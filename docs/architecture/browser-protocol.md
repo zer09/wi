@@ -144,13 +144,31 @@ input.respond
 
 ### Client heartbeat
 
-An application-level heartbeat may carry a timestamp or connection diagnostic. It is not a durable event.
+An application-level heartbeat carries the client timestamp and is not a durable event.
+
+```json
+{
+  "v": 1,
+  "kind": "heartbeat",
+  "clientTimeMs": 1783742612000
+}
+```
 
 ## 6. Server messages
 
 ### Welcome
 
 Communicates connection ID, protocol version, heartbeat settings, and safe server metadata.
+
+```json
+{
+  "v": 1,
+  "kind": "welcome",
+  "connectionId": "conn_01...",
+  "serverTimeMs": 1783742612000,
+  "heartbeatIntervalMs": 15000
+}
+```
 
 ### Command accepted
 
@@ -178,9 +196,10 @@ For an identical retry, `duplicate` is `true` and the original result is returne
   "v": 1,
   "kind": "command.rejected",
   "commandId": "cmd_01...",
-  "code": "COMMAND_ID_CONFLICT",
+  "code": "protocol.command_id_conflict",
   "message": "This command ID was already used with different content.",
-  "diagnosticId": "err_01..."
+  "diagnosticId": "err_01...",
+  "recoverable": false
 }
 ```
 
@@ -206,7 +225,11 @@ A rejection distinguishes:
   "eventType": "provider.text.delta",
   "createdAtMs": 1783742612000,
   "data": {
+    "eventVersion": 1,
     "runId": "run_01...",
+    "stepId": "step_01...",
+    "messageId": "msg_01...",
+    "partId": "part_01...",
     "text": "I will inspect the tests."
   }
 }
@@ -388,7 +411,53 @@ After reconnect:
 
 A pending command is not treated as failed merely because its acknowledgement was lost.
 
-## 16. Protocol tests
+## 16. Schema policy and v1 payload examples
+
+All v1 wire-message objects and all versioned durable-event payload objects are strict: unknown fields are rejected. Optional fields are accepted only where the schema explicitly declares them. JSON-valued command, result, tool-result, and input fields accept only null, booleans, finite numbers, strings, arrays, and string-keyed objects composed from the same values.
+
+Initial command parameters are:
+
+```json
+{
+  "session.create": { "title": "Optional title", "projectId": "project_01..." },
+  "message.submit": { "text": "Inspect the failing tests." },
+  "run.cancel": { "runId": "run_01..." },
+  "approval.resolve": { "approvalId": "approval_01...", "resolution": "approved" },
+  "input.respond": { "inputId": "input_01...", "value": { "answer": "yes" } }
+}
+```
+
+`session.create` omits `sessionId`; all other initial commands require it. A command's durable identity hashes its method, parameters, and session identity when present. `commandId`, transport metadata, and object key insertion order do not affect that hash.
+
+Every durable event payload contains `eventVersion: 1`. Representative state-bearing payloads are:
+
+```json
+{
+  "run.completed": {
+    "eventVersion": 1,
+    "runId": "run_01..."
+  },
+  "tool.approval.requested": {
+    "eventVersion": 1,
+    "runId": "run_01...",
+    "callId": "call_01...",
+    "approvalId": "approval_01...",
+    "toolName": "guarded_echo",
+    "actionDigest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "summary": "Echo the supplied text"
+  },
+  "input.requested": {
+    "eventVersion": 1,
+    "runId": "run_01...",
+    "inputId": "input_01...",
+    "prompt": "Continue?"
+  }
+}
+```
+
+The canonical error codes are exported by `packages/protocol` and match the taxonomy in the implementation plan. Browser-facing rejection and protocol-error messages always carry a safe message and diagnostic ID.
+
+## 17. Protocol tests
 
 Required tests include:
 

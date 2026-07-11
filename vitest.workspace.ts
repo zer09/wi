@@ -1,7 +1,16 @@
+import { fileURLToPath } from "node:url";
+
 import { defineWorkspace } from "vitest/config";
+
+const protocolSource = fileURLToPath(new URL("./packages/protocol/src/index.ts", import.meta.url));
 
 export default defineWorkspace([
   {
+    resolve: {
+      alias: {
+        "@wi/protocol": protocolSource,
+      },
+    },
     test: {
       name: "unit",
       environment: "node",

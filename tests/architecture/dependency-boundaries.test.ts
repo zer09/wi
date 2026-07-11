@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { builtinModules } from "node:module";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
@@ -63,6 +64,10 @@ const packageSpecificForbiddenModules: Readonly<Record<string, readonly string[]
   "@wi/protocol": ["@wi/server", "@wi/storage", "@wi/provider-contract", "@wi/provider-fake"],
   "@wi/client-state": ["@wi/server", "@wi/storage"],
 };
+
+const nodeBuiltinRoots = new Set(
+  builtinModules.map((module) => module.replace(/^node:/, "").split("/")[0]),
+);
 
 const harnessImplementationPatterns = [
   /^(?:fastify(?:-|\/|$)|@fastify\/)/,
@@ -148,6 +153,11 @@ function moduleIsForbidden(specifier: string, packageName: string): boolean {
     ...(packageSpecificForbiddenModules[packageName] ?? []),
   ];
 
+  const builtinRoot = normalized.replace(/^node:/, "").split("/")[0];
+  if (packageName === "@wi/protocol" && builtinRoot !== undefined && nodeBuiltinRoots.has(builtinRoot)) {
+    return true;
+  }
+
   if (
     packageName === "@wi/harness-core" &&
     harnessImplementationPatterns.some((pattern) => pattern.test(normalized))
@@ -197,6 +207,13 @@ describe("workspace architecture", () => {
       "required-import",
     ]);
   });
+
+  it.each(["node:crypto", "fs/promises"])(
+    "rejects Node builtin %s from the browser-safe protocol package",
+    (specifier) => {
+      expect(moduleIsForbidden(specifier, "@wi/protocol")).toBe(true);
+    },
+  );
 
   it.each([
     "fastify",

@@ -243,6 +243,25 @@ describe("workspace architecture", () => {
     );
   });
 
+  it("keeps SQLite drivers out of tests and main-thread storage clients", () => {
+    const mainThreadStorageFiles = [
+      "packages/storage/src/index.ts",
+      "packages/storage/src/catalog/client.ts",
+      "packages/storage/src/session/client.ts",
+      "packages/storage/src/session/worker-pool.ts",
+      "packages/storage/src/manager/session-store-manager.ts",
+      "packages/storage/src/manager/catalog-reconciler.ts",
+    ];
+    const files = [...sourceFiles("tests"), ...mainThreadStorageFiles.map((file) => join(root, file))];
+    const violations = files.flatMap((file) =>
+      importedSpecifiers(readFileSync(file, "utf8"), file)
+        .filter((specifier) => harnessImplementationPatterns.slice(2).some((pattern) => pattern.test(specifier)))
+        .map((specifier) => `${relative(root, file)} imports ${specifier}`),
+    );
+
+    expect(violations).toEqual([]);
+  });
+
   it("keeps production dependencies directional and test-support out of production", () => {
     for (const directory of workspaceDirectories) {
       const manifest = manifestAt(directory);

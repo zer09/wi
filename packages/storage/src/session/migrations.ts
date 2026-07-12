@@ -1,0 +1,13 @@
+import { readFileSync } from "node:fs";
+
+import type { Migration } from "../common/migrations.js";
+import { SESSION_SCHEMA_VERSION } from "../types.js";
+
+export const sessionMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    sql: readFileSync(new URL("./schema.sql", import.meta.url), "utf8"),
+  },
+];
+
+export { SESSION_SCHEMA_VERSION };

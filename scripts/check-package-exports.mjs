@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, "..");
 const expectedExports = {
   "@wi/client-state": ["createBrowserSessionState", "reduceSessionEvent", "replaySessionEvents"],
   "@wi/protocol": ["ClientMessageSchema", "SessionEventSchema", "canonicalJson"],
+  "@wi/storage": ["CatalogClient", "SessionStoreManager", "SessionWorkerPool"],
 };
 
 const workspaceDirectories = readdirSync(resolve(root, "packages"), { withFileTypes: true })

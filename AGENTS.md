@@ -20,6 +20,10 @@ Before changing code, read:
 
 Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit amendment when a decision must change.
 
+## Version control
+
+- Files under `prompts/` are local workflow artifacts. Do not stage any path under `prompts/`.
+
 ## Runtime and tooling
 
 - Target Node.js 24.

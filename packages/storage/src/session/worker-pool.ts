@@ -14,6 +14,8 @@ import {
   AcceptedCommandResultSchema,
   AppendTransactionResultSchema,
   PendingApprovalRecordSchema,
+  PendingInputRecordSchema,
+  ProviderStepRecordSchema,
   RunRecordSchema,
   SessionCatalogObservationSchema,
   SessionCatalogProjectionSchema,
@@ -24,6 +26,8 @@ import {
   type AppendTransactionInput,
   type AppendTransactionResult,
   type PendingApprovalRecord,
+  type PendingInputRecord,
+  type ProviderStepRecord,
   type RunRecord,
   type SessionCatalogObservation,
   type SessionCatalogProjection,
@@ -278,12 +282,54 @@ export class SessionWorkerPool {
     );
   }
 
+  async getEventById(
+    sessionId: string,
+    eventId: string,
+  ): Promise<z.infer<typeof SessionEventSchema> | null> {
+    return this.request(
+      sessionId,
+      "session.getEventById",
+      { eventId },
+      z.union([SessionEventSchema, z.null()]),
+    );
+  }
+
   async getRun(sessionId: string, runId: string): Promise<RunRecord | null> {
     return this.request(
       sessionId,
       "session.getRun",
       { runId },
       z.union([RunRecordSchema, z.null()]),
+    );
+  }
+
+  async getAcceptedCommand(
+    sessionId: string,
+    commandId: string,
+  ): Promise<AcceptedCommandResult | null> {
+    return this.request(
+      sessionId,
+      "session.getAcceptedCommand",
+      { commandId },
+      z.union([AcceptedCommandResultSchema, z.null()]),
+    );
+  }
+
+  async getProviderStep(sessionId: string, stepId: string): Promise<ProviderStepRecord | null> {
+    return this.request(
+      sessionId,
+      "session.getProviderStep",
+      { stepId },
+      z.union([ProviderStepRecordSchema, z.null()]),
+    );
+  }
+
+  async getNonterminalRuns(sessionId: string): Promise<readonly RunRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getNonterminalRuns",
+      {},
+      z.array(RunRecordSchema),
     );
   }
 
@@ -311,6 +357,15 @@ export class SessionWorkerPool {
       "session.getPendingApprovals",
       {},
       z.array(PendingApprovalRecordSchema),
+    );
+  }
+
+  async getPendingInputs(sessionId: string): Promise<readonly PendingInputRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getPendingInputs",
+      {},
+      z.array(PendingInputRecordSchema),
     );
   }
 

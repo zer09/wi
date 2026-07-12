@@ -49,7 +49,14 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
-  packages/harness-core: {}
+  packages/harness-core:
+    dependencies:
+      '@wi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@wi/storage':
+        specifier: workspace:*
+        version: link:../storage
 
   packages/protocol:
     dependencies:

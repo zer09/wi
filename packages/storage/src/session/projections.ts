@@ -189,11 +189,12 @@ export function applyProjection(database: Database.Database, mutation: Projectio
     case "providerStep.put": {
       const existing = database
         .prepare(
-          `SELECT run_id AS runId, step_index AS stepIndex, started_at_ms AS startedAtMs
+          `SELECT run_id AS runId, step_index AS stepIndex, state,
+                  started_at_ms AS startedAtMs
            FROM provider_steps WHERE step_id = ?`,
         )
         .get(mutation.stepId) as
-        | { runId: string; stepIndex: number; startedAtMs: number }
+        | { runId: string; stepIndex: number; state: string; startedAtMs: number }
         | undefined;
       if (
         existing !== undefined &&
@@ -203,6 +204,26 @@ export function applyProjection(database: Database.Database, mutation: Projectio
       ) {
         identityConflict("Provider step", mutation.stepId);
       }
+      if (
+        mutation.expectedState !== undefined &&
+        (existing === undefined || existing.state !== mutation.expectedState)
+      ) {
+        throw new StorageError(
+          "session.invalid_transition",
+          `Provider step ${mutation.stepId} expected ${mutation.expectedState}`,
+        );
+      }
+      const storedMutation = {
+        stepId: mutation.stepId,
+        runId: mutation.runId,
+        stepIndex: mutation.stepIndex,
+        state: mutation.state,
+        startedAtMs: mutation.startedAtMs,
+        completedAtMs: mutation.completedAtMs,
+        responseId: mutation.responseId,
+        errorCategory: mutation.errorCategory,
+        errorMessage: mutation.errorMessage,
+      };
       database
         .prepare(
           `INSERT INTO provider_steps (
@@ -218,7 +239,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
              error_category = excluded.error_category,
              error_message = excluded.error_message`,
         )
-        .run(mutation);
+        .run(storedMutation);
       return;
     }
     case "toolExecution.put": {
@@ -366,6 +387,21 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           `Input ${mutation.inputId} is missing or already resolved`,
         );
       }
+      return;
+    }
+    case "run.pendingInteractions.cancel": {
+      database
+        .prepare(
+          `UPDATE approvals SET state = 'cancelled', resolved_at_ms = @cancelledAtMs
+           WHERE run_id = @runId AND state = 'pending'`,
+        )
+        .run(mutation);
+      database
+        .prepare(
+          `UPDATE pending_inputs SET state = 'cancelled', resolved_at_ms = @cancelledAtMs
+           WHERE run_id = @runId AND state = 'pending'`,
+        )
+        .run(mutation);
       return;
     }
   }

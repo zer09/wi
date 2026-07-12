@@ -410,6 +410,11 @@ describe("catalog and per-session storage workers", () => {
       [2, "run.created"],
       [3, "run.started"],
     ]);
+    await expect(session.getEventById("evt_runStarted")).resolves.toMatchObject({
+      sequence: 3,
+      eventType: "run.started",
+    });
+    await expect(session.getEventById("evt_missing")).resolves.toBeNull();
     expect(await session.getEventsAfter(2, 2)).toEqual([]);
   });
 
@@ -846,6 +851,37 @@ describe("catalog and per-session storage workers", () => {
       lastEventSequence: 2,
       lastRunState: "created",
     });
+  });
+
+  it("durably accepts an idempotent session command without inventing an event", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const session = await storage.openSession(created.session.sessionId);
+    const input = {
+      commandId: "cmd_noopCancel",
+      commandMethod: "run.cancel" as const,
+      payloadHash: "c".repeat(64),
+      result: { runId: "run_alreadyTerminal", state: "completed" },
+      acceptedAtMs: 1_030,
+      runId: "run_alreadyTerminal",
+      transaction: { events: [], projections: [] },
+    };
+
+    await expect(session.acceptCommand(input)).resolves.toMatchObject({
+      duplicate: false,
+      acceptedSequence: 1,
+      events: [],
+    });
+    await expect(session.acceptCommand(input)).resolves.toMatchObject({
+      duplicate: true,
+      acceptedSequence: 1,
+      result: input.result,
+      events: [],
+    });
+    await expect(
+      session.acceptCommand({ ...input, payloadHash: "d".repeat(64) }),
+    ).rejects.toMatchObject({ code: "protocol.command_id_conflict" });
+    await expect(session.getHeadSequence()).resolves.toBe(1);
   });
 
   it("deduplicates global session creation and rejects conflicting reuse", async () => {
@@ -2237,6 +2273,132 @@ describe("catalog and per-session storage workers", () => {
       }),
     ).rejects.toMatchObject({ code: "session.invalid_transition" });
     await expect(session.getHeadSequence()).resolves.toBe(3);
+  });
+
+  it("makes pending interactions non-actionable when their run is cancelled", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const session = await storage.openSession(created.session.sessionId);
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_cancelInteractionRequested",
+          eventType: "input.requested",
+          createdAtMs: 1_300,
+          data: {
+            eventVersion: 1,
+            runId: "run_cancelInteraction",
+            inputId: "input_cancelInteraction",
+            prompt: "Continue?",
+          },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.put",
+          runId: "run_cancelInteraction",
+          state: "waiting_for_user",
+          providerId: "fake",
+          providerConfig: {},
+          createdAtMs: 1_290,
+          startedAtMs: 1_295,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        {
+          kind: "input.put",
+          inputId: "input_cancelInteraction",
+          runId: "run_cancelInteraction",
+          state: "pending",
+          prompt: "Continue?",
+          requestedAtMs: 1_300,
+        },
+      ],
+    });
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_cancelInteractionRequestedCancel",
+          eventType: "run.cancel.requested",
+          createdAtMs: 1_310,
+          data: { eventVersion: 1, runId: "run_cancelInteraction" },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.state",
+          runId: "run_cancelInteraction",
+          expectedState: "waiting_for_user",
+          nextState: "cancelling",
+          startedAtMs: 1_295,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+      ],
+    });
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_cancelInteractionCancelled",
+          eventType: "run.cancelled",
+          createdAtMs: 1_320,
+          data: { eventVersion: 1, runId: "run_cancelInteraction" },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.state",
+          runId: "run_cancelInteraction",
+          expectedState: "cancelling",
+          nextState: "cancelled",
+          startedAtMs: 1_295,
+          completedAtMs: null,
+          cancelledAtMs: 1_320,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        {
+          kind: "run.pendingInteractions.cancel",
+          runId: "run_cancelInteraction",
+          cancelledAtMs: 1_320,
+        },
+      ],
+    });
+
+    await expect(session.getPendingInputs()).resolves.toEqual([]);
+    await expect(
+      session.appendTransaction({
+        events: [
+          {
+            eventId: "evt_cancelInteractionLateResponse",
+            eventType: "input.resolved",
+            createdAtMs: 1_330,
+            data: {
+              eventVersion: 1,
+              runId: "run_cancelInteraction",
+              inputId: "input_cancelInteraction",
+              value: "late",
+            },
+          },
+        ],
+        projections: [
+          {
+            kind: "input.resolve",
+            inputId: "input_cancelInteraction",
+            resolvedAtMs: 1_330,
+            value: "late",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(4);
   });
 
   it("rejects oversized worker payloads before they can mutate a session", async () => {

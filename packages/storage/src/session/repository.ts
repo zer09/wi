@@ -17,6 +17,8 @@ import {
   AcceptedCommandResultSchema,
   AppendTransactionInputSchema,
   PendingApprovalRecordSchema,
+  PendingInputRecordSchema,
+  ProviderStepRecordSchema,
   RunRecordSchema,
   ProjectionMutationSchema,
   SESSION_FORMAT_VERSION,
@@ -29,6 +31,8 @@ import {
   type AcceptedCommandResult,
   type AppendTransactionInput,
   type PendingApprovalRecord,
+  type PendingInputRecord,
+  type ProviderStepRecord,
   type RunRecord,
   type SessionCatalogObservation,
   type SessionCatalogProjection,
@@ -267,7 +271,7 @@ export class SessionRepository {
       throw new StorageError("storage.worker_failed", "Storage failpoints are disabled");
     }
     const transaction = this.database.transaction(() => {
-      const existing = this.getAcceptedCommand(input.commandId);
+      const existing = this.getAcceptedCommandRow(input.commandId);
       if (existing !== null) {
         if (
           existing.commandMethod !== input.commandMethod ||
@@ -302,7 +306,7 @@ export class SessionRepository {
           acceptedAtMs: input.acceptedAtMs,
         });
       if (input.transaction.testFailpoint === "crash_before_commit") process.exit(71);
-      const row = this.getAcceptedCommand(input.commandId);
+      const row = this.getAcceptedCommandRow(input.commandId);
       if (row === null) throw new Error("Accepted command disappeared");
       return this.acceptedResult(row, false, append.events);
     });
@@ -311,7 +315,7 @@ export class SessionRepository {
     return result;
   }
 
-  private getAcceptedCommand(commandIdValue: string): AcceptedCommandRow | null {
+  private getAcceptedCommandRow(commandIdValue: string): AcceptedCommandRow | null {
     const commandId = CommandIdSchema.parse(commandIdValue);
     const row = this.database
       .prepare(
@@ -322,6 +326,11 @@ export class SessionRepository {
       )
       .get(commandId) as AcceptedCommandRow | undefined;
     return row ?? null;
+  }
+
+  getAcceptedCommand(commandIdValue: string): AcceptedCommandResult | null {
+    const row = this.getAcceptedCommandRow(commandIdValue);
+    return row === null ? null : this.acceptedResult(row, true, []);
   }
 
   private acceptedResult(
@@ -380,6 +389,30 @@ export class SessionRepository {
     return this.getManifest().lastEventSequence;
   }
 
+  getEventById(eventId: string): SessionEvent | null {
+    const row = this.database
+      .prepare(
+        `SELECT sequence, event_id AS eventId, event_type AS eventType,
+                created_at_ms AS createdAtMs, payload_json AS payloadJson
+         FROM events WHERE event_id = ?`,
+      )
+      .get(eventId) as EventRow | undefined;
+    if (row === undefined) return null;
+    const sessionId = this.getManifest().sessionId;
+    return decodeStoredValue(`session event ${row.sequence}`, () =>
+      SessionEventSchema.parse({
+        v: 1,
+        kind: "event",
+        sessionId,
+        sequence: row.sequence,
+        eventId: row.eventId,
+        eventType: row.eventType,
+        createdAtMs: row.createdAtMs,
+        data: JSON.parse(row.payloadJson) as unknown,
+      }),
+    );
+  }
+
   getRun(runId: string): RunRecord | null {
     const row = this.database
       .prepare(
@@ -399,6 +432,51 @@ export class SessionRepository {
         ...record,
         providerConfig: CanonicalJsonValueSchema.parse(JSON.parse(providerConfigJson) as unknown),
       }),
+    );
+  }
+
+  getProviderStep(stepId: string): ProviderStepRecord | null {
+    const row = this.database
+      .prepare(
+        `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
+                started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                response_id AS responseId, error_category AS errorCategory,
+                error_message AS errorMessage
+         FROM provider_steps WHERE step_id = ?`,
+      )
+      .get(stepId) as unknown;
+    if (row === undefined) return null;
+    return decodeStoredValue(`provider step ${stepId}`, () => ProviderStepRecordSchema.parse(row));
+  }
+
+  getNonterminalRuns(): readonly RunRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT runs.run_id AS runId, runs.state,
+                runs.provider_id AS providerId,
+                runs.provider_config_json AS providerConfigJson,
+                runs.created_at_ms AS createdAtMs,
+                runs.started_at_ms AS startedAtMs,
+                runs.completed_at_ms AS completedAtMs,
+                runs.cancelled_at_ms AS cancelledAtMs,
+                runs.failure_category AS failureCategory,
+                runs.failure_message AS failureMessage,
+                runs.active_provider_step_id AS activeProviderStepId
+         FROM runs
+         LEFT JOIN accepted_commands AS command
+           ON command.run_id = runs.run_id AND command.command_method = 'message.submit'
+         WHERE state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+         ORDER BY command.accepted_sequence IS NULL, command.accepted_sequence,
+                  runs.created_at_ms, runs.run_id`,
+      )
+      .all() as (Omit<RunRecord, "providerConfig"> & { providerConfigJson: string })[];
+    return rows.map(({ providerConfigJson, ...record }) =>
+      decodeStoredValue(`run ${record.runId}`, () =>
+        RunRecordSchema.parse({
+          ...record,
+          providerConfig: CanonicalJsonValueSchema.parse(JSON.parse(providerConfigJson) as unknown),
+        }),
+      ),
     );
   }
 
@@ -464,11 +542,21 @@ export class SessionRepository {
     );
   }
 
+  getPendingInputs(): readonly PendingInputRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT input_id AS inputId, run_id AS runId, state, prompt,
+                requested_at_ms AS requestedAtMs
+         FROM pending_inputs WHERE state = 'pending' ORDER BY requested_at_ms, input_id`,
+      )
+      .all() as unknown[];
+    return rows.map((row) =>
+      decodeStoredValue("pending input", () => PendingInputRecordSchema.parse(row)),
+    );
+  }
+
   getPendingInputCount(): number {
-    const row = this.database
-      .prepare("SELECT COUNT(*) AS count FROM pending_inputs WHERE state = 'pending'")
-      .get() as { count: number };
-    return row.count;
+    return this.getPendingInputs().length;
   }
 
   getCatalogObservation(): SessionCatalogObservation {

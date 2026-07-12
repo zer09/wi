@@ -204,14 +204,24 @@ function execute(operation: string, payloadValue: unknown): unknown {
       );
     case "session.getHeadSequence":
       return repository.getHeadSequence();
+    case "session.getEventById":
+      return repository.getEventById(z.string().min(1).parse(payload.eventId));
     case "session.getRun":
       return repository.getRun(z.string().min(1).parse(payload.runId));
+    case "session.getAcceptedCommand":
+      return repository.getAcceptedCommand(z.string().min(1).parse(payload.commandId));
+    case "session.getProviderStep":
+      return repository.getProviderStep(z.string().min(1).parse(payload.stepId));
+    case "session.getNonterminalRuns":
+      return repository.getNonterminalRuns();
     case "session.getCatalogProjection":
       return repository.getCatalogProjection();
     case "session.getCatalogObservation":
       return repository.getCatalogObservation();
     case "session.getPendingApprovals":
       return repository.getPendingApprovals();
+    case "session.getPendingInputs":
+      return repository.getPendingInputs();
     case "session.getPendingInputCount":
       return repository.getPendingInputCount();
     case "session.recover":

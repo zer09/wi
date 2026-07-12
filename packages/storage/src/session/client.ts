@@ -6,6 +6,8 @@ import type {
   AppendTransactionInput,
   AppendTransactionResult,
   PendingApprovalRecord,
+  PendingInputRecord,
+  ProviderStepRecord,
   RunRecord,
   SessionCatalogProjection,
   SessionManifest,
@@ -66,9 +68,29 @@ export class SessionClient {
     return this.pool.getHeadSequence(this.sessionId);
   }
 
+  async getEventById(eventId: string): Promise<SessionEvent | null> {
+    await this.prepare();
+    return this.pool.getEventById(this.sessionId, eventId);
+  }
+
   async getRun(runId: string): Promise<RunRecord | null> {
     await this.prepare();
     return this.pool.getRun(this.sessionId, runId);
+  }
+
+  async getAcceptedCommand(commandId: string): Promise<AcceptedCommandResult | null> {
+    await this.prepare();
+    return this.pool.getAcceptedCommand(this.sessionId, commandId);
+  }
+
+  async getProviderStep(stepId: string): Promise<ProviderStepRecord | null> {
+    await this.prepare();
+    return this.pool.getProviderStep(this.sessionId, stepId);
+  }
+
+  async getNonterminalRuns(): Promise<readonly RunRecord[]> {
+    await this.prepare();
+    return this.pool.getNonterminalRuns(this.sessionId);
   }
 
   async getCatalogProjection(): Promise<SessionCatalogProjection> {
@@ -79,6 +101,11 @@ export class SessionClient {
   async getPendingApprovals(): Promise<readonly PendingApprovalRecord[]> {
     await this.prepare();
     return this.pool.getPendingApprovals(this.sessionId);
+  }
+
+  async getPendingInputs(): Promise<readonly PendingInputRecord[]> {
+    await this.prepare();
+    return this.pool.getPendingInputs(this.sessionId);
   }
 
   async getPendingInputCount(): Promise<number> {

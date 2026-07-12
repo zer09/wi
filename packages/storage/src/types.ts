@@ -172,6 +172,7 @@ export const MessagePartProjectionSchema = z.strictObject({
 export const ProviderStepProjectionSchema = z.strictObject({
   kind: z.literal("providerStep.put"),
   stepId: z.string().min(1),
+  expectedState: z.string().min(1).optional(),
   runId: RunIdSchema,
   stepIndex: z.number().int().nonnegative().safe(),
   state: z.string().min(1),
@@ -181,6 +182,19 @@ export const ProviderStepProjectionSchema = z.strictObject({
   errorCategory: NullableStringSchema,
   errorMessage: NullableStringSchema,
 });
+
+export const ProviderStepRecordSchema = z.strictObject({
+  stepId: z.string().min(1),
+  runId: RunIdSchema,
+  stepIndex: z.number().int().nonnegative().safe(),
+  state: z.string().min(1),
+  startedAtMs: TimestampMsSchema,
+  completedAtMs: NullableTimestampSchema,
+  responseId: NullableStringSchema,
+  errorCategory: NullableStringSchema,
+  errorMessage: NullableStringSchema,
+});
+export type ProviderStepRecord = z.infer<typeof ProviderStepRecordSchema>;
 
 export const ToolExecutionProjectionSchema = z.strictObject({
   kind: z.literal("toolExecution.put"),
@@ -234,6 +248,12 @@ export const InputResolutionProjectionSchema = z.strictObject({
   value: CanonicalJsonValueSchema,
 });
 
+export const PendingInteractionsCancellationProjectionSchema = z.strictObject({
+  kind: z.literal("run.pendingInteractions.cancel"),
+  runId: RunIdSchema,
+  cancelledAtMs: TimestampMsSchema,
+});
+
 export const ProjectionMutationSchema = z.discriminatedUnion("kind", [
   RunProjectionSchema,
   RunStateProjectionSchema,
@@ -245,15 +265,27 @@ export const ProjectionMutationSchema = z.discriminatedUnion("kind", [
   ApprovalResolutionProjectionSchema,
   PendingInputProjectionSchema,
   InputResolutionProjectionSchema,
+  PendingInteractionsCancellationProjectionSchema,
 ]);
 export type ProjectionMutation = z.infer<typeof ProjectionMutationSchema>;
 
-export const AppendTransactionInputSchema = z.strictObject({
-  events: z.array(NewSessionEventSchema).min(1),
+const TransactionProjectionFields = {
   projections: z.array(ProjectionMutationSchema).default([]),
   testFailpoint: z.enum(["crash_before_commit", "crash_after_commit"]).optional(),
+} as const;
+
+export const AppendTransactionInputSchema = z.strictObject({
+  events: z.array(NewSessionEventSchema).min(1),
+  ...TransactionProjectionFields,
 });
 export type AppendTransactionInput = z.input<typeof AppendTransactionInputSchema>;
+
+// An idempotent command may be a durable no-op, such as cancelling an already terminal run.
+// Its acceptance still commits even though it does not invent a session event.
+export const AcceptCommandTransactionInputSchema = z.strictObject({
+  events: z.array(NewSessionEventSchema),
+  ...TransactionProjectionFields,
+});
 
 export const AcceptCommandInputSchema = z.strictObject({
   commandId: CommandIdSchema,
@@ -262,7 +294,7 @@ export const AcceptCommandInputSchema = z.strictObject({
   result: CanonicalJsonValueSchema,
   acceptedAtMs: TimestampMsSchema,
   runId: z.union([RunIdSchema, z.null()]),
-  transaction: AppendTransactionInputSchema,
+  transaction: AcceptCommandTransactionInputSchema,
 });
 export type AcceptCommandInput = z.input<typeof AcceptCommandInputSchema>;
 
@@ -309,6 +341,15 @@ export const PendingApprovalRecordSchema = z.strictObject({
   requestedAtMs: TimestampMsSchema,
 });
 export type PendingApprovalRecord = z.infer<typeof PendingApprovalRecordSchema>;
+
+export const PendingInputRecordSchema = z.strictObject({
+  inputId: z.string().min(1),
+  runId: RunIdSchema,
+  state: z.literal("pending"),
+  prompt: z.string(),
+  requestedAtMs: TimestampMsSchema,
+});
+export type PendingInputRecord = z.infer<typeof PendingInputRecordSchema>;
 
 export const StartedToolRecoveryRecordSchema = z.strictObject({
   callId: z.string().min(1),

@@ -1,7 +1,13 @@
 import type Database from "better-sqlite3";
 import { z } from "zod";
 
-import { canonicalJson, CommandIdSchema, EventIdSchema, SessionIdSchema } from "@wi/protocol";
+import {
+  canonicalJson,
+  CommandIdSchema,
+  DiagnosticIdSchema,
+  EventIdSchema,
+  SessionIdSchema,
+} from "@wi/protocol";
 
 import { applyMigrations } from "../common/migrations.js";
 import { StorageError } from "../common/worker-rpc.js";
@@ -38,6 +44,27 @@ export const CompleteGlobalCommandInputSchema = z.strictObject({
   acceptedAtMs: z.number().int().nonnegative().safe(),
 });
 
+export const FailGlobalCommandInputSchema = z.strictObject({
+  commandId: CommandIdSchema,
+  payloadHash: HashSchema,
+  session: SessionSummarySchema,
+  failureCode: z.string().min(1),
+  failureMessage: z.string(),
+  diagnosticId: z.string().min(1),
+  quarantinedRelativePath: z.union([z.string().min(1), z.null()]),
+  failedAtMs: z.number().int().nonnegative().safe(),
+});
+export type FailGlobalCommandInput = z.infer<typeof FailGlobalCommandInputSchema>;
+
+export const SetGlobalCommandQuarantineInputSchema = z.strictObject({
+  commandId: CommandIdSchema,
+  diagnosticId: DiagnosticIdSchema,
+  quarantinedRelativePath: z.string().min(1),
+});
+export type SetGlobalCommandQuarantineInput = z.infer<
+  typeof SetGlobalCommandQuarantineInputSchema
+>;
+
 export const CreateSessionIndexInputSchema = SessionSummarySchema;
 
 export const UpdateSessionProjectionInputSchema = z.strictObject({
@@ -51,6 +78,12 @@ export const UpdateSessionProjectionInputSchema = z.strictObject({
   pendingInputCount: z.number().int().nonnegative().safe(),
 });
 export type UpdateSessionProjectionInput = z.infer<typeof UpdateSessionProjectionInputSchema>;
+
+export const CatalogProjectionUpdateResultSchema = z.strictObject({
+  summary: SessionSummarySchema,
+  outcome: z.enum(["applied", "idempotent", "stale"]),
+});
+export type CatalogProjectionUpdateResult = z.infer<typeof CatalogProjectionUpdateResultSchema>;
 
 export const MarkSessionStatusInputSchema = z.strictObject({
   sessionId: SessionIdSchema,
@@ -88,12 +121,16 @@ interface GlobalCommandRow {
   commandId: string;
   commandMethod: "session.create";
   payloadHash: string;
-  state: "creating" | "accepted";
+  state: "creating" | "accepted" | "failed";
   reservedSessionId: string;
   reservedEventId: string;
   requestJson: string;
   resultJson: string | null;
   acceptedAtMs: number | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  diagnosticId: string | null;
+  quarantinedRelativePath: string | null;
   updatedAtMs: number;
 }
 
@@ -109,6 +146,10 @@ function globalCommandFromRow(row: GlobalCommandRow): GlobalCommandRecord {
       request: JSON.parse(row.requestJson) as unknown,
       result: row.resultJson === null ? null : (JSON.parse(row.resultJson) as unknown),
       acceptedAtMs: row.acceptedAtMs,
+      failureCode: row.failureCode,
+      failureMessage: row.failureMessage,
+      diagnosticId: row.diagnosticId,
+      quarantinedRelativePath: row.quarantinedRelativePath,
       updatedAtMs: row.updatedAtMs,
     }),
   );
@@ -190,6 +231,12 @@ export class CatalogRepository {
         );
       }
       if (existing.state === "accepted") return existing;
+      if (existing.state === "failed") {
+        throw new StorageError(
+          "session.invalid_transition",
+          `Global command ${input.commandId} already failed`,
+        );
+      }
 
       this.database
         .prepare(
@@ -209,6 +256,84 @@ export class CatalogRepository {
     })();
   }
 
+  failGlobalCommand(inputValue: unknown): GlobalCommandRecord {
+    const input = FailGlobalCommandInputSchema.parse(inputValue);
+    return this.database.transaction(() => {
+      const existing = this.getGlobalCommand(input.commandId);
+      if (existing === null) {
+        throw new StorageError("session.not_found", "Global command reservation not found");
+      }
+      if (existing.payloadHash !== input.payloadHash) {
+        throw new StorageError(
+          "protocol.command_id_conflict",
+          `Command ${input.commandId} was reused with different content`,
+        );
+      }
+      if (existing.state === "accepted") {
+        throw new StorageError("session.invalid_transition", "Accepted session creation cannot fail");
+      }
+      if (existing.state === "failed") return existing;
+
+      this.createSessionIndex(input.session);
+      const result = {
+        sessionId: input.session.sessionId,
+        failed: true,
+        code: input.failureCode,
+        message: input.failureMessage,
+        diagnosticId: input.diagnosticId,
+      };
+      this.database
+        .prepare(
+          `UPDATE catalog_commands SET
+             state = 'failed', result_json = @resultJson, failure_code = @failureCode,
+             failure_message = @failureMessage, diagnostic_id = @diagnosticId,
+             quarantined_relative_path = @quarantinedRelativePath,
+             updated_at_ms = @failedAtMs
+           WHERE command_id = @commandId AND state = 'creating'`,
+        )
+        .run({ ...input, resultJson: canonicalJson(result) });
+      const failed = this.getGlobalCommand(input.commandId);
+      if (failed === null) throw new Error("Failed global command disappeared");
+      return failed;
+    })();
+  }
+
+  setGlobalCommandQuarantine(inputValue: unknown): GlobalCommandRecord {
+    const input = SetGlobalCommandQuarantineInputSchema.parse(inputValue);
+    return this.database.transaction(() => {
+      const existing = this.getGlobalCommand(input.commandId);
+      if (existing === null) {
+        throw new StorageError("session.not_found", "Global command reservation not found");
+      }
+      if (existing.state !== "failed" || existing.diagnosticId !== input.diagnosticId) {
+        throw new StorageError(
+          "session.invalid_transition",
+          "Only the matching failed session creation can record quarantine",
+        );
+      }
+      if (existing.quarantinedRelativePath !== null) {
+        if (existing.quarantinedRelativePath !== input.quarantinedRelativePath) {
+          throw new StorageError(
+            "session.invalid_transition",
+            "Failed session creation already recorded a different quarantine path",
+          );
+        }
+        return existing;
+      }
+
+      this.database
+        .prepare(
+          `UPDATE catalog_commands SET quarantined_relative_path = @quarantinedRelativePath
+           WHERE command_id = @commandId AND state = 'failed' AND diagnostic_id = @diagnosticId
+             AND quarantined_relative_path IS NULL`,
+        )
+        .run(input);
+      const updated = this.getGlobalCommand(input.commandId);
+      if (updated === null) throw new Error("Failed global command disappeared");
+      return updated;
+    })();
+  }
+
   listCreatingGlobalCommands(): readonly GlobalCommandRecord[] {
     const rows = this.database
       .prepare(
@@ -216,6 +341,9 @@ export class CatalogRepository {
                 payload_hash AS payloadHash, state, reserved_session_id AS reservedSessionId,
                 reserved_event_id AS reservedEventId, request_json AS requestJson,
                 result_json AS resultJson, accepted_at_ms AS acceptedAtMs,
+                failure_code AS failureCode, failure_message AS failureMessage,
+                diagnostic_id AS diagnosticId,
+                quarantined_relative_path AS quarantinedRelativePath,
                 updated_at_ms AS updatedAtMs
          FROM catalog_commands WHERE state = 'creating' ORDER BY updated_at_ms, command_id`,
       )
@@ -230,6 +358,9 @@ export class CatalogRepository {
                 payload_hash AS payloadHash, state, reserved_session_id AS reservedSessionId,
                 reserved_event_id AS reservedEventId, request_json AS requestJson,
                 result_json AS resultJson, accepted_at_ms AS acceptedAtMs,
+                failure_code AS failureCode, failure_message AS failureMessage,
+                diagnostic_id AS diagnosticId,
+                quarantined_relative_path AS quarantinedRelativePath,
                 updated_at_ms AS updatedAtMs
          FROM catalog_commands WHERE command_id = ?`,
       )
@@ -308,8 +439,30 @@ export class CatalogRepository {
     return row === undefined ? null : sessionFromRow(row);
   }
 
-  updateSessionProjection(inputValue: unknown): SessionSummary {
+  updateSessionProjection(inputValue: unknown): CatalogProjectionUpdateResult {
     const input = UpdateSessionProjectionInputSchema.parse(inputValue);
+    const existing = this.getSession(input.sessionId);
+    if (existing === null) throw new StorageError("session.not_found", "Session index not found");
+    if (input.lastEventSequence < existing.lastEventSequence) {
+      return { summary: existing, outcome: "stale" };
+    }
+    if (input.lastEventSequence === existing.lastEventSequence) {
+      const identical =
+        input.updatedAtMs === existing.updatedAtMs &&
+        input.lastRunState === existing.lastRunState &&
+        input.lastMessagePreview === existing.lastMessagePreview &&
+        input.requiresAttention === existing.requiresAttention &&
+        input.pendingApprovalCount === existing.pendingApprovalCount &&
+        input.pendingInputCount === existing.pendingInputCount;
+      if (!identical) {
+        throw new StorageError(
+          "storage.catalog_projection_conflict",
+          `Catalog projection ${input.sessionId} conflicts at head ${input.lastEventSequence}`,
+        );
+      }
+      return { summary: existing, outcome: "idempotent" };
+    }
+
     const result = this.database
       .prepare(
         `UPDATE sessions SET
@@ -320,16 +473,15 @@ export class CatalogRepository {
            requires_attention = @requiresAttention,
            pending_approval_count = @pendingApprovalCount,
            pending_input_count = @pendingInputCount
-         WHERE session_id = @sessionId
-           AND last_event_sequence <= @lastEventSequence`,
+         WHERE session_id = @sessionId AND last_event_sequence < @lastEventSequence`,
       )
       .run({ ...input, requiresAttention: input.requiresAttention ? 1 : 0 });
-    const updated = this.getSession(input.sessionId);
-    if (updated === null) throw new StorageError("session.not_found", "Session index not found");
-    if (result.changes === 0 && updated.lastEventSequence <= input.lastEventSequence) {
-      throw new Error("Session projection update did not affect its eligible row");
+    if (result.changes !== 1) {
+      throw new StorageError("storage.catalog_projection_conflict", "Catalog projection lost its head CAS");
     }
-    return updated;
+    const updated = this.getSession(input.sessionId);
+    if (updated === null) throw new Error("Updated session index disappeared");
+    return { summary: updated, outcome: "applied" };
   }
 
   markSessionStatus(inputValue: unknown): SessionSummary {

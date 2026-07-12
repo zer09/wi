@@ -1,6 +1,10 @@
-import type { RunState, SessionEvent } from "@wi/protocol";
+import { canonicalJson, type RunState, type SessionEvent } from "@wi/protocol";
 
-import type { BrowserRunState, BrowserSessionState } from "./model.js";
+import type {
+  BrowserRunState,
+  BrowserSessionIntegrityError,
+  BrowserSessionState,
+} from "./model.js";
 
 const terminalRunStates = new Set<RunState>([
   "completed",
@@ -9,25 +13,33 @@ const terminalRunStates = new Set<RunState>([
   "interrupted",
 ]);
 
-function sameJsonValue(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length && left.every((value, index) => sameJsonValue(value, right[index]));
-  }
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
-    return false;
-  }
+const allowedRunTransitions: Readonly<Record<RunState, ReadonlySet<RunState>>> = {
+  created: new Set(["running"]),
+  queued: new Set(["running"]),
+  running: new Set([
+    "waiting_for_user",
+    "cancelling",
+    "completed",
+    "failed",
+    "interrupted",
+  ]),
+  waiting_for_user: new Set(["running", "cancelling", "failed", "interrupted"]),
+  cancelling: new Set(["cancelled", "interrupted"]),
+  completed: new Set(),
+  failed: new Set(),
+  cancelled: new Set(),
+  interrupted: new Set(),
+};
 
-  const leftRecord = left as Record<string, unknown>;
-  const rightRecord = right as Record<string, unknown>;
-  const leftKeys = Object.keys(leftRecord).sort();
-  const rightKeys = Object.keys(rightRecord).sort();
-  return (
-    leftKeys.length === rightKeys.length &&
-    leftKeys.every(
-      (key, index) => key === rightKeys[index] && sameJsonValue(leftRecord[key], rightRecord[key]),
-    )
-  );
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+function fatal(
+  state: BrowserSessionState,
+  errorCode: BrowserSessionIntegrityError,
+): BrowserSessionState {
+  return { ...state, status: "error", errorCode };
 }
 
 function runTransition(event: SessionEvent): BrowserRunState | null {
@@ -56,32 +68,24 @@ function runTransition(event: SessionEvent): BrowserRunState | null {
 function applyRunTransition(
   state: BrowserSessionState,
   transition: BrowserRunState | null,
-): Pick<BrowserSessionState, "activeRun" | "errorCode" | "status"> {
-  if (transition === null) {
-    return { activeRun: state.activeRun, errorCode: state.errorCode, status: state.status };
-  }
-
+): BrowserSessionState {
+  if (transition === null) return state;
   const current = state.activeRun;
-  if (current === null || current.runId === transition.runId) {
-    if (
-      current !== null &&
-      terminalRunStates.has(current.state) &&
-      transition.state !== current.state
-    ) {
-      return {
-        activeRun: current,
-        errorCode: "terminal_run_regression",
-        status: "error",
-      };
-    }
-    return { activeRun: transition, errorCode: state.errorCode, status: state.status };
+  if (current === null) {
+    return transition.state === "created"
+      ? { ...state, activeRun: transition }
+      : fatal(state, "impossible_run_transition");
   }
-
-  if (transition.state === "created" && terminalRunStates.has(current.state)) {
-    return { activeRun: transition, errorCode: state.errorCode, status: state.status };
+  if (current.runId !== transition.runId) {
+    if (!terminalRunStates.has(current.state)) return fatal(state, "second_active_run");
+    return transition.state === "created"
+      ? { ...state, activeRun: transition }
+      : fatal(state, "impossible_run_transition");
   }
-
-  return { activeRun: current, errorCode: state.errorCode, status: state.status };
+  if (!allowedRunTransitions[current.state].has(transition.state)) {
+    return fatal(state, "impossible_run_transition");
+  }
+  return { ...state, activeRun: transition };
 }
 
 function applyEventData(state: BrowserSessionState, event: SessionEvent): BrowserSessionState {
@@ -129,39 +133,42 @@ function applyEventData(state: BrowserSessionState, event: SessionEvent): Browse
     }
   }
 
-  const run = applyRunTransition(state, runTransition(event));
-  return {
-    ...state,
-    title,
-    pendingApprovals,
-    pendingInputs,
-    ...run,
-  };
+  return applyRunTransition(
+    { ...state, title, pendingApprovals, pendingInputs },
+    runTransition(event),
+  );
 }
 
 export function reduceSessionEvent(
   state: BrowserSessionState,
   event: SessionEvent,
 ): BrowserSessionState {
-  if (event.sessionId !== state.sessionId) {
-    return { ...state, status: "error", errorCode: "session_mismatch" };
-  }
+  if (state.errorCode !== null) return state;
+  if (event.sessionId !== state.sessionId) return fatal(state, "session_mismatch");
 
+  const existingSequence = state.appliedEventSequencesById[event.eventId];
+  if (existingSequence !== undefined && existingSequence !== event.sequence) {
+    return fatal(state, "event_id_conflict");
+  }
   if (event.sequence <= state.lastAppliedSequence) {
     const existing = state.appliedEvents[event.sequence];
     if (existing !== undefined && sameJsonValue(existing, event)) return state;
-    return { ...state, status: "error", errorCode: "event_conflict" };
+    return fatal(state, "event_conflict");
   }
-
   if (event.sequence !== state.lastAppliedSequence + 1) {
     return { ...state, status: "gap" };
   }
 
   const next = applyEventData(state, event);
+  if (next.errorCode !== null) return next;
   return {
     ...next,
     lastAppliedSequence: event.sequence,
     timeline: [...state.timeline, event],
     appliedEvents: { ...state.appliedEvents, [event.sequence]: event },
+    appliedEventSequencesById: {
+      ...state.appliedEventSequencesById,
+      [event.eventId]: event.sequence,
+    },
   };
 }

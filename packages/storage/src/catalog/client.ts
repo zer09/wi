@@ -16,14 +16,20 @@ import {
   type SessionSummary,
 } from "../types.js";
 import {
+  CatalogProjectionUpdateResultSchema,
   ReconcileSessionResultSchema,
+  type CatalogProjectionUpdateResult,
+  type FailGlobalCommandInput,
   type MarkSessionStatusInput,
   type ReconcileSessionResult,
+  type SetGlobalCommandQuarantineInput,
   type UpdateSessionProjectionInput,
 } from "./repository.js";
 
 export interface CatalogClientOptions {
   readonly homeDirectory: string;
+  readonly defaultRequestTimeoutMs?: number;
+  readonly closeTimeoutMs?: number;
   readonly onWorkerReplacement?: (replacementCount: number) => void;
 }
 
@@ -66,6 +72,10 @@ export class CatalogClient {
         workerId: "catalog",
         databasePath: resolve(options.homeDirectory, "catalog.sqlite3"),
       },
+      ...(options.defaultRequestTimeoutMs === undefined
+        ? {}
+        : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
+      ...(options.closeTimeoutMs === undefined ? {} : { closeTimeoutMs: options.closeTimeoutMs }),
       ...(options.onWorkerReplacement === undefined
         ? {}
         : { onReplacement: options.onWorkerReplacement }),
@@ -73,7 +83,9 @@ export class CatalogClient {
   }
 
   async createProject(input: ProjectRecord): Promise<ProjectRecord> {
-    return this.rpc.request("catalog.createProject", input, ProjectRecordSchema);
+    return this.rpc.request("catalog.createProject", input, ProjectRecordSchema, {
+      outcome: "write",
+    });
   }
 
   async reserveGlobalCommand(
@@ -83,6 +95,7 @@ export class CatalogClient {
       "catalog.reserveGlobalCommand",
       input,
       GlobalCommandReservationSchema,
+      { outcome: "write" },
     );
   }
 
@@ -91,6 +104,27 @@ export class CatalogClient {
       "catalog.completeGlobalCommand",
       input,
       GlobalCommandRecordSchema,
+      { outcome: "write" },
+    );
+  }
+
+  async failGlobalCommand(input: FailGlobalCommandInput): Promise<GlobalCommandRecord> {
+    return this.rpc.request(
+      "catalog.failGlobalCommand",
+      input,
+      GlobalCommandRecordSchema,
+      { outcome: "write" },
+    );
+  }
+
+  async setGlobalCommandQuarantine(
+    input: SetGlobalCommandQuarantineInput,
+  ): Promise<GlobalCommandRecord> {
+    return this.rpc.request(
+      "catalog.setGlobalCommandQuarantine",
+      input,
+      GlobalCommandRecordSchema,
+      { outcome: "write" },
     );
   }
 
@@ -111,7 +145,9 @@ export class CatalogClient {
   }
 
   async createSessionIndex(input: SessionSummary): Promise<SessionSummary> {
-    return this.rpc.request("catalog.createSessionIndex", input, SessionSummarySchema);
+    return this.rpc.request("catalog.createSessionIndex", input, SessionSummarySchema, {
+      outcome: "write",
+    });
   }
 
   async listSessions(): Promise<readonly SessionSummary[]> {
@@ -126,16 +162,21 @@ export class CatalogClient {
     );
   }
 
-  async updateSessionProjection(input: UpdateSessionProjectionInput): Promise<SessionSummary> {
+  async updateSessionProjection(
+    input: UpdateSessionProjectionInput,
+  ): Promise<CatalogProjectionUpdateResult> {
     return this.rpc.request(
       "catalog.updateSessionProjection",
       input,
-      SessionSummarySchema,
+      CatalogProjectionUpdateResultSchema,
+      { outcome: "write" },
     );
   }
 
   async markSessionStatus(input: MarkSessionStatusInput): Promise<SessionSummary> {
-    return this.rpc.request("catalog.markSessionStatus", input, SessionSummarySchema);
+    return this.rpc.request("catalog.markSessionStatus", input, SessionSummarySchema, {
+      outcome: "write",
+    });
   }
 
   async reconcileSessionWithStatus(
@@ -145,6 +186,7 @@ export class CatalogClient {
       "catalog.reconcileSession",
       input,
       ReconcileSessionResultSchema,
+      { outcome: "write" },
     );
   }
 

@@ -13,6 +13,7 @@ import {
 } from "@wi/storage";
 
 const fixture = fileURLToPath(new URL("./storage-crash-fixture.mjs", import.meta.url));
+const catalogV1Fixture = fileURLToPath(new URL("./catalog-v1-fixture.mjs", import.meta.url));
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
 
@@ -64,6 +65,24 @@ function runCrashFixture(
   });
 }
 
+function runCatalogV1Fixture(homeDirectory: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [catalogV1Fixture, homeDirectory], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) reject(new Error(stderr || `catalog v1 fixture exited ${String(code)}`));
+      else resolve(code);
+    });
+  });
+}
+
 function restart(homeDirectory: string): SessionStoreManager {
   const storage = new SessionStoreManager({
     homeDirectory,
@@ -79,6 +98,22 @@ afterEach(async () => {
 });
 
 describe("storage crash windows", () => {
+  it("migrates a retained version-1 catalog to version 2", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await expect(runCatalogV1Fixture(homeDirectory)).resolves.toBe(0);
+
+    const storage = restart(homeDirectory);
+    await storage.ready();
+    await expect(storage.catalog.getGlobalCommand("cmd_v1Migrated")).resolves.toMatchObject({
+      state: "accepted",
+      failureCode: null,
+      failureMessage: null,
+      diagnosticId: null,
+      quarantinedRelativePath: null,
+    });
+  });
+
   it("completes session creation committed before catalog readiness during startup", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
     homes.push(homeDirectory);
@@ -123,6 +158,75 @@ describe("storage crash windows", () => {
       title: "Incomplete creation",
       lastEventSequence: 1,
     });
+  });
+
+  it("persists corrupt incomplete creation failure across repeated restart and retry", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    const sessionId = "ses_processCorruptCreate";
+    await expect(
+      runCrashFixture(homeDirectory, sessionId, "corrupt_incomplete_creation"),
+    ).resolves.toBe(86);
+
+    const firstRestart = restart(homeDirectory);
+    await firstRestart.ready();
+    const failed = await firstRestart.catalog.getGlobalCommand("cmd_processCorruptCreate");
+    expect(failed).toMatchObject({
+      state: "failed",
+      reservedSessionId: sessionId,
+      failureCode: "storage.corrupt",
+      diagnosticId: expect.stringMatching(/^err_/),
+    });
+    await expect(firstRestart.catalog.getSession(sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Corrupt incomplete",
+    });
+    if (failed?.quarantinedRelativePath === null || failed?.quarantinedRelativePath === undefined) {
+      throw new Error("Failed creation did not record its quarantine path");
+    }
+    await expect(
+      stat(resolveStoragePath(homeDirectory, failed.quarantinedRelativePath)),
+    ).resolves.toBeDefined();
+    await firstRestart.close();
+
+    const secondRestart = restart(homeDirectory);
+    await secondRestart.ready();
+    await expect(
+      secondRestart.catalog.getGlobalCommand("cmd_processCorruptCreate"),
+    ).resolves.toMatchObject({
+      state: "failed",
+      diagnosticId: failed.diagnosticId,
+      quarantinedRelativePath: failed.quarantinedRelativePath,
+    });
+    await expect(
+      (await secondRestart.openSession(sessionId)).getManifest(),
+    ).rejects.toMatchObject({ code: "storage.session_missing" });
+    await expect(secondRestart.catalog.getSession(sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    await expect(
+      secondRestart.createSession({
+        v: 1,
+        kind: "command",
+        commandId: "cmd_processCorruptCreate",
+        method: "session.create",
+        params: { title: "Corrupt incomplete" },
+      }),
+    ).resolves.toMatchObject({
+      outcome: "failed",
+      duplicate: true,
+      session: { status: "unavailable" },
+      command: { diagnosticId: failed.diagnosticId },
+    });
+    await expect(
+      secondRestart.createSession({
+        v: 1,
+        kind: "command",
+        commandId: "cmd_processReplacementCreate",
+        method: "session.create",
+        params: { title: "Replacement" },
+      }),
+    ).resolves.toMatchObject({ outcome: "created", duplicate: false });
   });
 
   it("does not recreate a missing session database and marks its catalog row missing", async () => {

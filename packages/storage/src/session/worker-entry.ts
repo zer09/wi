@@ -208,6 +208,8 @@ function execute(operation: string, payloadValue: unknown): unknown {
       return repository.getRun(z.string().min(1).parse(payload.runId));
     case "session.getCatalogProjection":
       return repository.getCatalogProjection();
+    case "session.getCatalogObservation":
+      return repository.getCatalogObservation();
     case "session.getPendingApprovals":
       return repository.getPendingApprovals();
     case "session.getPendingInputCount":
@@ -230,6 +232,21 @@ function execute(operation: string, payloadValue: unknown): unknown {
       while (Atomics.load(view, 1) === 0) Atomics.wait(view, 1, 0, 1_000);
       return null;
     }
+    case "session.testGetProjectionIdentity":
+      return repository.testGetProjectionIdentity(
+        z
+          .enum([
+            "run",
+            "message",
+            "messagePart",
+            "providerStep",
+            "toolExecution",
+            "approval",
+            "input",
+          ])
+          .parse(payload.kind),
+        z.string().min(1).parse(payload.id),
+      );
     case "session.testGetPragmas":
       return repository.testGetPragmas();
     case "session.testMalformedResponse":

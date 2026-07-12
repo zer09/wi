@@ -4,6 +4,7 @@ import {
   CanonicalJsonValueSchema,
   CommandIdSchema,
   CommandMethodSchema,
+  DiagnosticIdSchema,
   EventIdSchema,
   MessageIdSchema,
   PartIdSchema,
@@ -16,7 +17,7 @@ import {
   TimestampMsSchema,
 } from "@wi/protocol";
 
-export const CATALOG_SCHEMA_VERSION = 1;
+export const CATALOG_SCHEMA_VERSION = 2;
 export const SESSION_SCHEMA_VERSION = 1;
 export const SESSION_FORMAT_VERSION = 1;
 
@@ -65,12 +66,16 @@ export const GlobalCommandRecordSchema = z.strictObject({
   commandId: CommandIdSchema,
   commandMethod: z.literal("session.create"),
   payloadHash: HashSchema,
-  state: z.enum(["creating", "accepted"]),
+  state: z.enum(["creating", "accepted", "failed"]),
   reservedSessionId: SessionIdSchema,
   reservedEventId: EventIdSchema,
   request: SessionCreationRequestSchema,
   result: z.union([CanonicalJsonValueSchema, z.null()]),
   acceptedAtMs: NullableTimestampSchema,
+  failureCode: NullableStringSchema,
+  failureMessage: NullableStringSchema,
+  diagnosticId: z.union([DiagnosticIdSchema, z.null()]),
+  quarantinedRelativePath: NullableStringSchema,
   updatedAtMs: TimestampMsSchema,
 });
 export type GlobalCommandRecord = z.infer<typeof GlobalCommandRecordSchema>;
@@ -87,6 +92,14 @@ export const SessionCatalogProjectionSchema = z.strictObject({
   lastMessagePreview: NullableStringSchema,
 });
 export type SessionCatalogProjection = z.infer<typeof SessionCatalogProjectionSchema>;
+
+export const SessionCatalogObservationSchema = z.strictObject({
+  headSequence: z.number().int().nonnegative().safe(),
+  projection: SessionCatalogProjectionSchema,
+  pendingApprovalCount: z.number().int().nonnegative().safe(),
+  pendingInputCount: z.number().int().nonnegative().safe(),
+});
+export type SessionCatalogObservation = z.infer<typeof SessionCatalogObservationSchema>;
 
 export const SessionManifestSchema = z.strictObject({
   sessionId: SessionIdSchema,
@@ -126,7 +139,8 @@ export const RunProjectionSchema = z.strictObject({
 export const RunStateProjectionSchema = z.strictObject({
   kind: z.literal("run.state"),
   runId: RunIdSchema,
-  state: RunStateSchema,
+  expectedState: RunStateSchema,
+  nextState: RunStateSchema,
   startedAtMs: NullableTimestampSchema,
   completedAtMs: NullableTimestampSchema,
   cancelledAtMs: NullableTimestampSchema,

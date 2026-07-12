@@ -37,6 +37,8 @@ export type WorkerResponse = z.infer<typeof WorkerResponseSchema>;
 const MAX_WORKER_PAYLOAD_DEPTH = 64;
 const MAX_WORKER_REQUEST_NODES = 20_000;
 const MAX_WORKER_REQUEST_UNITS = 1_000_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
 
 export interface WorkerPayloadBounds {
   readonly maxNodes?: number;
@@ -135,34 +137,69 @@ export function assertWorkerPayloadBounds(
   visit(value, 0);
 }
 
+export type WorkerRequestOutcome = "read" | "write";
+
+export interface WorkerRequestOptions {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+  readonly outcome?: WorkerRequestOutcome;
+}
+
 interface PendingRequest {
   readonly parseResult: (value: unknown) => unknown;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
+  readonly outcome: WorkerRequestOutcome;
+  readonly timer: ReturnType<typeof setTimeout>;
+  readonly signal: AbortSignal | undefined;
+  readonly abortListener: (() => void) | undefined;
 }
 
 export interface WorkerRpcClientOptions {
   readonly workerId: string;
   readonly entryUrl: URL;
   readonly workerData: unknown;
+  readonly defaultRequestTimeoutMs?: number;
+  readonly closeTimeoutMs?: number;
   readonly onReplacement?: (replacementCount: number) => void;
   readonly workerFactory?: (entryUrl: URL, options: WorkerOptions) => Worker;
+}
+
+function finiteTimeout(value: number, description: string): number {
+  if (!Number.isFinite(value) || value <= 0 || !Number.isSafeInteger(value)) {
+    throw new RangeError(`${description} must be a positive finite safe integer`);
+  }
+  return value;
 }
 
 export class WorkerRpcClient {
   readonly workerId: string;
   private readonly options: WorkerRpcClientOptions;
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly terminatingWorkers = new Set<Promise<boolean>>();
+  private readonly workerTerminations = new WeakMap<Worker, Promise<boolean>>();
+  private readonly defaultRequestTimeoutMs: number;
+  private readonly closeTimeoutMs: number;
   private worker: Worker | null;
   private nextRequestNumber = 1;
   private replacementCount = 0;
+  private replacementBlocked = false;
   private replacementError: StorageError | null = null;
+  private replacementPromise: Promise<void> | null = null;
   private closing = false;
   private closePromise: Promise<void> | null = null;
 
   constructor(options: WorkerRpcClientOptions) {
     this.options = options;
     this.workerId = options.workerId;
+    this.defaultRequestTimeoutMs = finiteTimeout(
+      options.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      "Worker request timeout",
+    );
+    this.closeTimeoutMs = finiteTimeout(
+      options.closeTimeoutMs ?? DEFAULT_CLOSE_TIMEOUT_MS,
+      "Worker close timeout",
+    );
     this.worker = this.spawn();
   }
 
@@ -182,40 +219,50 @@ export class WorkerRpcClient {
     return worker;
   }
 
-  private handleMessage(worker: Worker, message: unknown): void {
-    if (worker !== this.worker) return;
-    const parsed = WorkerResponseSchema.safeParse(message);
-    if (!parsed.success || parsed.data.workerId !== this.workerId) {
-      void worker.terminate();
-      return;
+  private cleanupPending(request: PendingRequest): void {
+    clearTimeout(request.timer);
+    if (request.signal !== undefined && request.abortListener !== undefined) {
+      request.signal.removeEventListener("abort", request.abortListener);
     }
+  }
 
-    const pending = this.pending.get(parsed.data.requestId);
-    if (pending === undefined) return;
-    this.pending.delete(parsed.data.requestId);
-    if (parsed.data.ok) {
-      try {
-        pending.resolve(pending.parseResult(parsed.data.result));
-      } catch {
-        pending.reject(
-          new StorageError("storage.worker_failed", "Storage worker returned an invalid result", true),
-        );
-        void worker.terminate();
-      }
-    } else {
-      pending.reject(
-        new StorageError(
-          parsed.data.error.code,
-          parsed.data.error.message,
-          parsed.data.error.retryable,
-        ),
+  private takePending(requestId: string): PendingRequest | undefined {
+    const request = this.pending.get(requestId);
+    if (request === undefined) return undefined;
+    this.pending.delete(requestId);
+    this.cleanupPending(request);
+    return request;
+  }
+
+  private failureFor(
+    request: PendingRequest,
+    code: string,
+    message: string,
+    retryable = true,
+  ): StorageError {
+    if (request.outcome === "write") {
+      return new StorageError(
+        "storage.ambiguous_outcome",
+        `${message}; reconcile by commandId or eventId before retrying`,
+        false,
       );
+    }
+    return new StorageError(code, message, retryable);
+  }
+
+  private rejectAll(code: string, message: string, retryable = true): void {
+    for (const requestId of [...this.pending.keys()]) {
+      const request = this.takePending(requestId);
+      if (request !== undefined) {
+        request.reject(this.failureFor(request, code, message, retryable));
+      }
     }
   }
 
   private installReplacement(): void {
     try {
       this.worker = this.spawn();
+      this.replacementBlocked = false;
       this.replacementError = null;
       try {
         this.options.onReplacement?.(this.replacementCount);
@@ -232,30 +279,187 @@ export class WorkerRpcClient {
     }
   }
 
+  private terminateWorker(worker: Worker): Promise<boolean> {
+    const existing = this.workerTerminations.get(worker);
+    if (existing !== undefined) return existing;
+
+    // Ignore late messages/exits, but retain an error listener until termination is confirmed.
+    worker.removeAllListeners("message");
+    worker.removeAllListeners("exit");
+    worker.removeAllListeners("error");
+    worker.on("error", () => {
+      // The affected requests already failed; this prevents a detached worker from crashing Wi.
+    });
+    let rawTermination: Promise<unknown>;
+    try {
+      rawTermination = Promise.resolve(worker.terminate());
+    } catch {
+      rawTermination = Promise.reject(new Error("Worker termination failed"));
+    }
+
+    const termination = new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (confirmed: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (confirmed) {
+          worker.removeAllListeners();
+        } else {
+          worker.unref();
+        }
+        resolve(confirmed);
+      };
+      const timer = setTimeout(() => finish(false), this.closeTimeoutMs);
+      timer.unref();
+      void rawTermination.then(
+        () => finish(true),
+        () => finish(false),
+      );
+    });
+    this.workerTerminations.set(worker, termination);
+    this.terminatingWorkers.add(termination);
+    void termination.then(() => {
+      this.terminatingWorkers.delete(termination);
+    });
+    return termination;
+  }
+
+  private terminateAndReplace(worker: Worker, code: string, message: string): void {
+    if (worker !== this.worker) return;
+    this.worker = null;
+    this.rejectAll(code, message);
+    const termination = this.terminateWorker(worker);
+    const replacement = termination
+      .then((terminationConfirmed) => {
+        if (!this.closing && this.replacementPromise === replacement) {
+          if (terminationConfirmed) {
+            this.replacementCount += 1;
+            this.installReplacement();
+          } else {
+            this.replacementBlocked = true;
+            this.replacementError = new StorageError(
+              "storage.worker_failed",
+              `Storage worker ${this.workerId} termination could not be confirmed`,
+            );
+          }
+        }
+      })
+      .finally(() => {
+        if (this.replacementPromise === replacement) this.replacementPromise = null;
+      });
+    this.replacementPromise = replacement;
+  }
+
+  private handleMessage(worker: Worker, message: unknown): void {
+    if (worker !== this.worker) return;
+    const parsed = WorkerResponseSchema.safeParse(message);
+    if (!parsed.success || parsed.data.workerId !== this.workerId) {
+      this.terminateAndReplace(
+        worker,
+        "storage.worker_failed",
+        `Storage worker ${this.workerId} returned a malformed response`,
+      );
+      return;
+    }
+
+    const pending = this.takePending(parsed.data.requestId);
+    if (pending === undefined) return;
+    if (parsed.data.ok) {
+      try {
+        pending.resolve(pending.parseResult(parsed.data.result));
+      } catch {
+        pending.reject(
+          this.failureFor(
+            pending,
+            "storage.worker_failed",
+            "Storage worker returned an invalid result",
+          ),
+        );
+        this.terminateAndReplace(
+          worker,
+          "storage.worker_failed",
+          `Storage worker ${this.workerId} returned an invalid result`,
+        );
+      }
+    } else {
+      pending.reject(
+        new StorageError(
+          parsed.data.error.code,
+          parsed.data.error.message,
+          parsed.data.error.retryable,
+        ),
+      );
+    }
+  }
+
   private handleExit(worker: Worker, code: number): void {
     if (worker !== this.worker) return;
-    const error = new StorageError(
+    this.worker = null;
+    worker.removeAllListeners();
+    this.rejectAll(
       "storage.worker_failed",
       `Storage worker ${this.workerId} exited with code ${code}`,
-      true,
     );
-    for (const request of this.pending.values()) request.reject(error);
-    this.pending.clear();
-
-    this.worker = null;
     if (!this.closing) {
       this.replacementCount += 1;
       this.installReplacement();
     }
   }
 
+  private waitForReplacement(
+    replacement: Promise<void>,
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (signal?.aborted === true) {
+      return Promise.reject(
+        new StorageError("storage.request_aborted", "Storage worker request was aborted"),
+      );
+    }
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (result: "resolved" | "aborted" | "timeout"): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abortListener);
+        if (result === "resolved") resolve();
+        else if (result === "aborted") {
+          reject(new StorageError("storage.request_aborted", "Storage worker request was aborted"));
+        } else {
+          reject(
+            new StorageError(
+              "storage.worker_timeout",
+              `Storage worker ${this.workerId} replacement was not ready within ${timeoutMs}ms`,
+              true,
+            ),
+          );
+        }
+      };
+      const abortListener = (): void => finish("aborted");
+      const timer = setTimeout(() => finish("timeout"), timeoutMs);
+      timer.unref();
+      signal?.addEventListener("abort", abortListener, { once: true });
+      void replacement.then(
+        () => finish("resolved"),
+        () => finish("timeout"),
+      );
+    });
+  }
+
   private sendRequest<T>(
     worker: Worker,
     operation: string,
     payload: unknown,
-    resultSchema?: z.ZodType<T>,
+    resultSchema: z.ZodType<T> | undefined,
+    options: WorkerRequestOptions,
   ): Promise<T> {
     assertWorkerPayloadBounds(payload);
+    const timeoutMs = finiteTimeout(
+      options.timeoutMs ?? this.defaultRequestTimeoutMs,
+      "Worker request timeout",
+    );
     const request = WorkerRequestSchema.parse({
       v: 1,
       requestId: `rpc_${this.workerId}_${this.nextRequestNumber}`,
@@ -264,17 +468,60 @@ export class WorkerRpcClient {
     });
     this.nextRequestNumber += 1;
 
+    if (options.signal?.aborted === true) {
+      return Promise.reject(
+        new StorageError("storage.request_aborted", "Storage worker request was aborted before send"),
+      );
+    }
+
     return new Promise<T>((resolve, reject) => {
+      const abortListener =
+        options.signal === undefined
+          ? undefined
+          : (): void => {
+              const pending = this.takePending(request.requestId);
+              if (pending === undefined) return;
+              pending.reject(
+                this.failureFor(
+                  pending,
+                  "storage.request_aborted",
+                  "Storage worker request was aborted",
+                  false,
+                ),
+              );
+            };
+      const timer = setTimeout(() => {
+        if (!this.pending.has(request.requestId)) return;
+        this.terminateAndReplace(
+          worker,
+          "storage.worker_timeout",
+          `Storage worker ${this.workerId} did not respond within ${timeoutMs}ms`,
+        );
+      }, timeoutMs);
+      timer.unref();
       this.pending.set(request.requestId, {
         parseResult: (value) => (resultSchema === undefined ? value : resultSchema.parse(value)),
         resolve: (value) => resolve(value as T),
         reject,
+        outcome: options.outcome ?? "read",
+        timer,
+        signal: options.signal,
+        abortListener,
       });
+      options.signal?.addEventListener("abort", abortListener as () => void, { once: true });
       try {
         worker.postMessage(request);
       } catch {
-        this.pending.delete(request.requestId);
-        reject(new StorageError("storage.worker_failed", "Storage worker request failed", true));
+        const pending = this.takePending(request.requestId);
+        pending?.reject(
+          pending === undefined
+            ? new StorageError("storage.worker_failed", "Storage worker request failed", true)
+            : this.failureFor(
+                pending,
+                "storage.worker_failed",
+                "Storage worker request failed",
+              ),
+        );
       }
     });
   }
@@ -283,34 +530,85 @@ export class WorkerRpcClient {
     operation: string,
     payload: unknown,
     resultSchema?: z.ZodType<T>,
+    options: WorkerRequestOptions = {},
   ): Promise<T> {
     if (this.closing) throw new StorageError("storage.worker_failed", "Storage worker is closing");
+    const timeoutMs = finiteTimeout(
+      options.timeoutMs ?? this.defaultRequestTimeoutMs,
+      "Worker request timeout",
+    );
+    const deadline = Date.now() + timeoutMs;
+    const replacement = this.replacementPromise;
+    if (replacement !== null) {
+      await this.waitForReplacement(replacement, timeoutMs, options.signal);
+    }
+    if (this.closing) throw new StorageError("storage.worker_failed", "Storage worker is closing");
+    if (options.signal?.aborted === true) {
+      throw new StorageError("storage.request_aborted", "Storage worker request was aborted");
+    }
     if (this.replacementError !== null) {
-      // A transient OS resource failure should not wedge this worker slot forever.
-      this.installReplacement();
+      // Retry a failed spawn, but never overlap a replacement with an unconfirmed old worker.
+      if (!this.replacementBlocked) this.installReplacement();
       if (this.replacementError !== null) throw this.replacementError;
     }
     const worker = this.worker;
     if (worker === null) {
       throw new StorageError("storage.worker_failed", "Storage worker is unavailable", true);
     }
-    return this.sendRequest(worker, operation, payload, resultSchema);
+    const remainingTimeoutMs = deadline - Date.now();
+    if (remainingTimeoutMs <= 0) {
+      throw new StorageError(
+        "storage.worker_timeout",
+        `Storage worker ${this.workerId} request deadline elapsed before send`,
+        true,
+      );
+    }
+    return this.sendRequest(worker, operation, payload, resultSchema, {
+      ...options,
+      timeoutMs: remainingTimeoutMs,
+    });
+  }
+
+  private unconfirmedTerminationError(): StorageError {
+    return new StorageError(
+      "storage.worker_failed",
+      `Storage worker ${this.workerId} termination could not be confirmed during close`,
+    );
   }
 
   private async finishClose(): Promise<void> {
     const worker = this.worker;
-    if (worker === null) return;
+    this.rejectAll("storage.worker_closed", `Storage worker ${this.workerId} is closing`, false);
+    if (worker === null) {
+      const terminationResults = await Promise.all([...this.terminatingWorkers]);
+      this.terminatingWorkers.clear();
+      if (this.replacementBlocked || terminationResults.some((confirmed) => !confirmed)) {
+        throw this.unconfirmedTerminationError();
+      }
+      return;
+    }
+    let terminationConfirmed = true;
     try {
-      await this.sendRequest(worker, "worker.close", {}, z.null());
+      await this.sendRequest(worker, "worker.close", {}, z.null(), {
+        timeoutMs: this.closeTimeoutMs,
+        outcome: "read",
+      });
+    } catch {
+      // Shutdown remains best-effort and bounded; termination below owns cleanup.
     } finally {
       if (this.worker === worker) this.worker = null;
-      await worker.terminate();
+      this.rejectAll("storage.worker_closed", `Storage worker ${this.workerId} closed`, false);
+      terminationConfirmed = await this.terminateWorker(worker);
+      const terminationResults = await Promise.all([...this.terminatingWorkers]);
+      this.terminatingWorkers.clear();
+      terminationConfirmed =
+        terminationConfirmed && terminationResults.every((confirmed) => confirmed);
     }
+    if (!terminationConfirmed) throw this.unconfirmedTerminationError();
   }
 
   close(): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
-    // Flip the state synchronously so no request can be queued behind worker.close.
     this.closing = true;
     this.closePromise = this.finishClose();
     return this.closePromise;

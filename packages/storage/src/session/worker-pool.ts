@@ -4,13 +4,18 @@ import { z } from "zod";
 
 import { SessionEventSchema } from "@wi/protocol";
 
-import { StorageError, WorkerRpcClient } from "../common/worker-rpc.js";
+import {
+  StorageError,
+  WorkerRpcClient,
+  type WorkerRequestOutcome,
+} from "../common/worker-rpc.js";
 import { stableSessionWorkerIndex } from "../manager/paths.js";
 import {
   AcceptedCommandResultSchema,
   AppendTransactionResultSchema,
   PendingApprovalRecordSchema,
   RunRecordSchema,
+  SessionCatalogObservationSchema,
   SessionCatalogProjectionSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
@@ -20,6 +25,7 @@ import {
   type AppendTransactionResult,
   type PendingApprovalRecord,
   type RunRecord,
+  type SessionCatalogObservation,
   type SessionCatalogProjection,
   type SessionManifest,
   type SessionRecoveryResult,
@@ -30,18 +36,10 @@ export interface SessionWorkerPoolOptions {
   readonly size?: number;
   readonly maxOpenHandlesPerWorker?: number;
   readonly allowTestOperations?: boolean;
+  readonly defaultRequestTimeoutMs?: number;
+  readonly closeTimeoutMs?: number;
   readonly onWorkerReplacement?: (workerIndex: number, replacementCount: number) => void;
   readonly onSessionError?: (sessionId: string, error: unknown) => void | Promise<void>;
-  readonly onSessionCommit?: (
-    sessionId: string,
-    events: readonly z.infer<typeof SessionEventSchema>[],
-    headSequence: number,
-  ) => Promise<boolean>;
-}
-
-export interface ObservedSessionCommit<T> {
-  readonly result: T;
-  readonly catalogUpdated: boolean;
 }
 
 export interface InitializeSessionInput {
@@ -74,20 +72,12 @@ export class SessionWorkerPool {
   readonly size: number;
   private readonly workers: readonly WorkerRpcClient[];
   private readonly paths = new Map<string, string>();
-  private readonly commitObservationTails = new Map<string, Promise<void>>();
   private readonly activeCommitOperations = new Set<Promise<void>>();
   private readonly allowTestOperations: boolean;
   private acceptingCommits = true;
   private closePromise: Promise<void> | null = null;
   private readonly onSessionError:
     | ((sessionId: string, error: unknown) => void | Promise<void>)
-    | undefined;
-  private readonly onSessionCommit:
-    | ((
-        sessionId: string,
-        events: readonly z.infer<typeof SessionEventSchema>[],
-        headSequence: number,
-      ) => Promise<boolean>)
     | undefined;
 
   constructor(options: SessionWorkerPoolOptions = {}) {
@@ -102,7 +92,6 @@ export class SessionWorkerPool {
     this.allowTestOperations =
       options.allowTestOperations === true && process.env.NODE_ENV === "test";
     this.onSessionError = options.onSessionError;
-    this.onSessionCommit = options.onSessionCommit;
     this.workers = Array.from({ length: this.size }, (_, workerIndex) =>
       new WorkerRpcClient({
         workerId: `session-${workerIndex}`,
@@ -112,6 +101,12 @@ export class SessionWorkerPool {
           maxOpenHandles,
           allowTestOperations: this.allowTestOperations,
         },
+        ...(options.defaultRequestTimeoutMs === undefined
+          ? {}
+          : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
+        ...(options.closeTimeoutMs === undefined
+          ? {}
+          : { closeTimeoutMs: options.closeTimeoutMs }),
         ...(options.onWorkerReplacement === undefined
           ? {}
           : {
@@ -130,13 +125,17 @@ export class SessionWorkerPool {
     sessionId: string,
     databasePath: string,
     beforeUse?: () => Promise<void>,
+    afterCommit?: (
+      events: readonly z.infer<typeof SessionEventSchema>[],
+      headSequence: number,
+    ) => void,
   ): SessionClient {
     const existing = this.paths.get(sessionId);
     if (existing !== undefined && existing !== databasePath) {
       throw new Error("Session database path cannot change within a pool");
     }
     this.paths.set(sessionId, databasePath);
-    return new SessionClient(this, sessionId, beforeUse);
+    return new SessionClient(this, sessionId, beforeUse, afterCommit);
   }
 
   session(sessionId: string): SessionClient {
@@ -161,12 +160,14 @@ export class SessionWorkerPool {
     operation: string,
     payload: object,
     resultSchema: z.ZodType<T>,
+    outcome: WorkerRequestOutcome = "read",
   ): Promise<T> {
     try {
       return await this.worker(sessionId).request(
         operation,
         { ...this.location(sessionId), ...payload },
         resultSchema,
+        { outcome },
       );
     } catch (error) {
       try {
@@ -188,6 +189,7 @@ export class SessionWorkerPool {
       "session.initialize",
       input,
       z.strictObject({ manifest: SessionManifestSchema, events: z.array(SessionEventSchema) }),
+      "write",
     );
   }
 
@@ -222,98 +224,34 @@ export class SessionWorkerPool {
     }
   }
 
-  private async runCommitObserver(
-    sessionId: string,
-    events: readonly z.infer<typeof SessionEventSchema>[],
-    headSequence: number,
-  ): Promise<boolean> {
-    if (this.onSessionCommit === undefined) return false;
-    try {
-      return await this.onSessionCommit(sessionId, events, headSequence);
-    } catch {
-      // A catalog/index observer cannot undo or replace a committed session result.
-      return false;
-    }
-  }
-
-  private observeCommit(
-    sessionId: string,
-    events: readonly z.infer<typeof SessionEventSchema>[],
-    headSequence: number,
-  ): Promise<boolean> {
-    const previous = this.commitObservationTails.get(sessionId) ?? Promise.resolve();
-    const observation = previous.then(() =>
-      this.runCommitObserver(sessionId, events, headSequence),
-    );
-    const tail = observation.then(() => undefined);
-    this.commitObservationTails.set(sessionId, tail);
-    void tail.then(() => {
-      if (this.commitObservationTails.get(sessionId) === tail) {
-        this.commitObservationTails.delete(sessionId);
-      }
-    });
-    return observation;
-  }
-
-  async drainCommitObservations(): Promise<void> {
-    while (this.commitObservationTails.size > 0) {
-      await Promise.all(this.commitObservationTails.values());
-    }
-  }
-
-  async acceptCommandWithCommitStatus(
-    sessionId: string,
-    input: AcceptCommandInput,
-  ): Promise<ObservedSessionCommit<AcceptedCommandResult>> {
-    return this.runCommitOperation(async () => {
-      const result = await this.request(
-        sessionId,
-        "session.acceptCommand",
-        { input },
-        AcceptedCommandResultSchema,
-      );
-      const headSequence = result.acceptedSequence ?? (await this.getHeadSequence(sessionId));
-      const catalogUpdated = await this.observeCommit(
-        sessionId,
-        result.events,
-        headSequence,
-      );
-      return { result, catalogUpdated };
-    });
-  }
-
   async acceptCommand(
     sessionId: string,
     input: AcceptCommandInput,
   ): Promise<AcceptedCommandResult> {
-    return (await this.acceptCommandWithCommitStatus(sessionId, input)).result;
-  }
-
-  async appendTransactionWithCommitStatus(
-    sessionId: string,
-    input: AppendTransactionInput,
-  ): Promise<ObservedSessionCommit<AppendTransactionResult>> {
-    return this.runCommitOperation(async () => {
-      const result = await this.request(
+    return this.runCommitOperation(() =>
+      this.request(
         sessionId,
-        "session.appendTransaction",
+        "session.acceptCommand",
         { input },
-        AppendTransactionResultSchema,
-      );
-      const catalogUpdated = await this.observeCommit(
-        sessionId,
-        result.events,
-        result.headSequence,
-      );
-      return { result, catalogUpdated };
-    });
+        AcceptedCommandResultSchema,
+        "write",
+      ),
+    );
   }
 
   async appendTransaction(
     sessionId: string,
     input: AppendTransactionInput,
   ): Promise<AppendTransactionResult> {
-    return (await this.appendTransactionWithCommitStatus(sessionId, input)).result;
+    return this.runCommitOperation(() =>
+      this.request(
+        sessionId,
+        "session.appendTransaction",
+        { input },
+        AppendTransactionResultSchema,
+        "write",
+      ),
+    );
   }
 
   async getEventsAfter(
@@ -355,6 +293,15 @@ export class SessionWorkerPool {
       "session.getCatalogProjection",
       {},
       SessionCatalogProjectionSchema,
+    );
+  }
+
+  async getCatalogObservation(sessionId: string): Promise<SessionCatalogObservation> {
+    return this.request(
+      sessionId,
+      "session.getCatalogObservation",
+      {},
+      SessionCatalogObservationSchema,
     );
   }
 
@@ -401,6 +348,20 @@ export class SessionWorkerPool {
     if (!this.allowTestOperations) throw new Error("Test operations are disabled");
     this.registerSession(sessionId, databasePath);
     await this.request(sessionId, "session.testInitializeSchemaOnly", {}, z.null());
+  }
+
+  async getProjectionIdentityForTest(
+    sessionId: string,
+    kind: "run" | "message" | "messagePart" | "providerStep" | "toolExecution" | "approval" | "input",
+    id: string,
+  ): Promise<Readonly<Record<string, string | number | null>>> {
+    if (!this.allowTestOperations) throw new Error("Test operations are disabled");
+    return this.request(
+      sessionId,
+      "session.testGetProjectionIdentity",
+      { kind, id },
+      z.record(z.string(), z.union([z.string(), z.number(), z.null()])),
+    );
   }
 
   async getPragmasForTest(sessionId: string): Promise<SessionSqlitePragmas> {
@@ -478,7 +439,6 @@ export class SessionWorkerPool {
 
   private async finishClose(): Promise<void> {
     await this.drainCommitOperations();
-    await this.drainCommitObservations();
     await Promise.all(this.workers.map((worker) => worker.close()));
   }
 

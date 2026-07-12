@@ -252,7 +252,13 @@ describe("workspace architecture", () => {
       "packages/storage/src/manager/session-store-manager.ts",
       "packages/storage/src/manager/catalog-reconciler.ts",
     ];
-    const files = [...sourceFiles("tests"), ...mainThreadStorageFiles.map((file) => join(root, file))];
+    const childOnlySqliteFixtures = new Set([
+      join(root, "tests/process/catalog-v1-fixture.mjs"),
+    ]);
+    const files = [
+      ...sourceFiles("tests").filter((file) => !childOnlySqliteFixtures.has(file)),
+      ...mainThreadStorageFiles.map((file) => join(root, file)),
+    ];
     const violations = files.flatMap((file) =>
       importedSpecifiers(readFileSync(file, "utf8"), file)
         .filter((specifier) => harnessImplementationPatterns.slice(2).some((pattern) => pattern.test(specifier)))

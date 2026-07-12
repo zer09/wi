@@ -4,13 +4,15 @@ import type { BrowserSessionState } from "./model.js";
 import { reduceSessionEvent } from "./reducer.js";
 
 export function beginReplay(state: BrowserSessionState): BrowserSessionState {
-  return { ...state, status: "replaying", errorCode: null };
+  if (state.errorCode !== null) return state;
+  return { ...state, status: "replaying" };
 }
 
 export function completeReplay(
   state: BrowserSessionState,
   throughSequence: number,
 ): BrowserSessionState {
+  if (state.errorCode !== null) return state;
   if (state.lastAppliedSequence !== throughSequence) {
     return { ...state, status: "gap" };
   }

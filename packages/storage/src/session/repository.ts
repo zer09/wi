@@ -21,6 +21,7 @@ import {
   ProjectionMutationSchema,
   SESSION_FORMAT_VERSION,
   SESSION_SCHEMA_VERSION,
+  SessionCatalogObservationSchema,
   SessionCatalogProjectionSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
@@ -29,6 +30,7 @@ import {
   type AppendTransactionInput,
   type PendingApprovalRecord,
   type RunRecord,
+  type SessionCatalogObservation,
   type SessionCatalogProjection,
   type SessionManifest,
   type SessionRecoveryResult,
@@ -469,6 +471,15 @@ export class SessionRepository {
     return row.count;
   }
 
+  getCatalogObservation(): SessionCatalogObservation {
+    return SessionCatalogObservationSchema.parse({
+      headSequence: this.getHeadSequence(),
+      projection: this.getCatalogProjection(),
+      pendingApprovalCount: this.getPendingApprovals().length,
+      pendingInputCount: this.getPendingInputCount(),
+    });
+  }
+
   recover(): SessionRecoveryResult {
     const interruptedRunIds = (
       this.database.prepare("SELECT run_id AS id FROM runs WHERE state IN ('running', 'cancelling')").all() as {
@@ -495,6 +506,40 @@ export class SessionRepository {
         startedToolCalls,
       }),
     );
+  }
+
+  testGetProjectionIdentity(
+    kind: "run" | "message" | "messagePart" | "providerStep" | "toolExecution" | "approval" | "input",
+    id: string,
+  ): Record<string, string | number | null> {
+    if (!this.allowTestOperations) {
+      throw new StorageError("storage.worker_failed", "Test operations are disabled");
+    }
+    const queries = {
+      run: `SELECT run_id AS runId, provider_id AS providerId,
+                   provider_config_json AS providerConfigJson, created_at_ms AS createdAtMs
+            FROM runs WHERE run_id = ?`,
+      message: `SELECT message_id AS messageId, run_id AS runId, role,
+                       created_at_ms AS createdAtMs FROM messages WHERE message_id = ?`,
+      messagePart: `SELECT part_id AS partId, message_id AS messageId,
+                           part_index AS partIndex, part_type AS partType
+                    FROM message_parts WHERE part_id = ?`,
+      providerStep: `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex,
+                            started_at_ms AS startedAtMs FROM provider_steps WHERE step_id = ?`,
+      toolExecution: `SELECT call_id AS callId, run_id AS runId, step_id AS stepId,
+                             tool_name AS toolName, arguments_json AS argumentsJson,
+                             arguments_hash AS argumentsHash, effect_class AS effectClass
+                      FROM tool_executions WHERE call_id = ?`,
+      approval: `SELECT approval_id AS approvalId, run_id AS runId, call_id AS callId,
+                        action_digest AS actionDigest FROM approvals WHERE approval_id = ?`,
+      input: `SELECT input_id AS inputId, run_id AS runId, prompt
+              FROM pending_inputs WHERE input_id = ?`,
+    } as const;
+    const row = this.database.prepare(queries[kind]).get(id) as
+      | Record<string, string | number | null>
+      | undefined;
+    if (row === undefined) throw new StorageError("session.not_found", "Projection not found");
+    return row;
   }
 
   testGetPragmas(): Record<string, string | number> {

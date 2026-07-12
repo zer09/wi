@@ -1,13 +1,74 @@
 import type Database from "better-sqlite3";
 
-import { canonicalJson } from "@wi/protocol";
+import { canonicalJson, type RunState } from "@wi/protocol";
 
 import { StorageError } from "../common/worker-rpc.js";
 import type { ProjectionMutation } from "../types.js";
+import { assertAllowedRunTransition } from "./run-transitions.js";
+
+function identityConflict(entity: string, id: string): never {
+  throw new StorageError("session.invalid_transition", `${entity} ${id} changed immutable identity`);
+}
+
+function canonicalArgumentsJson(value: string): string {
+  try {
+    return canonicalJson(JSON.parse(value) as unknown);
+  } catch {
+    throw new StorageError("provider.protocol_error", "Tool argumentsJson is not canonical JSON");
+  }
+}
+
+interface RunRow {
+  readonly state: RunState;
+  readonly providerId: string;
+  readonly providerConfigJson: string;
+  readonly createdAtMs: number;
+  readonly startedAtMs: number | null;
+  readonly completedAtMs: number | null;
+  readonly cancelledAtMs: number | null;
+  readonly failureCategory: string | null;
+  readonly failureMessage: string | null;
+  readonly activeProviderStepId: string | null;
+}
 
 export function applyProjection(database: Database.Database, mutation: ProjectionMutation): void {
   switch (mutation.kind) {
-    case "run.put":
+    case "run.put": {
+      const providerConfigJson = canonicalJson(mutation.providerConfig);
+      const existing = database
+        .prepare(
+          `SELECT state, provider_id AS providerId, provider_config_json AS providerConfigJson,
+                  created_at_ms AS createdAtMs, started_at_ms AS startedAtMs,
+                  completed_at_ms AS completedAtMs, cancelled_at_ms AS cancelledAtMs,
+                  failure_category AS failureCategory, failure_message AS failureMessage,
+                  active_provider_step_id AS activeProviderStepId
+           FROM runs WHERE run_id = ?`,
+        )
+        .get(mutation.runId) as RunRow | undefined;
+      if (existing !== undefined) {
+        if (
+          existing.providerId !== mutation.providerId ||
+          existing.providerConfigJson !== providerConfigJson ||
+          existing.createdAtMs !== mutation.createdAtMs
+        ) {
+          identityConflict("Run", mutation.runId);
+        }
+        if (
+          existing.state !== mutation.state ||
+          existing.startedAtMs !== mutation.startedAtMs ||
+          existing.completedAtMs !== mutation.completedAtMs ||
+          existing.cancelledAtMs !== mutation.cancelledAtMs ||
+          existing.failureCategory !== mutation.failureCategory ||
+          existing.failureMessage !== mutation.failureMessage ||
+          existing.activeProviderStepId !== mutation.activeProviderStepId
+        ) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Run ${mutation.runId} state must change through run.state`,
+          );
+        }
+        return;
+      }
       database
         .prepare(
           `INSERT INTO runs (
@@ -18,37 +79,67 @@ export function applyProjection(database: Database.Database, mutation: Projectio
              @runId, @state, @providerId, @providerConfigJson, @createdAtMs, @startedAtMs,
              @completedAtMs, @cancelledAtMs, @failureCategory, @failureMessage,
              @activeProviderStepId
-           ) ON CONFLICT(run_id) DO UPDATE SET
-             state = excluded.state,
-             provider_id = excluded.provider_id,
-             provider_config_json = excluded.provider_config_json,
-             started_at_ms = excluded.started_at_ms,
-             completed_at_ms = excluded.completed_at_ms,
-             cancelled_at_ms = excluded.cancelled_at_ms,
-             failure_category = excluded.failure_category,
-             failure_message = excluded.failure_message,
-             active_provider_step_id = excluded.active_provider_step_id`,
+           )`,
         )
-        .run({ ...mutation, providerConfigJson: canonicalJson(mutation.providerConfig) });
+        .run({ ...mutation, providerConfigJson });
       return;
+    }
     case "run.state": {
+      const existing = database
+        .prepare(
+          `SELECT state, provider_id AS providerId, provider_config_json AS providerConfigJson,
+                  created_at_ms AS createdAtMs, started_at_ms AS startedAtMs,
+                  completed_at_ms AS completedAtMs, cancelled_at_ms AS cancelledAtMs,
+                  failure_category AS failureCategory, failure_message AS failureMessage,
+                  active_provider_step_id AS activeProviderStepId
+           FROM runs WHERE run_id = ?`,
+        )
+        .get(mutation.runId) as RunRow | undefined;
+      if (existing === undefined) {
+        throw new StorageError("session.not_found", "Run projection not found");
+      }
+      if (existing.state !== mutation.expectedState) {
+        throw new StorageError(
+          "session.invalid_transition",
+          `Run ${mutation.runId} is ${existing.state}, expected ${mutation.expectedState}`,
+        );
+      }
+      assertAllowedRunTransition(mutation.expectedState, mutation.nextState);
       const result = database
         .prepare(
           `UPDATE runs SET
-             state = @state,
+             state = @nextState,
              started_at_ms = @startedAtMs,
              completed_at_ms = @completedAtMs,
              cancelled_at_ms = @cancelledAtMs,
              failure_category = @failureCategory,
              failure_message = @failureMessage,
              active_provider_step_id = @activeProviderStepId
-           WHERE run_id = @runId`,
+           WHERE run_id = @runId AND state = @expectedState`,
         )
         .run(mutation);
-      if (result.changes !== 1) throw new StorageError("session.not_found", "Run projection not found");
+      if (result.changes !== 1) {
+        throw new StorageError("session.invalid_transition", "Run transition lost its state CAS");
+      }
       return;
     }
-    case "message.put":
+    case "message.put": {
+      const existing = database
+        .prepare(
+          `SELECT run_id AS runId, role, created_at_ms AS createdAtMs
+           FROM messages WHERE message_id = ?`,
+        )
+        .get(mutation.messageId) as
+        | { runId: string | null; role: string; createdAtMs: number }
+        | undefined;
+      if (
+        existing !== undefined &&
+        (existing.runId !== mutation.runId ||
+          existing.role !== mutation.role ||
+          existing.createdAtMs !== mutation.createdAtMs)
+      ) {
+        identityConflict("Message", mutation.messageId);
+      }
       database
         .prepare(
           `INSERT INTO messages (
@@ -61,7 +152,24 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         )
         .run(mutation);
       return;
-    case "messagePart.put":
+    }
+    case "messagePart.put": {
+      const existing = database
+        .prepare(
+          `SELECT message_id AS messageId, part_index AS partIndex, part_type AS partType
+           FROM message_parts WHERE part_id = ?`,
+        )
+        .get(mutation.partId) as
+        | { messageId: string; partIndex: number; partType: string }
+        | undefined;
+      if (
+        existing !== undefined &&
+        (existing.messageId !== mutation.messageId ||
+          existing.partIndex !== mutation.partIndex ||
+          existing.partType !== mutation.partType)
+      ) {
+        identityConflict("Message part", mutation.partId);
+      }
       database
         .prepare(
           `INSERT INTO message_parts (
@@ -77,7 +185,24 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           dataJson: mutation.data === null ? null : canonicalJson(mutation.data),
         });
       return;
-    case "providerStep.put":
+    }
+    case "providerStep.put": {
+      const existing = database
+        .prepare(
+          `SELECT run_id AS runId, step_index AS stepIndex, started_at_ms AS startedAtMs
+           FROM provider_steps WHERE step_id = ?`,
+        )
+        .get(mutation.stepId) as
+        | { runId: string; stepIndex: number; startedAtMs: number }
+        | undefined;
+      if (
+        existing !== undefined &&
+        (existing.runId !== mutation.runId ||
+          existing.stepIndex !== mutation.stepIndex ||
+          existing.startedAtMs !== mutation.startedAtMs)
+      ) {
+        identityConflict("Provider step", mutation.stepId);
+      }
       database
         .prepare(
           `INSERT INTO provider_steps (
@@ -95,11 +220,14 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         )
         .run(mutation);
       return;
+    }
     case "toolExecution.put": {
+      const argumentsJson = canonicalArgumentsJson(mutation.argumentsJson);
       const existing = database
         .prepare(
           `SELECT run_id AS runId, step_id AS stepId, tool_name AS toolName,
-                  arguments_hash AS argumentsHash, effect_class AS effectClass
+                  arguments_json AS argumentsJson, arguments_hash AS argumentsHash,
+                  effect_class AS effectClass
            FROM tool_executions WHERE call_id = ?`,
         )
         .get(mutation.callId) as
@@ -107,6 +235,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
             runId: string;
             stepId: string;
             toolName: string;
+            argumentsJson: string;
             argumentsHash: string;
             effectClass: string;
           }
@@ -116,6 +245,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         (existing.runId !== mutation.runId ||
           existing.stepId !== mutation.stepId ||
           existing.toolName !== mutation.toolName ||
+          canonicalArgumentsJson(existing.argumentsJson) !== argumentsJson ||
           existing.argumentsHash !== mutation.argumentsHash ||
           existing.effectClass !== mutation.effectClass)
       ) {
@@ -144,6 +274,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         )
         .run({
           ...mutation,
+          argumentsJson,
           resultJson: mutation.result === null ? null : canonicalJson(mutation.result),
           errorJson: mutation.error === null ? null : canonicalJson(mutation.error),
         });
@@ -164,10 +295,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           existing.callId !== mutation.callId ||
           existing.actionDigest !== mutation.actionDigest
         ) {
-          throw new StorageError(
-            "session.invalid_transition",
-            `Approval ${mutation.approvalId} changed identity`,
-          );
+          identityConflict("Approval", mutation.approvalId);
         }
         return;
       }
@@ -209,10 +337,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         .get(mutation.inputId) as { runId: string; prompt: string } | undefined;
       if (existing !== undefined) {
         if (existing.runId !== mutation.runId || existing.prompt !== mutation.prompt) {
-          throw new StorageError(
-            "session.invalid_transition",
-            `Input ${mutation.inputId} changed identity`,
-          );
+          identityConflict("Input", mutation.inputId);
         }
         return;
       }

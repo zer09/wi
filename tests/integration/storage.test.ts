@@ -11,6 +11,7 @@ import {
   StorageError,
   stableSessionWorkerIndex,
   type AppendTransactionInput,
+  type ProjectionMutation,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
 
@@ -55,6 +56,12 @@ async function manager(
     ...(options.catalogProjectionWriter === undefined
       ? {}
       : { catalogProjectionWriter: options.catalogProjectionWriter }),
+    ...(options.catalogObservationShutdownTimeoutMs === undefined
+      ? {}
+      : {
+          catalogObservationShutdownTimeoutMs:
+            options.catalogObservationShutdownTimeoutMs,
+        }),
   });
   managers.push(storage);
   return storage;
@@ -332,7 +339,7 @@ describe("catalog and per-session storage workers", () => {
     const session = await storage.openSession(created.session.sessionId);
 
     const committed = await storage.appendTransaction(created.session.sessionId, runAppend());
-    expect(committed).toMatchObject({ headSequence: 2, catalogUpdated: true });
+    expect(committed).toMatchObject({ headSequence: 2, catalogObservationScheduled: true });
     await expect(session.getRun("run_storageA")).resolves.toMatchObject({
       state: "created",
       providerConfig: { scenario: "plain-text" },
@@ -352,7 +359,8 @@ describe("catalog and per-session storage workers", () => {
           {
             kind: "run.state",
             runId: "run_missing",
-            state: "running",
+            expectedState: "created",
+            nextState: "running",
             startedAtMs: 1_020,
             completedAtMs: null,
             cancelledAtMs: null,
@@ -381,7 +389,8 @@ describe("catalog and per-session storage workers", () => {
         {
           kind: "run.state",
           runId: "run_storageA",
-          state: "running",
+          expectedState: "created",
+          nextState: "running",
           startedAtMs: 1_030,
           completedAtMs: null,
           cancelledAtMs: null,
@@ -391,6 +400,7 @@ describe("catalog and per-session storage workers", () => {
         },
       ],
     });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 3,
       lastRunState: "running",
@@ -401,6 +411,389 @@ describe("catalog and per-session storage workers", () => {
       [3, "run.started"],
     ]);
     expect(await session.getEventsAfter(2, 2)).toEqual([]);
+  });
+
+  it("protects immutable projection identities and rolls back conflicting events", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const sessionId = created.session.sessionId;
+    const session = await storage.openSession(sessionId);
+    const run = (runId: string): Extract<ProjectionMutation, { kind: "run.put" }> => ({
+      kind: "run.put",
+      runId,
+      state: "created",
+      providerId: "fake",
+      providerConfig: { scenario: "identity" },
+      createdAtMs: 2_000,
+      startedAtMs: null,
+      completedAtMs: null,
+      cancelledAtMs: null,
+      failureCategory: null,
+      failureMessage: null,
+      activeProviderStepId: null,
+    });
+    const message = (
+      messageId: string,
+      runId: string,
+    ): Extract<ProjectionMutation, { kind: "message.put" }> => ({
+      kind: "message.put",
+      messageId,
+      runId,
+      role: "user",
+      state: "completed",
+      createdAtMs: 2_001,
+      completedAtMs: 2_001,
+    });
+    const step = (
+      stepId: string,
+      runId: string,
+      stepIndex: number,
+    ): Extract<ProjectionMutation, { kind: "providerStep.put" }> => ({
+      kind: "providerStep.put",
+      stepId,
+      runId,
+      stepIndex,
+      state: "streaming",
+      startedAtMs: 2_002,
+      completedAtMs: null,
+      responseId: null,
+      errorCategory: null,
+      errorMessage: null,
+    });
+    const tool: Extract<ProjectionMutation, { kind: "toolExecution.put" }> = {
+      kind: "toolExecution.put",
+      callId: "call_identityA",
+      runId: "run_identityA",
+      stepId: "step_identityA",
+      toolName: "echo",
+      argumentsJson: '{"a":1,"b":2}',
+      argumentsHash: "a".repeat(64),
+      effectClass: "pure",
+      state: "requested",
+      attemptCount: 0,
+      requestedAtMs: 2_003,
+      startedAtMs: null,
+      completedAtMs: null,
+      result: null,
+      error: null,
+    };
+    const approval: Extract<ProjectionMutation, { kind: "approval.put" }> = {
+      kind: "approval.put",
+      approvalId: "approval_identityA",
+      runId: "run_identityA",
+      callId: "call_identityA",
+      state: "pending",
+      actionDigest: "b".repeat(64),
+      requestedAtMs: 2_004,
+    };
+    const input: Extract<ProjectionMutation, { kind: "input.put" }> = {
+      kind: "input.put",
+      inputId: "input_identityA",
+      runId: "run_identityA",
+      state: "pending",
+      prompt: "Continue?",
+      requestedAtMs: 2_005,
+    };
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_identityInitial",
+          eventType: "run.created",
+          createdAtMs: 2_000,
+          data: { eventVersion: 1, runId: "run_identityA" },
+        },
+      ],
+      projections: [
+        run("run_identityA"),
+        run("run_identityB"),
+        message("msg_identityA", "run_identityA"),
+        message("msg_identityB", "run_identityB"),
+        {
+          kind: "messagePart.put",
+          partId: "part_identityA",
+          messageId: "msg_identityA",
+          partIndex: 0,
+          partType: "text",
+          textContent: "original",
+          data: null,
+        },
+        step("step_identityA", "run_identityA", 0),
+        step("step_identityB", "run_identityB", 1),
+        tool,
+        approval,
+        input,
+      ],
+    });
+
+    const cases: readonly {
+      name: string;
+      kind: Parameters<typeof storage.sessions.getProjectionIdentityForTest>[1];
+      id: string;
+      mutation: ProjectionMutation;
+      code: string;
+    }[] = [
+      { name: "run providerId", kind: "run", id: "run_identityA", mutation: { ...run("run_identityA"), providerId: "other" }, code: "session.invalid_transition" },
+      { name: "run providerConfig", kind: "run", id: "run_identityA", mutation: { ...run("run_identityA"), providerConfig: { scenario: "other" } }, code: "session.invalid_transition" },
+      { name: "run createdAtMs", kind: "run", id: "run_identityA", mutation: { ...run("run_identityA"), createdAtMs: 9_999 }, code: "session.invalid_transition" },
+      { name: "message runId", kind: "message", id: "msg_identityA", mutation: { ...message("msg_identityA", "run_identityA"), runId: "run_identityB" }, code: "session.invalid_transition" },
+      { name: "message role", kind: "message", id: "msg_identityA", mutation: { ...message("msg_identityA", "run_identityA"), role: "assistant" }, code: "session.invalid_transition" },
+      { name: "message createdAtMs", kind: "message", id: "msg_identityA", mutation: { ...message("msg_identityA", "run_identityA"), createdAtMs: 9_999 }, code: "session.invalid_transition" },
+      { name: "part messageId", kind: "messagePart", id: "part_identityA", mutation: { kind: "messagePart.put", partId: "part_identityA", messageId: "msg_identityB", partIndex: 0, partType: "text", textContent: "changed", data: null }, code: "session.invalid_transition" },
+      { name: "part index", kind: "messagePart", id: "part_identityA", mutation: { kind: "messagePart.put", partId: "part_identityA", messageId: "msg_identityA", partIndex: 1, partType: "text", textContent: "changed", data: null }, code: "session.invalid_transition" },
+      { name: "part type", kind: "messagePart", id: "part_identityA", mutation: { kind: "messagePart.put", partId: "part_identityA", messageId: "msg_identityA", partIndex: 0, partType: "json", textContent: "changed", data: null }, code: "session.invalid_transition" },
+      { name: "step runId", kind: "providerStep", id: "step_identityA", mutation: { ...step("step_identityA", "run_identityA", 0), runId: "run_identityB" }, code: "session.invalid_transition" },
+      { name: "step index", kind: "providerStep", id: "step_identityA", mutation: { ...step("step_identityA", "run_identityA", 0), stepIndex: 9 }, code: "session.invalid_transition" },
+      { name: "step startedAtMs", kind: "providerStep", id: "step_identityA", mutation: { ...step("step_identityA", "run_identityA", 0), startedAtMs: 9_999 }, code: "session.invalid_transition" },
+      { name: "tool runId", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, runId: "run_identityB" }, code: "provider.protocol_error" },
+      { name: "tool stepId", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, stepId: "step_identityB" }, code: "provider.protocol_error" },
+      { name: "tool name", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, toolName: "other" }, code: "provider.protocol_error" },
+      { name: "tool arguments", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, argumentsJson: '{"a":2,"b":2}' }, code: "provider.protocol_error" },
+      { name: "tool hash", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, argumentsHash: "c".repeat(64) }, code: "provider.protocol_error" },
+      { name: "tool effect", kind: "toolExecution", id: "call_identityA", mutation: { ...tool, effectClass: "non_idempotent" }, code: "provider.protocol_error" },
+      { name: "approval runId", kind: "approval", id: "approval_identityA", mutation: { ...approval, runId: "run_identityB" }, code: "session.invalid_transition" },
+      { name: "approval callId", kind: "approval", id: "approval_identityA", mutation: { ...approval, callId: "call_other" }, code: "session.invalid_transition" },
+      { name: "approval digest", kind: "approval", id: "approval_identityA", mutation: { ...approval, actionDigest: "d".repeat(64) }, code: "session.invalid_transition" },
+      { name: "input runId", kind: "input", id: "input_identityA", mutation: { ...input, runId: "run_identityB" }, code: "session.invalid_transition" },
+      { name: "input prompt", kind: "input", id: "input_identityA", mutation: { ...input, prompt: "Changed?" }, code: "session.invalid_transition" },
+    ];
+
+    let eventNumber = 0;
+    for (const item of cases) {
+      const original = await storage.sessions.getProjectionIdentityForTest(
+        sessionId,
+        item.kind,
+        item.id,
+      );
+      const head = await session.getHeadSequence();
+      await expect(
+        session.appendTransaction({
+          events: [
+            {
+              eventId: `evt_identityConflict${eventNumber++}`,
+              eventType: "run.started",
+              createdAtMs: 2_100 + eventNumber,
+              data: { eventVersion: 1, runId: "run_identityA" },
+            },
+          ],
+          projections: [item.mutation],
+        }),
+        item.name,
+      ).rejects.toMatchObject({ code: item.code });
+      await expect(session.getHeadSequence(), item.name).resolves.toBe(head);
+      await expect(
+        storage.sessions.getProjectionIdentityForTest(sessionId, item.kind, item.id),
+        item.name,
+      ).resolves.toEqual(original);
+    }
+
+    await expect(
+      session.appendTransaction({
+        events: [
+          {
+            eventId: "evt_identityCanonicalArguments",
+            eventType: "run.started",
+            createdAtMs: 2_500,
+            data: { eventVersion: 1, runId: "run_identityA" },
+          },
+        ],
+        projections: [{ ...tool, argumentsJson: '{"b":2,"a":1}', state: "started" }],
+      }),
+    ).resolves.toMatchObject({ headSequence: 3 });
+  });
+
+  it("applies run state transitions with an atomic expected-state CAS", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const session = await storage.openSession(created.session.sessionId);
+    await session.appendTransaction(runAppend("evt_runCasCreated", "run_casA"));
+    const createdHead = await session.getHeadSequence();
+    await expect(
+      session.appendTransaction({
+        events: [
+          {
+            eventId: "evt_runCasPutBypass",
+            eventType: "run.started",
+            createdAtMs: 3_000,
+            data: { eventVersion: 1, runId: "run_casA" },
+          },
+        ],
+        projections: [
+          {
+            kind: "run.put",
+            runId: "run_casA",
+            state: "running",
+            providerId: "fake",
+            providerConfig: { scenario: "plain-text" },
+            createdAtMs: 1_010,
+            startedAtMs: 3_000,
+            completedAtMs: null,
+            cancelledAtMs: null,
+            failureCategory: null,
+            failureMessage: null,
+            activeProviderStepId: null,
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(createdHead);
+    await expect(session.getRun("run_casA")).resolves.toMatchObject({ state: "created" });
+
+    const transition = (
+      eventId: string,
+      expectedState: "created" | "running" | "completed",
+      nextState: "running" | "completed",
+      completedAtMs: number | null,
+    ): AppendTransactionInput => ({
+      events: [
+        {
+          eventId,
+          eventType: nextState === "running" ? "run.started" : "run.completed",
+          createdAtMs: completedAtMs ?? 3_000,
+          data: { eventVersion: 1, runId: "run_casA" },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.state",
+          runId: "run_casA",
+          expectedState,
+          nextState,
+          startedAtMs: 3_000,
+          completedAtMs,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+      ],
+    });
+
+    await session.appendTransaction(transition("evt_runCasStarted", "created", "running", null));
+    const runningHead = await session.getHeadSequence();
+    await expect(
+      session.appendTransaction(transition("evt_runCasStale", "created", "running", null)),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(runningHead);
+
+    await session.appendTransaction(transition("evt_runCasCompleted", "running", "completed", 3_100));
+    await expect(session.getRun("run_casA")).resolves.toMatchObject({
+      state: "completed",
+      completedAtMs: 3_100,
+    });
+    const terminalHead = await session.getHeadSequence();
+    await expect(
+      session.appendTransaction(transition("evt_runCasSameTerminal", "running", "completed", 3_100)),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(terminalHead);
+    await expect(
+      session.appendTransaction(transition("evt_runCasDifferentTerminal", "running", "completed", 3_101)),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(
+      session.appendTransaction(
+        transition("evt_runCasInvalidTerminalRetry", "created", "completed", 3_100),
+      ),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(
+      session.appendTransaction(transition("evt_runCasRegress", "completed", "running", null)),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(terminalHead);
+  });
+
+  it("rolls back terminal regression and allows only one competing terminal transition", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const session = await storage.openSession(created.session.sessionId);
+    const transition = (
+      runId: string,
+      eventId: string,
+      expectedState: "created" | "running" | "cancelling" | "cancelled",
+      nextState: "running" | "cancelling" | "cancelled" | "completed" | "failed",
+      atMs: number,
+    ): AppendTransactionInput => {
+      const eventTypes = {
+        running: "run.started",
+        cancelling: "run.cancel.requested",
+        cancelled: "run.cancelled",
+        completed: "run.completed",
+        failed: "run.failed",
+      } as const;
+      return {
+        events: [
+          {
+            eventId,
+            eventType: eventTypes[nextState],
+            createdAtMs: atMs,
+            data: {
+              eventVersion: 1,
+              runId,
+              ...(nextState === "failed"
+                ? {
+                    code: "session.invalid_transition" as const,
+                    message: "competing terminal",
+                    diagnosticId: "err_competingTerminal",
+                  }
+                : {}),
+            },
+          },
+        ],
+        projections: [
+          {
+            kind: "run.state",
+            runId,
+            expectedState,
+            nextState,
+            startedAtMs: atMs,
+            completedAtMs:
+              nextState === "completed" || nextState === "failed" ? atMs : null,
+            cancelledAtMs: nextState === "cancelled" ? atMs : null,
+            failureCategory: nextState === "failed" ? "competing" : null,
+            failureMessage: nextState === "failed" ? "competing terminal" : null,
+            activeProviderStepId: null,
+          },
+        ],
+      };
+    };
+
+    await session.appendTransaction(runAppend("evt_cancelCreated", "run_cancelCas"));
+    await session.appendTransaction(
+      transition("run_cancelCas", "evt_cancelRunning", "created", "running", 3_200),
+    );
+    await session.appendTransaction(
+      transition("run_cancelCas", "evt_cancelRequested", "running", "cancelling", 3_201),
+    );
+    await session.appendTransaction(
+      transition("run_cancelCas", "evt_cancelled", "cancelling", "cancelled", 3_202),
+    );
+    const cancelledHead = await session.getHeadSequence();
+    await expect(
+      session.appendTransaction(
+        transition("run_cancelCas", "evt_cancelledCompleted", "cancelled", "completed", 3_203),
+      ),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+    await expect(session.getHeadSequence()).resolves.toBe(cancelledHead);
+
+    await session.appendTransaction(runAppend("evt_competingCreated", "run_competingCas"));
+    await session.appendTransaction(
+      transition("run_competingCas", "evt_competingRunning", "created", "running", 3_210),
+    );
+    const competingHead = await session.getHeadSequence();
+    const competing = await Promise.allSettled([
+      session.appendTransaction(
+        transition("run_competingCas", "evt_competingCompleted", "running", "completed", 3_211),
+      ),
+      session.appendTransaction(
+        transition("run_competingCas", "evt_competingFailed", "running", "failed", 3_212),
+      ),
+    ]);
+    expect(competing.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(competing.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(competing.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { code: "session.invalid_transition" },
+    });
+    await expect(session.getHeadSequence()).resolves.toBe(competingHead + 1);
+    await expect(session.getRun("run_competingCas")).resolves.toMatchObject({
+      state: expect.stringMatching(/^(completed|failed)$/),
+    });
   });
 
   it("enforces append-only event triggers through worker-owned SQLite", async () => {
@@ -459,6 +852,7 @@ describe("catalog and per-session storage workers", () => {
     const storage = await manager({}, ["ses_storageA", "ses_unusedB", "ses_unusedC"]);
     const first = await storage.createSession(createCommand());
     await storage.appendTransaction(first.session.sessionId, runAppend());
+    await storage.drainCatalogObservations();
     const summaryBeforeDuplicate = await storage.catalog.getSession(first.session.sessionId);
     const duplicate = await storage.createSession(createCommand());
 
@@ -558,9 +952,62 @@ describe("catalog and per-session storage workers", () => {
     await expect(restarted.ready()).resolves.toBeUndefined();
     await expect((await restarted.openSession(healthy.session.sessionId)).getHeadSequence()).resolves.toBe(1);
     await expect(restarted.catalog.getGlobalCommand(corruptCommand.commandId)).resolves.toMatchObject({
-      state: "creating",
+      state: "failed",
       reservedSessionId: "ses_corruptCreating",
+      failureCode: "storage.corrupt",
+      diagnosticId: expect.stringMatching(/^err_/),
+      quarantinedRelativePath: expect.stringContaining(".quarantine-"),
     });
+    await expect(restarted.catalog.getSession("ses_corruptCreating")).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Corrupt creating",
+    });
+  });
+
+  it("does not claim quarantine when the atomic rename fails", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = await manager({ homeDirectory }, ["ses_unusedQuarantineSetup"]);
+    await original.ready();
+    const command = createCommand("cmd_quarantineBlocked", "Blocked quarantine");
+    await original.catalog.reserveGlobalCommand({
+      commandId: command.commandId,
+      payloadHash: await hashCommandContent(command),
+      reservedSessionId: "ses_quarantineBlocked",
+      reservedEventId: "evt_quarantineBlocked",
+      request: { title: "Blocked quarantine", projectId: null },
+      updatedAtMs: 1_125,
+    });
+    await original.close();
+
+    const sourceDirectory = resolveStoragePath(
+      homeDirectory,
+      "sessions/qu/ses_quarantineBlocked",
+    );
+    const blockedDestination = resolveStoragePath(
+      homeDirectory,
+      "sessions/qu/ses_quarantineBlocked.quarantine-err_quarantineBlocked",
+    );
+    await mkdir(sourceDirectory, { recursive: true });
+    await writeFile(join(sourceDirectory, "session.sqlite3"), "not a sqlite database");
+    await mkdir(blockedDestination, { recursive: true });
+    await writeFile(join(blockedDestination, "keep"), "occupied");
+
+    const restarted = await manager({
+      homeDirectory,
+      ids: {
+        sessionId: () => "ses_unusedQuarantineRestart",
+        eventId: () => "evt_unusedQuarantineRestart",
+        diagnosticId: () => "err_quarantineBlocked",
+      },
+    });
+    await restarted.ready();
+    await expect(restarted.catalog.getGlobalCommand(command.commandId)).resolves.toMatchObject({
+      state: "failed",
+      failureMessage:
+        "The partial session database is unavailable and was retained for recovery.",
+      quarantinedRelativePath: null,
+    });
+    await expect(stat(join(sourceDirectory, "session.sqlite3"))).resolves.toBeDefined();
   });
 
   it("quarantines semantically corrupt stored data without blocking healthy sessions", async () => {
@@ -677,11 +1124,37 @@ describe("catalog and per-session storage workers", () => {
       sessionWorkers: { size: 1, allowTestOperations: true },
     });
     managers.push(restarted);
-    vi.spyOn(restarted.catalog, "getSession").mockRejectedValue(
+    vi.spyOn(restarted.catalog, "failGlobalCommand").mockRejectedValue(
       new StorageError("storage.disk_full", "injected catalog status failure"),
     );
 
     await expect(restarted.ready()).rejects.toMatchObject({ code: "storage.disk_full" });
+  });
+
+  it("returns a committed result when post-commit observation scheduling throws", async () => {
+    const homeDirectory = await temporaryHome();
+    const storage = await manager({ homeDirectory });
+    const created = await storage.createSession(createCommand());
+    const session = storage.sessions.registerSession(
+      created.session.sessionId,
+      resolveStoragePath(homeDirectory, created.session.dbRelativePath),
+      undefined,
+      () => {
+        throw new Error("injected synchronous observation failure");
+      },
+    );
+
+    await expect(
+      session.appendTransaction(
+        runAppend("evt_syncObservationFailure", "run_syncObservationFailure"),
+      ),
+    ).resolves.toMatchObject({
+      headSequence: 2,
+      events: [{ eventId: "evt_syncObservationFailure" }],
+    });
+    await expect(session.getEventsAfter(1)).resolves.toMatchObject([
+      { eventId: "evt_syncObservationFailure" },
+    ]);
   });
 
   it("keeps a session commit canonical when catalog projection update fails, then reconciles", async () => {
@@ -693,7 +1166,8 @@ describe("catalog and per-session storage workers", () => {
     const created = await storage.createSession(createCommand());
     const committed = await storage.appendTransaction(created.session.sessionId, runAppend());
 
-    expect(committed.catalogUpdated).toBe(false);
+    expect(committed.catalogObservationScheduled).toBe(true);
+    await storage.drainCatalogObservations();
     expect((await storage.catalog.getSession(created.session.sessionId))?.lastEventSequence).toBe(1);
     await expect(
       (await storage.openSession(created.session.sessionId)).getHeadSequence(),
@@ -723,10 +1197,12 @@ describe("catalog and per-session storage workers", () => {
     };
 
     await expect(session.acceptCommand(input)).resolves.toMatchObject({ duplicate: false });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 1,
     });
     await expect(session.acceptCommand(input)).resolves.toMatchObject({ duplicate: true });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 2,
       lastRunState: "created",
@@ -751,7 +1227,7 @@ describe("catalog and per-session storage workers", () => {
     };
 
     await expect(session.acceptCommand(input)).rejects.toMatchObject({
-      code: "storage.worker_failed",
+      code: "storage.ambiguous_outcome",
     });
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 1,
@@ -761,9 +1237,10 @@ describe("catalog and per-session storage workers", () => {
       lastEventSequence: 2,
       lastRunState: "created",
     });
-    await expect(
-      session.acceptCommandWithCommitStatus({ ...input, transaction }),
-    ).resolves.toMatchObject({ duplicate: true, catalogUpdated: true });
+    await expect(session.acceptCommand({ ...input, transaction })).resolves.toMatchObject({
+      duplicate: true,
+    });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 2,
       lastRunState: "created",
@@ -792,27 +1269,36 @@ describe("catalog and per-session storage workers", () => {
     });
     const created = await storage.createSession(createCommand());
 
-    const first = storage.appendTransaction(
+    const first = await storage.appendTransaction(
       created.session.sessionId,
       runAppend("evt_observerFirst", "run_observerFirst"),
     );
+    expect(first).toMatchObject({
+      headSequence: 2,
+      events: [{ eventId: "evt_observerFirst" }],
+      catalogObservationScheduled: true,
+    });
     await firstWriterStarted;
-    const second = storage.appendTransaction(
+    await expect(
+      storage.sessions.getEventsAfter(created.session.sessionId, 1),
+    ).resolves.toMatchObject([{ eventId: "evt_observerFirst" }]);
+    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      lastEventSequence: 1,
+    });
+
+    const second = await storage.appendTransaction(
       created.session.sessionId,
       runAppend("evt_observerSecond", "run_observerSecond"),
     );
-    await vi.waitFor(async () => {
-      expect(await storage.sessions.getHeadSequence(created.session.sessionId)).toBe(3);
-    });
+    expect(second.headSequence).toBe(3);
     expect(writerCalls).toBe(1);
 
     releaseFirstWriter();
-    await expect(Promise.all([first, second])).resolves.toMatchObject([
-      { headSequence: 2, catalogUpdated: true },
-      { headSequence: 3, catalogUpdated: true },
-    ]);
+    await storage.drainCatalogObservations();
+    expect(writerCalls).toBe(2);
     const current = await storage.catalog.getSession(created.session.sessionId);
     if (current === null) throw new Error("Session summary disappeared");
+    expect(current.lastEventSequence).toBe(3);
     await expect(
       storage.catalog.updateSessionProjection({
         sessionId: current.sessionId,
@@ -824,10 +1310,117 @@ describe("catalog and per-session storage workers", () => {
         pendingApprovalCount: current.pendingApprovalCount,
         pendingInputCount: current.pendingInputCount,
       }),
-    ).resolves.toMatchObject({ lastEventSequence: 3 });
+    ).resolves.toMatchObject({ outcome: "stale", summary: { lastEventSequence: 3 } });
+  });
+
+  it("writes catalog metadata with the atomic session head that produced it", async () => {
+    let releaseFirstSnapshot = (): void => {};
+    let markFirstSnapshotStarted = (): void => {};
+    const firstSnapshotGate = new Promise<void>((resolve) => {
+      releaseFirstSnapshot = resolve;
+    });
+    const firstSnapshotStarted = new Promise<void>((resolve) => {
+      markFirstSnapshotStarted = resolve;
+    });
+    let writerCalls = 0;
+    const storage = await manager({
+      catalogProjectionWriter: async (catalog, update) => {
+        writerCalls += 1;
+        if (writerCalls === 2) throw new Error("injected newer observation failure");
+        await catalog.updateSessionProjection(update);
+      },
+    });
+    const created = await storage.createSession(createCommand());
+    const getCatalogObservation = storage.sessions.getCatalogObservation.bind(storage.sessions);
+    let snapshotCalls = 0;
+    vi.spyOn(storage.sessions, "getCatalogObservation").mockImplementation(async (sessionId) => {
+      snapshotCalls += 1;
+      if (snapshotCalls === 1) {
+        markFirstSnapshotStarted();
+        await firstSnapshotGate;
+      }
+      return getCatalogObservation(sessionId);
+    });
+
+    await storage.appendTransaction(
+      created.session.sessionId,
+      runAppend("evt_atomicObservationCreated", "run_atomicObservation"),
+    );
+    await firstSnapshotStarted;
+    await storage.appendTransaction(created.session.sessionId, {
+      events: [
+        {
+          eventId: "evt_atomicObservationStarted",
+          eventType: "run.started",
+          createdAtMs: 1_020,
+          data: { eventVersion: 1, runId: "run_atomicObservation" },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.state",
+          runId: "run_atomicObservation",
+          expectedState: "created",
+          nextState: "running",
+          startedAtMs: 1_020,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+      ],
+    });
+
+    releaseFirstSnapshot();
+    await storage.drainCatalogObservations();
+    expect(writerCalls).toBe(2);
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 3,
+      lastRunState: "running",
+      updatedAtMs: 1_020,
     });
+  });
+
+  it("treats equal-head catalog updates as idempotent or conflicting without overwriting", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    await storage.appendTransaction(
+      created.session.sessionId,
+      runAppend("evt_equalHead", "run_equalHead"),
+    );
+    await storage.drainCatalogObservations();
+    const current = await storage.catalog.getSession(created.session.sessionId);
+    if (current === null) throw new Error("Session summary disappeared");
+    const update = {
+      sessionId: current.sessionId,
+      updatedAtMs: current.updatedAtMs,
+      lastEventSequence: current.lastEventSequence,
+      lastRunState: current.lastRunState,
+      lastMessagePreview: current.lastMessagePreview,
+      requiresAttention: current.requiresAttention,
+      pendingApprovalCount: current.pendingApprovalCount,
+      pendingInputCount: current.pendingInputCount,
+    };
+
+    await expect(storage.catalog.updateSessionProjection(update)).resolves.toMatchObject({
+      outcome: "idempotent",
+      summary: current,
+    });
+    const conflicts = [
+      { updatedAtMs: current.updatedAtMs + 1 },
+      { lastRunState: "running" as const },
+      { lastMessagePreview: "stale" },
+      { requiresAttention: !current.requiresAttention },
+      { pendingApprovalCount: current.pendingApprovalCount + 1 },
+      { pendingInputCount: current.pendingInputCount + 1 },
+    ];
+    for (const changed of conflicts) {
+      await expect(
+        storage.catalog.updateSessionProjection({ ...update, ...changed }),
+      ).rejects.toMatchObject({ code: "storage.catalog_projection_conflict" });
+      await expect(storage.catalog.getSession(current.sessionId)).resolves.toEqual(current);
+    }
   });
 
   it("stops new commits while shutdown drains an accepted catalog observation", async () => {
@@ -869,12 +1462,12 @@ describe("catalog and per-session storage workers", () => {
       message: "Session store manager is closing",
     });
     expect(closed).toBe(false);
-
-    releaseWriter();
     await expect(accepted).resolves.toMatchObject({
       headSequence: 2,
-      catalogUpdated: true,
+      catalogObservationScheduled: true,
     });
+
+    releaseWriter();
     await expect(closing).resolves.toBeUndefined();
 
     const reopened = await manager({ homeDirectory });
@@ -885,6 +1478,29 @@ describe("catalog and per-session storage workers", () => {
     await expect(
       (await reopened.openSession(created.session.sessionId)).getHeadSequence(),
     ).resolves.toBe(2);
+  });
+
+  it("bounds shutdown when a catalog observer never resolves", async () => {
+    let markWriterStarted = (): void => {};
+    const writerStarted = new Promise<void>((resolve) => {
+      markWriterStarted = resolve;
+    });
+    const storage = await manager({
+      catalogObservationShutdownTimeoutMs: 30,
+      catalogProjectionWriter: async () => {
+        markWriterStarted();
+        await new Promise<void>(() => {});
+      },
+    });
+    const created = await storage.createSession(createCommand());
+    await expect(
+      storage.appendTransaction(
+        created.session.sessionId,
+        runAppend("evt_shutdownBounded", "run_shutdownBounded"),
+      ),
+    ).resolves.toMatchObject({ headSequence: 2, catalogObservationScheduled: true });
+    await writerStarted;
+    await expect(storage.close()).resolves.toBeUndefined();
   });
 
   it("drains an accepted session creation before shutdown closes workers", async () => {
@@ -955,12 +1571,14 @@ describe("catalog and per-session storage workers", () => {
       created.session.sessionId,
       runAppend("evt_reconcileSnapshot", "run_reconcileSnapshot"),
     );
+    await storage.drainCatalogObservations();
     const staleInspection = await storage.reconciler.inspectSession(created.session.sessionId);
 
     await storage.appendTransaction(
       created.session.sessionId,
       runAppend("evt_reconcileNewest", "run_reconcileNewest"),
     );
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 3,
     });
@@ -988,6 +1606,7 @@ describe("catalog and per-session storage workers", () => {
       created.session.sessionId,
       runAppend("evt_partialCasThird", "run_partialCasThird"),
     );
+    await storage.drainCatalogObservations();
     const inspection = await storage.reconciler.inspectSession(created.session.sessionId);
     const stale = await storage.catalog.getSession(created.session.sessionId);
     if (stale === null) throw new Error("Session summary disappeared");
@@ -1050,7 +1669,7 @@ describe("catalog and per-session storage workers", () => {
       transaction: { ...transaction, testFailpoint: "crash_after_commit" as const },
     };
     await expect(session.acceptCommand(input)).rejects.toMatchObject({
-      code: "storage.worker_failed",
+      code: "storage.ambiguous_outcome",
     });
 
     const reconcileSession = storage.catalog.reconcileSession.bind(storage.catalog);
@@ -1068,11 +1687,9 @@ describe("catalog and per-session storage workers", () => {
       return reconcileSession(reconcileInput);
     });
 
-    const retry = storage.sessions.acceptCommandWithCommitStatus(
-      created.session.sessionId,
-      { ...input, transaction },
-    );
+    const retry = session.acceptCommand({ ...input, transaction });
     await reconciliationStarted;
+    await expect(retry).resolves.toMatchObject({ duplicate: true });
     const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
     const movedDatabasePath = `${databasePath}.observation-fault-race`;
     await rename(databasePath, movedDatabasePath);
@@ -1081,10 +1698,7 @@ describe("catalog and per-session storage workers", () => {
     ).rejects.toMatchObject({ code: "storage.session_missing" });
     releaseReconciliation();
 
-    await expect(retry).resolves.toMatchObject({
-      result: { duplicate: true },
-      catalogUpdated: false,
-    });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
       lastEventSequence: 1,
@@ -1133,8 +1747,12 @@ describe("catalog and per-session storage workers", () => {
       status: "missing",
     });
 
+    await expect(append).resolves.toMatchObject({
+      headSequence: 2,
+      catalogObservationScheduled: true,
+    });
     releaseWriter();
-    await expect(append).resolves.toMatchObject({ headSequence: 2, catalogUpdated: true });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
       lastEventSequence: 2,
@@ -1239,9 +1857,10 @@ describe("catalog and per-session storage workers", () => {
 
     releaseWriter();
     await expect(Promise.all([original, duplicate])).resolves.toMatchObject([
-      { duplicate: false, catalogUpdated: true },
-      { duplicate: true, catalogUpdated: true },
+      { duplicate: false, catalogObservationScheduled: true },
+      { duplicate: true, catalogObservationScheduled: true },
     ]);
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       lastEventSequence: 2,
     });
@@ -1539,6 +2158,7 @@ describe("catalog and per-session storage workers", () => {
         },
       ],
     });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       requiresAttention: true,
       pendingInputCount: 1,
@@ -1546,16 +2166,18 @@ describe("catalog and per-session storage workers", () => {
 
     const stale = await storage.catalog.getSession(created.session.sessionId);
     if (stale === null) throw new Error("Session index disappeared");
-    await storage.catalog.updateSessionProjection({
-      sessionId: stale.sessionId,
-      updatedAtMs: stale.updatedAtMs,
-      lastEventSequence: stale.lastEventSequence,
-      lastRunState: stale.lastRunState,
-      lastMessagePreview: stale.lastMessagePreview,
-      requiresAttention: false,
-      pendingApprovalCount: stale.pendingApprovalCount,
-      pendingInputCount: 0,
-    });
+    await expect(
+      storage.catalog.updateSessionProjection({
+        sessionId: stale.sessionId,
+        updatedAtMs: stale.updatedAtMs,
+        lastEventSequence: stale.lastEventSequence,
+        lastRunState: stale.lastRunState,
+        lastMessagePreview: stale.lastMessagePreview,
+        requiresAttention: false,
+        pendingApprovalCount: stale.pendingApprovalCount,
+        pendingInputCount: 0,
+      }),
+    ).rejects.toMatchObject({ code: "storage.catalog_projection_conflict" });
     await expect(storage.reconciler.reconcileSession(created.session.sessionId)).resolves.toMatchObject({
       requiresAttention: true,
       pendingInputCount: 1,
@@ -1584,6 +2206,7 @@ describe("catalog and per-session storage workers", () => {
         },
       ],
     });
+    await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       requiresAttention: false,
       pendingInputCount: 0,
@@ -1728,8 +2351,8 @@ describe("catalog and per-session storage workers", () => {
     await expect(
       storage.sessions.malformedResponseForTest(created.session.sessionId),
     ).rejects.toMatchObject({ code: "storage.worker_failed" });
-    expect(replacements).toBe(1);
     await expect((await storage.openSession(created.session.sessionId)).getHeadSequence()).resolves.toBe(1);
+    expect(replacements).toBe(1);
 
     await expect(
       storage.sessions.malformedResultForTest(created.session.sessionId),

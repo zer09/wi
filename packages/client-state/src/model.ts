@@ -23,6 +23,13 @@ export interface BrowserPendingInput {
 
 export type TimelineItem = SessionEvent;
 
+export type BrowserSessionIntegrityError =
+  | "event_conflict"
+  | "event_id_conflict"
+  | "session_mismatch"
+  | "impossible_run_transition"
+  | "second_active_run";
+
 export interface BrowserSessionState {
   readonly sessionId: string;
   readonly title: string;
@@ -33,7 +40,8 @@ export interface BrowserSessionState {
   readonly pendingApprovals: Readonly<Record<string, BrowserApproval>>;
   readonly pendingInputs: Readonly<Record<string, BrowserPendingInput>>;
   readonly appliedEvents: Readonly<Record<number, SessionEvent>>;
-  readonly errorCode: "event_conflict" | "session_mismatch" | "terminal_run_regression" | null;
+  readonly appliedEventSequencesById: Readonly<Record<string, number>>;
+  readonly errorCode: BrowserSessionIntegrityError | null;
 }
 
 export function createBrowserSessionState(sessionId: string): BrowserSessionState {
@@ -47,6 +55,7 @@ export function createBrowserSessionState(sessionId: string): BrowserSessionStat
     pendingApprovals: {},
     pendingInputs: {},
     appliedEvents: {},
+    appliedEventSequencesById: {},
     errorCode: null,
   };
 }

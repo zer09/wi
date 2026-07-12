@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+
 import { hashCommandContent } from "@wi/protocol";
 import {
   resolveStoragePath,
@@ -19,6 +22,33 @@ const storage = new SessionStoreManager({
     ? { catalogProjectionWriter: async () => process.exit(82) }
     : {}),
 });
+
+if (mode === "corrupt_incomplete_creation") {
+  await storage.ready();
+  const command = {
+    v: 1,
+    kind: "command",
+    commandId: "cmd_processCorruptCreate",
+    method: "session.create",
+    params: { title: "Corrupt incomplete" },
+  };
+  await storage.catalog.reserveGlobalCommand({
+    commandId: command.commandId,
+    payloadHash: await hashCommandContent(command),
+    reservedSessionId: sessionId,
+    reservedEventId: "evt_processCorruptCreate",
+    request: { title: command.params.title, projectId: null },
+    updatedAtMs: 1_000,
+  });
+  await storage.close();
+  const databasePath = resolveStoragePath(
+    homeDirectory,
+    sessionDatabaseRelativePath(sessionId),
+  );
+  await mkdir(dirname(databasePath), { recursive: true });
+  await writeFile(databasePath, "not a sqlite database");
+  process.exit(86);
+}
 
 if (
   mode === "after_session_create_commit_before_catalog" ||
@@ -92,6 +122,7 @@ try {
   const session = await storage.openSession(sessionId);
   if (mode === "after_session_commit_before_catalog") {
     await session.appendTransaction(input);
+    await storage.drainCatalogObservations();
     process.exit(67);
   }
   if (mode === "before_commit") {

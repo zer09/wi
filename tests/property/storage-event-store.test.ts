@@ -109,7 +109,13 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
             expect(result.headSequence).toBe(model.length + 1);
             expect(result.events).toHaveLength(1);
             model.push(...result.events);
-            if (operation.kind === "lagAppend") expect(result.catalogUpdated).toBe(false);
+            expect(result.catalogObservationScheduled).toBe(true);
+            await storage.drainCatalogObservations();
+            if (operation.kind === "lagAppend") {
+              await expect(storage.catalog.getSession(sessionId)).resolves.not.toMatchObject({
+                lastEventSequence: result.headSequence,
+              });
+            }
             eventNumber += 1;
           } finally {
             allowCatalogProjection = true;
@@ -156,7 +162,8 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
                 {
                   kind: "run.state",
                   runId: `run_missing${failedEventNumber}`,
-                  state: "running",
+                  expectedState: "created",
+                  nextState: "running",
                   startedAtMs: 3_000 + failedEventNumber,
                   completedAtMs: null,
                   cancelledAtMs: null,

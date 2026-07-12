@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rename } from "node:fs/promises";
 
 import {
   createId,
@@ -35,18 +36,21 @@ import { resolveStoragePath, sessionDatabaseRelativePath } from "./paths.js";
 export interface StorageIdGenerators {
   readonly sessionId: () => string;
   readonly eventId: () => string;
+  readonly diagnosticId?: () => string;
 }
 
 export interface SessionStoreManagerOptions {
   readonly homeDirectory: string;
-  readonly sessionWorkers?: Omit<SessionWorkerPoolOptions, "onSessionCommit">;
+  readonly sessionWorkers?: SessionWorkerPoolOptions;
   readonly catalogWorker?: Omit<CatalogClientOptions, "homeDirectory">;
   readonly ids?: StorageIdGenerators;
   readonly now?: () => number;
   readonly catalogProjectionWriter?: (
     catalog: CatalogClient,
     update: UpdateSessionProjectionInput,
+    signal: AbortSignal,
   ) => Promise<void>;
+  readonly catalogObservationShutdownTimeoutMs?: number;
 }
 
 export interface CreateSessionStorageResult {
@@ -54,14 +58,19 @@ export interface CreateSessionStorageResult {
   readonly command: GlobalCommandRecord;
   readonly events: readonly SessionEvent[];
   readonly duplicate: boolean;
+  readonly outcome: "created" | "failed";
 }
 
 export interface ManagedAppendResult extends AppendTransactionResult {
-  readonly catalogUpdated: boolean;
+  readonly catalogObservationScheduled: true;
 }
 
 export interface ManagedAcceptCommandResult extends AcceptedCommandResult {
-  readonly catalogUpdated: boolean;
+  readonly catalogObservationScheduled: true;
+}
+
+export interface DrainCatalogObservationsOptions {
+  readonly timeoutMs?: number;
 }
 
 function randomIdSource(): string {
@@ -72,6 +81,7 @@ function defaultIds(): StorageIdGenerators {
   return {
     sessionId: () => createId("session", randomIdSource),
     eventId: () => createId("event", randomIdSource),
+    diagnosticId: () => createId("diagnostic", randomIdSource),
   };
 }
 
@@ -98,7 +108,11 @@ export class SessionStoreManager {
   private readonly catalogProjectionWriter: (
     catalog: CatalogClient,
     update: UpdateSessionProjectionInput,
+    signal: AbortSignal,
   ) => Promise<void>;
+  private readonly catalogObservationShutdownTimeoutMs: number;
+  private readonly catalogObservationAbort = new AbortController();
+  private readonly catalogObservationTails = new Map<string, Promise<void>>();
   private readonly startupRecovery: Promise<void>;
   private readonly reconciledSessions = new Set<string>();
   private readonly reconciliationInFlight = new Map<string, Promise<boolean>>();
@@ -128,20 +142,90 @@ export class SessionStoreManager {
         }
         await this.markSessionUnavailable(sessionId, error);
       },
-      onSessionCommit: (sessionId, events, headSequence) =>
-        this.updateCatalogAfterCommit(sessionId, events, headSequence),
     });
     this.catalogProjectionWriter =
       options.catalogProjectionWriter ??
       (async (catalog, update) => {
         await catalog.updateSessionProjection(update);
       });
+    this.catalogObservationShutdownTimeoutMs =
+      options.catalogObservationShutdownTimeoutMs ?? 2_000;
+    if (
+      !Number.isSafeInteger(this.catalogObservationShutdownTimeoutMs) ||
+      this.catalogObservationShutdownTimeoutMs <= 0
+    ) {
+      throw new RangeError("Catalog observation shutdown timeout must be a positive safe integer");
+    }
     this.reconciler = new CatalogReconciler(
       this.homeDirectory,
       this.catalog,
       this.sessions,
     );
     this.startupRecovery = this.recoverIncompleteSessionCreations();
+  }
+
+  private diagnosticId(): string {
+    return this.ids.diagnosticId?.() ?? createId("diagnostic", randomIdSource);
+  }
+
+  private async failIncompleteSessionCreation(
+    command: GlobalCommandRecord,
+    error: unknown,
+  ): Promise<{ command: GlobalCommandRecord; session: SessionSummary }> {
+    const diagnosticId = this.diagnosticId();
+    const failureCode = error instanceof StorageError ? error.code : "storage.corrupt";
+    const failureMessage =
+      "The partial session database is unavailable and was retained for recovery.";
+    const dbRelativePath = sessionDatabaseRelativePath(command.reservedSessionId);
+    const sessionDirectoryRelativePath = dbRelativePath.slice(
+      0,
+      -"/session.sqlite3".length,
+    );
+    const quarantinedRelativePath = `${sessionDirectoryRelativePath}.quarantine-${diagnosticId}`;
+    const failedAtMs = this.now();
+    const session: SessionSummary = {
+      sessionId: command.reservedSessionId,
+      projectId: command.request.projectId,
+      dbRelativePath,
+      title: command.request.title,
+      status: "unavailable",
+      createdAtMs: command.updatedAtMs,
+      updatedAtMs: failedAtMs,
+      lastEventSequence: 0,
+      lastRunState: null,
+      lastMessagePreview: null,
+      requiresAttention: false,
+      pendingApprovalCount: 0,
+      pendingInputCount: 0,
+      sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+    };
+    let failedCommand = await this.catalog.failGlobalCommand({
+      commandId: command.commandId,
+      payloadHash: command.payloadHash,
+      session,
+      failureCode,
+      failureMessage,
+      diagnosticId,
+      quarantinedRelativePath: null,
+      failedAtMs,
+    });
+
+    await this.sessions.closeSession(command.reservedSessionId).catch(() => undefined);
+    const source = resolveStoragePath(this.homeDirectory, sessionDirectoryRelativePath);
+    const destination = resolveStoragePath(this.homeDirectory, quarantinedRelativePath);
+    try {
+      await rename(source, destination);
+      failedCommand = await this.catalog.setGlobalCommandQuarantine({
+        commandId: command.commandId,
+        diagnosticId,
+        quarantinedRelativePath,
+      });
+    } catch {
+      // The terminal failure stays truthful: an unrecorded quarantine path is never claimed.
+    }
+    this.sessionFaultStatuses.set(command.reservedSessionId, "unavailable");
+    this.reconciledSessions.delete(command.reservedSessionId);
+    return { command: failedCommand, session };
   }
 
   private async recoverIncompleteSessionCreations(): Promise<void> {
@@ -164,8 +248,8 @@ export class SessionStoreManager {
         inspection = await this.reconciler.inspectSession(command.reservedSessionId);
       } catch (error) {
         if (unavailableStatus(error) === null) throw error;
-        // Quarantine only a known session-local fault; catalog failures remain startup-fatal.
-        await this.markSessionUnavailable(command.reservedSessionId, error, false);
+        // Persist a terminal command result before attempting the best-effort atomic rename.
+        await this.failIncompleteSessionCreation(command, error);
         continue;
       }
 
@@ -186,7 +270,12 @@ export class SessionStoreManager {
     sessionId: string,
     error: unknown,
   ): void {
-    if (!(error instanceof StorageError) || error.code !== "storage.worker_failed") return;
+    if (
+      !(error instanceof StorageError) ||
+      (error.code !== "storage.worker_failed" && error.code !== "storage.ambiguous_outcome")
+    ) {
+      return;
+    }
     this.sessionFaultVersions.set(
       sessionId,
       (this.sessionFaultVersions.get(sessionId) ?? 0) + 1,
@@ -199,19 +288,32 @@ export class SessionStoreManager {
     error: unknown,
     suppressCatalogError = true,
   ): Promise<void> {
-    const status = unavailableStatus(error);
-    if (status === null) return;
+    const observedStatus = unavailableStatus(error);
+    if (observedStatus === null) return;
     this.sessionFaultVersions.set(
       sessionId,
       (this.sessionFaultVersions.get(sessionId) ?? 0) + 1,
     );
-    this.sessionFaultStatuses.set(sessionId, status);
     this.reconciledSessions.delete(sessionId);
 
+    let status =
+      this.sessionFaultStatuses.get(sessionId) === "unavailable"
+        ? "unavailable"
+        : observedStatus;
     try {
-      if ((await this.catalog.getSession(sessionId)) === null) return;
-      await this.catalog.markSessionStatus({ sessionId, status });
+      const existing = await this.catalog.getSession(sessionId);
+      if (existing === null) {
+        this.sessionFaultStatuses.set(sessionId, status);
+        return;
+      }
+      // A known corrupt session does not become less informative merely because quarantine moved it.
+      if (existing.status === "unavailable") status = "unavailable";
+      this.sessionFaultStatuses.set(sessionId, status);
+      if (existing.status !== status) {
+        await this.catalog.markSessionStatus({ sessionId, status });
+      }
     } catch (catalogError) {
+      this.sessionFaultStatuses.set(sessionId, status);
       if (!suppressCatalogError) throw catalogError;
       // The original session-scoped failure remains the useful diagnostic.
     }
@@ -305,6 +407,19 @@ export class SessionStoreManager {
       updatedAtMs: now,
     });
     const sessionId = reservation.command.reservedSessionId;
+    if (reservation.duplicate && reservation.command.state === "failed") {
+      const session = await this.catalog.getSession(sessionId);
+      if (session === null) {
+        throw new StorageError("storage.corrupt", "Failed session creation lost its catalog entry");
+      }
+      return {
+        session,
+        command: reservation.command,
+        events: [],
+        duplicate: true,
+        outcome: "failed",
+      };
+    }
     if (reservation.duplicate && reservation.command.state === "accepted") {
       const session =
         (await this.catalog.getSession(sessionId)) ??
@@ -314,6 +429,7 @@ export class SessionStoreManager {
         command: reservation.command,
         events: [],
         duplicate: true,
+        outcome: "created",
       };
     }
 
@@ -322,16 +438,29 @@ export class SessionStoreManager {
     const title = reservation.command.request.title;
     const projectId = reservation.command.request.projectId;
     const createdAtMs = reservation.command.updatedAtMs;
-    const initialized = await this.sessions.initialize(
-      {
-        sessionId,
-        projectId,
-        title,
-        createdAtMs,
-        eventId: reservation.command.reservedEventId,
-      },
-      databasePath,
-    );
+    let initialized: Awaited<ReturnType<SessionWorkerPool["initialize"]>>;
+    try {
+      initialized = await this.sessions.initialize(
+        {
+          sessionId,
+          projectId,
+          title,
+          createdAtMs,
+          eventId: reservation.command.reservedEventId,
+        },
+        databasePath,
+      );
+    } catch (error) {
+      if (unavailableStatus(error) === null) throw error;
+      const failed = await this.failIncompleteSessionCreation(reservation.command, error);
+      return {
+        session: failed.session,
+        command: failed.command,
+        events: [],
+        duplicate: reservation.duplicate,
+        outcome: "failed",
+      };
+    }
 
     const session = await this.catalog.createSessionIndex({
       sessionId,
@@ -362,6 +491,7 @@ export class SessionStoreManager {
       command: commandRecord,
       events: initialized.events,
       duplicate: reservation.duplicate,
+      outcome: "created",
     };
   }
 
@@ -379,6 +509,9 @@ export class SessionStoreManager {
       async () => {
         await this.ensureSessionReconciled(sessionId);
       },
+      (events, headSequence) => {
+        this.scheduleCatalogObservation(sessionId, events, headSequence);
+      },
     );
   }
 
@@ -386,11 +519,70 @@ export class SessionStoreManager {
     return this.runOperation(() => this.openSessionInternal(sessionId));
   }
 
+  private scheduleCatalogObservation(
+    sessionId: string,
+    events: readonly SessionEvent[],
+    headSequence: number,
+  ): void {
+    const previous = this.catalogObservationTails.get(sessionId) ?? Promise.resolve();
+    const observation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.catalogObservationAbort.signal.aborted) return;
+        await this.updateCatalogAfterCommit(
+          sessionId,
+          events,
+          headSequence,
+          this.catalogObservationAbort.signal,
+        );
+      })
+      .catch(() => undefined);
+    this.catalogObservationTails.set(sessionId, observation);
+    void observation.then(() => {
+      if (this.catalogObservationTails.get(sessionId) === observation) {
+        this.catalogObservationTails.delete(sessionId);
+      }
+    });
+  }
+
+  async drainCatalogObservations(
+    options: DrainCatalogObservationsOptions = {},
+  ): Promise<void> {
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new RangeError("Catalog observation drain timeout must be a positive safe integer");
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new StorageError(
+            "storage.worker_timeout",
+            `Catalog observations did not drain within ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+      timer.unref();
+    });
+    const drain = async (): Promise<void> => {
+      while (this.catalogObservationTails.size > 0) {
+        await Promise.all([...this.catalogObservationTails.values()]);
+      }
+    };
+    try {
+      await Promise.race([drain(), timeout]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
   private async updateCatalogAfterCommit(
     sessionId: string,
     events: readonly SessionEvent[],
     headSequence: number,
+    signal: AbortSignal,
   ): Promise<boolean> {
+    if (signal.aborted) return false;
     const faultVersion = this.sessionFaultVersions.get(sessionId) ?? 0;
     if (events.length === 0) {
       if (this.reconciledSessions.has(sessionId)) return true;
@@ -407,24 +599,28 @@ export class SessionStoreManager {
         return false;
       }
 
-      const [projection, pendingApprovals, pendingInputCount] = await Promise.all([
-        this.sessions.getCatalogProjection(sessionId),
-        this.sessions.getPendingApprovals(sessionId),
-        this.sessions.getPendingInputCount(sessionId),
-      ]);
+      const observation = await this.sessions.getCatalogObservation(sessionId);
+      if (observation.headSequence < headSequence) {
+        throw new StorageError(
+          "storage.corrupt",
+          `Catalog observation for ${sessionId} is behind its committed head`,
+        );
+      }
       const update: UpdateSessionProjectionInput = {
         sessionId,
-        updatedAtMs: projection.updatedAtMs,
-        lastEventSequence: headSequence,
-        lastRunState: projection.lastRunState,
-        lastMessagePreview: projection.lastMessagePreview,
-        requiresAttention: pendingApprovals.length > 0 || pendingInputCount > 0,
-        pendingApprovalCount: pendingApprovals.length,
-        pendingInputCount,
+        updatedAtMs: observation.projection.updatedAtMs,
+        lastEventSequence: observation.headSequence,
+        lastRunState: observation.projection.lastRunState,
+        lastMessagePreview: observation.projection.lastMessagePreview,
+        requiresAttention:
+          observation.pendingApprovalCount > 0 || observation.pendingInputCount > 0,
+        pendingApprovalCount: observation.pendingApprovalCount,
+        pendingInputCount: observation.pendingInputCount,
       };
-      await this.catalogProjectionWriter(this.catalog, update);
+      await this.catalogProjectionWriter(this.catalog, update, signal);
+      if (signal.aborted) return false;
       const updated = await this.catalog.getSession(sessionId);
-      if (updated === null || updated.lastEventSequence < headSequence) {
+      if (updated === null || updated.lastEventSequence < observation.headSequence) {
         this.reconciledSessions.delete(sessionId);
         return false;
       }
@@ -450,7 +646,8 @@ export class SessionStoreManager {
   ): Promise<ManagedAcceptCommandResult> {
     return this.runOperation(async () => {
       const client = await this.openSessionInternal(sessionId);
-      return client.acceptCommandWithCommitStatus(input);
+      const result = await client.acceptCommand(input);
+      return { ...result, catalogObservationScheduled: true };
     });
   }
 
@@ -460,14 +657,19 @@ export class SessionStoreManager {
   ): Promise<ManagedAppendResult> {
     return this.runOperation(async () => {
       const client = await this.openSessionInternal(sessionId);
-      return client.appendTransactionWithCommitStatus(input);
+      const result = await client.appendTransaction(input);
+      return { ...result, catalogObservationScheduled: true };
     });
   }
 
   private async finishClose(): Promise<void> {
     const [startupResult] = await Promise.allSettled([this.startupRecovery]);
     await this.drainOperations();
-    // Commit observers need the catalog until every accepted session operation has drained.
+    await this.drainCatalogObservations({
+      timeoutMs: this.catalogObservationShutdownTimeoutMs,
+    }).catch(() => undefined);
+    this.catalogObservationAbort.abort();
+    this.catalogObservationTails.clear();
     const [sessionsResult] = await Promise.allSettled([this.sessions.close()]);
     const [catalogResult] = await Promise.allSettled([this.catalog.close()]);
     if (startupResult?.status === "rejected") throw startupResult.reason;

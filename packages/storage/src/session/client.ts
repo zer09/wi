@@ -18,10 +18,22 @@ export class SessionClient {
     private readonly pool: SessionWorkerPool,
     readonly sessionId: string,
     private readonly beforeUse?: () => Promise<void>,
+    private readonly afterCommit?: (
+      events: readonly SessionEvent[],
+      headSequence: number,
+    ) => void,
   ) {}
 
   private async prepare(): Promise<void> {
     await this.beforeUse?.();
+  }
+
+  private observeCommit(events: readonly SessionEvent[], headSequence: number): void {
+    try {
+      this.afterCommit?.(events, headSequence);
+    } catch {
+      // The session commit is already durable; later reconciliation can repair observation.
+    }
   }
 
   async getManifest(): Promise<SessionManifest> {
@@ -29,31 +41,15 @@ export class SessionClient {
     return this.pool.getManifest(this.sessionId);
   }
 
-  async acceptCommandWithCommitStatus(
-    input: AcceptCommandInput,
-  ): Promise<AcceptedCommandResult & { readonly catalogUpdated: boolean }> {
-    await this.prepare();
-    const observed = await this.pool.acceptCommandWithCommitStatus(this.sessionId, input);
-    return { ...observed.result, catalogUpdated: observed.catalogUpdated };
-  }
-
   async acceptCommand(input: AcceptCommandInput): Promise<AcceptedCommandResult> {
-    const { catalogUpdated, ...result } = await this.acceptCommandWithCommitStatus(input);
-    void catalogUpdated;
+    const result = await this.pool.acceptCommand(this.sessionId, input);
+    this.observeCommit(result.events, result.acceptedSequence ?? 0);
     return result;
   }
 
-  async appendTransactionWithCommitStatus(
-    input: AppendTransactionInput,
-  ): Promise<AppendTransactionResult & { readonly catalogUpdated: boolean }> {
-    await this.prepare();
-    const observed = await this.pool.appendTransactionWithCommitStatus(this.sessionId, input);
-    return { ...observed.result, catalogUpdated: observed.catalogUpdated };
-  }
-
   async appendTransaction(input: AppendTransactionInput): Promise<AppendTransactionResult> {
-    const { catalogUpdated, ...result } = await this.appendTransactionWithCommitStatus(input);
-    void catalogUpdated;
+    const result = await this.pool.appendTransaction(this.sessionId, input);
+    this.observeCommit(result.events, result.headSequence);
     return result;
   }
 

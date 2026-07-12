@@ -53,6 +53,24 @@ describe("browser session reducer", () => {
     expect(reduceSessionEvent(once, duplicate)).toBe(once);
   });
 
+  it("treats negative zero and zero as the same canonical duplicate", () => {
+    const live = event(1, "input.resolved", {
+      eventVersion: 1,
+      runId: "run_A",
+      inputId: "input_A",
+      value: -0,
+    });
+    const replayed = event(1, "input.resolved", {
+      eventVersion: 1,
+      runId: "run_A",
+      inputId: "input_A",
+      value: 0,
+    });
+    const once = reduceSessionEvent(createBrowserSessionState("ses_A"), live);
+
+    expect(reduceSessionEvent(once, replayed)).toBe(once);
+  });
+
   it("rejects conflicting duplicate content", () => {
     const once = reduceSessionEvent(createBrowserSessionState("ses_A"), created);
     const conflict = { ...created, eventId: "evt_conflict" };
@@ -61,6 +79,18 @@ describe("browser session reducer", () => {
     expect(state.status).toBe("error");
     expect(state.errorCode).toBe("event_conflict");
     expect(state.lastAppliedSequence).toBe(1);
+  });
+
+  it("treats a session mismatch as fatal", () => {
+    const mismatched = { ...created, sessionId: "ses_B" };
+    const state = reduceSessionEvent(createBrowserSessionState("ses_A"), mismatched);
+
+    expect(state).toMatchObject({
+      status: "error",
+      errorCode: "session_mismatch",
+      lastAppliedSequence: 0,
+    });
+    expect(beginReplay(state)).toBe(state);
   });
 
   it("detects a sequence gap without applying the event", () => {
@@ -82,7 +112,59 @@ describe("browser session reducer", () => {
 
     expect(state.activeRun).toEqual({ runId: "run_A", state: "completed" });
     expect(state.status).toBe("error");
-    expect(state.errorCode).toBe("terminal_run_regression");
+    expect(state.errorCode).toBe("impossible_run_transition");
+  });
+
+  it("keeps fatal conflicts sticky through replay until trusted state is rebuilt", () => {
+    const once = reduceSessionEvent(createBrowserSessionState("ses_A"), created);
+    const fatal = reduceSessionEvent(once, { ...created, eventId: "evt_other" });
+
+    expect(beginReplay(fatal)).toBe(fatal);
+    expect(completeReplay(fatal, 1)).toBe(fatal);
+    expect(createBrowserSessionState("ses_A").errorCode).toBeNull();
+  });
+
+  it("rejects event ID reuse at another sequence", () => {
+    const once = reduceSessionEvent(createBrowserSessionState("ses_A"), created);
+    const reusedId = { ...started, eventId: created.eventId };
+    const state = reduceSessionEvent(once, reusedId);
+
+    expect(state.status).toBe("error");
+    expect(state.errorCode).toBe("event_id_conflict");
+    expect(state.lastAppliedSequence).toBe(1);
+  });
+
+  it("treats event ID reuse beyond a sequence gap as fatal immediately", () => {
+    const once = reduceSessionEvent(createBrowserSessionState("ses_A"), created);
+    const reusedIdAfterGap = {
+      ...event(3, "run.started", { eventVersion: 1, runId: "run_A" }),
+      eventId: created.eventId,
+    };
+    const state = reduceSessionEvent(once, reusedIdAfterGap);
+
+    expect(state.status).toBe("error");
+    expect(state.errorCode).toBe("event_id_conflict");
+    expect(beginReplay(state)).toBe(state);
+  });
+
+  it("rejects a second active run and impossible run transitions", () => {
+    const running = replaySessionEvents(createBrowserSessionState("ses_A"), [created, started]);
+    const secondRun = event(3, "run.created", { eventVersion: 1, runId: "run_B" });
+    expect(reduceSessionEvent(running, secondRun)).toMatchObject({
+      status: "error",
+      errorCode: "second_active_run",
+      lastAppliedSequence: 2,
+    });
+
+    const startedWithoutCreation = reduceSessionEvent(
+      createBrowserSessionState("ses_A"),
+      event(1, "run.started", { eventVersion: 1, runId: "run_A" }),
+    );
+    expect(startedWithoutCreation).toMatchObject({
+      status: "error",
+      errorCode: "impossible_run_transition",
+      lastAppliedSequence: 0,
+    });
   });
 
   it("tracks and resolves pending approvals and input", () => {

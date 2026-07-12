@@ -336,6 +336,8 @@ incoming sequence > last + 1
 
 The same pure reducer processes replayed and live events.
 
+A sequence gap or incomplete replay is recoverable by replaying from the last trusted cursor. Conflicting content at an applied sequence, event-ID reuse, session mismatch, an impossible run transition, or a second active run is a fatal integrity error. Replay cannot clear a fatal error; only rebuilding the session state from a trusted fresh snapshot can do so.
+
 The reducer does not decide backend actions. It renders the durable backend state represented by events.
 
 ## 11. Backpressure

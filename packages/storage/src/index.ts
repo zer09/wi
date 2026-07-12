@@ -6,10 +6,17 @@ export type {
   ReserveGlobalCommandInput,
 } from "./catalog/client.js";
 export type {
+  CatalogProjectionUpdateResult,
+  FailGlobalCommandInput,
   MarkSessionStatusInput,
   ReconcileSessionResult,
+  SetGlobalCommandQuarantineInput,
 } from "./catalog/repository.js";
 export { StorageError } from "./common/worker-rpc.js";
+export type {
+  WorkerRequestOptions,
+  WorkerRequestOutcome,
+} from "./common/worker-rpc.js";
 export { CatalogReconciler } from "./manager/catalog-reconciler.js";
 export {
   resolveStoragePath,
@@ -19,6 +26,7 @@ export {
 export { SessionStoreManager } from "./manager/session-store-manager.js";
 export type {
   CreateSessionStorageResult,
+  DrainCatalogObservationsOptions,
   ManagedAcceptCommandResult,
   ManagedAppendResult,
   SessionStoreManagerOptions,
@@ -28,7 +36,6 @@ export { SessionClient } from "./session/client.js";
 export { SessionWorkerPool } from "./session/worker-pool.js";
 export type {
   InitializeSessionInput,
-  ObservedSessionCommit,
   SessionSqlitePragmas,
   SessionWorkerPoolOptions,
   SessionWorkerStats,
@@ -51,6 +58,7 @@ export type {
   ProjectRecord,
   ProjectionMutation,
   RunRecord,
+  SessionCatalogObservation,
   SessionCatalogProjection,
   SessionCreationRequest,
   SessionManifest,

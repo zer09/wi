@@ -51,7 +51,7 @@ The catalog database is a rebuildable index used to:
 - locate sessions needing recovery or migration
 - avoid opening every session database at startup
 
-A successful session write never depends on a catalog write succeeding.
+A successful session write never depends on a catalog write succeeding. The committed session result is returned to the caller before catalog observation completes, so publication can proceed immediately after commit. Catalog observations are queued independently and serialized per session.
 
 ```text
 session transaction commit
@@ -60,6 +60,10 @@ session transaction commit
 ```
 
 If the catalog update fails, the session remains valid and the catalog is reconciled later.
+
+“Rebuildable” means that the session-index rows needed to locate and summarize sessions can be reconstructed from session manifests. Normal startup does not scan or open every session database. Complete session-directory discovery is an explicit catalog-repair operation delivered with the Milestone 7 startup recovery scanner; it is not part of the ordinary startup path.
+
+Project registration metadata is different from session-index metadata. In v0.1, project names, canonical paths, realpaths, and configuration exist only in the catalog. After complete project-catalog loss, the supported recovery path is explicit project re-registration. A future project manifest may make that metadata independently recoverable.
 
 ## 4. Catalog schema responsibilities
 
@@ -102,9 +106,10 @@ A catalog command stores:
 - `command_id`
 - method
 - canonical payload hash
-- current creation/acceptance state
+- current `creating`, `accepted`, or terminal `failed` state
 - reserved session ID and path
-- durable result
+- durable success or safe failure result
+- failure category, safe message, diagnostic ID, and quarantine path when failed
 - timestamps
 
 ## 5. Session database responsibilities
@@ -273,7 +278,7 @@ Every response carries:
 - worker ID
 - optional diagnostic ID
 
-A worker crash rejects its in-flight requests, emits a diagnostic, and causes the supervisor to create a clean replacement. The web server remains alive unless storage-wide invariants can no longer be trusted.
+A worker crash, malformed response, or request timeout rejects its in-flight requests, emits a diagnostic, and causes the supervisor to create a clean replacement after the old worker's termination is confirmed. If termination cannot be confirmed within the bounded deadline, that worker slot remains unavailable rather than risking overlapping database owners. Every RPC has a finite timeout and may also be aborted by its caller. A timed-out or aborted write is classified as having an ambiguous outcome: it is not retried automatically, and callers reconcile it by durable `commandId` or `eventId`. Worker close is bounded and settles all pending waiters. The web server remains alive unless storage-wide invariants can no longer be trusted.
 
 ## 11. Session creation state machine
 
@@ -296,15 +301,21 @@ Recovery handles:
 catalog says creating + valid session DB exists
   -> inspect manifest and complete registration
 
-catalog says creating + no valid DB exists
-  -> retry or clean incomplete reservation
+catalog says creating + no DB exists
+  -> retry initialization with the reserved identity
+
+catalog says creating + corrupt or irreconcilable partial DB exists
+  -> persist command state `failed`, retain a visible unavailable session row,
+     and best-effort atomically rename the partial directory to a quarantine path
 
 session DB exists + no catalog row
-  -> reconstruct catalog row from manifest
+  -> explicit catalog repair discovers it and reconstructs the session row from its manifest
 
 catalog row exists + DB missing
   -> mark missing and report diagnostic
 ```
+
+A duplicate `session.create` with the same command ID and payload returns its reserved, accepted, or terminal failed result. A corrupt partial database is never silently overwritten, and a failed reservation is not retried on every restart. A new command ID may reserve a new session identity explicitly.
 
 ## 12. Command idempotency
 
@@ -346,9 +357,11 @@ It never rewrites canonical session events.
 
 Reconciliation runs:
 
-- at startup for incomplete catalog states
-- when opening a session whose summary appears stale
+- at startup for catalog commands already known to be incomplete
+- when opening a catalog-known session whose summary appears stale
 - through an explicit maintenance operation
+
+Ordinary startup intentionally does not walk `$WI_HOME/sessions`. Milestone 7 adds the explicit complete-discovery scanner used when catalog repair is required. That scanner reconstructs session-index data only; project metadata still requires re-registration in v0.1.
 
 ## 14. SQLite configuration
 
@@ -429,7 +442,7 @@ It never includes:
 - browser session secrets
 - credential-vault material
 
-The catalog is rebuildable, but a complete installation backup should include both catalog and session directories.
+Session-index rows are rebuildable from discovered session manifests, but project registration metadata is not independently reconstructable in v0.1. A complete installation backup should therefore include both catalog and session directories.
 
 ## 19. Failure tests
 

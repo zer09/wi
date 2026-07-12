@@ -7,62 +7,74 @@ import {
   type SessionEventType,
 } from "../../packages/protocol/src/events.js";
 import { createBrowserSessionState } from "../../packages/client-state/src/model.js";
+import { reduceSessionEvent } from "../../packages/client-state/src/reducer.js";
 import {
+  beginReplay,
+  completeReplay,
   replaySessionEventChunks,
   replaySessionEvents,
 } from "../../packages/client-state/src/replay.js";
 
-const propertyOptions = { numRuns: 250 } as const;
-const eventTypes = [
-  "session.created",
-  "run.created",
-  "run.started",
-  "run.waiting_for_user",
-  "run.completed",
-] as const satisfies readonly SessionEventType[];
+const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "313131", 10);
+const propertyPath = process.env.WI_FC_PATH;
+const propertyOptions = {
+  numRuns: 250,
+  seed: propertySeed,
+  ...(propertyPath === undefined ? {} : { path: propertyPath }),
+} as const;
 
-function dataFor(eventType: (typeof eventTypes)[number], title: string): unknown {
-  switch (eventType) {
-    case "session.created":
-      return { eventVersion: 1, title };
-    case "run.created":
-    case "run.started":
-    case "run.completed":
-      return { eventVersion: 1, runId: "run_A" };
-    case "run.waiting_for_user":
-      return {
-        eventVersion: 1,
-        runId: "run_A",
-        reason: "input",
-        inputId: "input_A",
-      };
-  }
+function event(
+  sequence: number,
+  eventId: string,
+  eventType: SessionEventType,
+  data: unknown,
+): SessionEvent {
+  return SessionEventSchema.parse({
+    v: 1,
+    kind: "event",
+    sessionId: "ses_A",
+    sequence,
+    eventId,
+    eventType,
+    createdAtMs: sequence,
+    data,
+  });
 }
 
-const orderedEvents = fc
-  .array(fc.record({ eventType: fc.constantFrom(...eventTypes), title: fc.string() }), {
-    maxLength: 40,
-  })
-  .map((items) =>
-    items.map((item, index) =>
-      SessionEventSchema.parse({
-        v: 1,
-        kind: "event",
-        sessionId: "ses_A",
-        sequence: index + 1,
-        eventId: `evt_${index + 1}`,
-        eventType: item.eventType,
-        createdAtMs: index + 1,
-        data: dataFor(item.eventType, item.title),
-      }),
-    ),
-  );
+const validOrderedEvents = fc
+  .array(fc.boolean(), { maxLength: 12 })
+  .map((waits) => {
+    const events: SessionEvent[] = [];
+    let sequence = 1;
+    waits.forEach((wait, index) => {
+      const runId = `run_${index}`;
+      events.push(event(sequence, `evt_${sequence}`, "run.created", { eventVersion: 1, runId }));
+      sequence += 1;
+      events.push(event(sequence, `evt_${sequence}`, "run.started", { eventVersion: 1, runId }));
+      sequence += 1;
+      if (wait) {
+        events.push(
+          event(sequence, `evt_${sequence}`, "run.waiting_for_user", {
+            eventVersion: 1,
+            runId,
+            reason: "input",
+            inputId: `input_${index}`,
+          }),
+        );
+        sequence += 1;
+        events.push(event(sequence, `evt_${sequence}`, "run.started", { eventVersion: 1, runId }));
+        sequence += 1;
+      }
+      events.push(event(sequence, `evt_${sequence}`, "run.completed", { eventVersion: 1, runId }));
+      sequence += 1;
+    });
+    return events;
+  });
 
 function chunkEvents(events: readonly SessionEvent[], sizes: readonly number[]): SessionEvent[][] {
   const chunks: SessionEvent[][] = [];
   let offset = 0;
   let sizeIndex = 0;
-
   while (offset < events.length) {
     const requested = sizes[sizeIndex] ?? events.length;
     const size = Math.max(1, requested % (events.length - offset + 1));
@@ -73,48 +85,130 @@ function chunkEvents(events: readonly SessionEvent[], sizes: readonly number[]):
   return chunks;
 }
 
+async function runProperty(name: string, property: fc.IProperty<unknown>): Promise<void> {
+  try {
+    await fc.assert(property, propertyOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const minimizedPath = /path: "([^"]*)"/i.exec(message)?.[1];
+    const pathArgument = minimizedPath === undefined ? "" : ` WI_FC_PATH=${minimizedPath}`;
+    throw new Error(
+      `${name}\n${message}\nReproduction command: WI_FC_SEED=${propertySeed}${pathArgument} pnpm test:property`,
+      { cause: error },
+    );
+  }
+}
+
 describe("client reducer replay properties", () => {
-  it("duplicates produce the same state as unique ordered events", () => {
-    fc.assert(
+  it("duplicates produce the same state as unique ordered events", async () => {
+    await runProperty(
+      "duplicates produce the same state as unique ordered events",
       fc.property(
-        orderedEvents,
-        fc.array(fc.array(fc.nat(), { maxLength: 4 }), { maxLength: 40 }),
+        validOrderedEvents,
+        fc.array(fc.array(fc.nat(), { maxLength: 4 }), { maxLength: 60 }),
         (events, duplicateSlots) => {
           const withDuplicates: SessionEvent[] = [];
-          events.forEach((event, eventIndex) => {
-            withDuplicates.push(event);
+          events.forEach((item, eventIndex) => {
+            withDuplicates.push(item);
             for (const duplicateIndex of duplicateSlots[eventIndex] ?? []) {
               const duplicate = events[duplicateIndex % (eventIndex + 1)];
               if (duplicate !== undefined) withDuplicates.push(structuredClone(duplicate));
             }
           });
-          const deduplicated = [
-            ...new Map(withDuplicates.map((event) => [event.sequence, event])).values(),
-          ].sort((left, right) => left.sequence - right.sequence);
           const initial = createBrowserSessionState("ses_A");
-
           expect(replaySessionEvents(initial, withDuplicates)).toEqual(
-            replaySessionEvents(initial, deduplicated),
-          );
-        },
-      ),
-      propertyOptions,
-    );
-  });
-
-  it("arbitrary replay chunks equal one complete replay", () => {
-    fc.assert(
-      fc.property(
-        orderedEvents,
-        fc.array(fc.integer({ min: 1, max: 50 }), { maxLength: 40 }),
-        (events, sizes) => {
-          const initial = createBrowserSessionState("ses_A");
-          expect(replaySessionEventChunks(initial, chunkEvents(events, sizes))).toEqual(
             replaySessionEvents(initial, events),
           );
         },
       ),
-      propertyOptions,
+    );
+  });
+
+  it("replay and reconnect grouping equals one complete replay", async () => {
+    await runProperty(
+      "replay and reconnect grouping equals one complete replay",
+      fc.property(
+        validOrderedEvents,
+        fc.array(fc.integer({ min: 1, max: 50 }), { maxLength: 60 }),
+        (events, sizes) => {
+          const initial = beginReplay(createBrowserSessionState("ses_A"));
+          const chunked = replaySessionEventChunks(initial, chunkEvents(events, sizes));
+          const complete = replaySessionEvents(initial, events);
+          expect(chunked).toEqual(complete);
+          expect(completeReplay(chunked, events.length)).toEqual(
+            completeReplay(complete, events.length),
+          );
+        },
+      ),
+    );
+  });
+
+  it("gaps are recoverable but generated integrity faults remain fatal", async () => {
+    await runProperty(
+      "gaps are recoverable but generated integrity faults remain fatal",
+      fc.property(
+        fc.constantFrom("sequence", "eventId", "eventIdGap", "secondRun", "terminal"),
+        (fault) => {
+          const created = event(1, "evt_1", "run.created", { eventVersion: 1, runId: "run_A" });
+          const started = event(2, "evt_2", "run.started", { eventVersion: 1, runId: "run_A" });
+          const running = replaySessionEvents(createBrowserSessionState("ses_A"), [created, started]);
+          let fatalState;
+          switch (fault) {
+            case "sequence":
+              fatalState = reduceSessionEvent(running, { ...started, eventId: "evt_changed" });
+              break;
+            case "eventId":
+              fatalState = reduceSessionEvent(
+                running,
+                event(3, "evt_1", "run.waiting_for_user", {
+                  eventVersion: 1,
+                  runId: "run_A",
+                  reason: "input",
+                  inputId: "input_A",
+                }),
+              );
+              break;
+            case "eventIdGap":
+              fatalState = reduceSessionEvent(
+                running,
+                event(5, "evt_1", "run.waiting_for_user", {
+                  eventVersion: 1,
+                  runId: "run_A",
+                  reason: "input",
+                  inputId: "input_A",
+                }),
+              );
+              break;
+            case "secondRun":
+              fatalState = reduceSessionEvent(
+                running,
+                event(3, "evt_3", "run.created", { eventVersion: 1, runId: "run_B" }),
+              );
+              break;
+            case "terminal": {
+              const completed = reduceSessionEvent(
+                running,
+                event(3, "evt_3", "run.completed", { eventVersion: 1, runId: "run_A" }),
+              );
+              fatalState = reduceSessionEvent(
+                completed,
+                event(4, "evt_4", "run.started", { eventVersion: 1, runId: "run_A" }),
+              );
+              break;
+            }
+          }
+          expect(fatalState.errorCode).not.toBeNull();
+          expect(beginReplay(fatalState)).toBe(fatalState);
+          expect(completeReplay(fatalState, fatalState.lastAppliedSequence)).toBe(fatalState);
+
+          const gap = reduceSessionEvent(
+            createBrowserSessionState("ses_A"),
+            event(2, "evt_gap", "run.started", { eventVersion: 1, runId: "run_A" }),
+          );
+          expect(gap).toMatchObject({ status: "gap", errorCode: null });
+          expect(beginReplay(gap).status).toBe("replaying");
+        },
+      ),
     );
   });
 });

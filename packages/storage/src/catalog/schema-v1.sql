@@ -42,9 +42,5 @@ CREATE TABLE catalog_commands (
     request_json TEXT NOT NULL,
     result_json TEXT,
     accepted_at_ms INTEGER,
-    failure_code TEXT,
-    failure_message TEXT,
-    diagnostic_id TEXT,
-    quarantined_relative_path TEXT,
     updated_at_ms INTEGER NOT NULL
 ) STRICT;

@@ -53,6 +53,10 @@ function execute(operation: string, payload: unknown): unknown {
       return repository.reserveGlobalCommand(payload);
     case "catalog.completeGlobalCommand":
       return repository.completeGlobalCommand(payload);
+    case "catalog.failGlobalCommand":
+      return repository.failGlobalCommand(payload);
+    case "catalog.setGlobalCommandQuarantine":
+      return repository.setGlobalCommandQuarantine(payload);
     case "catalog.getGlobalCommand": {
       const input = z.strictObject({ commandId: z.string().min(1) }).parse(payload);
       return repository.getGlobalCommand(input.commandId);

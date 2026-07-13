@@ -1573,6 +1573,98 @@ describe("SessionActor", () => {
     await actor.shutdown();
   });
 
+  it("quarantines a recovery publication conflict before the first actor is acquired", async () => {
+    const sessionId = "ses_registryRecoveryPublicationConflict";
+    const recoveringRunId = "run_registryRecoveryPublicationConflict";
+    const queuedRunId = "run_registryRecoveryPublicationQueued";
+    const storage = new FakeActorStorage(sessionId);
+    storage.runs.set(recoveringRunId, {
+      runId: recoveringRunId,
+      state: "running",
+      providerId: "fake",
+      providerConfig: {},
+      createdAtMs: 1,
+      startedAtMs: 2,
+      completedAtMs: null,
+      cancelledAtMs: null,
+      failureCategory: null,
+      failureMessage: null,
+      activeProviderStepId: null,
+    });
+    storage.runs.set(queuedRunId, {
+      runId: queuedRunId,
+      state: "queued",
+      providerId: "fake",
+      providerConfig: {},
+      createdAtMs: 3,
+      startedAtMs: null,
+      completedAtMs: null,
+      cancelledAtMs: null,
+      failureCategory: null,
+      failureMessage: null,
+      activeProviderStepId: null,
+    });
+    vi.spyOn(storage, "recover").mockResolvedValue({
+      interruptedRunIds: [recoveringRunId],
+      interruptedStepIds: [],
+      startedToolCalls: [],
+    });
+    const hub = new CommittedEventHub();
+    hub.publishCommitted({
+      v: 1,
+      kind: "event",
+      sessionId,
+      sequence: 100,
+      eventId: "evt_registryRecoveryPublicationConflictPrimed",
+      eventType: "run.started",
+      createdAtMs: 1,
+      data: { eventVersion: 1, runId: "run_registryRecoveryPublicationConflictPrimed" },
+    } satisfies SessionEvent);
+    const tasks = new ControlledTasks();
+    let constructions = 0;
+    const registry = new SessionActorRegistry({
+      createActor: async (_sessionId, onActivity, onFault) => {
+        constructions += 1;
+        return SessionActor.create({
+          storage,
+          eventHub: hub,
+          scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+          ids: ids(`registryRecoveryPublication${constructions}`),
+          now: () => 10,
+          runTask: tasks.task,
+          cancelRunTask: tasks.cancel,
+          forceStopRunTask: () => ({ status: "terminated" }),
+          onActivity,
+          onFault,
+        });
+      },
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+
+    await expect(registry.acquire(sessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+      name: "SessionRegistryUnavailableError",
+    });
+    await expect(registry.acquire(sessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+
+    expect(constructions).toBe(1);
+    expect(storage.closeCalls).toBe(1);
+    expect(storage.runs.get(recoveringRunId)?.state).toBe("interrupted");
+    expect(storage.runs.get(queuedRunId)?.state).toBe("queued");
+    expect(storage.events.filter((event) => event.eventType === "run.interrupted")).toHaveLength(1);
+    expect(storage.events.some((event) => event.eventType === "run.started")).toBe(false);
+    expect(tasks.pending.has(queuedRunId)).toBe(false);
+    expect(registry.states()[0]).toMatchObject({
+      faulted: true,
+      retiring: true,
+      constructing: true,
+    });
+    await expect(registry.close()).rejects.toThrow("failed to shut down");
+  });
+
   it("quarantines a registry-managed publication conflict without resetting it", async () => {
     const faultedSessionId = "ses_registryPublicationConflict";
     const healthySessionId = "ses_registryPublicationHealthy";

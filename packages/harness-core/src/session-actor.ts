@@ -268,13 +268,22 @@ export class SessionActor {
     }
   }
 
+  private publishOrThrow(events: readonly SessionEvent[]): void {
+    try {
+      for (const event of events) this.eventHub.publishCommitted(event);
+    } catch (error) {
+      // The write is already committed. Quarantine this actor instead of reporting rollback
+      // or allowing later commands to mutate a session with an inconsistent live stream.
+      this.recordFault(error);
+      throw error;
+    }
+  }
+
   private publish(events: readonly SessionEvent[]): boolean {
     try {
       for (const event of events) this.eventHub.publishCommitted(event);
       return true;
     } catch (error) {
-      // The write is already committed. Quarantine this actor instead of reporting rollback
-      // or allowing later commands to mutate a session with an inconsistent live stream.
       this.recordFault(error);
       return false;
     }
@@ -414,7 +423,7 @@ export class SessionActor {
         now: this.now,
         eventId: this.ids.eventId,
         diagnosticId: this.ids.diagnosticId,
-        publishCommitted: (event) => this.eventHub.publishCommitted(event),
+        publishCommitted: (event) => this.publishOrThrow([event]),
       });
       const [runs, approvals, inputs] = await Promise.all([
         this.storage.getNonterminalRuns(),

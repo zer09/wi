@@ -236,6 +236,10 @@ export class SessionActorRegistry {
       actor = await entry.actorPromise;
     } catch (error) {
       this.releaseReference(entry);
+      if (entry.retirement !== null) {
+        await this.awaitRetirement(entry);
+        return this.acquire(sessionId);
+      }
       throw error;
     }
     if (entry.retirement !== null) {

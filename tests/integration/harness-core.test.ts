@@ -178,7 +178,7 @@ describe("harness-core with real storage workers", () => {
           signal.addEventListener("abort", () => resolve({ state: "interrupted" }), { once: true });
         }),
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
 
     const accepted = await actor.submitMessage(submit(session.sessionId, "cmd_submitHarness"));
@@ -236,7 +236,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 2_000,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     await expect(actor.submitMessage(submit(session.sessionId, "cmd_submitFailure"))).rejects.toThrow(
       "injected storage failure",
@@ -275,7 +275,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 2_000,
       runTask: tasks.task,
       cancelRunTask: tasks.cancel,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
     });
 
@@ -372,7 +372,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 3_000,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     expect(actor.snapshot.activeRunId).toBeNull();
     await expect(session.getRun("run_recovery")).resolves.toMatchObject({ state: "interrupted" });
@@ -394,7 +394,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 4_000,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     await expect(reopened.getHeadSequence()).resolves.toBe(head);
     await recreated.shutdown();
@@ -515,7 +515,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 3_000,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     expect(first.snapshot).toMatchObject({ pendingApprovalCount: 1, pendingInputCount: 1 });
     await first.shutdown();
@@ -529,7 +529,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 4_000,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     expect(second.snapshot).toMatchObject({ pendingApprovalCount: 1, pendingInputCount: 1 });
     const approvalCommand = {
@@ -580,7 +580,7 @@ describe("harness-core with real storage workers", () => {
       now: () => 2_000,
       runTask: tasks.task,
       cancelRunTask: tasks.cancel,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
     });
 
@@ -706,7 +706,7 @@ describe("harness-core with real storage workers", () => {
           now: () => 2_000 + index,
           runTask: tasks.task,
           cancelRunTask: tasks.cancel,
-          forceStopRunTask: async () => undefined,
+          forceStopRunTask: () => ({ status: "terminated" }),
           onActivity: () => monitors[index]?.signal(),
         }),
       ),
@@ -746,7 +746,7 @@ describe("harness-core with real storage workers", () => {
           now: () => 5_000,
           runTask: async () => undefined,
           cancelRunTask: async () => undefined,
-          forceStopRunTask: async () => undefined,
+          forceStopRunTask: () => ({ status: "terminated" }),
           onActivity,
         });
       },

@@ -17,6 +17,7 @@ import { RunScheduler } from "./scheduler.js";
 import { SessionActorRegistry } from "./session-registry.js";
 import {
   SessionActor,
+  type ForceStopRunTask,
   type RunTask,
   type RunTaskContext,
   type RunTaskResult,
@@ -24,12 +25,18 @@ import {
   type SessionActorStorage,
 } from "./session-actor.js";
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+} {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
     resolve = settle;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 interface DeferredTask {
@@ -273,7 +280,7 @@ async function actorFixture(name = "actor") {
     now: () => ++now,
     runTask: tasks.task,
     cancelRunTask: tasks.cancel,
-    forceStopRunTask: async () => undefined,
+    forceStopRunTask: () => ({ status: "terminated" }),
     onActivity: () => monitor.signal(),
   });
   actorMonitors.set(actor, monitor);
@@ -295,6 +302,12 @@ function waitForState(actor: SessionActor, state: RunState | null): Promise<void
 }
 
 describe("SessionActor", () => {
+  it("requires final isolation proof to be synchronous", () => {
+    // @ts-expect-error An async hook cannot prove that isolation already happened.
+    const asynchronousIsolation: ForceStopRunTask = async () => ({ status: "terminated" });
+    expect(asynchronousIsolation).toBeTypeOf("function");
+  });
+
   it("closes storage when actor initialization fails", async () => {
     const storage = new FakeActorStorage("ses_initializationFailure");
     vi.spyOn(storage, "getNonterminalRuns").mockRejectedValue(new Error("recovery read failed"));
@@ -308,7 +321,7 @@ describe("SessionActor", () => {
         now: () => 10,
         runTask: async () => undefined,
         cancelRunTask: async () => undefined,
-        forceStopRunTask: async () => undefined,
+        forceStopRunTask: () => ({ status: "terminated" }),
       }),
     ).rejects.toThrow("recovery read failed");
     expect(storage.closeCalls).toBe(1);
@@ -606,7 +619,7 @@ describe("SessionActor", () => {
       cancelRunTask: async () => {
         stopped = true;
       },
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
     });
     actorMonitors.set(actor, monitor);
@@ -653,7 +666,7 @@ describe("SessionActor", () => {
       cancelRunTask: async () => {
         throw new Error("cleanup failed after stop");
       },
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
     });
     actorMonitors.set(actor, monitor);
@@ -716,8 +729,9 @@ describe("SessionActor", () => {
         return { state: "completed" };
       },
       cancelRunTask: async () => cleanup.promise,
-      forceStopRunTask: async () => {
+      forceStopRunTask: () => {
         forceStopCalls += 1;
+        return { status: "terminated" };
       },
       cancellationWait: async (completion) => {
         await completion;
@@ -783,8 +797,9 @@ describe("SessionActor", () => {
       runTask: async () => new Promise<RunTaskResult>(() => {}),
       cancelRunTask: async () => new Promise<void>(() => {}),
       cancellationWait: async () => false,
-      forceStopRunTask: async () => {
+      forceStopRunTask: () => {
         forceStopCalls += 1;
+        return { status: "quarantined" };
       },
       onActivity: () => firstMonitor.signal(),
     });
@@ -799,7 +814,7 @@ describe("SessionActor", () => {
         return secondResult.promise;
       },
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => secondMonitor.signal(),
     });
     actorMonitors.set(first, firstMonitor);
@@ -832,6 +847,105 @@ describe("SessionActor", () => {
     secondResult.resolve({ state: "completed" });
     await waitForState(second, null);
     await Promise.all([first.shutdown(), second.shutdown()]);
+  });
+
+  it("releases shared capacity after forced isolation while cleanup remains unsettled", async () => {
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const firstStorage = new FakeActorStorage("ses_forcedIsolationA");
+    const secondStorage = new FakeActorStorage("ses_forcedIsolationB");
+    const firstMonitor = new ActivityMonitor();
+    const secondMonitor = new ActivityMonitor();
+    const cancellationDeadline = deferred<boolean>();
+    const forceStopEntered = deferred<void>();
+    const forceStop = deferred<void>();
+    const secondStarted = deferred<void>();
+    const secondResult = deferred<RunTaskResult>();
+    let secondDidStart = false;
+    const first = await SessionActor.create({
+      storage: firstStorage,
+      eventHub: new CommittedEventHub(),
+      scheduler,
+      ids: ids("forcedIsolationA"),
+      now: () => 10,
+      runTask: async () => new Promise<RunTaskResult>(() => {}),
+      cancelRunTask: async () => new Promise<void>(() => {}),
+      cancellationWait: async () => cancellationDeadline.promise,
+      forceStopRunTask: () => {
+        forceStopEntered.resolve();
+        return { status: "detached", cleanup: forceStop.promise };
+      },
+      onActivity: () => firstMonitor.signal(),
+    });
+    const second = await SessionActor.create({
+      storage: secondStorage,
+      eventHub: new CommittedEventHub(),
+      scheduler,
+      ids: ids("forcedIsolationB"),
+      now: () => 10,
+      runTask: async () => {
+        secondDidStart = true;
+        secondStarted.resolve();
+        return secondResult.promise;
+      },
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      onActivity: () => secondMonitor.signal(),
+    });
+    actorMonitors.set(first, firstMonitor);
+    actorMonitors.set(second, secondMonitor);
+
+    const firstRun = await first.submitMessage(message(first.sessionId, "cmd_forcedIsolationA"));
+    const secondRun = await second.submitMessage(message(second.sessionId, "cmd_forcedIsolationB"));
+    expect(scheduler.state.provider).toMatchObject({
+      capacity: 1,
+      active: 1,
+      available: 0,
+      queued: 1,
+    });
+
+    await first.cancelRun({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_cancelForcedIsolationA",
+      sessionId: first.sessionId,
+      method: "run.cancel",
+      params: { runId: firstRun.runId },
+    });
+    expect(first.snapshot).toMatchObject({
+      activeRunState: "cancelling",
+      cancellationCleanupCount: 1,
+    });
+    expect(secondDidStart).toBe(false);
+    expect(scheduler.state.provider).toMatchObject({ active: 1, queued: 1 });
+    expect(
+      firstStorage.events.filter((event) => event.eventType === "run.interrupted"),
+    ).toHaveLength(0);
+
+    cancellationDeadline.resolve(false);
+    await forceStopEntered.promise;
+    await secondStarted.promise;
+    await waitForState(first, null);
+
+    try {
+      expect(firstStorage.runs.get(firstRun.runId)?.state).toBe("interrupted");
+      expect(first.snapshot.cancellationCleanupCount).toBe(0);
+      expect(secondDidStart).toBe(true);
+      expect(second.snapshot.activeRunId).toBe(secondRun.runId);
+      expect(scheduler.state.provider).toMatchObject({ active: 1, queued: 0 });
+      expect(
+        firstStorage.events.filter((event) => event.eventType === "run.interrupted"),
+      ).toHaveLength(1);
+      forceStop.reject(new Error("late best-effort cleanup failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(first.snapshot.faulted).toBe(false);
+      expect(scheduler.state.provider).toMatchObject({ active: 1, queued: 0 });
+    } finally {
+      forceStop.resolve();
+      secondResult.resolve({ state: "completed" });
+      await waitForState(second, null);
+      await Promise.all([first.shutdown(), second.shutdown()]);
+    }
   });
 
   it("preserves completion when cancellation arrives after terminal commit", async () => {
@@ -908,7 +1022,7 @@ describe("SessionActor", () => {
       now: () => 10,
       runTask: tasks.task,
       cancelRunTask: tasks.cancel,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
 
     const submitting = actor.submitMessage(message(actor.sessionId, "cmd_shutdownStartRace"));
@@ -946,7 +1060,7 @@ describe("SessionActor", () => {
         });
       },
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     const submitted = await actor.submitMessage(message(actor.sessionId, "cmd_shutdown"));
     await taskStarted;
@@ -976,7 +1090,7 @@ describe("SessionActor", () => {
       now: () => 10,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       shutdownWait: async () => false,
     });
     const submitting = actor.submitMessage(
@@ -1002,7 +1116,7 @@ describe("SessionActor", () => {
       now: () => 10,
       runTask: tasks.task,
       cancelRunTask: tasks.cancel,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       shutdownWait: async () => false,
     });
     const submitted = await actor.submitMessage(
@@ -1119,7 +1233,7 @@ describe("SessionActor", () => {
           now: () => clock,
           runTask: async () => undefined,
           cancelRunTask: async () => undefined,
-          forceStopRunTask: async () => undefined,
+          forceStopRunTask: () => ({ status: "terminated" }),
           onActivity,
         });
         return actor;
@@ -1202,7 +1316,7 @@ describe("SessionActor", () => {
       now: () => 4,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
     });
     actorMonitors.set(actor, monitor);
@@ -1278,7 +1392,7 @@ describe("SessionActor", () => {
       now: () => 4,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     const originalAccept = storage.acceptCommand.bind(storage);
     let injected = false;
@@ -1345,7 +1459,7 @@ describe("SessionActor", () => {
       now: () => 10,
       runTask: async () => undefined,
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
 
     const accepted = await actor.submitMessage(
@@ -1405,7 +1519,7 @@ describe("SessionActor", () => {
           signal.addEventListener("abort", () => resolve({ state: "interrupted" }), { once: true });
         }),
       cancelRunTask: async () => undefined,
-      forceStopRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
     });
     const submitting = actor.submitMessage(message(actor.sessionId, "cmd_commit"));
     await entered;

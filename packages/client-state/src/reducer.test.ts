@@ -147,15 +147,110 @@ describe("browser session reducer", () => {
     expect(beginReplay(state)).toBe(state);
   });
 
-  it("rejects a second active run and impossible run transitions", () => {
+  it("queues a run created while another run is active", () => {
     const running = replaySessionEvents(createBrowserSessionState("ses_A"), [created, started]);
-    const secondRun = event(3, "run.created", { eventVersion: 1, runId: "run_B" });
-    expect(reduceSessionEvent(running, secondRun)).toMatchObject({
+    const queued = reduceSessionEvent(
+      running,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+    );
+
+    expect(queued).toMatchObject({
+      errorCode: null,
+      activeRun: { runId: "run_A", state: "running" },
+      queuedRuns: [{ runId: "run_B", state: "queued" }],
+      lastAppliedSequence: 3,
+    });
+  });
+
+  it("preserves creation order for multiple queued runs", () => {
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      created,
+      started,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+      event(4, "run.created", { eventVersion: 1, runId: "run_C" }),
+    ]);
+
+    expect(state.errorCode).toBeNull();
+    expect(state.activeRun).toEqual({ runId: "run_A", state: "running" });
+    expect(state.queuedRuns).toEqual([
+      { runId: "run_B", state: "queued" },
+      { runId: "run_C", state: "queued" },
+    ]);
+  });
+
+  it("rejects a duplicate queued run identity", () => {
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      created,
+      started,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+      event(4, "run.created", { eventVersion: 1, runId: "run_B" }),
+    ]);
+
+    expect(state).toMatchObject({
+      status: "error",
+      errorCode: "impossible_run_transition",
+      activeRun: { runId: "run_A", state: "running" },
+      lastAppliedSequence: 3,
+    });
+    expect(state.queuedRuns).toEqual([{ runId: "run_B", state: "queued" }]);
+  });
+
+  it("rejects a queued run starting before the active run terminalizes", () => {
+    const running = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      created,
+      started,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+    ]);
+    const prematureStart = reduceSessionEvent(
+      running,
+      event(4, "run.started", { eventVersion: 1, runId: "run_B" }),
+    );
+
+    expect(prematureStart).toMatchObject({
       status: "error",
       errorCode: "second_active_run",
-      lastAppliedSequence: 2,
+      activeRun: { runId: "run_A", state: "running" },
+      lastAppliedSequence: 3,
     });
+  });
 
+  it("promotes and removes only the queue head after the active run terminalizes", () => {
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      created,
+      started,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+      event(4, "run.completed", { eventVersion: 1, runId: "run_A" }),
+      event(5, "run.started", { eventVersion: 1, runId: "run_B" }),
+    ]);
+
+    expect(state.errorCode).toBeNull();
+    expect(state.activeRun).toEqual({ runId: "run_B", state: "running" });
+    expect(state.queuedRuns).toEqual([]);
+  });
+
+  it("rejects a non-head queued run starting", () => {
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      created,
+      started,
+      event(3, "run.created", { eventVersion: 1, runId: "run_B" }),
+      event(4, "run.created", { eventVersion: 1, runId: "run_C" }),
+      event(5, "run.completed", { eventVersion: 1, runId: "run_A" }),
+      event(6, "run.started", { eventVersion: 1, runId: "run_C" }),
+    ]);
+
+    expect(state).toMatchObject({
+      status: "error",
+      errorCode: "impossible_run_transition",
+      activeRun: { runId: "run_A", state: "completed" },
+      lastAppliedSequence: 5,
+    });
+    expect(state.queuedRuns).toEqual([
+      { runId: "run_B", state: "queued" },
+      { runId: "run_C", state: "queued" },
+    ]);
+  });
+
+  it("rejects impossible run transitions", () => {
     const startedWithoutCreation = reduceSessionEvent(
       createBrowserSessionState("ses_A"),
       event(1, "run.started", { eventVersion: 1, runId: "run_A" }),

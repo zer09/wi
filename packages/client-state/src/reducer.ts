@@ -72,20 +72,39 @@ function applyRunTransition(
   if (transition === null) return state;
   const current = state.activeRun;
   if (current === null) {
-    return transition.state === "created"
-      ? { ...state, activeRun: transition }
-      : fatal(state, "impossible_run_transition");
+    if (state.queuedRuns.length > 0 || transition.state !== "created") {
+      return fatal(state, "impossible_run_transition");
+    }
+    return { ...state, activeRun: transition };
   }
-  if (current.runId !== transition.runId) {
-    if (!terminalRunStates.has(current.state)) return fatal(state, "second_active_run");
-    return transition.state === "created"
-      ? { ...state, activeRun: transition }
-      : fatal(state, "impossible_run_transition");
+  if (current.runId === transition.runId) {
+    if (!allowedRunTransitions[current.state].has(transition.state)) {
+      return fatal(state, "impossible_run_transition");
+    }
+    return { ...state, activeRun: transition };
   }
-  if (!allowedRunTransitions[current.state].has(transition.state)) {
+  if (transition.state === "created") {
+    if (state.queuedRuns.some((run) => run.runId === transition.runId)) {
+      return fatal(state, "impossible_run_transition");
+    }
+    if (terminalRunStates.has(current.state) && state.queuedRuns.length === 0) {
+      return { ...state, activeRun: transition };
+    }
+    return {
+      ...state,
+      queuedRuns: [...state.queuedRuns, { runId: transition.runId, state: "queued" }],
+    };
+  }
+  if (!terminalRunStates.has(current.state)) return fatal(state, "second_active_run");
+  const queued = state.queuedRuns[0];
+  if (
+    queued === undefined ||
+    queued.runId !== transition.runId ||
+    !allowedRunTransitions[queued.state].has(transition.state)
+  ) {
     return fatal(state, "impossible_run_transition");
   }
-  return { ...state, activeRun: transition };
+  return { ...state, activeRun: transition, queuedRuns: state.queuedRuns.slice(1) };
 }
 
 function applyEventData(state: BrowserSessionState, event: SessionEvent): BrowserSessionState {

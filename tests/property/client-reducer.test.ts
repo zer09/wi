@@ -143,6 +143,44 @@ describe("client reducer replay properties", () => {
     );
   });
 
+  it("preserves exact FIFO order for generated queued creations and starts", async () => {
+    await runProperty(
+      "queued creations and starts preserve exact FIFO order",
+      fc.property(fc.integer({ min: 1, max: 12 }), (queuedCount) => {
+        let sequence = 1;
+        const nextEvent = (eventType: SessionEventType, runId: string): SessionEvent => {
+          const current = sequence;
+          sequence += 1;
+          return event(current, `evt_${current}`, eventType, { eventVersion: 1, runId });
+        };
+        let state = createBrowserSessionState("ses_A");
+        state = reduceSessionEvent(state, nextEvent("run.created", "run_0"));
+        state = reduceSessionEvent(state, nextEvent("run.started", "run_0"));
+        const queuedRunIds = Array.from(
+          { length: queuedCount },
+          (_, index) => `run_${index + 1}`,
+        );
+        for (const runId of queuedRunIds) {
+          state = reduceSessionEvent(state, nextEvent("run.created", runId));
+        }
+        expect(state.errorCode).toBeNull();
+        expect(state.queuedRuns.map((run) => run.runId)).toEqual(queuedRunIds);
+
+        let activeRunId = "run_0";
+        for (const [index, runId] of queuedRunIds.entries()) {
+          state = reduceSessionEvent(state, nextEvent("run.completed", activeRunId));
+          state = reduceSessionEvent(state, nextEvent("run.started", runId));
+          expect(state.errorCode).toBeNull();
+          expect(state.activeRun).toEqual({ runId, state: "running" });
+          expect(state.queuedRuns.map((run) => run.runId)).toEqual(
+            queuedRunIds.slice(index + 1),
+          );
+          activeRunId = runId;
+        }
+      }),
+    );
+  });
+
   it("gaps are recoverable but generated integrity faults remain fatal", async () => {
     await runProperty(
       "gaps are recoverable but generated integrity faults remain fatal",
@@ -179,12 +217,17 @@ describe("client reducer replay properties", () => {
                 }),
               );
               break;
-            case "secondRun":
-              fatalState = reduceSessionEvent(
+            case "secondRun": {
+              const queued = reduceSessionEvent(
                 running,
                 event(3, "evt_3", "run.created", { eventVersion: 1, runId: "run_B" }),
               );
+              fatalState = reduceSessionEvent(
+                queued,
+                event(4, "evt_4", "run.started", { eventVersion: 1, runId: "run_B" }),
+              );
               break;
+            }
             case "terminal": {
               const completed = reduceSessionEvent(
                 running,

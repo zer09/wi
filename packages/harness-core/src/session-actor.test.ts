@@ -1219,6 +1219,97 @@ describe("SessionActor", () => {
     await waitForState(right.actor, null);
   });
 
+  it("retires a registry-managed actor faulted after durable acceptance and resumes its queued run", async () => {
+    const sessionId = "ses_faultRetirement";
+    const storage = new FakeActorStorage(sessionId);
+    const originalAppend = storage.appendTransaction.bind(storage);
+    const originalRecover = storage.recover.bind(storage);
+    let recoverCalls = 0;
+    vi.spyOn(storage, "recover").mockImplementation(async () => {
+      recoverCalls += 1;
+      return originalRecover();
+    });
+    let startAttempts = 0;
+    vi.spyOn(storage, "appendTransaction").mockImplementation(async (input) => {
+      if (input.events[0]?.eventType === "run.started") {
+        startAttempts += 1;
+        if (startAttempts === 1) {
+          throw Object.assign(new Error("injected ambiguous pre-commit start failure"), {
+            code: "storage.ambiguous_outcome",
+          });
+        }
+        expect(recoverCalls).toBe(2);
+      }
+      return originalAppend(input);
+    });
+    let factoryCount = 0;
+    let faultNotificationCount = 0;
+    let originalRunStartCount = 0;
+    const createActor: (
+      sessionId: string,
+      onActivity: () => void,
+      onFault: (error: unknown) => void,
+    ) => Promise<SessionActor> = async (_sessionId, onActivity, onFault) => {
+      factoryCount += 1;
+      const actor = await SessionActor.create({
+        storage,
+        eventHub: new CommittedEventHub(),
+        scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+        ids: ids(`faultRetirement${factoryCount}`),
+        now: () => 10,
+        runTask: ({ signal }) => {
+          originalRunStartCount += 1;
+          return new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ state: "interrupted" }), { once: true });
+          });
+        },
+        cancelRunTask: async () => undefined,
+        forceStopRunTask: () => ({ status: "terminated" }),
+        onActivity,
+        onFault: (error) => {
+          faultNotificationCount += 1;
+          onFault(error);
+        },
+      });
+      return actor;
+    };
+    const registry = new SessionActorRegistry({
+      createActor,
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+    const firstLease = await registry.acquire(sessionId);
+    const accepted = await firstLease.actor.submitMessage(
+      message(sessionId, "cmd_faultRetirement"),
+    );
+
+    expect(accepted.acceptance.duplicate).toBe(false);
+    expect(firstLease.actor.snapshot.faulted).toBe(true);
+    expect(faultNotificationCount).toBe(1);
+    expect(storage.runs.get(accepted.runId)?.state).toBe("queued");
+    expect(originalRunStartCount).toBe(0);
+
+    firstLease.release();
+    const secondLease = await registry.acquire(sessionId);
+
+    expect(secondLease.actor).not.toBe(firstLease.actor);
+    expect(factoryCount).toBe(2);
+    expect(storage.closeCalls).toBe(1);
+    expect(secondLease.actor.snapshot).toMatchObject({
+      activeRunId: accepted.runId,
+      activeRunState: "running",
+      faulted: false,
+    });
+    expect(originalRunStartCount).toBe(1);
+    expect(recoverCalls).toBe(2);
+    expect(startAttempts).toBe(2);
+    expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
+    expect(storage.events.filter((event) => event.eventType === "run.started")).toHaveLength(1);
+
+    secondLease.release();
+    await registry.close();
+  });
+
   it("prevents idle eviction when a concrete subscriber connects during the decision", async () => {
     let clock = 0;
     let actor: SessionActor | undefined;
@@ -1480,6 +1571,184 @@ describe("SessionActor", () => {
       actor.submitMessage(message(actor.sessionId, "cmd_afterPublicationConflict")),
     ).rejects.toMatchObject({ code: "session.unavailable" });
     await actor.shutdown();
+  });
+
+  it("quarantines a recovery publication conflict before the first actor is acquired", async () => {
+    const sessionId = "ses_registryRecoveryPublicationConflict";
+    const recoveringRunId = "run_registryRecoveryPublicationConflict";
+    const queuedRunId = "run_registryRecoveryPublicationQueued";
+    const storage = new FakeActorStorage(sessionId);
+    storage.runs.set(recoveringRunId, {
+      runId: recoveringRunId,
+      state: "running",
+      providerId: "fake",
+      providerConfig: {},
+      createdAtMs: 1,
+      startedAtMs: 2,
+      completedAtMs: null,
+      cancelledAtMs: null,
+      failureCategory: null,
+      failureMessage: null,
+      activeProviderStepId: null,
+    });
+    storage.runs.set(queuedRunId, {
+      runId: queuedRunId,
+      state: "queued",
+      providerId: "fake",
+      providerConfig: {},
+      createdAtMs: 3,
+      startedAtMs: null,
+      completedAtMs: null,
+      cancelledAtMs: null,
+      failureCategory: null,
+      failureMessage: null,
+      activeProviderStepId: null,
+    });
+    vi.spyOn(storage, "recover").mockResolvedValue({
+      interruptedRunIds: [recoveringRunId],
+      interruptedStepIds: [],
+      startedToolCalls: [],
+    });
+    const hub = new CommittedEventHub();
+    hub.publishCommitted({
+      v: 1,
+      kind: "event",
+      sessionId,
+      sequence: 100,
+      eventId: "evt_registryRecoveryPublicationConflictPrimed",
+      eventType: "run.started",
+      createdAtMs: 1,
+      data: { eventVersion: 1, runId: "run_registryRecoveryPublicationConflictPrimed" },
+    } satisfies SessionEvent);
+    const tasks = new ControlledTasks();
+    let constructions = 0;
+    const registry = new SessionActorRegistry({
+      createActor: async (_sessionId, onActivity, onFault) => {
+        constructions += 1;
+        return SessionActor.create({
+          storage,
+          eventHub: hub,
+          scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+          ids: ids(`registryRecoveryPublication${constructions}`),
+          now: () => 10,
+          runTask: tasks.task,
+          cancelRunTask: tasks.cancel,
+          forceStopRunTask: () => ({ status: "terminated" }),
+          onActivity,
+          onFault,
+        });
+      },
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+
+    await expect(registry.acquire(sessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+      name: "SessionRegistryUnavailableError",
+    });
+    await expect(registry.acquire(sessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+
+    expect(constructions).toBe(1);
+    expect(storage.closeCalls).toBe(1);
+    expect(storage.runs.get(recoveringRunId)?.state).toBe("interrupted");
+    expect(storage.runs.get(queuedRunId)?.state).toBe("queued");
+    expect(storage.events.filter((event) => event.eventType === "run.interrupted")).toHaveLength(1);
+    expect(storage.events.some((event) => event.eventType === "run.started")).toBe(false);
+    expect(tasks.pending.has(queuedRunId)).toBe(false);
+    expect(registry.states()[0]).toMatchObject({
+      faulted: true,
+      retiring: true,
+      constructing: true,
+    });
+    await expect(registry.close()).rejects.toThrow("failed to shut down");
+  });
+
+  it("quarantines a registry-managed publication conflict without resetting it", async () => {
+    const faultedSessionId = "ses_registryPublicationConflict";
+    const healthySessionId = "ses_registryPublicationHealthy";
+    const faultedStorage = new FakeActorStorage(faultedSessionId);
+    const healthyStorage = new FakeActorStorage(healthySessionId);
+    const hub = new CommittedEventHub();
+    hub.publishCommitted({
+      v: 1,
+      kind: "event",
+      sessionId: faultedSessionId,
+      sequence: 100,
+      eventId: "evt_registryPublicationConflictPrimed",
+      eventType: "run.started",
+      createdAtMs: 1,
+      data: { eventVersion: 1, runId: "run_registryPublicationConflictPrimed" },
+    } satisfies SessionEvent);
+    const scheduler = new RunScheduler({ providerCapacity: 2, toolCapacity: 1 });
+    const tasks = new ControlledTasks();
+    const constructions = new Map<string, number>();
+    const registry = new SessionActorRegistry({
+      createActor: async (sessionId, onActivity, onFault) => {
+        constructions.set(sessionId, (constructions.get(sessionId) ?? 0) + 1);
+        const monitor = new ActivityMonitor();
+        const actor = await SessionActor.create({
+          storage: sessionId === faultedSessionId ? faultedStorage : healthyStorage,
+          eventHub: hub,
+          scheduler,
+          ids: ids(`registryPublication${sessionId}${constructions.get(sessionId)}`),
+          now: () => 10,
+          runTask: tasks.task,
+          cancelRunTask: tasks.cancel,
+          forceStopRunTask: () => ({ status: "terminated" }),
+          onActivity: () => {
+            monitor.signal();
+            onActivity();
+          },
+          onFault,
+        });
+        actorMonitors.set(actor, monitor);
+        return actor;
+      },
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+    const faultedLease = await registry.acquire(faultedSessionId);
+    const healthyLease = await registry.acquire(healthySessionId);
+    const accepted = await faultedLease.actor.submitMessage(
+      message(faultedSessionId, "cmd_registryPublicationConflict"),
+    );
+
+    expect(accepted.acceptance.duplicate).toBe(false);
+    expect(faultedLease.actor.snapshot).toMatchObject({
+      activeRunId: null,
+      queuedRunIds: [accepted.runId],
+      faulted: true,
+    });
+    expect(faultedStorage.runs.get(accepted.runId)?.state).toBe("queued");
+    expect(tasks.pending.has(accepted.runId)).toBe(false);
+
+    faultedLease.release();
+    await expect(registry.acquire(faultedSessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+      name: "SessionRegistryUnavailableError",
+    });
+    await expect(registry.acquire(faultedSessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+    expect(constructions.get(faultedSessionId)).toBe(1);
+    expect(faultedStorage.closeCalls).toBe(1);
+    expect(registry.states().find((state) => state.sessionId === faultedSessionId)).toMatchObject({
+      faulted: true,
+      retiring: true,
+      constructing: false,
+    });
+
+    const healthy = await healthyLease.actor.submitMessage(
+      message(healthySessionId, "cmd_registryPublicationHealthy"),
+    );
+    (await waitForTask(tasks, healthy.runId)).resolve({ state: "completed" });
+    await waitForState(healthyLease.actor, null);
+    expect(healthyStorage.runs.get(healthy.runId)?.state).toBe("completed");
+
+    healthyLease.release();
+    await expect(registry.close()).rejects.toThrow("failed to shut down");
   });
 
   it("publishes only events returned by a resolved committed storage operation", async () => {

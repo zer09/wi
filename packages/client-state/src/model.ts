@@ -37,6 +37,7 @@ export interface BrowserSessionState {
   readonly status: BrowserSessionStatus;
   readonly timeline: readonly TimelineItem[];
   readonly activeRun: BrowserRunState | null;
+  readonly queuedRuns: readonly BrowserRunState[];
   readonly pendingApprovals: Readonly<Record<string, BrowserApproval>>;
   readonly pendingInputs: Readonly<Record<string, BrowserPendingInput>>;
   readonly appliedEvents: Readonly<Record<number, SessionEvent>>;
@@ -52,6 +53,7 @@ export function createBrowserSessionState(sessionId: string): BrowserSessionStat
     status: "loading",
     timeline: [],
     activeRun: null,
+    queuedRuns: [],
     pendingApprovals: {},
     pendingInputs: {},
     appliedEvents: {},

@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "@wi/protocol";
 import { SessionStoreManager } from "@wi/storage";
+import { createBrowserSessionState } from "../../packages/client-state/src/model.js";
+import { reduceSessionEvent } from "../../packages/client-state/src/reducer.js";
 import {
   beginReplaySubscription,
   CommittedEventHub,
@@ -556,6 +558,68 @@ describe("harness-core with real storage workers", () => {
     await expect(reopened.getPendingInputs()).resolves.toEqual([]);
     expect(second.snapshot).toMatchObject({ pendingApprovalCount: 0, pendingInputCount: 0 });
     await second.shutdown();
+  });
+
+  it("replays actor-produced queued runs through the client reducer in FIFO order", async () => {
+    const manager = await store();
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_createClientQueue",
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    const tasks = new ControlledTasks();
+    const monitor = new ActivityMonitor();
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: actorIds("clientQueue"),
+      now: () => 2_000,
+      runTask: tasks.task,
+      cancelRunTask: tasks.cancel,
+      forceStopRunTask: async () => undefined,
+      onActivity: () => monitor.signal(),
+    });
+
+    try {
+      const first = await actor.submitMessage(submit(session.sessionId, "cmd_submitClientQueueA"));
+      await tasks.waitFor(first.runId);
+      const second = await actor.submitMessage(submit(session.sessionId, "cmd_submitClientQueueB"));
+      const throughQueuedCreation = await session.getEventsAfter(0);
+      const secondCreated = throughQueuedCreation.find(
+        (item) => item.eventType === "run.created" && item.data.runId === second.runId,
+      );
+      expect(secondCreated).toBeDefined();
+
+      let clientState = createBrowserSessionState(session.sessionId);
+      for (const item of throughQueuedCreation) clientState = reduceSessionEvent(clientState, item);
+      expect(clientState).toMatchObject({
+        errorCode: null,
+        activeRun: { runId: first.runId, state: "running" },
+        queuedRuns: [{ runId: second.runId, state: "queued" }],
+        lastAppliedSequence: secondCreated?.sequence,
+      });
+
+      tasks.pending.get(first.runId)?.resolve({ state: "completed" });
+      await monitor.waitFor(() => actor.snapshot.activeRunId === second.runId);
+      await tasks.waitFor(second.runId);
+      const promotedEvents = await session.getEventsAfter(clientState.lastAppliedSequence);
+      for (const item of promotedEvents) clientState = reduceSessionEvent(clientState, item);
+      expect(clientState).toMatchObject({
+        errorCode: null,
+        activeRun: { runId: second.runId, state: "running" },
+        queuedRuns: [],
+      });
+
+      tasks.pending.get(second.runId)?.resolve({ state: "completed" });
+      await monitor.waitFor(() => actor.snapshot.activeRunId === null);
+    } finally {
+      for (const pending of tasks.pending.values()) pending.resolve({ state: "interrupted" });
+      await actor.shutdown();
+    }
   });
 
   it("reconstructs equal-timestamp queued runs in durable acceptance order", async () => {

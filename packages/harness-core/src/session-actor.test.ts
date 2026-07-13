@@ -1573,6 +1573,92 @@ describe("SessionActor", () => {
     await actor.shutdown();
   });
 
+  it("quarantines a registry-managed publication conflict without resetting it", async () => {
+    const faultedSessionId = "ses_registryPublicationConflict";
+    const healthySessionId = "ses_registryPublicationHealthy";
+    const faultedStorage = new FakeActorStorage(faultedSessionId);
+    const healthyStorage = new FakeActorStorage(healthySessionId);
+    const hub = new CommittedEventHub();
+    hub.publishCommitted({
+      v: 1,
+      kind: "event",
+      sessionId: faultedSessionId,
+      sequence: 100,
+      eventId: "evt_registryPublicationConflictPrimed",
+      eventType: "run.started",
+      createdAtMs: 1,
+      data: { eventVersion: 1, runId: "run_registryPublicationConflictPrimed" },
+    } satisfies SessionEvent);
+    const scheduler = new RunScheduler({ providerCapacity: 2, toolCapacity: 1 });
+    const tasks = new ControlledTasks();
+    const constructions = new Map<string, number>();
+    const registry = new SessionActorRegistry({
+      createActor: async (sessionId, onActivity, onFault) => {
+        constructions.set(sessionId, (constructions.get(sessionId) ?? 0) + 1);
+        const monitor = new ActivityMonitor();
+        const actor = await SessionActor.create({
+          storage: sessionId === faultedSessionId ? faultedStorage : healthyStorage,
+          eventHub: hub,
+          scheduler,
+          ids: ids(`registryPublication${sessionId}${constructions.get(sessionId)}`),
+          now: () => 10,
+          runTask: tasks.task,
+          cancelRunTask: tasks.cancel,
+          forceStopRunTask: () => ({ status: "terminated" }),
+          onActivity: () => {
+            monitor.signal();
+            onActivity();
+          },
+          onFault,
+        });
+        actorMonitors.set(actor, monitor);
+        return actor;
+      },
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+    const faultedLease = await registry.acquire(faultedSessionId);
+    const healthyLease = await registry.acquire(healthySessionId);
+    const accepted = await faultedLease.actor.submitMessage(
+      message(faultedSessionId, "cmd_registryPublicationConflict"),
+    );
+
+    expect(accepted.acceptance.duplicate).toBe(false);
+    expect(faultedLease.actor.snapshot).toMatchObject({
+      activeRunId: null,
+      queuedRunIds: [accepted.runId],
+      faulted: true,
+    });
+    expect(faultedStorage.runs.get(accepted.runId)?.state).toBe("queued");
+    expect(tasks.pending.has(accepted.runId)).toBe(false);
+
+    faultedLease.release();
+    await expect(registry.acquire(faultedSessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+      name: "SessionRegistryUnavailableError",
+    });
+    await expect(registry.acquire(faultedSessionId)).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+    expect(constructions.get(faultedSessionId)).toBe(1);
+    expect(faultedStorage.closeCalls).toBe(1);
+    expect(registry.states().find((state) => state.sessionId === faultedSessionId)).toMatchObject({
+      faulted: true,
+      retiring: true,
+      constructing: false,
+    });
+
+    const healthy = await healthyLease.actor.submitMessage(
+      message(healthySessionId, "cmd_registryPublicationHealthy"),
+    );
+    (await waitForTask(tasks, healthy.runId)).resolve({ state: "completed" });
+    await waitForState(healthyLease.actor, null);
+    expect(healthyStorage.runs.get(healthy.runId)?.state).toBe("completed");
+
+    healthyLease.release();
+    await expect(registry.close()).rejects.toThrow("failed to shut down");
+  });
+
   it("publishes only events returned by a resolved committed storage operation", async () => {
     const storage = new FakeActorStorage("ses_commit");
     const original = storage.acceptCommand.bind(storage);

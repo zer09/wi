@@ -1,3 +1,4 @@
+import { EventHubIntegrityError } from "./event-hub.js";
 import type { SessionActor } from "./session-actor.js";
 import {
   defaultShutdownWait,
@@ -162,6 +163,10 @@ export class SessionActorRegistry {
       const oldActor = await entry.actorPromise;
       await oldActor.shutdown();
       if (this.closed || this.entries.get(entry.sessionId) !== entry) return;
+      if (entry.fault instanceof EventHubIntegrityError) {
+        // Rebuilding would erase evidence that committed live history became inconsistent.
+        throw entry.fault;
+      }
 
       entry.actor = undefined;
       entry.fault = null;

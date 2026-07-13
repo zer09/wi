@@ -60,6 +60,124 @@ describe("SessionActorRegistry", () => {
     await registry.close();
   });
 
+  it("constructs one replacement after fault retirement while another session remains available", async () => {
+    let faultFirst: (error: unknown) => void = () => undefined;
+    let releaseShutdown = (): void => {};
+    let signalShutdownEntered = (): void => {};
+    const shutdownGate = new Promise<void>((resolve) => {
+      releaseShutdown = resolve;
+    });
+    const shutdownEntered = new Promise<void>((resolve) => {
+      signalShutdownEntered = resolve;
+    });
+    const actors = new Map<string, FakeRegistryActor[]>();
+    const createActor = vi.fn(async (sessionId: string, _onActivity: () => void, onFault: (error: unknown) => void) => {
+      const actor = new FakeRegistryActor();
+      const created = actors.get(sessionId) ?? [];
+      created.push(actor);
+      actors.set(sessionId, created);
+      if (sessionId === "ses_faulted" && created.length === 1) {
+        faultFirst = onFault;
+        vi.spyOn(actor, "shutdown").mockImplementation(async () => {
+          actor.shutdownCalls += 1;
+          signalShutdownEntered();
+          await shutdownGate;
+        });
+      }
+      return asActor(actor);
+    });
+    const registry = new SessionActorRegistry({
+      createActor,
+      now: () => 0,
+      idleTimeoutMs: 10,
+    });
+    const first = await registry.acquire("ses_faulted");
+    const unrelated = await registry.acquire("ses_unrelated");
+
+    faultFirst(new Error("faulted actor"));
+    const leftReplacement = registry.acquire("ses_faulted");
+    const rightReplacement = registry.acquire("ses_faulted");
+    const unrelatedAgain = await registry.acquire("ses_unrelated");
+    expect(unrelatedAgain.actor).toBe(unrelated.actor);
+    expect(createActor).toHaveBeenCalledTimes(2);
+
+    first.release();
+    await shutdownEntered;
+    expect(createActor).toHaveBeenCalledTimes(2);
+    releaseShutdown();
+    const [left, right] = await Promise.all([leftReplacement, rightReplacement]);
+
+    expect(left.actor).toBe(right.actor);
+    expect(left.actor).not.toBe(first.actor);
+    expect(createActor).toHaveBeenCalledTimes(3);
+    expect(actors.get("ses_faulted")?.[0]?.shutdownCalls).toBe(1);
+    left.release();
+    right.release();
+    unrelated.release();
+    unrelatedAgain.release();
+    await registry.close();
+  });
+
+  it("preserves reference accounting when release wins the fault-notification race", async () => {
+    let notifyFault: (error: unknown) => void = () => undefined;
+    const actors: FakeRegistryActor[] = [];
+    const registry = new SessionActorRegistry({
+      createActor: async (_sessionId, _onActivity, onFault) => {
+        notifyFault = onFault;
+        const actor = new FakeRegistryActor();
+        actors.push(actor);
+        return asActor(actor);
+      },
+      now: () => 0,
+      idleTimeoutMs: 10,
+    });
+    const first = await registry.acquire("ses_faultReleaseRace");
+
+    first.release();
+    notifyFault(new Error("fault after release"));
+    const replacement = await registry.acquire("ses_faultReleaseRace");
+
+    expect(replacement.actor).not.toBe(first.actor);
+    expect(actors).toHaveLength(2);
+    expect(actors[0]?.shutdownCalls).toBe(1);
+    expect(registry.states()[0]?.references).toBe(1);
+    replacement.release();
+    await registry.close();
+  });
+
+  it("quarantines an irreconcilable replacement failure with a typed stable error", async () => {
+    let notifyFault: (error: unknown) => void = () => undefined;
+    let constructions = 0;
+    const registry = new SessionActorRegistry({
+      createActor: async (_sessionId, _onActivity, onFault) => {
+        constructions += 1;
+        if (constructions === 2) throw new Error("irreconcilable durable state");
+        notifyFault = onFault;
+        return asActor(new FakeRegistryActor());
+      },
+      now: () => 0,
+      idleTimeoutMs: 10,
+    });
+    const first = await registry.acquire("ses_irreconcilable");
+    notifyFault(new Error("ambiguous write could not be reconciled"));
+    first.release();
+
+    await expect(registry.acquire("ses_irreconcilable")).rejects.toMatchObject({
+      code: "session.unavailable",
+      name: "SessionRegistryUnavailableError",
+    });
+    await expect(registry.acquire("ses_irreconcilable")).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+    expect(constructions).toBe(2);
+    expect(registry.states()[0]).toMatchObject({
+      faulted: true,
+      retiring: true,
+      constructing: true,
+    });
+    await expect(registry.close()).rejects.toThrow("failed to shut down");
+  });
+
   it("evicts only after every actor blocker and retained reference is absent", async () => {
     let now = 0;
     const actor = new FakeRegistryActor();

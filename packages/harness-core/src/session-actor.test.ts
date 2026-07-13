@@ -1219,6 +1219,97 @@ describe("SessionActor", () => {
     await waitForState(right.actor, null);
   });
 
+  it("retires a registry-managed actor faulted after durable acceptance and resumes its queued run", async () => {
+    const sessionId = "ses_faultRetirement";
+    const storage = new FakeActorStorage(sessionId);
+    const originalAppend = storage.appendTransaction.bind(storage);
+    const originalRecover = storage.recover.bind(storage);
+    let recoverCalls = 0;
+    vi.spyOn(storage, "recover").mockImplementation(async () => {
+      recoverCalls += 1;
+      return originalRecover();
+    });
+    let startAttempts = 0;
+    vi.spyOn(storage, "appendTransaction").mockImplementation(async (input) => {
+      if (input.events[0]?.eventType === "run.started") {
+        startAttempts += 1;
+        if (startAttempts === 1) {
+          throw Object.assign(new Error("injected ambiguous pre-commit start failure"), {
+            code: "storage.ambiguous_outcome",
+          });
+        }
+        expect(recoverCalls).toBe(2);
+      }
+      return originalAppend(input);
+    });
+    let factoryCount = 0;
+    let faultNotificationCount = 0;
+    let originalRunStartCount = 0;
+    const createActor: (
+      sessionId: string,
+      onActivity: () => void,
+      onFault: (error: unknown) => void,
+    ) => Promise<SessionActor> = async (_sessionId, onActivity, onFault) => {
+      factoryCount += 1;
+      const actor = await SessionActor.create({
+        storage,
+        eventHub: new CommittedEventHub(),
+        scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+        ids: ids(`faultRetirement${factoryCount}`),
+        now: () => 10,
+        runTask: ({ signal }) => {
+          originalRunStartCount += 1;
+          return new Promise((resolve) => {
+            signal.addEventListener("abort", () => resolve({ state: "interrupted" }), { once: true });
+          });
+        },
+        cancelRunTask: async () => undefined,
+        forceStopRunTask: () => ({ status: "terminated" }),
+        onActivity,
+        onFault: (error) => {
+          faultNotificationCount += 1;
+          onFault(error);
+        },
+      });
+      return actor;
+    };
+    const registry = new SessionActorRegistry({
+      createActor,
+      now: () => 10,
+      idleTimeoutMs: 10,
+    });
+    const firstLease = await registry.acquire(sessionId);
+    const accepted = await firstLease.actor.submitMessage(
+      message(sessionId, "cmd_faultRetirement"),
+    );
+
+    expect(accepted.acceptance.duplicate).toBe(false);
+    expect(firstLease.actor.snapshot.faulted).toBe(true);
+    expect(faultNotificationCount).toBe(1);
+    expect(storage.runs.get(accepted.runId)?.state).toBe("queued");
+    expect(originalRunStartCount).toBe(0);
+
+    firstLease.release();
+    const secondLease = await registry.acquire(sessionId);
+
+    expect(secondLease.actor).not.toBe(firstLease.actor);
+    expect(factoryCount).toBe(2);
+    expect(storage.closeCalls).toBe(1);
+    expect(secondLease.actor.snapshot).toMatchObject({
+      activeRunId: accepted.runId,
+      activeRunState: "running",
+      faulted: false,
+    });
+    expect(originalRunStartCount).toBe(1);
+    expect(recoverCalls).toBe(2);
+    expect(startAttempts).toBe(2);
+    expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
+    expect(storage.events.filter((event) => event.eventType === "run.started")).toHaveLength(1);
+
+    secondLease.release();
+    await registry.close();
+  });
+
   it("prevents idle eviction when a concrete subscriber connects during the decision", async () => {
     let clock = 0;
     let actor: SessionActor | undefined;

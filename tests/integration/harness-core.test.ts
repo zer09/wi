@@ -736,7 +736,7 @@ describe("harness-core with real storage workers", () => {
     const registry = new SessionActorRegistry({
       now: () => now,
       idleTimeoutMs: 5,
-      createActor: async (sessionId, onActivity) => {
+      createActor: async (sessionId, onActivity, onFault) => {
         constructions += 1;
         return SessionActor.create({
           storage: await manager.openSession(sessionId),
@@ -748,6 +748,7 @@ describe("harness-core with real storage workers", () => {
           cancelRunTask: async () => undefined,
           forceStopRunTask: () => ({ status: "terminated" }),
           onActivity,
+          onFault,
         });
       },
     });

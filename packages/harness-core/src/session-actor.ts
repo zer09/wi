@@ -193,6 +193,7 @@ export class SessionActor {
   private readonly forceStopRunTask: ForceStopRunTask;
   private readonly cancellationWait: ShutdownWait;
   private readonly onActivity: (() => void) | undefined;
+  private readonly onFault: ((error: unknown) => void) | undefined;
   private readonly shutdownWait: ShutdownWait;
   private readonly queuedRuns: RunRecord[] = [];
   private readonly pendingApprovals = new Map<string, PendingApprovalRecord>();
@@ -218,6 +219,7 @@ export class SessionActor {
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
     readonly onActivity?: () => void;
+    readonly onFault?: (error: unknown) => void;
     readonly shutdownWait?: ShutdownWait;
   }) {
     this.sessionId = options.storage.sessionId;
@@ -231,6 +233,7 @@ export class SessionActor {
     this.forceStopRunTask = options.forceStopRunTask;
     this.cancellationWait = options.cancellationWait ?? defaultShutdownWait;
     this.onActivity = options.onActivity;
+    this.onFault = options.onFault;
     this.shutdownWait = options.shutdownWait ?? defaultShutdownWait;
   }
 
@@ -245,6 +248,7 @@ export class SessionActor {
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
     readonly onActivity?: () => void;
+    readonly onFault?: (error: unknown) => void;
     readonly shutdownWait?: ShutdownWait;
   }): Promise<SessionActor> {
     const actor = new SessionActor(options);
@@ -300,8 +304,10 @@ export class SessionActor {
   }
 
   private recordFault(error: unknown): void {
-    if (this.fault === null) this.fault = error;
+    const firstFault = this.fault === null;
+    if (firstFault) this.fault = error;
     if (this.activeRun !== null) this.stopActiveTask(this.activeRun, error);
+    if (firstFault) this.onFault?.(error);
     this.touch();
   }
 

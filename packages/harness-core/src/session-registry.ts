@@ -10,13 +10,23 @@ export interface SessionActorLease {
   readonly release: () => void;
 }
 
+type CreateSessionActor = (
+  sessionId: string,
+  onActivity: () => void,
+  onFault: (error: unknown) => void,
+) => Promise<SessionActor>;
+
 interface RegistryEntry {
   readonly sessionId: string;
   actorPromise: Promise<SessionActor>;
   actor: SessionActor | undefined;
+  actorVersion: number;
   references: number;
+  resolveReferencesDrained: (() => void) | null;
   lastActivityMs: number;
   activityVersion: number;
+  fault: unknown | null;
+  retirement: Promise<void> | null;
   eviction: Promise<void> | null;
 }
 
@@ -27,15 +37,23 @@ export interface SessionRegistryEntryState {
   readonly activityVersion: number;
   readonly constructing: boolean;
   readonly evicting: boolean;
+  readonly faulted: boolean;
+  readonly retiring: boolean;
   readonly actorIdle: boolean;
+}
+
+export class SessionRegistryUnavailableError extends Error {
+  readonly code = "session.unavailable";
+
+  constructor(readonly sessionId: string, cause: unknown) {
+    super(`Session ${sessionId} is unavailable after its actor faulted`, { cause });
+    this.name = "SessionRegistryUnavailableError";
+  }
 }
 
 export class SessionActorRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
-  private readonly createActor: (
-    sessionId: string,
-    onActivity: () => void,
-  ) => Promise<SessionActor>;
+  private readonly createActor: CreateSessionActor;
   private readonly now: () => number;
   private readonly idleTimeoutMs: number;
   private readonly beforeEvict: ((sessionId: string) => void | Promise<void>) | undefined;
@@ -44,7 +62,7 @@ export class SessionActorRegistry {
   private closePromise: Promise<void> | null = null;
 
   constructor(options: {
-    readonly createActor: (sessionId: string, onActivity: () => void) => Promise<SessionActor>;
+    readonly createActor: CreateSessionActor;
     readonly now: () => number;
     readonly idleTimeoutMs: number;
     readonly beforeEvict?: (sessionId: string) => void | Promise<void>;
@@ -61,39 +79,139 @@ export class SessionActorRegistry {
   }
 
   private newEntry(sessionId: string): RegistryEntry {
-    const creating = this.createActor(sessionId, () => this.touch(sessionId));
     const entry: RegistryEntry = {
       sessionId,
-      actorPromise: creating,
+      actorPromise: new Promise<SessionActor>(() => undefined),
       actor: undefined,
+      actorVersion: 0,
       references: 0,
+      resolveReferencesDrained: null,
       lastActivityMs: this.now(),
       activityVersion: 0,
+      fault: null,
+      retirement: null,
       eviction: null,
     };
+    this.startConstruction(entry, true);
+    return entry;
+  }
+
+  private startConstruction(entry: RegistryEntry, removeOnFailure: boolean): void {
+    const version = ++entry.actorVersion;
+    const creating = Promise.resolve().then(() =>
+      this.createActor(
+        entry.sessionId,
+        () => this.touchEntry(entry),
+        (error) => this.actorFaulted(entry, version, error),
+      ),
+    );
     entry.actorPromise = creating.then(
       (actor) => {
         entry.actor = actor;
         return actor;
       },
       (error: unknown) => {
-        if (this.entries.get(sessionId) === entry) this.entries.delete(sessionId);
+        if (
+          removeOnFailure &&
+          this.entries.get(entry.sessionId) === entry &&
+          entry.retirement === null
+        ) {
+          this.entries.delete(entry.sessionId);
+        }
         throw error;
       },
     );
-    return entry;
   }
 
-  private touch(sessionId: string): void {
-    const entry = this.entries.get(sessionId);
-    if (entry === undefined) return;
+  private touchEntry(entry: RegistryEntry): void {
+    if (this.entries.get(entry.sessionId) !== entry) return;
     entry.lastActivityMs = this.now();
     entry.activityVersion += 1;
+  }
+
+  private actorFaulted(entry: RegistryEntry, version: number, error: unknown): void {
+    if (
+      this.closed ||
+      this.entries.get(entry.sessionId) !== entry ||
+      entry.actorVersion !== version
+    ) {
+      return;
+    }
+    if (entry.fault === null) entry.fault = error;
+    this.touchEntry(entry);
+    if (entry.retirement !== null) return;
+
+    const referencesDrained =
+      entry.references === 0
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            entry.resolveReferencesDrained = resolve;
+          });
+    entry.retirement = this.retireFaultedActor(entry, referencesDrained);
+    // Retirement is also observed by acquire/close. This prevents an unhandled rejection when
+    // neither happens before a quarantined session is diagnosed.
+    void entry.retirement.catch(() => undefined);
+  }
+
+  private async retireFaultedActor(
+    entry: RegistryEntry,
+    referencesDrained: Promise<void>,
+  ): Promise<void> {
+    try {
+      await referencesDrained;
+      const oldActor = await entry.actorPromise;
+      await oldActor.shutdown();
+      if (this.closed || this.entries.get(entry.sessionId) !== entry) return;
+
+      entry.actor = undefined;
+      entry.fault = null;
+      this.startConstruction(entry, false);
+      const replacement = await entry.actorPromise;
+      if (this.closed || this.entries.get(entry.sessionId) !== entry) {
+        await replacement.shutdown();
+        return;
+      }
+      if (entry.fault !== null) {
+        await replacement.shutdown();
+        throw entry.fault;
+      }
+      entry.retirement = null;
+    } catch (error) {
+      if (entry.fault === null) entry.fault = error;
+      if (error instanceof SessionRegistryUnavailableError) throw error;
+      throw new SessionRegistryUnavailableError(entry.sessionId, error);
+    }
+  }
+
+  private releaseReference(entry: RegistryEntry): void {
+    entry.references -= 1;
+    if (entry.references < 0) throw new Error("Actor reference count became negative");
+    if (entry.references === 0 && entry.resolveReferencesDrained !== null) {
+      const resolve = entry.resolveReferencesDrained;
+      entry.resolveReferencesDrained = null;
+      resolve();
+    }
+    this.touchEntry(entry);
+  }
+
+  private async awaitRetirement(entry: RegistryEntry): Promise<void> {
+    const retirement = entry.retirement;
+    if (retirement === null) return;
+    try {
+      await retirement;
+    } catch (error) {
+      if (error instanceof SessionRegistryUnavailableError) throw error;
+      throw new SessionRegistryUnavailableError(entry.sessionId, error);
+    }
   }
 
   async acquire(sessionId: string): Promise<SessionActorLease> {
     if (this.closed) throw new Error("Session actor registry is closed");
     let entry = this.entries.get(sessionId);
+    if (entry?.retirement !== null && entry?.retirement !== undefined) {
+      await this.awaitRetirement(entry);
+      return this.acquire(sessionId);
+    }
     if (entry?.eviction !== null && entry?.eviction !== undefined) {
       try {
         await entry.eviction;
@@ -107,16 +225,21 @@ export class SessionActorRegistry {
       this.entries.set(sessionId, entry);
     }
     entry.references += 1;
-    this.touch(sessionId);
+    this.touchEntry(entry);
     let actor: SessionActor;
     try {
       actor = await entry.actorPromise;
     } catch (error) {
-      entry.references -= 1;
+      this.releaseReference(entry);
       throw error;
     }
+    if (entry.retirement !== null) {
+      this.releaseReference(entry);
+      await this.awaitRetirement(entry);
+      return this.acquire(sessionId);
+    }
     if (this.closed || this.entries.get(sessionId) !== entry || entry.eviction !== null) {
-      entry.references -= 1;
+      this.releaseReference(entry);
       throw new Error("Session actor registry closed during acquire");
     }
 
@@ -126,11 +249,7 @@ export class SessionActorRegistry {
       release: () => {
         if (released) return;
         released = true;
-        const current = this.entries.get(sessionId);
-        if (current !== entry) return;
-        current.references -= 1;
-        if (current.references < 0) throw new Error("Actor reference count became negative");
-        this.touch(sessionId);
+        this.releaseReference(entry);
       },
     };
   }
@@ -143,6 +262,8 @@ export class SessionActorRegistry {
       activityVersion: entry.activityVersion,
       constructing: entry.actor === undefined,
       evicting: entry.eviction !== null,
+      faulted: entry.fault !== null,
+      retiring: entry.retirement !== null,
       actorIdle: entry.actor?.isIdle() ?? false,
     }));
   }
@@ -154,6 +275,7 @@ export class SessionActorRegistry {
       if (
         actor === undefined ||
         entry.eviction !== null ||
+        entry.retirement !== null ||
         entry.references !== 0 ||
         !actor.isIdle() ||
         this.now() - entry.lastActivityMs < this.idleTimeoutMs
@@ -166,6 +288,7 @@ export class SessionActorRegistry {
         this.entries.get(entry.sessionId) !== entry ||
         entry.references !== 0 ||
         entry.activityVersion !== version ||
+        entry.retirement !== null ||
         !actor.isIdle()
       ) {
         continue;
@@ -185,6 +308,7 @@ export class SessionActorRegistry {
   close(): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
     this.closed = true;
+    for (const entry of this.entries.values()) entry.resolveReferencesDrained?.();
     this.closePromise = this.finishClose();
     return this.closePromise;
   }
@@ -200,16 +324,19 @@ export class SessionActorRegistry {
   }
 
   private async completeClose(): Promise<void> {
-    const actors = await Promise.allSettled(
-      [...this.entries.values()].map((entry) => entry.actorPromise),
-    );
     const shutdowns = await Promise.allSettled(
-      actors.flatMap((result) => (result.status === "fulfilled" ? [result.value.shutdown()] : [])),
+      [...this.entries.values()].map(async (entry) => {
+        if (entry.retirement !== null) {
+          await entry.retirement;
+          return;
+        }
+        const actor = await entry.actorPromise;
+        await actor.shutdown();
+      }),
     );
-    const errors = [
-      ...actors.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
-      ...shutdowns.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
-    ];
+    const errors = shutdowns.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
     if (errors.length > 0) {
       throw new AggregateError(errors, "One or more session actors failed to shut down");
     }

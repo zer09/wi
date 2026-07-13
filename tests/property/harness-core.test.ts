@@ -48,6 +48,20 @@ async function runProperty(
   }
 }
 
+function propertyDeferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (error: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
 class PropertyStorage implements SessionActorStorage {
   readonly runs = new Map<string, RunRecord>();
   readonly commands = new Map<string, AcceptedCommandResult>();
@@ -501,6 +515,94 @@ describe("Milestone 3 property models", () => {
     );
   });
 
+  it("releases forced-isolation permits before generated cleanup settlements", async () => {
+    await runProperty(
+      "forced isolation followed by queued acquisition restores capacity exactly once",
+      fc.asyncProperty(
+        fc.constantFrom("terminated" as const, "detached" as const, "quarantined" as const),
+        fc.boolean(),
+        async (status, rejectCleanup) => {
+          const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+          const firstStorage = new PropertyStorage("ses_propertyIsolationA");
+          const secondStorage = new PropertyStorage("ses_propertyIsolationB");
+          const firstMonitor = new ActivityMonitor();
+          const secondMonitor = new ActivityMonitor();
+          const cleanup = propertyDeferred<void>();
+          const secondStarted = propertyDeferred<void>();
+          const secondResult = propertyDeferred<RunTaskResult>();
+          const first = await SessionActor.create({
+            storage: firstStorage,
+            eventHub: new CommittedEventHub(),
+            scheduler,
+            ids: propertyIds(),
+            now: () => 10,
+            runTask: async () => new Promise<RunTaskResult>(() => {}),
+            cancelRunTask: async () => new Promise<void>(() => {}),
+            cancellationWait: async () => false,
+            forceStopRunTask: () => ({ status, cleanup: cleanup.promise }),
+            onActivity: () => firstMonitor.signal(),
+          });
+          const second = await SessionActor.create({
+            storage: secondStorage,
+            eventHub: new CommittedEventHub(),
+            scheduler,
+            ids: propertyIds(),
+            now: () => 10,
+            runTask: async () => {
+              secondStarted.resolve();
+              return secondResult.promise;
+            },
+            cancelRunTask: async () => undefined,
+            forceStopRunTask: () => ({ status: "terminated" }),
+            onActivity: () => secondMonitor.signal(),
+          });
+
+          const firstRun = await first.submitMessage(
+            propertySubmit(first.sessionId, "cmd_propertyIsolationA", "first"),
+          );
+          await second.submitMessage(
+            propertySubmit(second.sessionId, "cmd_propertyIsolationB", "second"),
+          );
+          expect(scheduler.state.provider).toMatchObject({ active: 1, queued: 1 });
+
+          await first.cancelRun({
+            v: 1,
+            kind: "command",
+            commandId: "cmd_propertyIsolationCancelA",
+            sessionId: first.sessionId,
+            method: "run.cancel",
+            params: { runId: firstRun.runId },
+          });
+          await secondStarted.promise;
+          await firstMonitor.waitFor(() => first.snapshot.activeRunId === null);
+
+          expect(firstStorage.runs.get(firstRun.runId)?.state).toBe("interrupted");
+          expect(
+            firstStorage.events.filter((event) => event.eventType === "run.interrupted"),
+          ).toHaveLength(1);
+          expect(scheduler.state.provider).toMatchObject({
+            capacity: 1,
+            active: 1,
+            available: 0,
+            queued: 0,
+          });
+
+          if (rejectCleanup) cleanup.reject(new Error("late cleanup failure"));
+          else cleanup.resolve();
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(first.snapshot.faulted).toBe(false);
+          expect(scheduler.state.provider).toMatchObject({ active: 1, queued: 0 });
+
+          secondResult.resolve({ state: "completed" });
+          await secondMonitor.waitFor(() => second.snapshot.activeRunId === null);
+          expect(scheduler.state.provider).toMatchObject({ active: 0, available: 1, queued: 0 });
+          await Promise.all([first.shutdown(), second.shutdown()]);
+        },
+      ),
+    );
+  }, 20_000);
+
   it("merges replay and concurrently published live events into exact database order", async () => {
     await runProperty(
       "replay + live equals complete ordered database replay",
@@ -705,7 +807,7 @@ describe("Milestone 3 property models", () => {
             now: () => 4,
             runTask: async () => undefined,
             cancelRunTask: async () => undefined,
-            forceStopRunTask: async () => undefined,
+            forceStopRunTask: () => ({ status: "terminated" }),
           });
           let approvalResolved = false;
           let inputResolved = false;
@@ -842,7 +944,7 @@ describe("Milestone 3 property models", () => {
             now: () => 10,
             runTask: tasks.task,
             cancelRunTask: tasks.cancel,
-            forceStopRunTask: async () => undefined,
+            forceStopRunTask: () => ({ status: "terminated" }),
             onActivity: () => monitor.signal(),
           });
           const submitted = await actor.submitMessage(
@@ -1163,7 +1265,7 @@ describe("Milestone 3 property models", () => {
             now: () => ++now,
             runTask: tasks.left.task,
             cancelRunTask: tasks.left.cancel,
-            forceStopRunTask: async () => undefined,
+            forceStopRunTask: () => ({ status: "terminated" }),
             onActivity: () => monitors.left.signal(),
           }),
           right: await SessionActor.create({
@@ -1174,7 +1276,7 @@ describe("Milestone 3 property models", () => {
             now: () => ++now,
             runTask: tasks.right.task,
             cancelRunTask: tasks.right.cancel,
-            forceStopRunTask: async () => undefined,
+            forceStopRunTask: () => ({ status: "terminated" }),
             onActivity: () => monitors.right.signal(),
           }),
         };

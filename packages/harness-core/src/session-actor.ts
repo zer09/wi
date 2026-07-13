@@ -96,12 +96,50 @@ export type CancelRunTask = (
   reason: unknown,
 ) => void | Promise<void>;
 
-// Settlement must prove that the execution resource was terminated or quarantined. This hook is
-// entered only after graceful cancellation times out and must be bounded by its implementation.
+export interface RunTaskIsolation {
+  readonly status: "terminated" | "detached" | "quarantined";
+  readonly cleanup?: Promise<void>;
+}
+
+// This synchronous result is proof that the execution resource is already isolated. Optional
+// best-effort cleanup happens after isolation and cannot retain the scheduler permit.
 export type ForceStopRunTask = (
   context: RunTaskContext,
   reason: unknown,
-) => void | Promise<void>;
+) => RunTaskIsolation;
+
+function assertRunTaskIsolation(value: unknown): asserts value is RunTaskIsolation {
+  if (value === null || typeof value !== "object" || "then" in value) {
+    throw new SessionActorError(
+      "session.invalid_isolation_proof",
+      "Forced run-task isolation must return synchronous proof",
+    );
+  }
+  if (
+    !("status" in value) ||
+    (value.status !== "terminated" &&
+      value.status !== "detached" &&
+      value.status !== "quarantined")
+  ) {
+    throw new SessionActorError(
+      "session.invalid_isolation_proof",
+      "Forced run-task isolation returned an invalid status",
+    );
+  }
+  if (
+    "cleanup" in value &&
+    value.cleanup !== undefined &&
+    (value.cleanup === null ||
+      typeof value.cleanup !== "object" ||
+      !("then" in value.cleanup) ||
+      typeof value.cleanup.then !== "function")
+  ) {
+    throw new SessionActorError(
+      "session.invalid_isolation_proof",
+      "Forced run-task isolation cleanup must be a promise",
+    );
+  }
+}
 
 interface ActiveRun {
   readonly runId: string;
@@ -734,11 +772,17 @@ export class SessionActor {
       return;
     }
 
-    await this.forceStopRunTask(context, reason);
+    const isolation: unknown = this.forceStopRunTask(context, reason);
+    assertRunTaskIsolation(isolation);
+    if (isolation.cleanup !== undefined) {
+      void Promise.resolve(isolation.cleanup).catch(() => {
+        // Isolation already succeeded; later best-effort cleanup cannot affect run or permit state.
+      });
+    }
     confirmStopped({
       state: "interrupted",
       code: "provider.cancelled",
-      message: "Run task exceeded its cancellation deadline and its execution resource was isolated.",
+      message: `Run task exceeded its cancellation deadline and its execution resource was ${isolation.status}.`,
       cancellationFailure: true,
     });
   }

@@ -35,6 +35,68 @@ const created = event(1, "run.created", { eventVersion: 1, runId: "run_A" });
 const started = event(2, "run.started", { eventVersion: 1, runId: "run_A" });
 const completed = event(3, "run.completed", { eventVersion: 1, runId: "run_A" });
 
+const terminalEventTypes = [
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.interrupted",
+] as const;
+
+function terminalRunEvents(eventType: (typeof terminalEventTypes)[number]) {
+  const events = [
+    event(1, "run.created", { eventVersion: 1, runId: "run_A" }),
+    event(2, "run.started", { eventVersion: 1, runId: "run_A" }),
+    event(3, "tool.approval.requested", {
+      eventVersion: 1,
+      runId: "run_A",
+      callId: "call_A",
+      approvalId: "approval_A",
+      toolName: "guarded_echo",
+      actionDigest: "a".repeat(64),
+      summary: "Echo hello",
+    }),
+    event(4, "input.requested", {
+      eventVersion: 1,
+      runId: "run_A",
+      inputId: "input_A",
+      prompt: "Continue?",
+    }),
+    event(5, "run.waiting_for_user", {
+      eventVersion: 1,
+      runId: "run_A",
+      reason: "input",
+      inputId: "input_A",
+    }),
+  ];
+
+  switch (eventType) {
+    case "run.completed":
+      return [
+        ...events,
+        event(6, "run.started", { eventVersion: 1, runId: "run_A" }),
+        event(7, eventType, { eventVersion: 1, runId: "run_A" }),
+      ];
+    case "run.failed":
+    case "run.interrupted":
+      return [
+        ...events,
+        event(6, eventType, {
+          eventVersion: 1,
+          runId: "run_A",
+          code: "provider.incomplete",
+          message: "Provider stopped.",
+          diagnosticId: "err_A",
+        }),
+      ];
+    case "run.cancelled":
+      return [
+        ...events,
+        event(6, "run.cancel.requested", { eventVersion: 1, runId: "run_A" }),
+        event(7, eventType, { eventVersion: 1, runId: "run_A" }),
+      ];
+  }
+}
+
 describe("browser session reducer", () => {
   it("applies contiguous events", () => {
     const state = replaySessionEvents(createBrowserSessionState("ses_A"), [created, started]);
@@ -301,6 +363,113 @@ describe("browser session reducer", () => {
     const resolved = replaySessionEvents(waiting, events.slice(2));
     expect(resolved.pendingApprovals).toEqual({});
     expect(resolved.pendingInputs).toEqual({});
+  });
+
+  it.each(terminalEventTypes)("clears pending interactions when %s terminalizes their run", (eventType) => {
+    const state = replaySessionEvents(
+      createBrowserSessionState("ses_A"),
+      terminalRunEvents(eventType),
+    );
+
+    expect(state.errorCode).toBeNull();
+    expect(state.activeRun).toEqual({ runId: "run_A", state: eventType.slice(4) });
+    expect(state.pendingApprovals).toEqual({});
+    expect(state.pendingInputs).toEqual({});
+  });
+
+  it.each(["approval", "input"] as const)(
+    "clears a pending %s without requiring another interaction kind",
+    (kind) => {
+      const interaction = kind === "approval"
+        ? event(3, "tool.approval.requested", {
+            eventVersion: 1,
+            runId: "run_A",
+            callId: "call_A",
+            approvalId: "approval_A",
+            toolName: "guarded_echo",
+            actionDigest: "a".repeat(64),
+            summary: "Echo hello",
+          })
+        : event(3, "input.requested", {
+            eventVersion: 1,
+            runId: "run_A",
+            inputId: "input_A",
+            prompt: "Continue?",
+          });
+      const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+        event(1, "run.created", { eventVersion: 1, runId: "run_A" }),
+        event(2, "run.started", { eventVersion: 1, runId: "run_A" }),
+        interaction,
+        event(4, "run.completed", { eventVersion: 1, runId: "run_A" }),
+      ]);
+
+      expect(state.errorCode).toBeNull();
+      expect(state.pendingApprovals).toEqual({});
+      expect(state.pendingInputs).toEqual({});
+    },
+  );
+
+  it("preserves pending interactions that belong to another run", () => {
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      event(1, "run.created", { eventVersion: 1, runId: "run_A" }),
+      event(2, "run.started", { eventVersion: 1, runId: "run_A" }),
+      event(3, "tool.approval.requested", {
+        eventVersion: 1,
+        runId: "run_B",
+        callId: "call_B",
+        approvalId: "approval_B",
+        toolName: "guarded_echo",
+        actionDigest: "b".repeat(64),
+        summary: "Echo goodbye",
+      }),
+      event(4, "input.requested", {
+        eventVersion: 1,
+        runId: "run_B",
+        inputId: "input_B",
+        prompt: "Wait?",
+      }),
+      event(5, "run.completed", { eventVersion: 1, runId: "run_A" }),
+    ]);
+
+    expect(state.errorCode).toBeNull();
+    expect(Object.keys(state.pendingApprovals)).toEqual(["approval_B"]);
+    expect(Object.keys(state.pendingInputs)).toEqual(["input_B"]);
+  });
+
+  it("keeps explicit interaction resolution before terminal cleanup idempotent", () => {
+    const events = terminalRunEvents("run.completed");
+    const state = replaySessionEvents(createBrowserSessionState("ses_A"), [
+      ...events.slice(0, 4),
+      event(5, "tool.approval.resolved", {
+        eventVersion: 1,
+        runId: "run_A",
+        callId: "call_A",
+        approvalId: "approval_A",
+        resolution: "denied",
+      }),
+      event(6, "input.resolved", {
+        eventVersion: 1,
+        runId: "run_A",
+        inputId: "input_A",
+        value: null,
+      }),
+      event(7, "run.completed", { eventVersion: 1, runId: "run_A" }),
+    ]);
+
+    expect(state.errorCode).toBeNull();
+    expect(state.pendingApprovals).toEqual({});
+    expect(state.pendingInputs).toEqual({});
+  });
+
+  it("keeps exact duplicate terminal cleanup idempotent", () => {
+    const events = terminalRunEvents("run.cancelled");
+    const once = replaySessionEvents(createBrowserSessionState("ses_A"), events);
+    const terminal = events.at(-1);
+    if (terminal === undefined) throw new Error("Terminal event is missing");
+
+    expect(reduceSessionEvent(once, structuredClone(terminal))).toBe(once);
+    expect(once.pendingApprovals).toEqual({});
+    expect(once.pendingInputs).toEqual({});
   });
 });
 

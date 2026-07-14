@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionEvent } from "@wi/protocol";
-import { SessionStoreManager } from "@wi/storage";
+import { SessionStoreManager, type SessionClient } from "@wi/storage";
 import { createBrowserSessionState } from "../../packages/client-state/src/model.js";
 import { reduceSessionEvent } from "../../packages/client-state/src/reducer.js";
 import {
@@ -80,6 +80,151 @@ function submit(sessionId: string, commandId: string) {
     method: "message.submit" as const,
     params: { text: commandId },
   };
+}
+
+async function seedRunWithPendingInteractions(
+  session: SessionClient,
+  prefix: string,
+  state: "running" | "waiting_for_user",
+): Promise<{ readonly runId: string }> {
+  const runId = `run_${prefix}`;
+  const stepId = `step_${prefix}`;
+  const callId = `call_${prefix}`;
+  const approvalId = `approval_${prefix}`;
+  const inputId = `input_${prefix}`;
+  const waiting = state === "waiting_for_user";
+
+  await session.appendTransaction({
+    events: [
+      {
+        eventId: `evt_${prefix}RunCreated`,
+        eventType: "run.created",
+        createdAtMs: 2_000,
+        data: { eventVersion: 1, runId },
+      },
+      {
+        eventId: `evt_${prefix}RunStarted`,
+        eventType: "run.started",
+        createdAtMs: 2_001,
+        data: { eventVersion: 1, runId },
+      },
+      {
+        eventId: `evt_${prefix}StepStarted`,
+        eventType: "provider.step.started",
+        createdAtMs: 2_002,
+        data: { eventVersion: 1, runId, stepId, stepIndex: 0 },
+      },
+      ...(waiting
+        ? [
+            {
+              eventId: `evt_${prefix}StepCompleted`,
+              eventType: "provider.step.completed" as const,
+              createdAtMs: 2_003,
+              data: { eventVersion: 1 as const, runId, stepId },
+            },
+          ]
+        : []),
+      {
+        eventId: `evt_${prefix}Approval`,
+        eventType: "tool.approval.requested",
+        createdAtMs: 2_004,
+        data: {
+          eventVersion: 1,
+          runId,
+          callId,
+          approvalId,
+          toolName: "guarded_echo",
+          actionDigest: "a".repeat(64),
+          summary: "pending",
+        },
+      },
+      {
+        eventId: `evt_${prefix}Input`,
+        eventType: "input.requested",
+        createdAtMs: 2_005,
+        data: { eventVersion: 1, runId, inputId, prompt: "answer" },
+      },
+      ...(waiting
+        ? [
+            {
+              eventId: `evt_${prefix}Waiting`,
+              eventType: "run.waiting_for_user" as const,
+              createdAtMs: 2_006,
+              data: {
+                eventVersion: 1 as const,
+                runId,
+                reason: "input" as const,
+                inputId,
+              },
+            },
+          ]
+        : []),
+    ],
+    projections: [
+      {
+        kind: "run.put",
+        runId,
+        state,
+        providerId: "fake",
+        providerConfig: {},
+        createdAtMs: 2_000,
+        startedAtMs: 2_001,
+        completedAtMs: null,
+        cancelledAtMs: null,
+        failureCategory: null,
+        failureMessage: null,
+        activeProviderStepId: waiting ? null : stepId,
+      },
+      {
+        kind: "providerStep.put",
+        stepId,
+        runId,
+        stepIndex: 0,
+        state: waiting ? "completed" : "streaming",
+        startedAtMs: 2_002,
+        completedAtMs: waiting ? 2_003 : null,
+        responseId: waiting ? `response_${prefix}` : null,
+        errorCategory: null,
+        errorMessage: null,
+      },
+      {
+        kind: "toolExecution.put",
+        callId,
+        runId,
+        stepId,
+        toolName: "guarded_echo",
+        argumentsJson: "{}",
+        argumentsHash: "b".repeat(64),
+        effectClass: "pure",
+        state: "awaiting_approval",
+        attemptCount: 0,
+        requestedAtMs: 2_004,
+        startedAtMs: null,
+        completedAtMs: null,
+        result: null,
+        error: null,
+      },
+      {
+        kind: "approval.put",
+        approvalId,
+        runId,
+        callId,
+        state: "pending",
+        actionDigest: "a".repeat(64),
+        requestedAtMs: 2_004,
+      },
+      {
+        kind: "input.put",
+        inputId,
+        runId,
+        state: "pending",
+        prompt: "answer",
+        requestedAtMs: 2_005,
+      },
+    ],
+  });
+
+  return { runId };
 }
 
 class ControlledTasks {
@@ -558,6 +703,119 @@ describe("harness-core with real storage workers", () => {
     await expect(reopened.getPendingInputs()).resolves.toEqual([]);
     expect(second.snapshot).toMatchObject({ pendingApprovalCount: 0, pendingInputCount: 0 });
     await second.shutdown();
+  });
+
+  it("replays actor cancellation without storage/client pending-interaction divergence", async () => {
+    const manager = await store();
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_createPendingCancellation",
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    const seeded = await seedRunWithPendingInteractions(session, "pendingCancellation", "waiting_for_user");
+    const monitor = new ActivityMonitor();
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: actorIds("pendingCancellation"),
+      now: () => 3_000,
+      runTask: async () => undefined,
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      onActivity: () => monitor.signal(),
+    });
+
+    try {
+      expect(actor.snapshot).toMatchObject({ pendingApprovalCount: 1, pendingInputCount: 1 });
+      await actor.cancelRun({
+        v: 1,
+        kind: "command",
+        commandId: "cmd_cancelPendingCancellation",
+        sessionId: session.sessionId,
+        method: "run.cancel",
+        params: { runId: seeded.runId },
+      });
+      await monitor.waitFor(() => actor.snapshot.activeRunId === null);
+
+      const [storageApprovals, storageInputs, events] = await Promise.all([
+        session.getPendingApprovals(),
+        session.getPendingInputs(),
+        session.getEventsAfter(0),
+      ]);
+      let browserState = createBrowserSessionState(session.sessionId);
+      for (const event of events) browserState = reduceSessionEvent(browserState, event);
+
+      expect(storageApprovals).toEqual([]);
+      expect(storageInputs).toEqual([]);
+      expect(browserState).toMatchObject({
+        errorCode: null,
+        activeRun: { runId: seeded.runId, state: "cancelled" },
+      });
+      expect(Object.keys(browserState.pendingApprovals)).toEqual(
+        storageApprovals.map((approval) => approval.approvalId),
+      );
+      expect(Object.keys(browserState.pendingInputs)).toEqual(
+        storageInputs.map((input) => input.inputId),
+      );
+      expect(events.map((event) => event.eventType)).not.toContain("tool.approval.resolved");
+      expect(events.map((event) => event.eventType)).not.toContain("input.resolved");
+    } finally {
+      await actor.shutdown();
+    }
+  });
+
+  it("replays recovery interruption without storage/client pending-interaction divergence", async () => {
+    const manager = await store();
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_createPendingRecovery",
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    const seeded = await seedRunWithPendingInteractions(session, "pendingRecovery", "running");
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: actorIds("pendingRecovery"),
+      now: () => 3_000,
+      runTask: async () => undefined,
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+    });
+
+    try {
+      const [storageApprovals, storageInputs, events] = await Promise.all([
+        session.getPendingApprovals(),
+        session.getPendingInputs(),
+        session.getEventsAfter(0),
+      ]);
+      let browserState = createBrowserSessionState(session.sessionId);
+      for (const event of events) browserState = reduceSessionEvent(browserState, event);
+
+      expect(storageApprovals).toEqual([]);
+      expect(storageInputs).toEqual([]);
+      expect(browserState).toMatchObject({
+        errorCode: null,
+        activeRun: { runId: seeded.runId, state: "interrupted" },
+      });
+      expect(Object.keys(browserState.pendingApprovals)).toEqual(
+        storageApprovals.map((approval) => approval.approvalId),
+      );
+      expect(Object.keys(browserState.pendingInputs)).toEqual(
+        storageInputs.map((input) => input.inputId),
+      );
+      expect(events.map((event) => event.eventType)).not.toContain("tool.approval.resolved");
+      expect(events.map((event) => event.eventType)).not.toContain("input.resolved");
+    } finally {
+      await actor.shutdown();
+    }
   });
 
   it("replays actor-produced queued runs through the client reducer in FIFO order", async () => {

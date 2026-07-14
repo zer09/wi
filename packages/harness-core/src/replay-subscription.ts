@@ -68,10 +68,7 @@ export function beginReplaySubscription(options: {
 
   let active = true;
   let disconnectError: ReplaySubscriptionError | null = null;
-  let resolveDisconnect = (): void => {};
-  const disconnected = new Promise<void>((resolve) => {
-    resolveDisconnect = resolve;
-  });
+  const disconnectWaiters = new Set<() => void>();
   const abortController = new AbortController();
   let phase: "replaying" | "live" = "replaying";
   let deliveredSequence = options.afterSequence;
@@ -115,7 +112,8 @@ export function beginReplaySubscription(options: {
           );
     queue.clear();
     hubSubscription?.unsubscribe();
-    resolveDisconnect();
+    for (const notifyDisconnected of disconnectWaiters) notifyDisconnected();
+    disconnectWaiters.clear();
     abortController.abort(disconnectError);
     return true;
   };
@@ -134,27 +132,68 @@ export function beginReplaySubscription(options: {
     );
   };
 
-  const awaitCollaborator = async <T>(operation: () => T | PromiseLike<T>): Promise<T> => {
+  const awaitCollaborator = <T>(
+    operation: () => T | PromiseLike<T>,
+  ): Promise<Awaited<T>> => {
     assertActive();
-    const outcome = await Promise.race([
-      Promise.resolve()
-        .then(operation)
-        .then(
-          (value) => ({ status: "fulfilled", value }) as const,
-          (error: unknown) => ({ status: "rejected", error }) as const,
-        ),
-      disconnected.then(() => ({ status: "disconnected" }) as const),
-    ]);
-    if (outcome.status === "disconnected") {
-      assertActive();
-      throw new ReplaySubscriptionError(
-        "replay.disconnected",
-        `Replay subscriber for ${options.sessionId} disconnected`,
-      );
-    }
-    if (outcome.status === "rejected") throw outcome.error;
-    assertActive();
-    return outcome.value;
+    return new Promise<Awaited<T>>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        disconnectWaiters.delete(notifyDisconnected);
+      };
+      const resolveOnce = (value: Awaited<T>): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+      const rejectOnce = (error: unknown): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const rejectDisconnected = (): void => {
+        try {
+          assertActive();
+        } catch (error) {
+          rejectOnce(error);
+        }
+      };
+      const notifyDisconnected = (): void => {
+        queueMicrotask(rejectDisconnected);
+      };
+
+      disconnectWaiters.add(notifyDisconnected);
+      queueMicrotask(() => {
+        // Preserve deferred collaborator startup, but never start work after disconnect.
+        if (settled || !active) return;
+        let collaborator: T | PromiseLike<T>;
+        try {
+          collaborator = operation();
+        } catch (error) {
+          if (active) rejectOnce(error);
+          else rejectDisconnected();
+          return;
+        }
+        void Promise.resolve(collaborator).then(
+          (value) => {
+            if (settled) return;
+            try {
+              assertActive();
+              resolveOnce(value);
+            } catch (error) {
+              rejectOnce(error);
+            }
+          },
+          (error: unknown) => {
+            // Attach in the startup turn so the first rejection wins and remains observed even
+            // if disconnect settles the outer wait.
+            rejectOnce(error);
+          },
+        );
+      });
+    });
   };
 
   const queueLive = (event: SessionEvent): void => {

@@ -455,6 +455,35 @@ describe("race-free replay subscription", () => {
     expect(drained).toBe(true);
   });
 
+  it("never starts a collaborator with an already-aborted signal", async () => {
+    const hub = new CommittedEventHub();
+    const signalStates: boolean[] = [];
+    const deliver = vi.fn();
+    const replayComplete = vi.fn();
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: {
+        getHeadSequence: (signal) => {
+          signalStates.push(signal.aborted);
+          return never<number>();
+        },
+        getEventsAfter: async () => [],
+      },
+      callbacks: { deliver, replayComplete },
+    });
+
+    subscription.unsubscribe();
+
+    await expect(subscription.ready).rejects.toMatchObject({ code: "replay.disconnected" });
+    await expect(subscription.drain()).resolves.toBeUndefined();
+    expect(signalStates).not.toContain(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(replayComplete).not.toHaveBeenCalled();
+  });
+
   it("bounds disconnect while the head query never settles", async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;
@@ -728,8 +757,8 @@ describe("race-free replay subscription", () => {
       afterSequence: 0,
       hub,
       source: {
-        getHeadSequence: async () => 1,
-        getEventsAfter: async () => {
+        getHeadSequence: () => Promise.resolve(1),
+        getEventsAfter: () => {
           started.resolve();
           return history.promise;
         },
@@ -740,9 +769,9 @@ describe("race-free replay subscription", () => {
     await started.promise;
     const readyError = subscription.ready.catch((error: unknown) => error);
     history.reject(conflict);
-    await expect(readyError).resolves.toBe(conflict);
     subscription.unsubscribe();
 
+    await expect(readyError).resolves.toBe(conflict);
     await expect(subscription.drain()).resolves.toBeUndefined();
     expect(hub.subscriberCount("ses_replay")).toBe(0);
   });

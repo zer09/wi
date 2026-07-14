@@ -19,14 +19,18 @@ export class ReplaySubscriptionError extends Error {
 }
 
 export interface ReplayEventSource {
-  getHeadSequence(): Promise<number>;
-  getEventsAfter(afterSequence: number, throughSequence: number): Promise<readonly SessionEvent[]>;
+  getHeadSequence(signal: AbortSignal): Promise<number>;
+  getEventsAfter(
+    afterSequence: number,
+    throughSequence: number,
+    signal: AbortSignal,
+  ): Promise<readonly SessionEvent[]>;
 }
 
 export interface ReplaySubscriptionCallbacks {
-  readonly deliver: (event: SessionEvent) => void | Promise<void>;
-  readonly replayComplete: (throughSequence: number) => void | Promise<void>;
-  readonly onLiveError?: (error: unknown) => void | Promise<void>;
+  readonly deliver: (event: SessionEvent, signal: AbortSignal) => void | Promise<void>;
+  readonly replayComplete: (throughSequence: number, signal: AbortSignal) => void | Promise<void>;
+  readonly onLiveError?: (error: unknown, signal: AbortSignal) => void | Promise<void>;
 }
 
 export interface ReplaySubscription {
@@ -63,7 +67,12 @@ export function beginReplaySubscription(options: {
   }
 
   let active = true;
-  let activeFailure: unknown | null = null;
+  let disconnectError: ReplaySubscriptionError | null = null;
+  let resolveDisconnect = (): void => {};
+  const disconnected = new Promise<void>((resolve) => {
+    resolveDisconnect = resolve;
+  });
+  const abortController = new AbortController();
   let phase: "replaying" | "live" = "replaying";
   let deliveredSequence = options.afterSequence;
   let pendingLiveDeliveries = 0;
@@ -82,7 +91,7 @@ export function beginReplaySubscription(options: {
 
   const reportLiveError = (error: unknown): void => {
     try {
-      const reporting = options.callbacks.onLiveError?.(error);
+      const reporting = options.callbacks.onLiveError?.(error, abortController.signal);
       if (reporting !== undefined) {
         void Promise.resolve(reporting).catch(() => {
           // Subscriber diagnostics must not affect the committed-event publisher.
@@ -93,23 +102,59 @@ export function beginReplaySubscription(options: {
     }
   };
 
-  const failLive = (error: unknown): void => {
-    if (!active) return;
+  const deactivate = (failure: unknown | null): boolean => {
+    if (!active) return false;
     active = false;
-    activeFailure = error;
+    disconnectError =
+      failure instanceof ReplaySubscriptionError
+        ? failure
+        : new ReplaySubscriptionError(
+            "replay.disconnected",
+            `Replay subscriber for ${options.sessionId} disconnected`,
+            failure === null ? undefined : { cause: failure },
+          );
     queue.clear();
     hubSubscription?.unsubscribe();
+    resolveDisconnect();
+    abortController.abort(disconnectError);
+    return true;
+  };
+
+  const failLive = (error: unknown): void => {
+    if (!deactivate(error)) return;
     reportLiveError(error);
   };
 
   const assertActive = (): void => {
     if (active) return;
-    if (activeFailure instanceof ReplaySubscriptionError) throw activeFailure;
+    if (disconnectError !== null) throw disconnectError;
     throw new ReplaySubscriptionError(
       "replay.disconnected",
       `Replay subscriber for ${options.sessionId} disconnected`,
-      activeFailure === null ? undefined : { cause: activeFailure },
     );
+  };
+
+  const awaitCollaborator = async <T>(operation: () => T | PromiseLike<T>): Promise<T> => {
+    assertActive();
+    const outcome = await Promise.race([
+      Promise.resolve()
+        .then(operation)
+        .then(
+          (value) => ({ status: "fulfilled", value }) as const,
+          (error: unknown) => ({ status: "rejected", error }) as const,
+        ),
+      disconnected.then(() => ({ status: "disconnected" }) as const),
+    ]);
+    if (outcome.status === "disconnected") {
+      assertActive();
+      throw new ReplaySubscriptionError(
+        "replay.disconnected",
+        `Replay subscriber for ${options.sessionId} disconnected`,
+      );
+    }
+    if (outcome.status === "rejected") throw outcome.error;
+    assertActive();
+    return outcome.value;
   };
 
   const queueLive = (event: SessionEvent): void => {
@@ -158,7 +203,9 @@ export function beginReplaySubscription(options: {
       pendingLiveDeliveries += 1;
       liveTail = liveTail
         .then(async () => {
-          if (active) await options.callbacks.deliver(event);
+          if (active) {
+            await awaitCollaborator(() => options.callbacks.deliver(event, abortController.signal));
+          }
         })
         .catch((error: unknown) => {
           // A failed send makes the subscriber's cursor uncertain. Stop before a later
@@ -200,18 +247,18 @@ export function beginReplaySubscription(options: {
   );
 
   const unsubscribe = (): void => {
-    if (!active) return;
-    active = false;
-    queue.clear();
-    hubSubscription?.unsubscribe();
+    deactivate(null);
   };
 
   const ready = (async (): Promise<{ readonly throughSequence: number }> => {
     try {
       let head: number;
       try {
-        head = await options.source.getHeadSequence();
+        head = await awaitCollaborator(() =>
+          options.source.getHeadSequence(abortController.signal),
+        );
       } catch (error) {
+        if (error instanceof ReplaySubscriptionError) throw error;
         if (options.isUnknownSessionError?.(error) === true) {
           throw new ReplaySubscriptionError(
             "replay.unknown_session",
@@ -233,8 +280,11 @@ export function beginReplaySubscription(options: {
 
       let historical: readonly SessionEvent[];
       try {
-        historical = await options.source.getEventsAfter(options.afterSequence, head);
+        historical = await awaitCollaborator(() =>
+          options.source.getEventsAfter(options.afterSequence, head, abortController.signal),
+        );
       } catch (error) {
+        if (error instanceof ReplaySubscriptionError) throw error;
         if (options.isUnknownSessionError?.(error) === true) {
           throw new ReplaySubscriptionError(
             "replay.unknown_session",
@@ -294,8 +344,9 @@ export function beginReplaySubscription(options: {
       // Validate the complete `(cursor, H]` batch before exposing any of it to the subscriber.
       for (const validatedEvent of validatedHistorical) {
         queue.delete(validatedEvent.event.sequence);
-        await options.callbacks.deliver(validatedEvent.event);
-        assertActive();
+        await awaitCollaborator(() =>
+          options.callbacks.deliver(validatedEvent.event, abortController.signal),
+        );
         deliveredSequence = validatedEvent.event.sequence;
         rememberDelivered(validatedEvent);
       }
@@ -320,8 +371,7 @@ export function beginReplaySubscription(options: {
         queue.delete(sequence);
       }
 
-      await options.callbacks.replayComplete(head);
-      assertActive();
+      await awaitCollaborator(() => options.callbacks.replayComplete(head, abortController.signal));
       deliveredSequence = head;
 
       while (queue.size > 0) {
@@ -334,8 +384,9 @@ export function beginReplaySubscription(options: {
           );
         }
         queue.delete(nextSequence);
-        await options.callbacks.deliver(queued.event);
-        assertActive();
+        await awaitCollaborator(() =>
+          options.callbacks.deliver(queued.event, abortController.signal),
+        );
         deliveredSequence = nextSequence;
         rememberDelivered(queued);
       }

@@ -30,6 +30,39 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+type ObservedPromise =
+  | { readonly status: "fulfilled"; readonly value: unknown }
+  | { readonly status: "rejected"; readonly reason: unknown }
+  | { readonly status: "pending" };
+
+function never<T>(): Promise<T> {
+  return new Promise<T>(() => {});
+}
+
+function rejectableDeferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly reject: (reason: unknown) => void;
+} {
+  let reject: (reason: unknown) => void = () => {};
+  const promise = new Promise<T>((_resolve, rejectPromise) => {
+    reject = rejectPromise;
+  });
+  return { promise, reject };
+}
+
+async function observePromise(promise: Promise<unknown>): Promise<ObservedPromise> {
+  const settled: Promise<ObservedPromise> = promise.then(
+    (value): ObservedPromise => ({ status: "fulfilled", value }),
+    (reason: unknown): ObservedPromise => ({ status: "rejected", reason }),
+  );
+  const timedOut = new Promise<ObservedPromise>((resolve) => {
+    setTimeout(() => resolve({ status: "pending" }), 1);
+  });
+  const outcome = Promise.race([settled, timedOut]);
+  await vi.advanceTimersByTimeAsync(1);
+  return outcome;
+}
+
 describe("CommittedEventHub", () => {
   it("isolates subscriber failures and never waits for a slow subscriber", async () => {
     const hub = new CommittedEventHub();
@@ -420,6 +453,298 @@ describe("race-free replay subscription", () => {
     await expect(subscription.ready).rejects.toMatchObject({ code: "replay.disconnected" });
     await drain;
     expect(drained).toBe(true);
+  });
+
+  it("bounds disconnect while the head query never settles", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let readyOutcome: ObservedPromise;
+    let drainOutcome: ObservedPromise;
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const deliver = vi.fn();
+    const replayComplete = vi.fn();
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: {
+        getHeadSequence: async (...signals: AbortSignal[]) => {
+          [signal] = signals;
+          started.resolve();
+          return never<number>();
+        },
+        getEventsAfter: async () => [],
+      },
+      callbacks: { deliver, replayComplete },
+    });
+
+    try {
+      await started.promise;
+      subscription.unsubscribe();
+      readyOutcome = await observePromise(subscription.ready);
+      drainOutcome = await observePromise(subscription.drain());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(readyOutcome).toMatchObject({
+      status: "rejected",
+      reason: { code: "replay.disconnected" },
+    });
+    expect(drainOutcome).toEqual({ status: "fulfilled", value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    hub.publishCommitted(event(1));
+    await Promise.resolve();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(replayComplete).not.toHaveBeenCalled();
+  });
+
+  it("bounds disconnect while the history query never settles", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let readyOutcome: ObservedPromise;
+    let drainOutcome: ObservedPromise;
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const deliver = vi.fn();
+    const replayComplete = vi.fn();
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: {
+        getHeadSequence: async () => 1,
+        getEventsAfter: async (_afterSequence, _throughSequence, ...signals: AbortSignal[]) => {
+          [signal] = signals;
+          started.resolve();
+          return never<readonly SessionEvent[]>();
+        },
+      },
+      callbacks: { deliver, replayComplete },
+    });
+
+    try {
+      await started.promise;
+      subscription.unsubscribe();
+      readyOutcome = await observePromise(subscription.ready);
+      drainOutcome = await observePromise(subscription.drain());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(readyOutcome).toMatchObject({
+      status: "rejected",
+      reason: { code: "replay.disconnected" },
+    });
+    expect(drainOutcome).toEqual({ status: "fulfilled", value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    hub.publishCommitted(event(1));
+    await Promise.resolve();
+    expect(deliver).not.toHaveBeenCalled();
+    expect(replayComplete).not.toHaveBeenCalled();
+  });
+
+  it("bounds disconnect while historical delivery never settles", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let readyOutcome: ObservedPromise;
+    let drainOutcome: ObservedPromise;
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const observed: number[] = [];
+    const replayComplete = vi.fn();
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: { getHeadSequence: async () => 1, getEventsAfter: async () => [event(1)] },
+      callbacks: {
+        deliver: async (value, ...signals: AbortSignal[]) => {
+          observed.push(value.sequence);
+          [signal] = signals;
+          started.resolve();
+          return never<void>();
+        },
+        replayComplete,
+      },
+    });
+
+    try {
+      await started.promise;
+      subscription.unsubscribe();
+      readyOutcome = await observePromise(subscription.ready);
+      drainOutcome = await observePromise(subscription.drain());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(readyOutcome).toMatchObject({
+      status: "rejected",
+      reason: { code: "replay.disconnected" },
+    });
+    expect(drainOutcome).toEqual({ status: "fulfilled", value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    expect(replayComplete).not.toHaveBeenCalled();
+    hub.publishCommitted(event(1));
+    await Promise.resolve();
+    expect(observed).toEqual([1]);
+  });
+
+  it("bounds disconnect while replay completion never settles", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let readyOutcome: ObservedPromise;
+    let drainOutcome: ObservedPromise;
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const deliver = vi.fn();
+    const replayComplete = vi.fn(async (_throughSequence, ...signals: AbortSignal[]) => {
+      [signal] = signals;
+      started.resolve();
+      return never<void>();
+    });
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: { getHeadSequence: async () => 0, getEventsAfter: async () => [] },
+      callbacks: { deliver, replayComplete },
+    });
+
+    try {
+      await started.promise;
+      subscription.unsubscribe();
+      readyOutcome = await observePromise(subscription.ready);
+      drainOutcome = await observePromise(subscription.drain());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(readyOutcome).toMatchObject({
+      status: "rejected",
+      reason: { code: "replay.disconnected" },
+    });
+    expect(drainOutcome).toEqual({ status: "fulfilled", value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(replayComplete).toHaveBeenCalledOnce();
+    hub.publishCommitted(event(1));
+    await Promise.resolve();
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("bounds drain while live delivery never settles", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let drainOutcome: ObservedPromise;
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const observed: number[] = [];
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: { getHeadSequence: async () => 0, getEventsAfter: async () => [] },
+      callbacks: {
+        deliver: async (value, ...signals: AbortSignal[]) => {
+          observed.push(value.sequence);
+          [signal] = signals;
+          started.resolve();
+          return never<void>();
+        },
+        replayComplete: vi.fn(),
+      },
+    });
+
+    try {
+      await expect(subscription.ready).resolves.toEqual({ throughSequence: 0 });
+      hub.publishCommitted(event(1));
+      await started.promise;
+      subscription.unsubscribe();
+      drainOutcome = await observePromise(subscription.drain());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(drainOutcome).toEqual({ status: "fulfilled", value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+    hub.publishCommitted(event(2));
+    await Promise.resolve();
+    expect(observed).toEqual([1]);
+  });
+
+  it("contains a late collaborator rejection after disconnect", async () => {
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const lateHead = rejectableDeferred<number>();
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: {
+        getHeadSequence: async () => {
+          started.resolve();
+          return lateHead.promise;
+        },
+        getEventsAfter: async () => [],
+      },
+      callbacks: { deliver: vi.fn(), replayComplete: vi.fn() },
+    });
+
+    try {
+      await started.promise;
+      subscription.unsubscribe();
+      await expect(subscription.ready).rejects.toMatchObject({ code: "replay.disconnected" });
+      await expect(subscription.drain()).resolves.toBeUndefined();
+      lateHead.reject(new Error("late head failure"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+  });
+
+  it("preserves a sequence conflict that wins the disconnect race", async () => {
+    const hub = new CommittedEventHub();
+    const started = deferred();
+    const history = rejectableDeferred<readonly SessionEvent[]>();
+    const conflict = new ReplaySubscriptionError(
+      "replay.sequence_conflict",
+      "history conflicted",
+    );
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      source: {
+        getHeadSequence: async () => 1,
+        getEventsAfter: async () => {
+          started.resolve();
+          return history.promise;
+        },
+      },
+      callbacks: { deliver: vi.fn(), replayComplete: vi.fn() },
+    });
+
+    await started.promise;
+    const readyError = subscription.ready.catch((error: unknown) => error);
+    history.reject(conflict);
+    await expect(readyError).resolves.toBe(conflict);
+    subscription.unsubscribe();
+
+    await expect(subscription.drain()).resolves.toBeUndefined();
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
   });
 
   it("disconnects when committed live events overflow the replay buffer", async () => {

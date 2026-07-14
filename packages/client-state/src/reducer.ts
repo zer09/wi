@@ -107,10 +107,24 @@ function applyRunTransition(
   return { ...state, activeRun: transition, queuedRuns: state.queuedRuns.slice(1) };
 }
 
+function removeInteractionsForRun<T extends { readonly runId: string }>(
+  interactions: Readonly<Record<string, T>>,
+  runId: string,
+): Readonly<Record<string, T>> {
+  const remaining = { ...interactions };
+  for (const [id, interaction] of Object.entries(interactions)) {
+    if (interaction.runId === runId) delete remaining[id];
+  }
+  return remaining;
+}
+
 function applyEventData(state: BrowserSessionState, event: SessionEvent): BrowserSessionState {
-  let title = state.title;
-  let pendingApprovals = state.pendingApprovals;
-  let pendingInputs = state.pendingInputs;
+  const transitioned = applyRunTransition(state, runTransition(event));
+  if (transitioned.errorCode !== null) return transitioned;
+
+  let title = transitioned.title;
+  let pendingApprovals = transitioned.pendingApprovals;
+  let pendingInputs = transitioned.pendingInputs;
 
   switch (event.eventType) {
     case "session.created":
@@ -150,12 +164,16 @@ function applyEventData(state: BrowserSessionState, event: SessionEvent): Browse
       pendingInputs = remaining;
       break;
     }
+    case "run.completed":
+    case "run.failed":
+    case "run.cancelled":
+    case "run.interrupted":
+      pendingApprovals = removeInteractionsForRun(pendingApprovals, event.data.runId);
+      pendingInputs = removeInteractionsForRun(pendingInputs, event.data.runId);
+      break;
   }
 
-  return applyRunTransition(
-    { ...state, title, pendingApprovals, pendingInputs },
-    runTransition(event),
-  );
+  return { ...transitioned, title, pendingApprovals, pendingInputs };
 }
 
 export function reduceSessionEvent(

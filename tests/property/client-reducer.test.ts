@@ -71,6 +71,34 @@ const validOrderedEvents = fc
     return events;
   });
 
+const terminalEventTypes = [
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.interrupted",
+] as const;
+
+function terminalEvent(
+  sequence: number,
+  eventType: (typeof terminalEventTypes)[number],
+  runId: string,
+): SessionEvent {
+  switch (eventType) {
+    case "run.completed":
+    case "run.cancelled":
+      return event(sequence, `evt_${sequence}`, eventType, { eventVersion: 1, runId });
+    case "run.failed":
+    case "run.interrupted":
+      return event(sequence, `evt_${sequence}`, eventType, {
+        eventVersion: 1,
+        runId,
+        code: "provider.incomplete",
+        message: "Provider stopped.",
+        diagnosticId: "err_property",
+      });
+  }
+}
+
 function chunkEvents(events: readonly SessionEvent[], sizes: readonly number[]): SessionEvent[][] {
   const chunks: SessionEvent[][] = [];
   let offset = 0;
@@ -138,6 +166,59 @@ describe("client reducer replay properties", () => {
           expect(completeReplay(chunked, events.length)).toEqual(
             completeReplay(complete, events.length),
           );
+        },
+      ),
+    );
+  });
+
+  it("leaves no pending interaction belonging to a terminal run", async () => {
+    await runProperty(
+      "terminal runs own no pending browser interactions",
+      fc.property(
+        fc.constantFrom(...terminalEventTypes),
+        fc.integer({ min: 0, max: 8 }),
+        fc.integer({ min: 0, max: 8 }),
+        (terminalType, approvalCount, inputCount) => {
+          const runId = "run_terminal";
+          const events: SessionEvent[] = [];
+          let sequence = 1;
+          const next = (eventType: SessionEventType, data: unknown): void => {
+            events.push(event(sequence, `evt_${sequence}`, eventType, data));
+            sequence += 1;
+          };
+
+          next("run.created", { eventVersion: 1, runId });
+          next("run.started", { eventVersion: 1, runId });
+          for (let index = 0; index < approvalCount; index += 1) {
+            next("tool.approval.requested", {
+              eventVersion: 1,
+              runId,
+              callId: `call_${index}`,
+              approvalId: `approval_${index}`,
+              toolName: "guarded_echo",
+              actionDigest: "a".repeat(64),
+              summary: `approval ${index}`,
+            });
+          }
+          for (let index = 0; index < inputCount; index += 1) {
+            next("input.requested", {
+              eventVersion: 1,
+              runId,
+              inputId: `input_${index}`,
+              prompt: `input ${index}`,
+            });
+          }
+          if (terminalType === "run.cancelled") {
+            next("run.cancel.requested", { eventVersion: 1, runId });
+          }
+          events.push(terminalEvent(sequence, terminalType, runId));
+
+          const state = replaySessionEvents(createBrowserSessionState("ses_A"), events);
+          expect(state.errorCode).toBeNull();
+          expect(Object.values(state.pendingApprovals).every((item) => item.runId !== runId)).toBe(
+            true,
+          );
+          expect(Object.values(state.pendingInputs).every((item) => item.runId !== runId)).toBe(true);
         },
       ),
     );

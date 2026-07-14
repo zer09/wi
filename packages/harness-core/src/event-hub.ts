@@ -111,6 +111,50 @@ export class CommittedEventHub {
       });
   }
 
+  private pumpCommittedQueue(state: SessionPublicationState, subscriber: Subscriber): void {
+    if (!subscriber.active || subscriber.delivering) return;
+
+    // A completed async delivery may expose a large synchronous backlog, so drain without recursion.
+    while (subscriber.active) {
+      const event = subscriber.queue.shift();
+      if (event === undefined) return;
+      subscriber.delivering = true;
+
+      let delivery: void | Promise<void>;
+      try {
+        delivery = subscriber.deliver(event);
+      } catch (error) {
+        this.deactivateSubscriber(state, subscriber);
+        this.reportSubscriberError(subscriber, error);
+        subscriber.backlog = 0;
+        subscriber.delivering = false;
+        return;
+      }
+      if (delivery === undefined) {
+        subscriber.backlog -= 1;
+        subscriber.delivering = false;
+        continue;
+      }
+
+      void Promise.resolve(delivery)
+        .catch((error: unknown) => {
+          this.deactivateSubscriber(state, subscriber);
+          this.reportSubscriberError(subscriber, error);
+        })
+        .finally(() => {
+          subscriber.backlog -= 1;
+          subscriber.delivering = false;
+          if (!subscriber.active) {
+            subscriber.queue.length = 0;
+            subscriber.backlog = 0;
+            return;
+          }
+          this.pumpCommittedQueue(state, subscriber);
+        });
+      return;
+    }
+  }
+
   private enqueueSubscriber(
     sessionId: string,
     state: SessionPublicationState,
@@ -125,7 +169,8 @@ export class CommittedEventHub {
     }
     subscriber.backlog += 1;
     subscriber.queue.push(event);
-    this.pumpSubscriber(state, subscriber);
+    if (subscriber.immediate) this.pumpCommittedQueue(state, subscriber);
+    else this.pumpSubscriber(state, subscriber);
   }
 
   private session(sessionId: string): SessionPublicationState {
@@ -173,7 +218,7 @@ export class CommittedEventHub {
 
   subscribeCommittedQueue(
     sessionId: string,
-    enqueue: (event: SessionEvent) => void,
+    enqueue: CommittedEventSubscriber,
     onError?: SubscriberErrorHandler,
   ): EventHubSubscription {
     const state = this.session(sessionId);
@@ -267,23 +312,6 @@ export class CommittedEventHub {
       while ((pending = state.pendingDeliveries.shift()) !== undefined) {
         const delivery = pending;
         for (const subscriber of state.subscribers) {
-          if (subscriber.immediate) {
-            try {
-              if (subscriber.active) {
-                const result = subscriber.deliver(delivery);
-                if (result !== undefined) {
-                  void Promise.resolve(result).catch((error: unknown) => {
-                    this.deactivateSubscriber(state, subscriber);
-                    this.reportSubscriberError(subscriber, error);
-                  });
-                }
-              }
-            } catch (error) {
-              this.deactivateSubscriber(state, subscriber);
-              this.reportSubscriberError(subscriber, error);
-            }
-            continue;
-          }
           this.enqueueSubscriber(event.sessionId, state, subscriber, delivery);
         }
       }

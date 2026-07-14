@@ -199,6 +199,42 @@ describe("SessionActorRegistry", () => {
     expect(actor.shutdownCalls).toBe(1);
   });
 
+  it("claims an idle actor once across concurrent eviction sweeps", async () => {
+    let now = 0;
+    const actor = new FakeRegistryActor();
+    let releaseSweeps = (): void => {};
+    const sweepGate = new Promise<void>((resolve) => {
+      releaseSweeps = resolve;
+    });
+    let enteredSweeps = 0;
+    let resolveBothEntered = (): void => {};
+    const bothEntered = new Promise<void>((resolve) => {
+      resolveBothEntered = resolve;
+    });
+    const registry = new SessionActorRegistry({
+      createActor: async () => asActor(actor),
+      now: () => now,
+      idleTimeoutMs: 10,
+      beforeEvict: async () => {
+        enteredSweeps += 1;
+        if (enteredSweeps === 2) resolveBothEntered();
+        await sweepGate;
+      },
+    });
+    const lease = await registry.acquire("ses_registry");
+    lease.release();
+    now = 20;
+
+    const firstSweep = registry.evictIdle();
+    const secondSweep = registry.evictIdle();
+    await bothEntered;
+    releaseSweeps();
+    const results = await Promise.all([firstSweep, secondSweep]);
+
+    expect(results.flat()).toEqual(["ses_registry"]);
+    expect(actor.shutdownCalls).toBe(1);
+  });
+
   it("abandons eviction when activity acquires a reference during the race", async () => {
     let now = 0;
     const actor = new FakeRegistryActor();

@@ -555,6 +555,56 @@ describe("SessionActor", () => {
     expect(storage.events.filter((event) => event.eventType === "run.cancelled")).toHaveLength(1);
   });
 
+  it("faults on a reconciled non-message command with a mismatched run identity", async () => {
+    const { actor, storage, tasks } = await actorFixture("mismatchedCancelRunIdentity");
+    const submitted = await actor.submitMessage(
+      message(actor.sessionId, "cmd_mismatchedCancelRunIdentitySubmit"),
+    );
+    const activeTask = await waitForTask(tasks, submitted.runId);
+    const originalAccept = storage.acceptCommand.bind(storage);
+    const originalGetAccepted = storage.getAcceptedCommand.bind(storage);
+    let cancellationCommitted = false;
+    vi.spyOn(storage, "acceptCommand").mockImplementation(async (input) => {
+      const result = await originalAccept(input);
+      if (input.commandMethod === "run.cancel") {
+        cancellationCommitted = true;
+        throw Object.assign(new Error("ambiguous cancellation result"), {
+          code: "storage.ambiguous_outcome",
+        });
+      }
+      return result;
+    });
+    vi.spyOn(storage, "getAcceptedCommand").mockImplementation(async (commandId) => {
+      const accepted = await originalGetAccepted(commandId);
+      if (cancellationCommitted && commandId === "cmd_mismatchedCancelRunIdentity") {
+        if (accepted === null) throw new Error("Committed cancellation disappeared");
+        return { ...accepted, runId: "run_conflictingCancellationIdentity" };
+      }
+      return accepted;
+    });
+
+    await expect(
+      actor.cancelRun({
+        v: 1,
+        kind: "command",
+        commandId: "cmd_mismatchedCancelRunIdentity",
+        sessionId: actor.sessionId,
+        method: "run.cancel",
+        params: { runId: submitted.runId },
+      }),
+    ).rejects.toMatchObject({ code: "session.invalid_transition" });
+
+    expect(actor.snapshot).toMatchObject({
+      activeRunId: submitted.runId,
+      activeRunState: "running",
+      faulted: true,
+    });
+    expect(storage.runs.get(submitted.runId)?.state).toBe("cancelling");
+    expect(storage.events.filter((event) => event.eventType === "run.cancel.requested")).toHaveLength(1);
+    activeTask.resolve({ state: "completed" });
+    await actor.shutdown();
+  });
+
   it("signals cancellation promptly, is idempotent, and records one terminal outcome", async () => {
     const { actor, storage, tasks, scheduler } = await actorFixture("cancel");
     const submitted = await actor.submitMessage(message(actor.sessionId, "cmd_cancelSubmit"));
@@ -1310,6 +1360,65 @@ describe("SessionActor", () => {
     await registry.close();
   });
 
+  it("prevents idle eviction when a concrete message is submitted during the decision", async () => {
+    let clock = 0;
+    let actor!: SessionActor;
+    let submittedRunId: string | undefined;
+    let raced = false;
+    const tasks = new ControlledTasks();
+    const monitor = new ActivityMonitor();
+    const registry = new SessionActorRegistry({
+      createActor: async (_sessionId, onActivity) => {
+        actor = await SessionActor.create({
+          storage: new FakeActorStorage("ses_evictionMessageRace"),
+          eventHub: new CommittedEventHub(),
+          scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+          ids: ids("evictionMessageRace"),
+          now: () => clock,
+          runTask: tasks.task,
+          cancelRunTask: tasks.cancel,
+          forceStopRunTask: () => ({ status: "terminated" }),
+          onActivity: () => {
+            onActivity();
+            monitor.signal();
+          },
+        });
+        actorMonitors.set(actor, monitor);
+        return actor;
+      },
+      now: () => clock,
+      idleTimeoutMs: 10,
+      beforeEvict: async () => {
+        if (!raced) {
+          raced = true;
+          submittedRunId = (
+            await actor.submitMessage(
+              message("ses_evictionMessageRace", "cmd_evictionMessageRace"),
+            )
+          ).runId;
+        }
+      },
+    });
+    const lease = await registry.acquire("ses_evictionMessageRace");
+    lease.release();
+    clock = 20;
+
+    await expect(registry.evictIdle()).resolves.toEqual([]);
+    expect(actor.snapshot).toMatchObject({
+      activeRunId: submittedRunId,
+      activeRunState: "running",
+      closed: false,
+    });
+
+    if (submittedRunId === undefined) throw new Error("Eviction race did not submit a run");
+    (await waitForTask(tasks, submittedRunId)).resolve({ state: "completed" });
+    await waitForState(actor, null);
+    await actor.flush();
+    clock = 40;
+    await expect(registry.evictIdle()).resolves.toEqual(["ses_evictionMessageRace"]);
+    await registry.close();
+  });
+
   it("prevents idle eviction when a concrete subscriber connects during the decision", async () => {
     let clock = 0;
     let actor: SessionActor | undefined;
@@ -1527,6 +1636,34 @@ describe("SessionActor", () => {
     expect(first.queued).toBe(false);
     expect(duplicate).toMatchObject({ runId: first.runId, queued: false });
     expect(duplicate.acceptance.duplicate).toBe(true);
+  });
+
+  it("returns a durable duplicate message result when its worker response is ambiguous", async () => {
+    const { actor, storage, tasks } = await actorFixture("ambiguousDuplicateMessage");
+    const command = message(actor.sessionId, "cmd_ambiguousDuplicateMessage");
+    const first = await actor.submitMessage(command);
+    const originalAccept = storage.acceptCommand.bind(storage);
+    let injected = false;
+    vi.spyOn(storage, "acceptCommand").mockImplementation(async (input) => {
+      const result = await originalAccept(input);
+      if (!injected && input.commandId === command.commandId && result.duplicate) {
+        injected = true;
+        throw Object.assign(new Error("ambiguous duplicate command result"), {
+          code: "storage.ambiguous_outcome",
+        });
+      }
+      return result;
+    });
+
+    const duplicate = await actor.submitMessage(command);
+
+    expect(injected).toBe(true);
+    expect(duplicate).toMatchObject({ runId: first.runId, queued: false });
+    expect(duplicate.acceptance.duplicate).toBe(true);
+    expect(storage.runs.size).toBe(1);
+    expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
+    (await waitForTask(tasks, first.runId)).resolve({ state: "completed" });
+    await waitForState(actor, null);
   });
 
   it("faults after a post-commit publication conflict without rejecting durable acceptance", async () => {

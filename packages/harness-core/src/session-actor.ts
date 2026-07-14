@@ -361,6 +361,18 @@ export class SessionActor {
       ) {
         throw operationError;
       }
+      if (accepted.runId !== input.runId) {
+        if (input.commandMethod === "message.submit" && accepted.runId !== null) {
+          // A duplicate message predates this retry, so its fresh proposed event IDs never applied.
+          return accepted;
+        }
+        const identityError = new SessionActorError(
+          "session.invalid_transition",
+          `Accepted command ${input.commandId} has an inconsistent run identity`,
+        );
+        this.recordFault(identityError);
+        throw identityError;
+      }
 
       const events: SessionEvent[] = [];
       for (const expected of input.transaction.events) {

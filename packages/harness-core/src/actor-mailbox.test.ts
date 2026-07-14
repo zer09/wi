@@ -52,6 +52,18 @@ describe("ActorMailbox", () => {
     expect(observed).toEqual(["outer", "later"]);
   });
 
+  it("rejects shutdown awaited by its active handler without closing the mailbox", async () => {
+    const mailbox = new ActorMailbox();
+    const reentrant = mailbox.enqueue(async () => {
+      await mailbox.shutdown();
+    });
+
+    await expect(reentrant).rejects.toBeInstanceOf(MailboxReentryError);
+    expect(mailbox.state.accepting).toBe(true);
+    await expect(mailbox.enqueue(() => "continued")).resolves.toBe("continued");
+    await expect(mailbox.shutdown()).resolves.toBeUndefined();
+  });
+
   it("allows a non-awaitable deferred post from an active handler", async () => {
     const mailbox = new ActorMailbox();
     const observed: string[] = [];
@@ -90,6 +102,43 @@ describe("ActorMailbox", () => {
     await expect(later).resolves.toBe(42);
     expect(mailbox.state.idle).toBe(true);
     await expect(mailbox.shutdown()).resolves.toBeUndefined();
+  });
+
+  it("contains asynchronously rejected error reporters before and after shutdown", async () => {
+    const mailbox = new ActorMailbox();
+    const reported = deferred<void>();
+    let handlerError: unknown;
+    mailbox.post(
+      async () => {
+        throw new Error("posted handler failed asynchronously");
+      },
+      async (error) => {
+        handlerError = error;
+        reported.resolve();
+        throw new Error("posted async error reporter failed");
+      },
+    );
+
+    await reported.promise;
+    await expect(mailbox.enqueue(() => 42)).resolves.toBe(42);
+    await expect(mailbox.shutdown()).resolves.toBeUndefined();
+
+    const closedReported = deferred<void>();
+    let closedError: unknown;
+    mailbox.post(
+      () => undefined,
+      async (error) => {
+        closedError = error;
+        closedReported.resolve();
+        throw new Error("closed async error reporter failed");
+      },
+    );
+    await closedReported.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(handlerError).toEqual(new Error("posted handler failed asynchronously"));
+    expect(closedError).toBeInstanceOf(MailboxClosedError);
+    expect(mailbox.state.idle).toBe(true);
   });
 
   it("continues after a failed command without an unhandled tail rejection", async () => {

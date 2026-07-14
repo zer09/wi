@@ -152,6 +152,57 @@ describe("CommittedEventHub", () => {
     expect(errors[0]).toMatchObject({ message: "immediate subscriber failed" });
   });
 
+  it("serializes asynchronous committed-queue delivery in session order", async () => {
+    const hub = new CommittedEventHub();
+    const releaseFirst = deferred();
+    const delivered = deferred();
+    const observed: number[] = [];
+    hub.subscribeCommittedQueue("ses_replay", async (value) => {
+      if (value.sequence === 1) await releaseFirst.promise;
+      observed.push(value.sequence);
+      if (observed.length === 2) delivered.resolve();
+    });
+
+    hub.publishCommitted(event(1));
+    hub.publishCommitted(event(2));
+    expect(observed).toEqual([]);
+
+    releaseFirst.resolve();
+    await delivered.promise;
+    expect(observed).toEqual([1, 2]);
+  });
+
+  it("iteratively drains a large synchronous backlog after an asynchronous delivery", async () => {
+    const eventCount = 20_000;
+    const hub = new CommittedEventHub({ maxSubscriberBacklog: eventCount + 1 });
+    const releaseFirst = deferred();
+    const allDelivered = deferred();
+    let deliveredCount = 0;
+    let ordered = true;
+    const recordDelivery = (sequence: number): void => {
+      deliveredCount += 1;
+      if (sequence !== deliveredCount) ordered = false;
+      if (deliveredCount === eventCount) allDelivered.resolve();
+    };
+    hub.subscribeCommittedQueue("ses_replay", (value) => {
+      if (value.sequence === 1) {
+        return releaseFirst.promise.then(() => recordDelivery(value.sequence));
+      }
+      recordDelivery(value.sequence);
+    });
+
+    for (let sequence = 1; sequence <= eventCount; sequence += 1) {
+      hub.publishCommitted(event(sequence));
+    }
+    expect(deliveredCount).toBe(0);
+
+    releaseFirst.resolve();
+    await allDelivered.promise;
+    expect(ordered).toBe(true);
+    expect(deliveredCount).toBe(eventCount);
+    expect(hub.subscriberCount("ses_replay")).toBe(1);
+  });
+
   it("contains a rejected asynchronous subscriber error handler", async () => {
     const hub = new CommittedEventHub();
     const errorHandlerCalled = deferred();

@@ -294,10 +294,12 @@ export class SessionActorRegistry {
       const version = entry.activityVersion;
       await this.beforeEvict?.(entry.sessionId);
       if (
+        this.closed ||
         this.entries.get(entry.sessionId) !== entry ||
         entry.references !== 0 ||
         entry.activityVersion !== version ||
         entry.retirement !== null ||
+        entry.eviction !== null ||
         !actor.isIdle()
       ) {
         continue;

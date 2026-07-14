@@ -9,7 +9,7 @@ export class MailboxClosedError extends Error {
 
 export class MailboxReentryError extends Error {
   constructor() {
-    super("Actor mailbox handlers cannot enqueue back into the same mailbox");
+    super("Actor mailbox handlers cannot enqueue or await shutdown on the same mailbox");
     this.name = "MailboxReentryError";
   }
 }
@@ -20,6 +20,21 @@ interface MailboxHandlerContext {
 }
 
 const activeMailboxHandler = new AsyncLocalStorage<MailboxHandlerContext>();
+
+type MailboxErrorReporter = (error: unknown) => void | Promise<void>;
+
+function reportMailboxError(onError: MailboxErrorReporter, error: unknown): void {
+  try {
+    const reporting = onError(error);
+    if (reporting !== undefined) {
+      void Promise.resolve(reporting).catch(() => {
+        // Diagnostic failures are isolated from the mailbox and process rejection policy.
+      });
+    }
+  } catch {
+    // Diagnostic failures are isolated from the mailbox and process rejection policy.
+  }
+}
 
 export interface MailboxState {
   readonly accepting: boolean;
@@ -60,19 +75,15 @@ export class ActorMailbox {
 
   // External task callbacks use this deferred path. It intentionally returns void, so calling it
   // from a handler cannot create an awaited queue cycle; the post runs after that handler returns.
-  post(handler: () => void | Promise<void>, onError: (error: unknown) => void): void {
+  post(handler: () => void | Promise<void>, onError: MailboxErrorReporter): void {
     if (!this.accepting) {
-      try {
-        onError(new MailboxClosedError());
-      } catch {
-        // Error reporting cannot reopen or poison a closed mailbox.
-      }
+      reportMailboxError(onError, new MailboxClosedError());
       return;
     }
     this.queue.push({
       handler,
       resolve: () => undefined,
-      reject: onError,
+      reject: (error: unknown) => reportMailboxError(onError, error),
     } as MailboxEntry<unknown>);
     this.pump();
   }
@@ -123,6 +134,10 @@ export class ActorMailbox {
   }
 
   shutdown(options: { readonly drain?: boolean } = {}): Promise<void> {
+    const context = activeMailboxHandler.getStore();
+    if (this.running && context?.mailbox === this && context.active) {
+      throw new MailboxReentryError();
+    }
     this.accepting = false;
     if (options.drain === false) {
       const error = new MailboxClosedError();

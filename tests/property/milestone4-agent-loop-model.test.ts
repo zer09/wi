@@ -209,6 +209,7 @@ async function runTrace(trace: GeneratedTrace): Promise<void> {
         ids: ids.actor,
         now: () => ++now,
         runTask: loop.task,
+        currentToolEffectClass: loop.currentToolEffectClass,
         cancelRunTask: loop.cancel,
         forceStopRunTask: () => ({ status: "terminated" }),
         createRunProviderSnapshot: () => ({

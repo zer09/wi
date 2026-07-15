@@ -117,6 +117,20 @@ describe("Milestone 4 state-machine properties", () => {
         },
       ),
     );
+    const classified = {
+      runId: "run_classified",
+      toolName: "echo",
+      argumentsJson: '{"text":"same"}',
+      argumentsHash: "hash:same",
+      effectClass: "pure" as const,
+    };
+    expect(sameToolCallIdentity(classified, { ...classified, effectClass: null })).toBe(false);
+    expect(
+      sameToolCallIdentity(
+        { ...classified, effectClass: null },
+        { ...classified, effectClass: "pure" },
+      ),
+    ).toBe(true);
   });
 
   it("retries only a transient pre-semantic, pre-tool, non-cancelled attempt within budget", () => {

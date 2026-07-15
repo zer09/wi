@@ -5,9 +5,18 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeProviderAdapter } from "@wi/provider-fake";
-import { canonicalJsonHash, type SessionEvent } from "@wi/protocol";
+import {
+  canonicalJsonHash,
+  type SessionEvent,
+  type ToolEffectClass,
+} from "@wi/protocol";
 import { SessionStoreManager, type SessionClient, type ToolExecutionRecord } from "@wi/storage";
-import { ToolExecutor, createBuiltinToolRegistry } from "@wi/tools";
+import {
+  ToolExecutor,
+  ToolRegistry,
+  createBuiltinToolRegistry,
+  createEchoTool,
+} from "@wi/tools";
 import {
   AgentRunLoop,
   CommittedEventHub,
@@ -74,6 +83,7 @@ async function storageFixture(): Promise<{ manager: SessionStoreManager; session
 async function seedRecoverableTool(
   session: SessionClient,
   state: "requested" | "started" | "completed",
+  effectClass: ToolEffectClass = "pure",
 ): Promise<ToolExecutionRecord> {
   const runId = `run_recover${state}`;
   const stepId = `step_recover${state}`;
@@ -112,7 +122,7 @@ async function seedRecoverableTool(
           name: "echo",
           argumentsJson,
           argumentsHash,
-          effectClass: "pure",
+          effectClass,
         },
       },
       ...(state === "started"
@@ -171,7 +181,7 @@ async function seedRecoverableTool(
         toolName: "echo",
         argumentsJson,
         argumentsHash,
-        effectClass: "pure",
+        effectClass,
         state,
         attemptCount: state === "requested" ? 0 : 1,
         requestedAtMs: 2_003,
@@ -194,16 +204,26 @@ async function seedRecoverableTool(
   return tool;
 }
 
+function echoRegistry(effectClass: ToolEffectClass): ToolRegistry {
+  const registry = new ToolRegistry();
+  registry.register({ ...createEchoTool(), effectClass });
+  return registry;
+}
+
 async function resumeSeeded(
   session: SessionClient,
   seeded: ToolExecutionRecord,
+  options: {
+    readonly registry?: ToolRegistry;
+    readonly expectedRunState?: "completed" | "failed" | "interrupted";
+  } = {},
 ): Promise<{ actor: SessionActor; executions: string[] }> {
   const ids = generatedIds(seeded.state);
   const executions: string[] = [];
   const loop = new AgentRunLoop({
     storage: session,
     provider: new FakeProviderAdapter(),
-    registry: createBuiltinToolRegistry(),
+    registry: options.registry ?? createBuiltinToolRegistry(),
     executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
     ids: ids.loop,
   });
@@ -232,6 +252,7 @@ async function resumeSeeded(
     ids: ids.actor,
     now: () => ++now,
     runTask: loop.task,
+    currentToolEffectClass: loop.currentToolEffectClass,
     cancelRunTask: loop.cancel,
     forceStopRunTask: () => ({ status: "terminated" }),
     createRunProviderSnapshot: () => ({
@@ -243,7 +264,9 @@ async function resumeSeeded(
   });
   actors.push(actor);
   await terminal;
-  await expect(session.getRun(seeded.runId)).resolves.toMatchObject({ state: "completed" });
+  await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+    state: options.expectedRunState ?? "completed",
+  });
   return { actor, executions };
 }
 
@@ -290,6 +313,78 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       state: "completed",
       attemptCount: 1,
       result: { text: "recover" },
+    });
+  });
+
+  it("rejects a requested call when its current effect class changed", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "requested", "pure");
+    const resumed = await resumeSeeded(session, seeded, {
+      registry: echoRegistry("non_idempotent"),
+      expectedRunState: "failed",
+    });
+
+    expect(resumed.executions).toEqual([]);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "cancelled",
+      attemptCount: 0,
+      effectClass: "pure",
+    });
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "failed",
+      failureCategory: "provider.protocol_error",
+    });
+  });
+
+  it("does not recover a started call when its current effect class changed", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "started", "pure");
+    const resumed = await resumeSeeded(session, seeded, {
+      registry: echoRegistry("non_idempotent"),
+      expectedRunState: "interrupted",
+    });
+
+    expect(resumed.executions).toEqual([]);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "started",
+      attemptCount: 1,
+      effectClass: "pure",
+    });
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "provider.protocol_error",
+    });
+  });
+
+  it("rejects the inverse started effect-class mismatch without retry", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "started", "non_idempotent");
+    const resumed = await resumeSeeded(session, seeded, {
+      registry: echoRegistry("pure"),
+      expectedRunState: "interrupted",
+    });
+
+    expect(resumed.executions).toEqual([]);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "started",
+      attemptCount: 1,
+      effectClass: "non_idempotent",
+    });
+  });
+
+  it("fails a durable call safely when its current definition is missing", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "requested", "pure");
+    const resumed = await resumeSeeded(session, seeded, {
+      registry: new ToolRegistry(),
+      expectedRunState: "failed",
+    });
+
+    expect(resumed.executions).toEqual([]);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "cancelled",
+      attemptCount: 0,
+      effectClass: "pure",
     });
   });
 

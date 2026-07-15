@@ -10,6 +10,7 @@ import {
   ToolCallIdSchema,
   type CanonicalJsonValue,
   type ErrorCode,
+  type ToolEffectClass,
 } from "@wi/protocol";
 import type {
   PendingApprovalRecord,
@@ -29,6 +30,7 @@ import {
 } from "@wi/tools";
 
 import {
+  assertCurrentToolEffectClass,
   canRetryProviderStep,
   sameToolCallIdentity,
 } from "./run-policy.js";
@@ -108,6 +110,7 @@ function toolError(
 export class AgentRunLoop {
   readonly task: RunTask;
   readonly cancel: CancelRunTask;
+  readonly currentToolEffectClass: (toolName: string) => ToolEffectClass | null;
   private readonly storage: AgentRunStorage;
   private readonly provider: ProviderAdapter;
   private readonly registry: ToolRegistry;
@@ -133,6 +136,8 @@ export class AgentRunLoop {
     this.storage = options.storage;
     this.provider = options.provider;
     this.registry = options.registry;
+    this.currentToolEffectClass =
+      (toolName) => this.registry.get(toolName)?.effectClass ?? null;
     this.executor = options.executor;
     this.ids = options.ids;
     this.coalescerClock = options.coalescerClock;
@@ -759,7 +764,7 @@ export class AgentRunLoop {
           toolName: event.name,
           argumentsJson,
           argumentsHash,
-          effectClass: this.registry.get(event.name)?.effectClass ?? null,
+          effectClass: this.currentToolEffectClass(event.name),
         })
       ) {
         throw new RunLoopFailure(
@@ -1115,6 +1120,11 @@ export class AgentRunLoop {
     return { kind: calls.length === 0 ? "final" : "tools" };
   }
 
+  private validateCompatibleTool(tool: ToolExecutionRecord): ValidatedToolCall {
+    assertCurrentToolEffectClass(tool, this.currentToolEffectClass(tool.toolName));
+    return this.registry.validate(tool.toolName, tool.argumentsJson);
+  }
+
   private async processToolCalls(
     context: RunTaskContext,
     initialCalls: readonly ToolExecutionRecord[],
@@ -1122,13 +1132,26 @@ export class AgentRunLoop {
     for (const initial of initialCalls) {
       let tool = await this.storage.getToolExecution(initial.callId);
       if (tool === null) throw new RunLoopFailure("session.not_found", "Tool ledger row disappeared.", false);
+      let validated: ValidatedToolCall | null = null;
+      if (tool.effectClass !== null) {
+        validated = this.validateCompatibleTool(tool);
+      } else if (tool.state !== "failed" && tool.state !== "discarded") {
+        throw new RunLoopFailure(
+          "session.invalid_transition",
+          `Tool call ${tool.callId} is unclassified in state ${tool.state}.`,
+          false,
+        );
+      }
 
       if (tool.state === "requested") {
-        const validated = this.registry.validate(tool.toolName, tool.argumentsJson);
+        if (validated === null) {
+          throw new RunLoopFailure("session.invalid_transition", "Requested tool is unclassified.", false);
+        }
         if (validated.definition.approval === "always") {
           await this.requestApproval(context, tool, validated);
           tool = await this.storage.getToolExecution(tool.callId);
           if (tool === null) throw new RunLoopFailure("session.not_found", "Tool ledger row disappeared.", false);
+          validated = this.validateCompatibleTool(tool);
         }
       }
 
@@ -1142,7 +1165,10 @@ export class AgentRunLoop {
       }
 
       if (tool.state === "requested" || tool.state === "approved") {
-        await this.executeTool(context, tool);
+        if (validated === null) {
+          throw new RunLoopFailure("session.invalid_transition", "Executable tool is unclassified.", false);
+        }
+        await this.executeTool(context, tool, validated);
         tool = await this.storage.getToolExecution(tool.callId);
         if (tool === null) throw new RunLoopFailure("session.not_found", "Tool ledger row disappeared.", false);
       }
@@ -1248,11 +1274,12 @@ export class AgentRunLoop {
   private async executeTool(
     context: RunTaskContext,
     tool: ToolExecutionRecord,
+    validated: ValidatedToolCall,
   ): Promise<void> {
     if (tool.effectClass === null) {
       throw new RunLoopFailure("session.invalid_transition", "Tool effect is not classified.", false);
     }
-    const validated = this.registry.validate(tool.toolName, tool.argumentsJson);
+    assertCurrentToolEffectClass(tool, validated.definition.effectClass);
     const expectedState = tool.state;
     await context.scheduler.withToolPermit(context.signal, async () => {
       const startedAtMs = context.now();

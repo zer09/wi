@@ -354,8 +354,9 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           throw new StorageError("session.invalid_transition", "Tool execution CAS target is missing");
         }
       } else {
-        const effectConflict =
-          existing.effectClass !== effectClass && existing.effectClass !== "unclassified";
+        const firstClassification =
+          existing.effectClass === "unclassified" && existing.state === "staged";
+        const effectConflict = existing.effectClass !== effectClass && !firstClassification;
         if (
           existing.runId !== mutation.runId ||
           existing.stepId !== mutation.stepId ||

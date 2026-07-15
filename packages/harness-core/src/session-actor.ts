@@ -9,6 +9,7 @@ import {
   type RunState,
   RunStateSchema,
   type SessionEvent,
+  type ToolEffectClass,
 } from "@wi/protocol";
 import type {
   AcceptCommandInput,
@@ -32,6 +33,7 @@ import {
   reconcileCommittedEventBatch,
 } from "./event-reconciliation.js";
 import { recoverSession } from "./recovery.js";
+import { assertCurrentToolEffectClass } from "./run-policy.js";
 import {
   isTerminalRunState,
   terminalStateForTask,
@@ -240,6 +242,9 @@ export class SessionActor {
   private readonly createRunProviderSnapshot: CreateRunProviderSnapshot;
   private readonly runTaskOwnsSchedulerPermits: boolean;
   private readonly resumeRestoredRuns: boolean;
+  private readonly currentToolEffectClass:
+    | ((toolName: string) => ToolEffectClass | null)
+    | undefined;
   private readonly cancelRunTask: CancelRunTask;
   private readonly forceStopRunTask: ForceStopRunTask;
   private readonly cancellationWait: ShutdownWait;
@@ -270,6 +275,7 @@ export class SessionActor {
     readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
     readonly runTaskOwnsSchedulerPermits?: boolean;
     readonly resumeRestoredRuns?: boolean;
+    readonly currentToolEffectClass?: (toolName: string) => ToolEffectClass | null;
     readonly cancelRunTask: CancelRunTask;
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
@@ -289,6 +295,7 @@ export class SessionActor {
       (() => ({ providerId: "milestone-3-task", providerConfig: { milestone: 3 } }));
     this.runTaskOwnsSchedulerPermits = options.runTaskOwnsSchedulerPermits === true;
     this.resumeRestoredRuns = options.resumeRestoredRuns === true;
+    this.currentToolEffectClass = options.currentToolEffectClass;
     this.cancelRunTask = options.cancelRunTask;
     this.forceStopRunTask = options.forceStopRunTask;
     this.cancellationWait = options.cancellationWait ?? defaultShutdownWait;
@@ -307,6 +314,7 @@ export class SessionActor {
     readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
     readonly runTaskOwnsSchedulerPermits?: boolean;
     readonly resumeRestoredRuns?: boolean;
+    readonly currentToolEffectClass?: (toolName: string) => ToolEffectClass | null;
     readonly cancelRunTask: CancelRunTask;
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
@@ -658,6 +666,9 @@ export class SessionActor {
         diagnosticId: this.ids.diagnosticId,
         publishCommitted: (event) => this.publishOrThrow([event]),
         resumeToolLoop: this.resumeRestoredRuns,
+        ...(this.currentToolEffectClass === undefined
+          ? {}
+          : { currentToolEffectClass: this.currentToolEffectClass }),
       });
       const [runs, approvals, inputs] = await Promise.all([
         this.storage.getNonterminalRuns(),
@@ -1333,6 +1344,10 @@ export class SessionActor {
             `Approval ${approval.approvalId} tool is already resolved`,
           );
         }
+        assertCurrentToolEffectClass(
+          tool,
+          this.currentToolEffectClass?.(tool.toolName) ?? null,
+        );
         const denied = command.params.resolution === "denied";
         const denialMessage = "The user denied this tool call.";
         transaction = {

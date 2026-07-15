@@ -176,6 +176,7 @@ async function fixture(
     ids: generated.actor,
     now: () => ++now,
     runTask: runLoop.task,
+    currentToolEffectClass: runLoop.currentToolEffectClass,
     cancelRunTask: runLoop.cancel,
     forceStopRunTask: () => ({ status: "terminated" }),
     createRunProviderSnapshot: () => ({
@@ -709,6 +710,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
       ids: generated.actor,
       now: () => ++now,
       runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
       cancelRunTask: loop.cancel,
       forceStopRunTask: () => ({ status: "terminated" }),
       createRunProviderSnapshot: () => ({
@@ -734,6 +736,64 @@ describe("Milestone 4 agent loop with real session databases", () => {
     await replacementMonitor.waitFor((event) => isRunTerminalEvent(event, value.runId));
     await expect(session.getRun(value.runId)).resolves.toMatchObject({ state: "completed" });
     expect(value.executions).toEqual(["call_guardedEchoRoundTrip"]);
+  });
+
+  it("rejects approval resolution when the durable effect class changed", async () => {
+    const value = await fixture({ scenario: "approval-round-trip" });
+    await value.monitor.waitFor(
+      (event) => event.eventType === "run.waiting_for_user" && event.data.reason === "approval",
+    );
+    const [approval] = await value.session.getPendingApprovals();
+    if (approval === undefined) throw new Error("Approval was not persisted");
+    await value.actor.handoff();
+    actors.splice(actors.indexOf(value.actor), 1);
+
+    const storage = managers[0];
+    if (storage === undefined) throw new Error("Manager disappeared");
+    const session = await storage.openSession(value.session.sessionId);
+    const generated = ids("approvalEffectMismatch");
+    const replacement = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: generated.actor,
+      now: () => 7_000,
+      runTask: ({ signal }) =>
+        new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => resolve({ state: "interrupted", code: "provider.cancelled" }),
+            { once: true },
+          );
+        }),
+      currentToolEffectClass: () => "non_idempotent",
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(replacement);
+
+    await expect(
+      replacement.resolveApproval(
+        {
+          v: 1,
+          kind: "command",
+          commandId: "cmd_approvalEffectMismatch",
+          sessionId: session.sessionId,
+          method: "approval.resolve",
+          params: { approvalId: approval.approvalId, resolution: "approved" },
+        },
+        "client_effectMismatch",
+      ),
+    ).rejects.toMatchObject({ code: "provider.protocol_error", name: "ToolIdentityError" });
+    expect(value.executions).toEqual([]);
+    await expect(session.getPendingApprovals()).resolves.toHaveLength(1);
+    await expect(session.getToolExecution(approval.callId)).resolves.toMatchObject({
+      state: "awaiting_approval",
+      effectClass: "pure",
+      attemptCount: 0,
+    });
   });
 
   it("hands off immediately after approval commit and resumes the approved ledger row", async () => {
@@ -800,6 +860,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
       ids: generated.actor,
       now: () => ++now,
       runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
       cancelRunTask: loop.cancel,
       forceStopRunTask: () => ({ status: "terminated" }),
       createRunProviderSnapshot: () => ({
@@ -1075,6 +1136,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
       ids: generated.actor,
       now: () => ++now,
       runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
       cancelRunTask: loop.cancel,
       forceStopRunTask: () => ({ status: "terminated" }),
       createRunProviderSnapshot: () => ({

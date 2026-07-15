@@ -1,4 +1,4 @@
-import type { SessionEvent, RunState } from "@wi/protocol";
+import type { SessionEvent, RunState, ToolEffectClass } from "@wi/protocol";
 import type {
   AppendTransactionInput,
   ProviderStepRecord,
@@ -7,6 +7,8 @@ import type {
   SessionRecoveryResult,
   ToolExecutionRecord,
 } from "@wi/storage";
+
+import { assertCurrentToolEffectClass, ToolIdentityError } from "./run-policy.js";
 
 export type RecoveryDecision = "preserve" | "interrupt" | "resume_queued" | "restore_waiting";
 
@@ -69,6 +71,7 @@ export async function recoverSession(options: {
   readonly diagnosticId: () => string;
   readonly publishCommitted: (event: SessionEvent) => void;
   readonly resumeToolLoop?: boolean;
+  readonly currentToolEffectClass?: (toolName: string) => ToolEffectClass | null;
 }): Promise<RecoveryResult> {
   const candidates = await options.storage.recover();
   const interruptedRunIds: string[] = [];
@@ -80,11 +83,22 @@ export async function recoverSession(options: {
   }
   const runsWithStreamingSteps = new Set([...streamingSteps.values()].map((step) => step.runId));
   const unsafeToolRunIds = new Set<string>();
+  const incompatibleToolRunIds = new Set<string>();
 
   if (options.resumeToolLoop === true && options.storage.getToolExecution !== undefined) {
     for (const candidate of candidates.startedToolCalls) {
       const tool = await options.storage.getToolExecution(candidate.callId);
       if (tool === null || tool.state !== "started" || tool.effectClass === null) continue;
+      try {
+        assertCurrentToolEffectClass(
+          tool,
+          options.currentToolEffectClass?.(tool.toolName) ?? null,
+        );
+      } catch (error) {
+        if (!(error instanceof ToolIdentityError)) throw error;
+        incompatibleToolRunIds.add(tool.runId);
+        continue;
+      }
       const atMs = options.now();
       if (tool.effectClass === "pure" && !runsWithStreamingSteps.has(tool.runId)) {
         await appendAndPublish({
@@ -250,7 +264,8 @@ export async function recoverSession(options: {
       options.resumeToolLoop === true &&
       run.state === "running" &&
       runSteps.length === 0 &&
-      !unsafeToolRunIds.has(runId)
+      !unsafeToolRunIds.has(runId) &&
+      !incompatibleToolRunIds.has(runId)
     ) {
       preservedRunIds.push(runId);
       continue;
@@ -258,6 +273,11 @@ export async function recoverSession(options: {
 
     const atMs = options.now();
     const recoveredSteps = await Promise.all(runSteps.map((step) => stepRecovery(step, atMs)));
+    const incompatibleTool = incompatibleToolRunIds.has(runId);
+    const interruptionCode = incompatibleTool ? "provider.protocol_error" : "provider.incomplete";
+    const interruptionMessage = incompatibleTool
+      ? "A durable tool call no longer matches its registered effect classification."
+      : "Active work could not be safely resumed after restart.";
     const recoveryEvents = [
       ...recoveredSteps.map((step) => step.event),
       {
@@ -267,8 +287,8 @@ export async function recoverSession(options: {
         data: {
           eventVersion: 1 as const,
           runId,
-          code: "provider.incomplete" as const,
-          message: "Active work could not be safely resumed after restart.",
+          code: interruptionCode,
+          message: interruptionMessage,
           diagnosticId: options.diagnosticId(),
         },
       },
@@ -286,8 +306,8 @@ export async function recoverSession(options: {
             startedAtMs: run.startedAtMs,
             completedAtMs: atMs,
             cancelledAtMs: run.cancelledAtMs,
-            failureCategory: "provider.incomplete",
-            failureMessage: "Active work could not be safely resumed after restart.",
+            failureCategory: interruptionCode,
+            failureMessage: interruptionMessage,
             activeProviderStepId: null,
           },
           { kind: "run.pendingInteractions.cancel", runId, cancelledAtMs: atMs },

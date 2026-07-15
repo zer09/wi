@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@wi/protocol": "workspace:*"
+    "@wi/protocol": "workspace:*",
+    "zod": "4.4.3"
   }
 }

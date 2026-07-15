@@ -1,5 +1,7 @@
 import {
   ProviderAdapterError,
+  decodeProviderEvent,
+  decodeProviderRequest,
   type ProviderAdapter,
   type ProviderEvent,
   type ProviderInputItem,
@@ -366,6 +368,22 @@ export class AgentRunLoop {
   ): Promise<StepOutcome> {
     const stepId = this.ids.stepId();
     const startedAtMs = context.now();
+    let request: ProviderRequest;
+    try {
+      request = decodeProviderRequest({
+        runId: run.runId,
+        stepId,
+        stepIndex,
+        providerConfig: run.providerConfig,
+        input: await this.providerInput(run.runId),
+      });
+    } catch {
+      throw new RunLoopFailure(
+        "provider.protocol_error",
+        "Provider request does not match the runtime contract or limits.",
+        false,
+      );
+    }
     const current = await this.storage.getRun(run.runId);
     if (current === null) throw new RunLoopFailure("session.not_found", "Run disappeared.", false);
     await context.commitTransaction({
@@ -475,21 +493,23 @@ export class AgentRunLoop {
       ...(this.coalescerClock === undefined ? {} : { clock: this.coalescerClock }),
     });
 
-    const request: ProviderRequest = {
-      runId: run.runId,
-      stepId,
-      stepIndex,
-      providerConfig: run.providerConfig,
-      input: await this.providerInput(run.runId),
-    };
-
     try {
       await context.scheduler.withProviderPermit(context.signal, async () => {
-        for await (const event of this.provider.stream(
+        for await (const value of this.provider.stream(
           request,
           { sessionId: context.sessionId, attempt, now: context.now },
           context.signal,
         )) {
+          let event: ProviderEvent;
+          try {
+            event = decodeProviderEvent(value);
+          } catch {
+            throw new RunLoopFailure(
+              "provider.protocol_error",
+              "Provider event does not match the runtime contract or limits.",
+              false,
+            );
+          }
           this.assertEventIdentity(event, request);
           if (terminal !== null) {
             const duplicateCompletion =
@@ -1430,6 +1450,9 @@ export class AgentRunLoop {
           },
           cancelled ? { allowWhileCancelling: true } : {},
         );
+        if (outcomeUnknown) {
+          throw new RunLoopFailure("tool.outcome_unknown", message, true);
+        }
         if (cancelled) throw error;
       }
     });

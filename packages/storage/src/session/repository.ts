@@ -19,7 +19,9 @@ import {
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
+  RunMessageRecordSchema,
   RunRecordSchema,
+  ToolExecutionRecordSchema,
   ProjectionMutationSchema,
   SESSION_FORMAT_VERSION,
   SESSION_SCHEMA_VERSION,
@@ -33,7 +35,9 @@ import {
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
+  type RunMessageRecord,
   type RunRecord,
+  type ToolExecutionRecord,
   type SessionCatalogObservation,
   type SessionCatalogProjection,
   type SessionManifest,
@@ -447,6 +451,115 @@ export class SessionRepository {
       .get(stepId) as unknown;
     if (row === undefined) return null;
     return decodeStoredValue(`provider step ${stepId}`, () => ProviderStepRecordSchema.parse(row));
+  }
+
+  getProviderStepsForRun(runId: string): readonly ProviderStepRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
+                started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                response_id AS responseId, error_category AS errorCategory,
+                error_message AS errorMessage
+         FROM provider_steps WHERE run_id = ? ORDER BY step_index`,
+      )
+      .all(runId) as unknown[];
+    return rows.map((row) =>
+      decodeStoredValue("provider step", () => ProviderStepRecordSchema.parse(row)),
+    );
+  }
+
+  private decodeToolExecution(row: Record<string, unknown>): ToolExecutionRecord {
+    const { resultJson, errorJson, ...record } = row;
+    const effectClass = record.effectClass === "unclassified" ? null : record.effectClass;
+    return decodeStoredValue(`tool execution ${String(record.callId)}`, () =>
+      ToolExecutionRecordSchema.parse({
+        ...record,
+        effectClass,
+        result:
+          resultJson === null
+            ? null
+            : CanonicalJsonValueSchema.parse(JSON.parse(String(resultJson)) as unknown),
+        error:
+          errorJson === null
+            ? null
+            : CanonicalJsonValueSchema.parse(JSON.parse(String(errorJson)) as unknown),
+      }),
+    );
+  }
+
+  private toolExecutionRows(where: string, ...values: readonly string[]): readonly ToolExecutionRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT call_id AS callId, run_id AS runId, step_id AS stepId,
+                tool_name AS toolName, arguments_json AS argumentsJson,
+                arguments_hash AS argumentsHash, effect_class AS effectClass, state,
+                attempt_count AS attemptCount, requested_at_ms AS requestedAtMs,
+                started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                result_json AS resultJson, error_json AS errorJson
+         FROM tool_executions WHERE ${where}
+         ORDER BY requested_at_ms, call_id`,
+      )
+      .all(...values) as Record<string, unknown>[];
+    return rows.map((row) => this.decodeToolExecution(row));
+  }
+
+  getToolExecution(callId: string): ToolExecutionRecord | null {
+    return this.toolExecutionRows("call_id = ?", callId)[0] ?? null;
+  }
+
+  getToolExecutionsForStep(stepId: string): readonly ToolExecutionRecord[] {
+    return this.toolExecutionRows(
+      "call_id IN (SELECT call_id FROM tool_call_occurrences WHERE step_id = ?)",
+      stepId,
+    );
+  }
+
+  getToolExecutionsForRun(runId: string): readonly ToolExecutionRecord[] {
+    return this.toolExecutionRows("run_id = ?", runId);
+  }
+
+  private decodeRunMessages(messages: readonly Record<string, unknown>[]): readonly RunMessageRecord[] {
+    const partStatement = this.database.prepare(
+      `SELECT text_content AS textContent FROM message_parts
+       WHERE message_id = ? ORDER BY part_index`,
+    );
+    return messages.map((message) => {
+      const parts = partStatement.all(message.messageId) as { textContent: string | null }[];
+      return decodeStoredValue(`run message ${String(message.messageId)}`, () =>
+        RunMessageRecordSchema.parse({
+          ...message,
+          text: parts.map((part) => part.textContent ?? "").join(""),
+        }),
+      );
+    });
+  }
+
+  getRunMessages(runId: string): readonly RunMessageRecord[] {
+    const messages = this.database
+      .prepare(
+        `SELECT message_id AS messageId, run_id AS runId, role, state,
+                created_at_ms AS createdAtMs, completed_at_ms AS completedAtMs
+         FROM messages WHERE run_id = ? ORDER BY created_at_ms, message_id`,
+      )
+      .all(runId) as Record<string, unknown>[];
+    return this.decodeRunMessages(messages);
+  }
+
+  getStreamingMessagesForStep(stepId: string): readonly RunMessageRecord[] {
+    const messages = this.database
+      .prepare(
+        `SELECT DISTINCT m.message_id AS messageId, m.run_id AS runId, m.role, m.state,
+                m.created_at_ms AS createdAtMs, m.completed_at_ms AS completedAtMs
+         FROM events e
+         JOIN messages m ON m.message_id = json_extract(e.payload_json, '$.messageId')
+         WHERE e.event_type = 'provider.text.delta'
+           AND json_extract(e.payload_json, '$.stepId') = ?
+           AND m.role = 'assistant'
+           AND m.state = 'streaming'
+         ORDER BY m.created_at_ms, m.message_id`,
+      )
+      .all(stepId) as Record<string, unknown>[];
+    return this.decodeRunMessages(messages);
   }
 
   getNonterminalRuns(): readonly RunRecord[] {

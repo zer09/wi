@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@wi/provider-contract": "workspace:*",
     "@wi/protocol": "workspace:*",
-    "@wi/storage": "workspace:*"
+    "@wi/storage": "workspace:*",
+    "@wi/tools": "workspace:*"
   }
 }

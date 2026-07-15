@@ -32,6 +32,7 @@ export const SESSION_EVENT_TYPES = [
   "provider.step.started",
   "provider.text.delta",
   "provider.tool_call.staged",
+  "provider.tool_call.reused",
   "provider.step.completed",
   "provider.step.interrupted",
   "provider.step.failed",
@@ -40,6 +41,7 @@ export const SESSION_EVENT_TYPES = [
   "tool.approval.requested",
   "tool.approval.resolved",
   "tool.execution.started",
+  "tool.execution.recovered",
   "tool.execution.completed",
   "tool.execution.failed",
   "tool.execution.outcome_unknown",
@@ -178,6 +180,14 @@ export const ProviderToolCallStagedEventSchema = eventMessage(
     argumentsJson: z.string(),
   }),
 );
+export const ProviderToolCallReusedEventSchema = eventMessage(
+  "provider.tool_call.reused",
+  z.strictObject({
+    ...stepData,
+    callId: ToolCallIdSchema,
+    originalStepId: ProviderStepIdSchema,
+  }),
+);
 export const ProviderStepCompletedEventSchema = eventMessage(
   "provider.step.completed",
   z.strictObject(stepData),
@@ -239,6 +249,10 @@ export const ToolExecutionStartedEventSchema = eventMessage(
   "tool.execution.started",
   z.strictObject(toolData),
 );
+export const ToolExecutionRecoveredEventSchema = eventMessage(
+  "tool.execution.recovered",
+  z.strictObject({ ...toolData, attemptCount: z.number().int().positive().safe() }),
+);
 export const ToolExecutionCompletedEventSchema = eventMessage(
   "tool.execution.completed",
   z.strictObject({ ...toolData, result: CanonicalJsonValueSchema }),
@@ -293,6 +307,7 @@ export const SessionEventSchema = z.discriminatedUnion("eventType", [
   ProviderStepStartedEventSchema,
   ProviderTextDeltaEventSchema,
   ProviderToolCallStagedEventSchema,
+  ProviderToolCallReusedEventSchema,
   ProviderStepCompletedEventSchema,
   ProviderStepInterruptedEventSchema,
   ProviderStepFailedEventSchema,
@@ -301,6 +316,7 @@ export const SessionEventSchema = z.discriminatedUnion("eventType", [
   ToolApprovalRequestedEventSchema,
   ToolApprovalResolvedEventSchema,
   ToolExecutionStartedEventSchema,
+  ToolExecutionRecoveredEventSchema,
   ToolExecutionCompletedEventSchema,
   ToolExecutionFailedEventSchema,
   ToolExecutionOutcomeUnknownEventSchema,

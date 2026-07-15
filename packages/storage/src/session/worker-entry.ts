@@ -212,6 +212,18 @@ function execute(operation: string, payloadValue: unknown): unknown {
       return repository.getAcceptedCommand(z.string().min(1).parse(payload.commandId));
     case "session.getProviderStep":
       return repository.getProviderStep(z.string().min(1).parse(payload.stepId));
+    case "session.getProviderStepsForRun":
+      return repository.getProviderStepsForRun(z.string().min(1).parse(payload.runId));
+    case "session.getToolExecution":
+      return repository.getToolExecution(z.string().min(1).parse(payload.callId));
+    case "session.getToolExecutionsForStep":
+      return repository.getToolExecutionsForStep(z.string().min(1).parse(payload.stepId));
+    case "session.getToolExecutionsForRun":
+      return repository.getToolExecutionsForRun(z.string().min(1).parse(payload.runId));
+    case "session.getRunMessages":
+      return repository.getRunMessages(z.string().min(1).parse(payload.runId));
+    case "session.getStreamingMessagesForStep":
+      return repository.getStreamingMessagesForStep(z.string().min(1).parse(payload.stepId));
     case "session.getNonterminalRuns":
       return repository.getNonterminalRuns();
     case "session.getCatalogProjection":

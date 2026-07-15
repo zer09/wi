@@ -20,9 +20,18 @@ importers:
       '@wi/protocol':
         specifier: workspace:*
         version: link:packages/protocol
+      '@wi/provider-contract':
+        specifier: workspace:*
+        version: link:packages/provider-contract
+      '@wi/provider-fake':
+        specifier: workspace:*
+        version: link:packages/provider-fake
       '@wi/storage':
         specifier: workspace:*
         version: link:packages/storage
+      '@wi/tools':
+        specifier: workspace:*
+        version: link:packages/tools
       eslint:
         specifier: 9.39.1
         version: 9.39.1
@@ -54,9 +63,15 @@ importers:
       '@wi/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@wi/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
       '@wi/storage':
         specifier: workspace:*
         version: link:../storage
+      '@wi/tools':
+        specifier: workspace:*
+        version: link:../tools
 
   packages/protocol:
     dependencies:
@@ -64,9 +79,20 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
 
-  packages/provider-contract: {}
+  packages/provider-contract:
+    dependencies:
+      '@wi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
-  packages/provider-fake: {}
+  packages/provider-fake:
+    dependencies:
+      '@wi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@wi/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
 
   packages/storage:
     dependencies:
@@ -86,7 +112,14 @@ importers:
 
   packages/test-support: {}
 
-  packages/tools: {}
+  packages/tools:
+    dependencies:
+      '@wi/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
 packages:
 

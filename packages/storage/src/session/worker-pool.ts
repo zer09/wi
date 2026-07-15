@@ -16,7 +16,9 @@ import {
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
+  RunMessageRecordSchema,
   RunRecordSchema,
+  ToolExecutionRecordSchema,
   SessionCatalogObservationSchema,
   SessionCatalogProjectionSchema,
   SessionManifestSchema,
@@ -28,7 +30,9 @@ import {
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
+  type RunMessageRecord,
   type RunRecord,
+  type ToolExecutionRecord,
   type SessionCatalogObservation,
   type SessionCatalogProjection,
   type SessionManifest,
@@ -321,6 +325,72 @@ export class SessionWorkerPool {
       "session.getProviderStep",
       { stepId },
       z.union([ProviderStepRecordSchema, z.null()]),
+    );
+  }
+
+  async getProviderStepsForRun(
+    sessionId: string,
+    runId: string,
+  ): Promise<readonly ProviderStepRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getProviderStepsForRun",
+      { runId },
+      z.array(ProviderStepRecordSchema),
+    );
+  }
+
+  async getToolExecution(sessionId: string, callId: string): Promise<ToolExecutionRecord | null> {
+    return this.request(
+      sessionId,
+      "session.getToolExecution",
+      { callId },
+      z.union([ToolExecutionRecordSchema, z.null()]),
+    );
+  }
+
+  async getToolExecutionsForStep(
+    sessionId: string,
+    stepId: string,
+  ): Promise<readonly ToolExecutionRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getToolExecutionsForStep",
+      { stepId },
+      z.array(ToolExecutionRecordSchema),
+    );
+  }
+
+  async getToolExecutionsForRun(
+    sessionId: string,
+    runId: string,
+  ): Promise<readonly ToolExecutionRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getToolExecutionsForRun",
+      { runId },
+      z.array(ToolExecutionRecordSchema),
+    );
+  }
+
+  async getRunMessages(sessionId: string, runId: string): Promise<readonly RunMessageRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getRunMessages",
+      { runId },
+      z.array(RunMessageRecordSchema),
+    );
+  }
+
+  async getStreamingMessagesForStep(
+    sessionId: string,
+    stepId: string,
+  ): Promise<readonly RunMessageRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getStreamingMessagesForStep",
+      { stepId },
+      z.array(RunMessageRecordSchema),
     );
   }
 

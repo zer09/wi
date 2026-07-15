@@ -266,7 +266,10 @@ class ActivityMonitor {
 
 const actorMonitors = new WeakMap<SessionActor, ActivityMonitor>();
 
-async function actorFixture(name = "actor") {
+async function actorFixture(
+  name = "actor",
+  options: { readonly onFault?: (error: unknown) => void } = {},
+) {
   const storage = new FakeActorStorage(`ses_${name}`);
   const tasks = new ControlledTasks();
   let now = 1_000;
@@ -282,6 +285,7 @@ async function actorFixture(name = "actor") {
     cancelRunTask: tasks.cancel,
     forceStopRunTask: () => ({ status: "terminated" }),
     onActivity: () => monitor.signal(),
+    ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
   });
   actorMonitors.set(actor, monitor);
   return { actor, storage, tasks, scheduler };
@@ -1183,6 +1187,149 @@ describe("SessionActor", () => {
     await scheduler.provider.drain();
     expect(scheduler.state.provider.active).toBe(0);
   });
+
+  it("quarantines an ambiguous task write when event reconciliation cannot be read", async () => {
+    let faultCount = 0;
+    const { actor, storage, tasks, scheduler } = await actorFixture("taskEventReadFailure", {
+      onFault: () => {
+        faultCount += 1;
+      },
+    });
+    const submitted = await actor.submitMessage(
+      message(actor.sessionId, "cmd_taskEventReadFailure"),
+    );
+    const task = await waitForTask(tasks, submitted.runId);
+    const ambiguity = Object.assign(new Error("ambiguous task append"), {
+      code: "storage.ambiguous_outcome",
+    });
+    const eventId = "evt_taskEventReadFailure";
+    const originalAppend = storage.appendTransaction.bind(storage);
+    let taskAppendCalls = 0;
+    vi.spyOn(storage, "appendTransaction").mockImplementation(async (input) => {
+      if (input.events[0]?.eventId === eventId) {
+        taskAppendCalls += 1;
+        throw ambiguity;
+      }
+      return originalAppend(input);
+    });
+    const originalGetEvent = storage.getEventById.bind(storage);
+    vi.spyOn(storage, "getEventById").mockImplementation(async (candidateEventId) => {
+      if (candidateEventId === eventId) throw new Error("event reconciliation unavailable");
+      return originalGetEvent(candidateEventId);
+    });
+    const transaction: AppendTransactionInput = {
+      events: [
+        {
+          eventId,
+          eventType: "provider.step.started",
+          createdAtMs: 2_000,
+          data: {
+            eventVersion: 1,
+            runId: submitted.runId,
+            stepId: "step_taskEventReadFailure",
+            stepIndex: 0,
+          },
+        },
+      ],
+    };
+
+    await expect(task.context.commitTransaction(transaction)).rejects.toBe(ambiguity);
+    expect(actor.snapshot.faulted).toBe(true);
+    expect(faultCount).toBe(1);
+    await expect(task.context.commitTransaction(transaction)).rejects.toMatchObject({
+      code: "session.unavailable",
+    });
+    expect(taskAppendCalls).toBe(1);
+
+    task.resolve({ state: "failed", code: "provider.protocol_error" });
+    await scheduler.provider.drain();
+    await Promise.resolve();
+    expect(storage.runs.get(submitted.runId)?.state).toBe("running");
+    expect(
+      storage.events.filter((event) =>
+        ["run.completed", "run.failed", "run.cancelled", "run.interrupted"].includes(
+          event.eventType,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(["failure", "missing"] as const)(
+    "quarantines an ambiguous task write when the reconciled run read is %s",
+    async (runReadOutcome) => {
+      let faultCount = 0;
+      const { actor, storage, tasks, scheduler } = await actorFixture(
+        `taskRunRead${runReadOutcome}`,
+        {
+          onFault: () => {
+            faultCount += 1;
+          },
+        },
+      );
+      const submitted = await actor.submitMessage(
+        message(actor.sessionId, `cmd_taskRunRead${runReadOutcome}`),
+      );
+      const task = await waitForTask(tasks, submitted.runId);
+      const ambiguity = Object.assign(new Error("ambiguous committed task append"), {
+        code: "storage.ambiguous_outcome",
+      });
+      const eventId = `evt_taskRunRead${runReadOutcome}`;
+      const originalAppend = storage.appendTransaction.bind(storage);
+      let taskAppendCalls = 0;
+      vi.spyOn(storage, "appendTransaction").mockImplementation(async (input) => {
+        if (input.events[0]?.eventId === eventId) {
+          taskAppendCalls += 1;
+          await originalAppend(input);
+          throw ambiguity;
+        }
+        return originalAppend(input);
+      });
+      const originalGetRun = storage.getRun.bind(storage);
+      vi.spyOn(storage, "getRun").mockImplementation(async (runId) => {
+        if (runId === submitted.runId) {
+          if (runReadOutcome === "failure") throw new Error("run reconciliation unavailable");
+          return null;
+        }
+        return originalGetRun(runId);
+      });
+      const transaction: AppendTransactionInput = {
+        events: [
+          {
+            eventId,
+            eventType: "provider.step.started",
+            createdAtMs: 2_000,
+            data: {
+              eventVersion: 1,
+              runId: submitted.runId,
+              stepId: `step_taskRunRead${runReadOutcome}`,
+              stepIndex: 0,
+            },
+          },
+        ],
+      };
+
+      await expect(task.context.commitTransaction(transaction)).rejects.toBe(ambiguity);
+      expect(storage.events.some((event) => event.eventId === eventId)).toBe(true);
+      expect(actor.snapshot.faulted).toBe(true);
+      expect(faultCount).toBe(1);
+      await expect(task.context.commitTransaction(transaction)).rejects.toMatchObject({
+        code: "session.unavailable",
+      });
+      expect(taskAppendCalls).toBe(1);
+
+      task.resolve({ state: "failed", code: "provider.protocol_error" });
+      await scheduler.provider.drain();
+      await Promise.resolve();
+      expect(storage.runs.get(submitted.runId)?.state).toBe("running");
+      expect(
+        storage.events.filter((event) =>
+          ["run.completed", "run.failed", "run.cancelled", "run.interrupted"].includes(
+            event.eventType,
+          ),
+        ),
+      ).toEqual([]);
+    },
+  );
 
   it("reconciles an ambiguous terminal commit and publishes its committed event once", async () => {
     const { actor, storage, tasks } = await actorFixture("ambiguousTerminal");

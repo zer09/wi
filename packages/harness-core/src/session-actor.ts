@@ -1,6 +1,7 @@
 import {
   hashCommandContent,
   type ApprovalResolveCommand,
+  type CanonicalJsonValue,
   type ErrorCode,
   type InputRespondCommand,
   type MessageSubmitCommand,
@@ -17,8 +18,10 @@ import type {
   PendingApprovalRecord,
   PendingInputRecord,
   ProviderStepRecord,
+  RunMessageRecord,
   RunRecord,
   SessionRecoveryResult,
+  ToolExecutionRecord,
 } from "@wi/storage";
 
 import { ActorMailbox, MailboxClosedError } from "./actor-mailbox.js";
@@ -44,6 +47,17 @@ export class SessionActorError extends Error {
   }
 }
 
+export class SessionActorHandoffError extends Error {
+  constructor() {
+    super("Session actor is handing durable work to a replacement actor");
+    this.name = "SessionActorHandoffError";
+  }
+}
+
+export function isSessionActorHandoffSignal(signal: AbortSignal): boolean {
+  return signal.aborted && signal.reason instanceof SessionActorHandoffError;
+}
+
 function hasErrorCode(error: unknown, code: string): boolean {
   return error !== null && typeof error === "object" && "code" in error && error.code === code;
 }
@@ -56,6 +70,9 @@ export interface SessionActorStorage {
   getRun(runId: string): Promise<RunRecord | null>;
   getAcceptedCommand(commandId: string): Promise<AcceptedCommandResult | null>;
   getProviderStep(stepId: string): Promise<ProviderStepRecord | null>;
+  getToolExecution?(callId: string): Promise<ToolExecutionRecord | null>;
+  getToolExecutionsForStep?(stepId: string): Promise<readonly ToolExecutionRecord[]>;
+  getStreamingMessagesForStep?(stepId: string): Promise<readonly RunMessageRecord[]>;
   getNonterminalRuns(): Promise<readonly RunRecord[]>;
   getPendingApprovals(): Promise<readonly PendingApprovalRecord[]>;
   getPendingInputs(): Promise<readonly PendingInputRecord[]>;
@@ -71,13 +88,33 @@ export interface SessionActorIds {
   readonly diagnosticId: () => string;
 }
 
+export interface RunTaskCommitOptions {
+  /** Cancellation cleanup may persist interruption/discard state after run.cancel is committed. */
+  readonly allowWhileCancelling?: boolean;
+}
+
 export interface RunTaskContext {
   readonly sessionId: string;
   readonly runId: string;
   readonly generation: number;
   readonly signal: AbortSignal;
   readonly scheduler: RunScheduler;
+  readonly now: () => number;
+  readonly commitTransaction: (
+    input: AppendTransactionInput,
+    options?: RunTaskCommitOptions,
+  ) => Promise<AppendTransactionResult>;
+  readonly waitForApproval: (approvalId: string) => Promise<void>;
 }
+
+export interface RunProviderSnapshot {
+  readonly providerId: string;
+  readonly providerConfig: CanonicalJsonValue;
+}
+
+export type CreateRunProviderSnapshot = (
+  command: MessageSubmitCommand,
+) => RunProviderSnapshot;
 
 export interface RunTaskResult {
   readonly state: RunTaskTerminalState;
@@ -141,6 +178,13 @@ function assertRunTaskIsolation(value: unknown): asserts value is RunTaskIsolati
   }
 }
 
+interface ApprovalWaiter {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  readonly signal: AbortSignal;
+  readonly onAbort: () => void;
+}
+
 interface ActiveRun {
   readonly runId: string;
   readonly generation: number;
@@ -189,6 +233,9 @@ export class SessionActor {
   private readonly ids: SessionActorIds;
   private readonly now: () => number;
   private readonly runTask: RunTask;
+  private readonly createRunProviderSnapshot: CreateRunProviderSnapshot;
+  private readonly runTaskOwnsSchedulerPermits: boolean;
+  private readonly resumeRestoredRuns: boolean;
   private readonly cancelRunTask: CancelRunTask;
   private readonly forceStopRunTask: ForceStopRunTask;
   private readonly cancellationWait: ShutdownWait;
@@ -198,6 +245,7 @@ export class SessionActor {
   private readonly queuedRuns: RunRecord[] = [];
   private readonly pendingApprovals = new Map<string, PendingApprovalRecord>();
   private readonly pendingInputs = new Map<string, PendingInputRecord>();
+  private readonly approvalWaiters = new Map<string, Set<ApprovalWaiter>>();
   private readonly subscribers = new Set<string>();
   // A run may terminalize first, so the actor retains cleanup until shutdown can safely drain it.
   private readonly cancellationCleanups = new Set<Promise<void>>();
@@ -206,7 +254,7 @@ export class SessionActor {
   private recovering = true;
   private fault: unknown | null = null;
   private closed = false;
-  private shutdownPromise: Promise<void> | null = null;
+  private closePromise: Promise<void> | null = null;
 
   private constructor(options: {
     readonly storage: SessionActorStorage;
@@ -215,6 +263,9 @@ export class SessionActor {
     readonly ids: SessionActorIds;
     readonly now: () => number;
     readonly runTask: RunTask;
+    readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
+    readonly runTaskOwnsSchedulerPermits?: boolean;
+    readonly resumeRestoredRuns?: boolean;
     readonly cancelRunTask: CancelRunTask;
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
@@ -229,6 +280,11 @@ export class SessionActor {
     this.ids = options.ids;
     this.now = options.now;
     this.runTask = options.runTask;
+    this.createRunProviderSnapshot =
+      options.createRunProviderSnapshot ??
+      (() => ({ providerId: "milestone-3-task", providerConfig: { milestone: 3 } }));
+    this.runTaskOwnsSchedulerPermits = options.runTaskOwnsSchedulerPermits === true;
+    this.resumeRestoredRuns = options.resumeRestoredRuns === true;
     this.cancelRunTask = options.cancelRunTask;
     this.forceStopRunTask = options.forceStopRunTask;
     this.cancellationWait = options.cancellationWait ?? defaultShutdownWait;
@@ -244,6 +300,9 @@ export class SessionActor {
     readonly ids: SessionActorIds;
     readonly now: () => number;
     readonly runTask: RunTask;
+    readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
+    readonly runTaskOwnsSchedulerPermits?: boolean;
+    readonly resumeRestoredRuns?: boolean;
     readonly cancelRunTask: CancelRunTask;
     readonly forceStopRunTask: ForceStopRunTask;
     readonly cancellationWait?: ShutdownWait;
@@ -428,6 +487,160 @@ export class SessionActor {
     return { payloadHash, duplicate };
   }
 
+  private settleApprovalWaiters(approvalId: string): void {
+    const waiters = this.approvalWaiters.get(approvalId);
+    if (waiters === undefined) return;
+    this.approvalWaiters.delete(approvalId);
+    for (const waiter of waiters) {
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+      waiter.resolve();
+    }
+  }
+
+  private waitForApproval(approvalId: string, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    // Resolution may commit between the run loop's ledger read and waiter registration.
+    if (!this.pendingApprovals.has(approvalId)) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const waiters = this.approvalWaiters.get(approvalId) ?? new Set<ApprovalWaiter>();
+      const waiter: ApprovalWaiter = {
+        resolve,
+        reject,
+        signal,
+        onAbort: () => {
+          waiters.delete(waiter);
+          if (waiters.size === 0) this.approvalWaiters.delete(approvalId);
+          reject(signal.reason ?? new DOMException("Approval wait aborted", "AbortError"));
+        },
+      };
+      waiters.add(waiter);
+      this.approvalWaiters.set(approvalId, waiters);
+      signal.addEventListener("abort", waiter.onAbort, { once: true });
+    });
+  }
+
+  private applyProjectionMemory(input: AppendTransactionInput): void {
+    for (const projection of input.projections ?? []) {
+      const active = this.activeRun;
+      if (projection.kind === "run.state" && active?.runId === projection.runId) {
+        active.record = {
+          ...active.record,
+          state: projection.nextState,
+          startedAtMs: projection.startedAtMs,
+          completedAtMs: projection.completedAtMs,
+          cancelledAtMs: projection.cancelledAtMs,
+          failureCategory: projection.failureCategory,
+          failureMessage: projection.failureMessage,
+          activeProviderStepId: projection.activeProviderStepId,
+        };
+      } else if (
+        projection.kind === "run.activeProviderStep" &&
+        active?.runId === projection.runId
+      ) {
+        active.record = {
+          ...active.record,
+          activeProviderStepId: projection.activeProviderStepId,
+        };
+      } else if (projection.kind === "approval.put") {
+        this.pendingApprovals.set(projection.approvalId, {
+          approvalId: projection.approvalId,
+          runId: projection.runId,
+          callId: projection.callId,
+          state: "pending",
+          actionDigest: projection.actionDigest,
+          requestedAtMs: projection.requestedAtMs,
+        });
+      } else if (projection.kind === "approval.resolve") {
+        this.pendingApprovals.delete(projection.approvalId);
+      } else if (projection.kind === "input.put") {
+        this.pendingInputs.set(projection.inputId, {
+          inputId: projection.inputId,
+          runId: projection.runId,
+          state: "pending",
+          prompt: projection.prompt,
+          requestedAtMs: projection.requestedAtMs,
+        });
+      } else if (projection.kind === "input.resolve") {
+        this.pendingInputs.delete(projection.inputId);
+      } else if (projection.kind === "run.pendingInteractions.cancel") {
+        for (const [approvalId, approval] of this.pendingApprovals) {
+          if (approval.runId === projection.runId) {
+            this.pendingApprovals.delete(approvalId);
+            this.settleApprovalWaiters(approvalId);
+          }
+        }
+        for (const [inputId, input] of this.pendingInputs) {
+          if (input.runId === projection.runId) this.pendingInputs.delete(inputId);
+        }
+      }
+    }
+  }
+
+  private async commitTaskTransaction(
+    runId: string,
+    generation: number,
+    input: AppendTransactionInput,
+    options: RunTaskCommitOptions = {},
+  ): Promise<AppendTransactionResult> {
+    return this.mailbox.enqueue(async () => {
+      this.assertNotFaulted();
+      const active = this.activeRun;
+      if (active === null || active.runId !== runId || active.generation !== generation) {
+        throw new SessionActorError("session.invalid_transition", "Run task is stale");
+      }
+      if (
+        (active.scope.signal.aborted || active.record.state === "cancelling") &&
+        options.allowWhileCancelling !== true
+      ) {
+        throw new SessionActorError("provider.cancelled", "Run cancellation prevents this mutation");
+      }
+
+      let committed: AppendTransactionResult;
+      try {
+        committed = await this.storage.appendTransaction(input);
+      } catch (operationError) {
+        let storedEvents: (SessionEvent | null)[];
+        try {
+          storedEvents = await Promise.all(
+            input.events.map((event) => this.storage.getEventById(event.eventId)),
+          );
+        } catch {
+          this.faultUnresolvedAmbiguousWrite(operationError);
+          throw operationError;
+        }
+        if (storedEvents.every((event): event is SessionEvent => event !== null)) {
+          let current: RunRecord | null;
+          try {
+            current = await this.storage.getRun(runId);
+          } catch {
+            this.faultUnresolvedAmbiguousWrite(operationError);
+            throw operationError;
+          }
+          if (current === null) {
+            this.faultUnresolvedAmbiguousWrite(operationError);
+            throw operationError;
+          }
+          committed = {
+            events: storedEvents,
+            headSequence: Math.max(...storedEvents.map((event) => event.sequence)),
+          };
+          active.record = current;
+        } else {
+          // No matching event proves a pre-commit rejection. A partial match is impossible for
+          // one transaction, so retain quarantine behavior for that ambiguous/corrupt case.
+          if (storedEvents.some((event) => event !== null)) {
+            this.faultUnresolvedAmbiguousWrite(operationError);
+          }
+          throw operationError;
+        }
+      }
+      this.publishOrThrow(committed.events);
+      this.applyProjectionMemory(input);
+      this.touch();
+      return committed;
+    });
+  }
+
   private async initialize(): Promise<void> {
     try {
       await recoverSession({
@@ -436,6 +649,7 @@ export class SessionActor {
         eventId: this.ids.eventId,
         diagnosticId: this.ids.diagnosticId,
         publishCommitted: (event) => this.publishOrThrow([event]),
+        resumeToolLoop: this.resumeRestoredRuns,
       });
       const [runs, approvals, inputs] = await Promise.all([
         this.storage.getNonterminalRuns(),
@@ -474,7 +688,9 @@ export class SessionActor {
       this.recovering = false;
     }
 
-    if (this.activeRun === null && this.queuedRuns.length > 0) {
+    if (this.activeRun !== null && this.resumeRestoredRuns) {
+      this.launchTask(this.activeRun);
+    } else if (this.activeRun === null && this.queuedRuns.length > 0) {
       await this.mailbox.enqueue(async () => this.startNextRun());
     }
   }
@@ -524,6 +740,7 @@ export class SessionActor {
       const messageId = this.ids.messageId();
       const createdAtMs = this.now();
       const wasQueued = this.activeRun !== null || this.queuedRuns.length > 0;
+      const providerSnapshot = this.createRunProviderSnapshot(command);
       const payloadHash = await hashCommandContent(command);
       const input: AcceptCommandInput = {
         commandId: command.commandId,
@@ -552,8 +769,8 @@ export class SessionActor {
               kind: "run.put",
               runId,
               state: "queued",
-              providerId: "milestone-3-task",
-              providerConfig: { milestone: 3 },
+              providerId: providerSnapshot.providerId,
+              providerConfig: providerSnapshot.providerConfig,
               createdAtMs,
               startedAtMs: null,
               completedAtMs: null,
@@ -708,6 +925,10 @@ export class SessionActor {
       generation: active.generation,
       signal: active.scope.signal,
       scheduler: this.scheduler,
+      now: this.now,
+      commitTransaction: (input, options) =>
+        this.commitTaskTransaction(active.runId, active.generation, input, options),
+      waitForApproval: (approvalId) => this.waitForApproval(approvalId, active.scope.signal),
     };
     let confirmStopped!: (result: RunTaskResult) => void;
     const stopped = new Promise<RunTaskResult>((resolve) => {
@@ -715,9 +936,11 @@ export class SessionActor {
     });
     active.context = context;
     active.confirmStopped = confirmStopped;
-    const scheduled = this.scheduler.withProviderPermit(active.scope.signal, () =>
-      Promise.race([this.runTask(context), stopped]),
-    );
+    const task = (): Promise<RunTaskResult | void> =>
+      Promise.race([this.runTask(context), stopped]);
+    const scheduled = this.runTaskOwnsSchedulerPermits
+      ? task()
+      : this.scheduler.withProviderPermit(active.scope.signal, task);
     active.task = scheduled
       .then((result): RunTaskResult => {
         if (active.scope.cancelled && active.record.state === "running") {
@@ -730,13 +953,20 @@ export class SessionActor {
         return result ?? { state: "completed" };
       })
       .then(
-        (result) => this.postTaskOutcome(active.runId, active.generation, result),
-        (error: unknown) =>
+        (result) => {
+          // Handoff leaves durable state for recovery instead of inventing a terminal run.
+          if (!isSessionActorHandoffSignal(active.scope.signal)) {
+            this.postTaskOutcome(active.runId, active.generation, result);
+          }
+        },
+        (error: unknown) => {
+          if (isSessionActorHandoffSignal(active.scope.signal)) return;
           this.postTaskOutcome(active.runId, active.generation, {
             state: active.scope.cancelled ? "interrupted" : "failed",
             code: active.scope.cancelled ? "provider.cancelled" : "provider.protocol_error",
             message: error instanceof Error ? error.message : "Run task failed",
-          }),
+          });
+        },
       )
       .catch((error: unknown) => this.postFault(error));
   }
@@ -937,7 +1167,10 @@ export class SessionActor {
     this.publish(committed.events);
     active.record = terminalRecord;
     for (const [approvalId, approval] of this.pendingApprovals) {
-      if (approval.runId === runId) this.pendingApprovals.delete(approvalId);
+      if (approval.runId === runId) {
+        this.pendingApprovals.delete(approvalId);
+        this.settleApprovalWaiters(approvalId);
+      }
     }
     for (const [inputId, input] of this.pendingInputs) {
       if (input.runId === runId) this.pendingInputs.delete(inputId);
@@ -1038,6 +1271,13 @@ export class SessionActor {
       const identity = await this.commandIdentity(command);
       if (identity.duplicate !== null) {
         this.pendingApprovals.delete(command.params.approvalId);
+        if (this.runTaskOwnsSchedulerPermits && identity.duplicate.runId !== null) {
+          const current = await this.storage.getRun(identity.duplicate.runId);
+          if (current !== null && this.activeRun?.runId === current.runId) {
+            this.activeRun.record = current;
+          }
+          this.settleApprovalWaiters(command.params.approvalId);
+        }
         return identity.duplicate;
       }
       const approval = this.pendingApprovals.get(command.params.approvalId);
@@ -1057,26 +1297,61 @@ export class SessionActor {
         );
       }
       const atMs = this.now();
-      const acceptance = await this.acceptCommand({
-        commandId: command.commandId,
-        commandMethod: command.method,
-        payloadHash: identity.payloadHash,
-        result: { approvalId: approval.approvalId, resolution: command.params.resolution },
-        acceptedAtMs: atMs,
-        runId: approval.runId,
-        transaction: {
+      const resolvedEvent = {
+        eventId: this.ids.eventId(),
+        eventType: "tool.approval.resolved" as const,
+        createdAtMs: atMs,
+        data: {
+          eventVersion: 1 as const,
+          runId: approval.runId,
+          callId: approval.callId,
+          approvalId: approval.approvalId,
+          resolution: command.params.resolution,
+        },
+      };
+
+      let transaction: AcceptCommandInput["transaction"];
+      if (this.runTaskOwnsSchedulerPermits) {
+        const tool = await this.storage.getToolExecution?.(approval.callId);
+        if (tool === null || tool === undefined || tool.effectClass === null) {
+          throw new SessionActorError(
+            "session.invalid_transition",
+            `Approval ${approval.approvalId} has no classified tool execution`,
+          );
+        }
+        if (tool.state !== "awaiting_approval") {
+          throw new SessionActorError(
+            "approval.already_resolved",
+            `Approval ${approval.approvalId} tool is already resolved`,
+          );
+        }
+        const denied = command.params.resolution === "denied";
+        const denialMessage = "The user denied this tool call.";
+        transaction = {
           events: [
+            resolvedEvent,
+            ...(denied
+              ? [
+                  {
+                    eventId: this.ids.eventId(),
+                    eventType: "tool.execution.failed" as const,
+                    createdAtMs: atMs,
+                    data: {
+                      eventVersion: 1 as const,
+                      runId: approval.runId,
+                      callId: approval.callId,
+                      code: "tool.approval_denied" as const,
+                      message: denialMessage,
+                      diagnosticId: this.ids.diagnosticId(),
+                    },
+                  },
+                ]
+              : []),
             {
               eventId: this.ids.eventId(),
-              eventType: "tool.approval.resolved",
+              eventType: "run.started",
               createdAtMs: atMs,
-              data: {
-                eventVersion: 1,
-                runId: approval.runId,
-                callId: approval.callId,
-                approvalId: approval.approvalId,
-                resolution: command.params.resolution,
-              },
+              data: { eventVersion: 1, runId: approval.runId },
             },
           ],
           projections: [
@@ -1087,11 +1362,68 @@ export class SessionActor {
               resolvedAtMs: atMs,
               resolvedByClientId: clientId,
             },
+            {
+              kind: "toolExecution.put",
+              callId: tool.callId,
+              expectedState: "awaiting_approval",
+              runId: tool.runId,
+              stepId: tool.stepId,
+              toolName: tool.toolName,
+              argumentsJson: tool.argumentsJson,
+              argumentsHash: tool.argumentsHash,
+              effectClass: tool.effectClass,
+              state: denied ? "denied" : "approved",
+              attemptCount: tool.attemptCount,
+              requestedAtMs: tool.requestedAtMs,
+              startedAtMs: tool.startedAtMs,
+              completedAtMs: denied ? atMs : tool.completedAtMs,
+              result: tool.result,
+              error: denied
+                ? { code: "tool.approval_denied", message: denialMessage }
+                : tool.error,
+            },
+            {
+              kind: "run.state",
+              runId: approval.runId,
+              expectedState: "waiting_for_user",
+              nextState: "running",
+              startedAtMs: this.activeRun.record.startedAtMs,
+              completedAtMs: null,
+              cancelledAtMs: null,
+              failureCategory: null,
+              failureMessage: null,
+              activeProviderStepId: this.activeRun.record.activeProviderStepId,
+            },
           ],
-        },
+        };
+      } else {
+        transaction = {
+          events: [resolvedEvent],
+          projections: [
+            {
+              kind: "approval.resolve",
+              approvalId: approval.approvalId,
+              resolution: command.params.resolution,
+              resolvedAtMs: atMs,
+              resolvedByClientId: clientId,
+            },
+          ],
+        };
+      }
+
+      const acceptance = await this.acceptCommand({
+        commandId: command.commandId,
+        commandMethod: command.method,
+        payloadHash: identity.payloadHash,
+        result: { approvalId: approval.approvalId, resolution: command.params.resolution },
+        acceptedAtMs: atMs,
+        runId: approval.runId,
+        transaction,
       });
       this.publish(acceptance.events);
+      this.applyProjectionMemory(transaction);
       this.pendingApprovals.delete(approval.approvalId);
+      if (this.runTaskOwnsSchedulerPermits) this.settleApprovalWaiters(approval.approvalId);
       return acceptance;
     });
   }
@@ -1182,27 +1514,39 @@ export class SessionActor {
   }
 
   shutdown(): Promise<void> {
-    if (this.shutdownPromise !== null) return this.shutdownPromise;
+    if (this.closePromise !== null) return this.closePromise;
     this.closed = true;
-    this.shutdownPromise = this.finishShutdown();
-    return this.shutdownPromise;
+    this.closePromise = this.finishClose(
+      new Error("Session actor is shutting down"),
+      `Session actor ${this.sessionId}`,
+    );
+    return this.closePromise;
   }
 
-  private async finishShutdown(): Promise<void> {
-    const completion = this.completeShutdown();
+  handoff(): Promise<void> {
+    if (this.closePromise !== null) return this.closePromise;
+    this.closed = true;
+    this.closePromise = this.finishClose(
+      new SessionActorHandoffError(),
+      `Session actor handoff ${this.sessionId}`,
+    );
+    return this.closePromise;
+  }
+
+  private async finishClose(reason: unknown, component: string): Promise<void> {
+    const completion = this.completeClose(reason);
     if (!(await this.shutdownWait(completion))) {
       // The caller can now escalate without waiting forever. Keep late cleanup contained.
       void completion.catch(() => undefined);
-      throw new ShutdownTimeoutError(`Session actor ${this.sessionId}`);
+      throw new ShutdownTimeoutError(component);
     }
     await completion;
   }
 
-  private async completeShutdown(): Promise<void> {
-    const reason = new Error("Session actor is shutting down");
+  private async completeClose(reason: unknown): Promise<void> {
     if (this.activeRun !== null) this.stopActiveTask(this.activeRun, reason);
-    // Drain commands accepted before shutdown. One may be committing run.started, so inspect
-    // activeRun again after the barrier and cancel the newly installed task as well.
+    // Drain commands accepted before close. One may be committing run.started, so inspect
+    // activeRun again after the barrier and stop the newly installed task as well.
     await this.mailbox.enqueue(() => undefined);
     if (this.activeRun !== null) this.stopActiveTask(this.activeRun, reason);
     const activeTask = this.activeRun?.task ?? null;

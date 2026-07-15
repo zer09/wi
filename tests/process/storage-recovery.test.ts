@@ -14,6 +14,7 @@ import {
 
 const fixture = fileURLToPath(new URL("./storage-crash-fixture.mjs", import.meta.url));
 const catalogV1Fixture = fileURLToPath(new URL("./catalog-v1-fixture.mjs", import.meta.url));
+const sessionV1Fixture = fileURLToPath(new URL("./session-v1-fixture.mjs", import.meta.url));
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
 
@@ -83,6 +84,24 @@ function runCatalogV1Fixture(homeDirectory: string): Promise<number | null> {
   });
 }
 
+function runSessionV1Fixture(homeDirectory: string, mode: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [sessionV1Fixture, homeDirectory, mode], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) reject(new Error(stderr || `session v1 fixture exited ${String(code)}`));
+      else resolve(code);
+    });
+  });
+}
+
 function restart(homeDirectory: string): SessionStoreManager {
   const storage = new SessionStoreManager({
     homeDirectory,
@@ -112,6 +131,73 @@ describe("storage crash windows", () => {
       diagnosticId: null,
       quarantinedRelativePath: null,
     });
+  });
+
+  it("migrates a populated session v1 and backfills tool call occurrences", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await expect(runSessionV1Fixture(homeDirectory, "valid")).resolves.toBe(0);
+
+    const storage = restart(homeDirectory);
+    const session = await storage.openSession("ses_v1Populated");
+    await expect(session.getManifest()).resolves.toMatchObject({ schemaVersion: 2 });
+    await expect(session.getToolExecutionsForStep("step_v1Original")).resolves.toEqual([
+      expect.objectContaining({ callId: "call_v1Existing", state: "completed" }),
+    ]);
+
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_v1LaterOccurrence",
+          eventType: "provider.tool_call.reused",
+          createdAtMs: 3_000,
+          data: {
+            eventVersion: 1,
+            runId: "run_v1Populated",
+            stepId: "step_v1Later",
+            callId: "call_v1Existing",
+            originalStepId: "step_v1Original",
+          },
+        },
+      ],
+      projections: [
+        {
+          kind: "providerStep.put",
+          stepId: "step_v1Later",
+          runId: "run_v1Populated",
+          stepIndex: 1,
+          state: "completed",
+          startedAtMs: 3_000,
+          completedAtMs: 3_000,
+          responseId: "response_v1Later",
+          errorCategory: null,
+          errorMessage: null,
+        },
+        {
+          kind: "toolCallOccurrence.put",
+          runId: "run_v1Populated",
+          stepId: "step_v1Later",
+          callId: "call_v1Existing",
+          occurredAtMs: 3_000,
+        },
+      ],
+    });
+    await expect(session.getToolExecutionsForStep("step_v1Later")).resolves.toEqual([
+      expect.objectContaining({ callId: "call_v1Existing", state: "completed" }),
+    ]);
+  });
+
+  it("rolls back a failed session v2 migration without advancing its version", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await expect(runSessionV1Fixture(homeDirectory, "conflict")).resolves.toBe(0);
+
+    const storage = restart(homeDirectory);
+    const session = await storage.openSession("ses_v1Populated");
+    await expect(session.getManifest()).rejects.toMatchObject({ code: "storage.migration_failed" });
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+    await expect(runSessionV1Fixture(homeDirectory, "inspect-conflict")).resolves.toBe(0);
   });
 
   it("completes session creation committed before catalog readiness during startup", async () => {

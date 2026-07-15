@@ -40,6 +40,7 @@ const eventData: Record<SessionEventType, unknown> = {
     name: "echo",
     argumentsJson: '{"text":"hello"}',
   },
+  "provider.tool_call.reused": { ...step, callId: "call_A", originalStepId: "step_original" },
   "provider.step.completed": step,
   "provider.step.interrupted": { ...step, ...failure },
   "provider.step.failed": { ...step, ...failure },
@@ -61,6 +62,7 @@ const eventData: Record<SessionEventType, unknown> = {
   },
   "tool.approval.resolved": { ...tool, approvalId: "approval_A", resolution: "approved" },
   "tool.execution.started": tool,
+  "tool.execution.recovered": { ...tool, attemptCount: 1 },
   "tool.execution.completed": { ...tool, result: { text: "hello" } },
   "tool.execution.failed": { ...tool, ...failure, code: "tool.execution_failed" },
   "tool.execution.outcome_unknown": {

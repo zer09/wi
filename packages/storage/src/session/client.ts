@@ -8,7 +8,9 @@ import type {
   PendingApprovalRecord,
   PendingInputRecord,
   ProviderStepRecord,
+  RunMessageRecord,
   RunRecord,
+  ToolExecutionRecord,
   SessionCatalogProjection,
   SessionManifest,
   SessionRecoveryResult,
@@ -86,6 +88,36 @@ export class SessionClient {
   async getProviderStep(stepId: string): Promise<ProviderStepRecord | null> {
     await this.prepare();
     return this.pool.getProviderStep(this.sessionId, stepId);
+  }
+
+  async getProviderStepsForRun(runId: string): Promise<readonly ProviderStepRecord[]> {
+    await this.prepare();
+    return this.pool.getProviderStepsForRun(this.sessionId, runId);
+  }
+
+  async getToolExecution(callId: string): Promise<ToolExecutionRecord | null> {
+    await this.prepare();
+    return this.pool.getToolExecution(this.sessionId, callId);
+  }
+
+  async getToolExecutionsForStep(stepId: string): Promise<readonly ToolExecutionRecord[]> {
+    await this.prepare();
+    return this.pool.getToolExecutionsForStep(this.sessionId, stepId);
+  }
+
+  async getToolExecutionsForRun(runId: string): Promise<readonly ToolExecutionRecord[]> {
+    await this.prepare();
+    return this.pool.getToolExecutionsForRun(this.sessionId, runId);
+  }
+
+  async getRunMessages(runId: string): Promise<readonly RunMessageRecord[]> {
+    await this.prepare();
+    return this.pool.getRunMessages(this.sessionId, runId);
+  }
+
+  async getStreamingMessagesForStep(stepId: string): Promise<readonly RunMessageRecord[]> {
+    await this.prepare();
+    return this.pool.getStreamingMessagesForStep(this.sessionId, stepId);
   }
 
   async getNonterminalRuns(): Promise<readonly RunRecord[]> {

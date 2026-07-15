@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionEvent } from "@wi/protocol";
+import type { ProviderStepState, SessionEvent } from "@wi/protocol";
 import type { RunRecord, SessionRecoveryResult } from "@wi/storage";
 
 import { recoverSession, recoveryDecision, type RecoveryStorage } from "./recovery.js";
@@ -176,7 +176,7 @@ describe("startup recovery", () => {
       ["run_completed", run("run_completed", "completed")],
     ]);
     let sequence = 0;
-    let stepState = "streaming";
+    let stepState: ProviderStepState = "streaming";
     const candidates: SessionRecoveryResult = {
       interruptedRunIds: ["run_running"],
       interruptedStepIds: ["step_streaming"],

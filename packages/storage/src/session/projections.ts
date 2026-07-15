@@ -1,6 +1,11 @@
 import type Database from "better-sqlite3";
 
-import { canonicalJson, type RunState } from "@wi/protocol";
+import {
+  canonicalJson,
+  type ProviderStepState,
+  type RunState,
+  type ToolExecutionState,
+} from "@wi/protocol";
 
 import { StorageError } from "../common/worker-rpc.js";
 import type { ProjectionMutation } from "../types.js";
@@ -15,6 +20,47 @@ function canonicalArgumentsJson(value: string): string {
     return canonicalJson(JSON.parse(value) as unknown);
   } catch {
     throw new StorageError("provider.protocol_error", "Tool argumentsJson is not canonical JSON");
+  }
+}
+
+const providerStepTransitions: Readonly<Record<ProviderStepState, ReadonlySet<ProviderStepState>>> = {
+  created: new Set(["streaming"]),
+  streaming: new Set(["completed", "failed", "cancelled", "interrupted"]),
+  completed: new Set(),
+  failed: new Set(),
+  cancelled: new Set(),
+  interrupted: new Set(),
+};
+
+const toolTransitions: Readonly<Record<ToolExecutionState, ReadonlySet<ToolExecutionState>>> = {
+  staged: new Set(["requested", "failed", "discarded"]),
+  requested: new Set(["awaiting_approval", "started", "failed", "cancelled"]),
+  awaiting_approval: new Set(["approved", "denied", "cancelled"]),
+  approved: new Set(["started", "cancelled"]),
+  started: new Set(["requested", "completed", "failed", "cancelled", "outcome_unknown"]),
+  completed: new Set(),
+  failed: new Set(),
+  denied: new Set(),
+  cancelled: new Set(),
+  outcome_unknown: new Set(),
+  discarded: new Set(),
+};
+
+function assertProviderStepTransition(current: ProviderStepState, next: ProviderStepState): void {
+  if (!providerStepTransitions[current].has(next)) {
+    throw new StorageError(
+      "session.invalid_transition",
+      `Provider step cannot transition from ${current} to ${next}`,
+    );
+  }
+}
+
+function assertToolTransition(current: ToolExecutionState, next: ToolExecutionState): void {
+  if (!toolTransitions[current].has(next)) {
+    throw new StorageError(
+      "session.invalid_transition",
+      `Tool execution cannot transition from ${current} to ${next}`,
+    );
   }
 }
 
@@ -123,6 +169,24 @@ export function applyProjection(database: Database.Database, mutation: Projectio
       }
       return;
     }
+    case "run.activeProviderStep": {
+      const result = database
+        .prepare(
+          `UPDATE runs SET active_provider_step_id = @activeProviderStepId
+           WHERE run_id = @runId
+             AND (active_provider_step_id = @expectedActiveProviderStepId
+                  OR (active_provider_step_id IS NULL AND @expectedActiveProviderStepId IS NULL))
+             AND state NOT IN ('completed', 'failed', 'cancelled', 'interrupted')`,
+        )
+        .run(mutation);
+      if (result.changes !== 1) {
+        throw new StorageError(
+          "session.invalid_transition",
+          `Run ${mutation.runId} active provider step lost its identity CAS`,
+        );
+      }
+      return;
+    }
     case "message.put": {
       const existing = database
         .prepare(
@@ -190,40 +254,51 @@ export function applyProjection(database: Database.Database, mutation: Projectio
       const existing = database
         .prepare(
           `SELECT run_id AS runId, step_index AS stepIndex, state,
-                  started_at_ms AS startedAtMs
+                  started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                  response_id AS responseId, error_category AS errorCategory,
+                  error_message AS errorMessage
            FROM provider_steps WHERE step_id = ?`,
         )
         .get(mutation.stepId) as
-        | { runId: string; stepIndex: number; state: string; startedAtMs: number }
+        | {
+            runId: string;
+            stepIndex: number;
+            state: ProviderStepState;
+            startedAtMs: number;
+            completedAtMs: number | null;
+            responseId: string | null;
+            errorCategory: string | null;
+            errorMessage: string | null;
+          }
         | undefined;
-      if (
-        existing !== undefined &&
-        (existing.runId !== mutation.runId ||
+      if (existing === undefined) {
+        if (mutation.expectedState !== undefined) {
+          throw new StorageError("session.invalid_transition", "Provider step CAS target is missing");
+        }
+      } else {
+        if (
+          existing.runId !== mutation.runId ||
           existing.stepIndex !== mutation.stepIndex ||
-          existing.startedAtMs !== mutation.startedAtMs)
-      ) {
-        identityConflict("Provider step", mutation.stepId);
+          existing.startedAtMs !== mutation.startedAtMs ||
+          (existing.responseId !== null && existing.responseId !== mutation.responseId)
+        ) {
+          identityConflict("Provider step", mutation.stepId);
+        }
+        const unchanged =
+          existing.state === mutation.state &&
+          existing.completedAtMs === mutation.completedAtMs &&
+          existing.responseId === mutation.responseId &&
+          existing.errorCategory === mutation.errorCategory &&
+          existing.errorMessage === mutation.errorMessage;
+        if (unchanged) return;
+        if (mutation.expectedState === undefined || existing.state !== mutation.expectedState) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Provider step ${mutation.stepId} lost its state CAS`,
+          );
+        }
+        assertProviderStepTransition(existing.state, mutation.state);
       }
-      if (
-        mutation.expectedState !== undefined &&
-        (existing === undefined || existing.state !== mutation.expectedState)
-      ) {
-        throw new StorageError(
-          "session.invalid_transition",
-          `Provider step ${mutation.stepId} expected ${mutation.expectedState}`,
-        );
-      }
-      const storedMutation = {
-        stepId: mutation.stepId,
-        runId: mutation.runId,
-        stepIndex: mutation.stepIndex,
-        state: mutation.state,
-        startedAtMs: mutation.startedAtMs,
-        completedAtMs: mutation.completedAtMs,
-        responseId: mutation.responseId,
-        errorCategory: mutation.errorCategory,
-        errorMessage: mutation.errorMessage,
-      };
       database
         .prepare(
           `INSERT INTO provider_steps (
@@ -239,16 +314,22 @@ export function applyProjection(database: Database.Database, mutation: Projectio
              error_category = excluded.error_category,
              error_message = excluded.error_message`,
         )
-        .run(storedMutation);
+        .run(mutation);
       return;
     }
     case "toolExecution.put": {
       const argumentsJson = canonicalArgumentsJson(mutation.argumentsJson);
+      const effectClass = mutation.effectClass ?? "unclassified";
+      const resultJson = mutation.result === null ? null : canonicalJson(mutation.result);
+      const errorJson = mutation.error === null ? null : canonicalJson(mutation.error);
       const existing = database
         .prepare(
           `SELECT run_id AS runId, step_id AS stepId, tool_name AS toolName,
                   arguments_json AS argumentsJson, arguments_hash AS argumentsHash,
-                  effect_class AS effectClass
+                  effect_class AS effectClass, state, attempt_count AS attemptCount,
+                  requested_at_ms AS requestedAtMs, started_at_ms AS startedAtMs,
+                  completed_at_ms AS completedAtMs, result_json AS resultJson,
+                  error_json AS errorJson
            FROM tool_executions WHERE call_id = ?`,
         )
         .get(mutation.callId) as
@@ -259,21 +340,80 @@ export function applyProjection(database: Database.Database, mutation: Projectio
             argumentsJson: string;
             argumentsHash: string;
             effectClass: string;
+            state: ToolExecutionState;
+            attemptCount: number;
+            requestedAtMs: number;
+            startedAtMs: number | null;
+            completedAtMs: number | null;
+            resultJson: string | null;
+            errorJson: string | null;
           }
         | undefined;
-      if (
-        existing !== undefined &&
-        (existing.runId !== mutation.runId ||
+      if (existing === undefined) {
+        if (mutation.expectedState !== undefined) {
+          throw new StorageError("session.invalid_transition", "Tool execution CAS target is missing");
+        }
+      } else {
+        const effectConflict =
+          existing.effectClass !== effectClass && existing.effectClass !== "unclassified";
+        if (
+          existing.runId !== mutation.runId ||
           existing.stepId !== mutation.stepId ||
           existing.toolName !== mutation.toolName ||
           canonicalArgumentsJson(existing.argumentsJson) !== argumentsJson ||
           existing.argumentsHash !== mutation.argumentsHash ||
-          existing.effectClass !== mutation.effectClass)
-      ) {
-        throw new StorageError(
-          "provider.protocol_error",
-          `Tool call ${mutation.callId} was reused with different identity`,
-        );
+          existing.requestedAtMs !== mutation.requestedAtMs ||
+          effectConflict
+        ) {
+          throw new StorageError(
+            "provider.protocol_error",
+            `Tool call ${mutation.callId} was reused with different identity`,
+          );
+        }
+        const unchanged =
+          existing.effectClass === effectClass &&
+          existing.state === mutation.state &&
+          existing.attemptCount === mutation.attemptCount &&
+          existing.startedAtMs === mutation.startedAtMs &&
+          existing.completedAtMs === mutation.completedAtMs &&
+          existing.resultJson === resultJson &&
+          existing.errorJson === errorJson;
+        if (unchanged) return;
+        if (mutation.expectedState === undefined || existing.state !== mutation.expectedState) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Tool call ${mutation.callId} lost its state CAS`,
+          );
+        }
+        assertToolTransition(existing.state, mutation.state);
+        if (
+          mutation.state === "started" &&
+          mutation.attemptCount !== existing.attemptCount + 1
+        ) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Tool call ${mutation.callId} attempt count did not increment exactly once`,
+          );
+        }
+        if (
+          mutation.state !== "started" &&
+          mutation.attemptCount !== existing.attemptCount
+        ) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Tool call ${mutation.callId} attempt count changed outside execution start`,
+          );
+        }
+        if (
+          existing.state === "started" &&
+          mutation.state === "requested" &&
+          existing.effectClass !== "pure"
+        ) {
+          throw new StorageError(
+            "session.invalid_transition",
+            `Only a pure tool call may be reconciled for retry`,
+          );
+        }
       }
       database
         .prepare(
@@ -286,6 +426,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
              @effectClass, @state, @attemptCount, @requestedAtMs, @startedAtMs,
              @completedAtMs, @resultJson, @errorJson
            ) ON CONFLICT(call_id) DO UPDATE SET
+             effect_class = excluded.effect_class,
              state = excluded.state,
              attempt_count = excluded.attempt_count,
              started_at_ms = excluded.started_at_ms,
@@ -296,9 +437,52 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         .run({
           ...mutation,
           argumentsJson,
-          resultJson: mutation.result === null ? null : canonicalJson(mutation.result),
-          errorJson: mutation.error === null ? null : canonicalJson(mutation.error),
+          effectClass,
+          resultJson,
+          errorJson,
         });
+      return;
+    }
+    case "toolCallOccurrence.put": {
+      const identities = database
+        .prepare(
+          `SELECT
+             (SELECT run_id FROM provider_steps WHERE step_id = @stepId) AS stepRunId,
+             (SELECT run_id FROM tool_executions WHERE call_id = @callId) AS toolRunId`,
+        )
+        .get(mutation) as { stepRunId: string | null; toolRunId: string | null };
+      if (identities.stepRunId === null || identities.toolRunId === null) {
+        throw new StorageError(
+          "session.invalid_transition",
+          `Tool call occurrence ${mutation.callId} has missing provenance`,
+        );
+      }
+      if (identities.stepRunId !== mutation.runId || identities.toolRunId !== mutation.runId) {
+        throw new StorageError(
+          "provider.protocol_error",
+          `Tool call occurrence ${mutation.callId} crossed run identity`,
+        );
+      }
+      const existing = database
+        .prepare(
+          `SELECT run_id AS runId, occurred_at_ms AS occurredAtMs
+           FROM tool_call_occurrences WHERE step_id = ? AND call_id = ?`,
+        )
+        .get(mutation.stepId, mutation.callId) as
+        | { runId: string; occurredAtMs: number }
+        | undefined;
+      if (existing !== undefined) {
+        if (existing.runId !== mutation.runId || existing.occurredAtMs !== mutation.occurredAtMs) {
+          identityConflict("Tool call occurrence", `${mutation.stepId}/${mutation.callId}`);
+        }
+        return;
+      }
+      database
+        .prepare(
+          `INSERT INTO tool_call_occurrences (step_id, call_id, run_id, occurred_at_ms)
+           VALUES (@stepId, @callId, @runId, @occurredAtMs)`,
+        )
+        .run(mutation);
       return;
     }
     case "approval.put": {
@@ -400,6 +584,14 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         .prepare(
           `UPDATE pending_inputs SET state = 'cancelled', resolved_at_ms = @cancelledAtMs
            WHERE run_id = @runId AND state = 'pending'`,
+        )
+        .run(mutation);
+      database
+        .prepare(
+          `UPDATE tool_executions SET state = 'cancelled', completed_at_ms = @cancelledAtMs,
+                                      error_json = '{"code":"provider.cancelled","message":"Run cancelled."}'
+           WHERE run_id = @runId
+             AND state IN ('requested', 'awaiting_approval', 'approved')`,
         )
         .run(mutation);
       return;

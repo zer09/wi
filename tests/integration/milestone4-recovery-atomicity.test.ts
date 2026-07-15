@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { PROVIDER_LIMITS } from "@wi/provider-contract";
 import { FakeProviderAdapter } from "@wi/provider-fake";
 import {
   canonicalJsonHash,
@@ -519,6 +520,255 @@ async function seedTerminalToolSet(
   return { runId, callIds };
 }
 
+async function seedOlderUnknownOutcome(
+  session: SessionClient,
+  latestState: "awaiting_approval" | "completed",
+): Promise<{
+  readonly runId: string;
+  readonly unknownCallId: string;
+  readonly latestCallId: string;
+  readonly approvalId: string;
+}> {
+  const suffix = `${fixtureNumber}_${latestState}`;
+  const runId = `run_olderUnknown${suffix}`;
+  const unknownStepId = `step_olderUnknown${suffix}`;
+  const latestStepId = `step_latestAfterUnknown${suffix}`;
+  const unknownCallId = `call_olderUnknown${suffix}`;
+  const latestCallId = `call_latestAfterUnknown${suffix}`;
+  const approvalId = `approval_latestAfterUnknown${suffix}`;
+  const argumentsJson = '{"text":"older unknown"}';
+  const argumentsHash = await canonicalJsonHash({ text: "older unknown" });
+  const latestToolName = latestState === "awaiting_approval" ? "guarded_echo" : "echo";
+  const actionDigest = await canonicalJsonHash({
+    callId: latestCallId,
+    toolName: latestToolName,
+    argumentsHash,
+  });
+  await session.appendTransaction({
+    events: [
+      {
+        eventId: `evt_olderUnknown${suffix}RunStarted`,
+        eventType: "run.started",
+        createdAtMs: 2_000,
+        data: { eventVersion: 1, runId },
+      },
+      {
+        eventId: `evt_olderUnknown${suffix}StepCompleted`,
+        eventType: "provider.step.completed",
+        createdAtMs: 2_001,
+        data: { eventVersion: 1, runId, stepId: unknownStepId },
+      },
+      {
+        eventId: `evt_olderUnknown${suffix}Requested`,
+        eventType: "tool.call.requested",
+        createdAtMs: 2_002,
+        data: {
+          eventVersion: 1,
+          runId,
+          stepId: unknownStepId,
+          callId: unknownCallId,
+          name: "echo",
+          argumentsJson,
+          argumentsHash,
+          effectClass: "non_idempotent",
+        },
+      },
+      {
+        eventId: `evt_olderUnknown${suffix}Started`,
+        eventType: "tool.execution.started",
+        createdAtMs: 2_003,
+        data: { eventVersion: 1, runId, callId: unknownCallId },
+      },
+      {
+        eventId: `evt_olderUnknown${suffix}Unknown`,
+        eventType: "tool.execution.outcome_unknown",
+        createdAtMs: 2_004,
+        data: {
+          eventVersion: 1,
+          runId,
+          callId: unknownCallId,
+          code: "tool.outcome_unknown",
+          message: "The older non-idempotent outcome is unknown.",
+          diagnosticId: `err_olderUnknown${suffix}`,
+        },
+      },
+      {
+        eventId: `evt_latestAfterUnknown${suffix}StepCompleted`,
+        eventType: "provider.step.completed",
+        createdAtMs: 2_010,
+        data: { eventVersion: 1, runId, stepId: latestStepId },
+      },
+      {
+        eventId: `evt_latestAfterUnknown${suffix}Requested`,
+        eventType: "tool.call.requested",
+        createdAtMs: 2_011,
+        data: {
+          eventVersion: 1,
+          runId,
+          stepId: latestStepId,
+          callId: latestCallId,
+          name: latestToolName,
+          argumentsJson,
+          argumentsHash,
+          effectClass: "pure",
+        },
+      },
+      ...(latestState === "completed"
+        ? [
+            {
+              eventId: `evt_latestAfterUnknown${suffix}Started`,
+              eventType: "tool.execution.started" as const,
+              createdAtMs: 2_012,
+              data: { eventVersion: 1 as const, runId, callId: latestCallId },
+            },
+            {
+              eventId: `evt_latestAfterUnknown${suffix}Completed`,
+              eventType: "tool.execution.completed" as const,
+              createdAtMs: 2_013,
+              data: {
+                eventVersion: 1 as const,
+                runId,
+                callId: latestCallId,
+                result: { text: "older unknown" },
+              },
+            },
+          ]
+        : [
+            {
+              eventId: `evt_latestAfterUnknown${suffix}Approval`,
+              eventType: "tool.approval.requested" as const,
+              createdAtMs: 2_012,
+              data: {
+                eventVersion: 1 as const,
+                runId,
+                callId: latestCallId,
+                approvalId,
+                toolName: latestToolName,
+                actionDigest,
+                summary: "guarded_echo: older unknown",
+              },
+            },
+            {
+              eventId: `evt_latestAfterUnknown${suffix}Waiting`,
+              eventType: "run.waiting_for_user" as const,
+              createdAtMs: 2_012,
+              data: {
+                eventVersion: 1 as const,
+                runId,
+                reason: "approval" as const,
+                approvalId,
+              },
+            },
+          ]),
+    ],
+    projections: [
+      {
+        kind: "run.put",
+        runId,
+        state: latestState === "awaiting_approval" ? "waiting_for_user" : "running",
+        providerId: "fake",
+        providerConfig: { scenario: "echo-tool-round-trip" },
+        createdAtMs: 2_000,
+        startedAtMs: 2_000,
+        completedAtMs: null,
+        cancelledAtMs: null,
+        failureCategory: null,
+        failureMessage: null,
+        activeProviderStepId: null,
+      },
+      {
+        kind: "providerStep.put",
+        stepId: unknownStepId,
+        runId,
+        stepIndex: 0,
+        state: "completed",
+        startedAtMs: 2_000,
+        completedAtMs: 2_001,
+        responseId: `response_olderUnknown${suffix}`,
+        errorCategory: null,
+        errorMessage: null,
+      },
+      {
+        kind: "toolExecution.put",
+        callId: unknownCallId,
+        runId,
+        stepId: unknownStepId,
+        toolName: "echo",
+        argumentsJson,
+        argumentsHash,
+        effectClass: "non_idempotent",
+        state: "outcome_unknown",
+        attemptCount: 1,
+        requestedAtMs: 2_002,
+        startedAtMs: 2_003,
+        completedAtMs: 2_004,
+        result: null,
+        error: {
+          code: "tool.outcome_unknown",
+          message: "The older non-idempotent outcome is unknown.",
+        },
+      },
+      {
+        kind: "toolCallOccurrence.put",
+        runId,
+        stepId: unknownStepId,
+        callId: unknownCallId,
+        occurredAtMs: 2_002,
+      },
+      {
+        kind: "providerStep.put",
+        stepId: latestStepId,
+        runId,
+        stepIndex: 1,
+        state: "completed",
+        startedAtMs: 2_009,
+        completedAtMs: 2_010,
+        responseId: `response_latestAfterUnknown${suffix}`,
+        errorCategory: null,
+        errorMessage: null,
+      },
+      {
+        kind: "toolExecution.put",
+        callId: latestCallId,
+        runId,
+        stepId: latestStepId,
+        toolName: latestToolName,
+        argumentsJson,
+        argumentsHash,
+        effectClass: "pure",
+        state: latestState,
+        attemptCount: latestState === "completed" ? 1 : 0,
+        requestedAtMs: 2_011,
+        startedAtMs: latestState === "completed" ? 2_012 : null,
+        completedAtMs: latestState === "completed" ? 2_013 : null,
+        result: latestState === "completed" ? { text: "older unknown" } : null,
+        error: null,
+      },
+      {
+        kind: "toolCallOccurrence.put",
+        runId,
+        stepId: latestStepId,
+        callId: latestCallId,
+        occurredAtMs: 2_011,
+      },
+      ...(latestState === "awaiting_approval"
+        ? [
+            {
+              kind: "approval.put" as const,
+              approvalId,
+              runId,
+              callId: latestCallId,
+              state: "pending" as const,
+              actionDigest,
+              requestedAtMs: 2_012,
+            },
+          ]
+        : []),
+    ],
+  });
+  return { runId, unknownCallId, latestCallId, approvalId };
+}
+
 function registryFor(specs: readonly StartedToolSpec[]): ToolRegistry {
   const registry = new ToolRegistry();
   for (const spec of specs) {
@@ -797,6 +1047,159 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       attemptCount: 1,
       result: { text: "recover" },
     });
+  });
+
+  it("interrupts a waiting run with an older unknown outcome before approval continuation", async () => {
+    const { manager, session } = await storageFixture();
+    const seeded = await seedOlderUnknownOutcome(session, "awaiting_approval");
+    await expect(session.recover()).resolves.toMatchObject({
+      interruptedRunIds: [],
+      outcomeUnknownRunIds: [seeded.runId],
+    });
+
+    const ids = generatedIds("waitingOlderUnknown");
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const registry = createBuiltinToolRegistry();
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry,
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: ids.loop,
+    });
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    let now = 5_500;
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler,
+      ids: ids.actor,
+      now: () => ++now,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(actor);
+
+    expect(actor.snapshot.activeRunId).toBeNull();
+    expect(provider.requests).toEqual([]);
+    expect(executions).toEqual([]);
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+      activeProviderStepId: null,
+    });
+    await expect(session.getToolExecution(seeded.unknownCallId)).resolves.toMatchObject({
+      state: "outcome_unknown",
+      attemptCount: 1,
+    });
+    await expect(session.getToolExecution(seeded.latestCallId)).resolves.toMatchObject({
+      state: "cancelled",
+      attemptCount: 0,
+    });
+    await expect(session.getPendingApprovals()).resolves.toEqual([]);
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.outcome_unknown" &&
+          event.data.callId === seeded.unknownCallId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      events.filter(
+        (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+    const head = await session.getHeadSequence();
+
+    await actor.handoff();
+    actors.splice(actors.indexOf(actor), 1);
+    const reopened = await manager.openSession(session.sessionId);
+    let repeatedEvent = 0;
+    await expect(
+      recoverSession({
+        sessionId: reopened.sessionId,
+        storage: reopened,
+        now: () => ++now,
+        eventId: () => `evt_waitingOlderUnknownRepeated${++repeatedEvent}`,
+        diagnosticId: () => `err_waitingOlderUnknownRepeated${repeatedEvent}`,
+        publishCommitted: () => undefined,
+        resumeToolLoop: true,
+        currentToolEffectClass: (name) => registry.get(name)?.effectClass ?? null,
+      }),
+    ).resolves.toMatchObject({
+      interruptedRunIds: [],
+      outcomeUnknownRunIds: [],
+    });
+    await expect(reopened.getHeadSequence()).resolves.toBe(head);
+  });
+
+  it("refuses provider request construction from an older unknown outcome", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedOlderUnknownOutcome(session, "completed");
+    await expect(
+      session.getBoundedProviderRequestData({
+        runId: seeded.runId,
+        stepId: "step_olderUnknownRequestDefense",
+        stepIndex: 2,
+        expectedProviderId: "fake",
+        maxProviderConfigBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+        maxMessageTextBytes: PROVIDER_LIMITS.messageTextMaxBytes,
+        maxToolNameBytes: PROVIDER_LIMITS.toolNameMaxBytes,
+        maxInputItems: PROVIDER_LIMITS.inputItemMaxCount,
+        maxRequestBytes: PROVIDER_LIMITS.requestMaxBytes,
+      }),
+    ).resolves.toEqual({ status: "unsafe_outcome_unknown" });
+
+    const ids = generatedIds("olderUnknownRequestDefense");
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry: createBuiltinToolRegistry(),
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: ids.loop,
+    });
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const head = await session.getHeadSequence();
+    const result = await loop.task({
+      sessionId: session.sessionId,
+      runId: seeded.runId,
+      generation: 1,
+      signal: new AbortController().signal,
+      scheduler,
+      now: () => 5_900,
+      commitTransaction: (input) => session.appendTransaction(input),
+      waitForApproval: async () => undefined,
+    });
+
+    expect(result).toMatchObject({ state: "interrupted", code: "tool.outcome_unknown" });
+    expect(provider.requests).toEqual([]);
+    expect(executions).toEqual([]);
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    await expect(session.getToolExecution(seeded.unknownCallId)).resolves.toMatchObject({
+      state: "outcome_unknown",
+      attemptCount: 1,
+    });
+    await expect(session.getToolExecution(seeded.latestCallId)).resolves.toMatchObject({
+      state: "completed",
+      attemptCount: 1,
+    });
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await scheduler.shutdown();
   });
 
   it("interrupts a running run with existing unknown outcomes exactly once", async () => {

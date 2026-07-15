@@ -1,3 +1,4 @@
+import { decodeProviderConfiguration } from "@wi/provider-contract";
 import {
   hashCommandContent,
   type ApprovalResolveCommand,
@@ -15,6 +16,7 @@ import type {
   AcceptCommandInput,
   AcceptedCommandResult,
   AppendTransactionInput,
+  AppendTransactionInspection,
   AppendTransactionResult,
   PendingApprovalRecord,
   PendingInputRecord,
@@ -72,6 +74,7 @@ export interface SessionActorStorage {
   readonly sessionId: string;
   acceptCommand(input: AcceptCommandInput): Promise<AcceptedCommandResult>;
   appendTransaction(input: AppendTransactionInput): Promise<AppendTransactionResult>;
+  inspectAppendTransaction(input: AppendTransactionInput): Promise<AppendTransactionInspection>;
   getEventById(eventId: string): Promise<SessionEvent | null>;
   getRun(runId: string): Promise<RunRecord | null>;
   getAcceptedCommand(commandId: string): Promise<AcceptedCommandResult | null>;
@@ -95,8 +98,181 @@ export interface SessionActorIds {
 }
 
 export interface RunTaskCommitOptions {
-  /** Cancellation cleanup may persist interruption/discard state after run.cancel is committed. */
-  readonly allowWhileCancelling?: boolean;
+  /** Actor-validated terminal cleanup may finish after run.cancel is committed. */
+  readonly cancellationCleanup?: "provider_text" | "provider_step" | "tool_execution";
+}
+
+function eventIdentity(event: AppendTransactionInput["events"][number]): {
+  readonly runId: string | null;
+  readonly stepId: string | null;
+  readonly callId: string | null;
+} {
+  if (event.data === null || typeof event.data !== "object") {
+    return { runId: null, stepId: null, callId: null };
+  }
+  const data = event.data as { readonly runId?: unknown; readonly stepId?: unknown; readonly callId?: unknown };
+  return {
+    runId: typeof data.runId === "string" ? data.runId : null,
+    stepId: typeof data.stepId === "string" ? data.stepId : null,
+    callId: typeof data.callId === "string" ? data.callId : null,
+  };
+}
+
+function isProviderTextCancellationCleanup(
+  runId: string,
+  input: AppendTransactionInput,
+): boolean {
+  if (input.events.length !== 1 || (input.projections ?? []).length !== 2) return false;
+  const event = input.events[0];
+  if (event?.eventType !== "provider.text.delta") return false;
+  const identity = eventIdentity(event);
+  if (identity.runId !== runId || identity.stepId === null) return false;
+  const data = event.data as {
+    readonly messageId?: unknown;
+    readonly partId?: unknown;
+  };
+  const message = input.projections?.find((projection) => projection.kind === "message.put");
+  const part = input.projections?.find((projection) => projection.kind === "messagePart.put");
+  return (
+    typeof data.messageId === "string" &&
+    typeof data.partId === "string" &&
+    message?.kind === "message.put" &&
+    message.messageId === data.messageId &&
+    message.runId === runId &&
+    message.role === "assistant" &&
+    message.state === "streaming" &&
+    part?.kind === "messagePart.put" &&
+    part.partId === data.partId &&
+    part.messageId === data.messageId
+  );
+}
+
+function isProviderCancellationCleanup(
+  runId: string,
+  input: AppendTransactionInput,
+): boolean {
+  if (input.events.length !== 1) return false;
+  const event = input.events[0];
+  if (
+    event === undefined ||
+    (event.eventType !== "provider.step.failed" &&
+      event.eventType !== "provider.step.interrupted")
+  ) {
+    return false;
+  }
+  const identity = eventIdentity(event);
+  if (identity.runId !== runId || identity.stepId === null) return false;
+
+  let providerStepCount = 0;
+  let activeStepCount = 0;
+  let messageId: string | null = null;
+  let partMessageId: string | null = null;
+  for (const projection of input.projections ?? []) {
+    switch (projection.kind) {
+      case "providerStep.put":
+        providerStepCount += 1;
+        if (
+          projection.runId !== runId ||
+          projection.stepId !== identity.stepId ||
+          projection.expectedState !== "streaming" ||
+          (event.eventType === "provider.step.failed"
+            ? projection.state !== "failed"
+            : projection.state !== "interrupted") ||
+          projection.completedAtMs !== event.createdAtMs
+        ) {
+          return false;
+        }
+        break;
+      case "toolExecution.put":
+        if (
+          projection.runId !== runId ||
+          projection.stepId !== identity.stepId ||
+          projection.expectedState !== "staged" ||
+          projection.state !== "discarded" ||
+          projection.completedAtMs !== event.createdAtMs
+        ) {
+          return false;
+        }
+        break;
+      case "run.activeProviderStep":
+        activeStepCount += 1;
+        if (
+          projection.runId !== runId ||
+          projection.expectedActiveProviderStepId !== identity.stepId ||
+          projection.activeProviderStepId !== null
+        ) {
+          return false;
+        }
+        break;
+      case "message.put":
+        if (
+          messageId !== null ||
+          projection.runId !== runId ||
+          projection.role !== "assistant" ||
+          projection.state !== "interrupted" ||
+          projection.completedAtMs !== event.createdAtMs
+        ) {
+          return false;
+        }
+        messageId = projection.messageId;
+        break;
+      case "messagePart.put":
+        if (partMessageId !== null) return false;
+        partMessageId = projection.messageId;
+        break;
+      default:
+        return false;
+    }
+  }
+  return (
+    providerStepCount === 1 &&
+    activeStepCount === 1 &&
+    ((messageId === null && partMessageId === null) || messageId === partMessageId)
+  );
+}
+
+function isToolCancellationCleanup(runId: string, input: AppendTransactionInput): boolean {
+  if (input.events.length !== 1 || (input.projections ?? []).length !== 1) return false;
+  const event = input.events[0];
+  const projection = input.projections?.[0];
+  if (
+    event === undefined ||
+    projection?.kind !== "toolExecution.put" ||
+    (event.eventType !== "tool.execution.failed" &&
+      event.eventType !== "tool.execution.outcome_unknown")
+  ) {
+    return false;
+  }
+  const identity = eventIdentity(event);
+  const validState =
+    event.eventType === "tool.execution.outcome_unknown"
+      ? projection.state === "outcome_unknown"
+      : projection.state === "failed" || projection.state === "cancelled";
+  return (
+    identity.runId === runId &&
+    identity.callId === projection.callId &&
+    projection.runId === runId &&
+    projection.expectedState === "started" &&
+    validState &&
+    projection.completedAtMs === event.createdAtMs
+  );
+}
+
+function isAuthorizedCancellationCleanup(
+  runId: string,
+  input: AppendTransactionInput,
+  options: RunTaskCommitOptions,
+): boolean {
+  if (options.cancellationCleanup === "provider_text") {
+    return isProviderTextCancellationCleanup(runId, input);
+  }
+  if (options.cancellationCleanup === "provider_step") {
+    return isProviderCancellationCleanup(runId, input);
+  }
+  if (options.cancellationCleanup === "tool_execution") {
+    return isToolCancellationCleanup(runId, input);
+  }
+  return false;
 }
 
 export interface RunTaskContext {
@@ -602,7 +778,7 @@ export class SessionActor {
       }
       if (
         (active.scope.signal.aborted || active.record.state === "cancelling") &&
-        options.allowWhileCancelling !== true
+        !isAuthorizedCancellationCleanup(runId, input, options)
       ) {
         throw new SessionActorError("provider.cancelled", "Run cancellation prevents this mutation");
       }
@@ -611,12 +787,14 @@ export class SessionActor {
       try {
         committed = await this.storage.appendTransaction(input);
       } catch (operationError) {
-        let storedEvents: (SessionEvent | null)[];
+        let inspection: AppendTransactionInspection;
         try {
-          storedEvents = await Promise.all(
-            input.events.map((event) => this.storage.getEventById(event.eventId)),
-          );
-        } catch {
+          inspection = await this.storage.inspectAppendTransaction(input);
+        } catch (inspectionError) {
+          if (hasErrorCode(inspectionError, "storage.corrupt")) {
+            this.recordFault(inspectionError);
+            throw inspectionError;
+          }
           this.faultUnresolvedAmbiguousWrite(operationError);
           throw operationError;
         }
@@ -624,7 +802,9 @@ export class SessionActor {
           const reconciled = reconcileCommittedEventBatch(
             this.sessionId,
             input.events,
-            storedEvents,
+            inspection.storedEvents,
+            inspection.headSequence,
+            inspection.projectionsApplied,
           );
           if (reconciled === null) throw operationError;
           committed = reconciled;
@@ -760,8 +940,24 @@ export class SessionActor {
       const messageId = this.ids.messageId();
       const createdAtMs = this.now();
       const wasQueued = this.activeRun !== null || this.queuedRuns.length > 0;
-      const providerSnapshot = this.createRunProviderSnapshot(command);
       const payloadHash = await hashCommandContent(command);
+      let existingCommand: AcceptedCommandResult | null = null;
+      try {
+        existingCommand = await this.storage.getAcceptedCommand(command.commandId);
+      } catch {
+        // Command acceptance remains authoritative and performs its own ambiguous-write recovery.
+      }
+      let providerSnapshot: RunProviderSnapshot = { providerId: "duplicate", providerConfig: {} };
+      if (existingCommand === null) {
+        const createdProviderSnapshot = this.createRunProviderSnapshot(command);
+        if (createdProviderSnapshot.providerId.length === 0) {
+          throw new SessionActorError("provider.protocol_error", "Run provider ID is empty");
+        }
+        providerSnapshot = {
+          providerId: createdProviderSnapshot.providerId,
+          providerConfig: decodeProviderConfiguration(createdProviderSnapshot.providerConfig),
+        };
+      }
       const input: AcceptCommandInput = {
         commandId: command.commandId,
         commandMethod: command.method,

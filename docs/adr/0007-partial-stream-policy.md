@@ -47,6 +47,8 @@ A provider adapter must validate:
 - complete and valid event sequence
 - final tool-call identity and arguments
 
+After one terminal marker is accepted, Wi accepts only an identical duplicate of that same terminal marker. Any other post-terminal event—including text, tool calls, response starts, or a different terminal marker—is a provider protocol error.
+
 ## Consequences
 
 Positive:

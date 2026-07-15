@@ -599,3 +599,278 @@ export function applyProjection(database: Database.Database, mutation: Projectio
     }
   }
 }
+
+function projectionTarget(mutation: ProjectionMutation): string {
+  switch (mutation.kind) {
+    case "run.put":
+    case "run.state":
+      return `run.state:${mutation.runId}`;
+    case "run.activeProviderStep":
+      return `run.activeProviderStep:${mutation.runId}`;
+    case "message.put":
+      return `message:${mutation.messageId}`;
+    case "messagePart.put":
+      return `messagePart:${mutation.partId}`;
+    case "providerStep.put":
+      return `providerStep:${mutation.stepId}`;
+    case "toolExecution.put":
+      return `toolExecution:${mutation.callId}`;
+    case "toolCallOccurrence.put":
+      return `toolCallOccurrence:${mutation.stepId}:${mutation.callId}`;
+    case "approval.put":
+    case "approval.resolve":
+      return `approval:${mutation.approvalId}`;
+    case "input.put":
+    case "input.resolve":
+      return `input:${mutation.inputId}`;
+    case "run.pendingInteractions.cancel":
+      return `run.pendingInteractions.cancel:${mutation.runId}`;
+  }
+}
+
+function rowMatches(
+  row: Readonly<Record<string, unknown>> | undefined,
+  expected: Readonly<Record<string, unknown>>,
+): boolean {
+  if (row === undefined) return false;
+  return Object.entries(expected).every(([key, value]) => row[key] === value);
+}
+
+function projectionApplied(database: Database.Database, mutation: ProjectionMutation): boolean {
+  switch (mutation.kind) {
+    case "run.put": {
+      const row = database
+        .prepare(
+          `SELECT state, provider_id AS providerId, provider_config_json AS providerConfigJson,
+                  created_at_ms AS createdAtMs, started_at_ms AS startedAtMs,
+                  completed_at_ms AS completedAtMs, cancelled_at_ms AS cancelledAtMs,
+                  failure_category AS failureCategory, failure_message AS failureMessage,
+                  active_provider_step_id AS activeProviderStepId
+           FROM runs WHERE run_id = ?`,
+        )
+        .get(mutation.runId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        state: mutation.state,
+        providerId: mutation.providerId,
+        providerConfigJson: canonicalJson(mutation.providerConfig),
+        createdAtMs: mutation.createdAtMs,
+        startedAtMs: mutation.startedAtMs,
+        completedAtMs: mutation.completedAtMs,
+        cancelledAtMs: mutation.cancelledAtMs,
+        failureCategory: mutation.failureCategory,
+        failureMessage: mutation.failureMessage,
+        activeProviderStepId: mutation.activeProviderStepId,
+      });
+    }
+    case "run.state": {
+      const row = database
+        .prepare(
+          `SELECT state, started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                  cancelled_at_ms AS cancelledAtMs, failure_category AS failureCategory,
+                  failure_message AS failureMessage,
+                  active_provider_step_id AS activeProviderStepId
+           FROM runs WHERE run_id = ?`,
+        )
+        .get(mutation.runId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        state: mutation.nextState,
+        startedAtMs: mutation.startedAtMs,
+        completedAtMs: mutation.completedAtMs,
+        cancelledAtMs: mutation.cancelledAtMs,
+        failureCategory: mutation.failureCategory,
+        failureMessage: mutation.failureMessage,
+        activeProviderStepId: mutation.activeProviderStepId,
+      });
+    }
+    case "run.activeProviderStep": {
+      const row = database
+        .prepare(`SELECT active_provider_step_id AS activeProviderStepId FROM runs WHERE run_id = ?`)
+        .get(mutation.runId) as Record<string, unknown> | undefined;
+      return rowMatches(row, { activeProviderStepId: mutation.activeProviderStepId });
+    }
+    case "message.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, role, state, created_at_ms AS createdAtMs,
+                  completed_at_ms AS completedAtMs
+           FROM messages WHERE message_id = ?`,
+        )
+        .get(mutation.messageId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        role: mutation.role,
+        state: mutation.state,
+        createdAtMs: mutation.createdAtMs,
+        completedAtMs: mutation.completedAtMs,
+      });
+    }
+    case "messagePart.put": {
+      const row = database
+        .prepare(
+          `SELECT message_id AS messageId, part_index AS partIndex, part_type AS partType,
+                  text_content AS textContent, data_json AS dataJson
+           FROM message_parts WHERE part_id = ?`,
+        )
+        .get(mutation.partId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        messageId: mutation.messageId,
+        partIndex: mutation.partIndex,
+        partType: mutation.partType,
+        textContent: mutation.textContent,
+        dataJson: mutation.data === null ? null : canonicalJson(mutation.data),
+      });
+    }
+    case "providerStep.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, step_index AS stepIndex, state,
+                  started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                  response_id AS responseId, error_category AS errorCategory,
+                  error_message AS errorMessage
+           FROM provider_steps WHERE step_id = ?`,
+        )
+        .get(mutation.stepId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        stepIndex: mutation.stepIndex,
+        state: mutation.state,
+        startedAtMs: mutation.startedAtMs,
+        completedAtMs: mutation.completedAtMs,
+        responseId: mutation.responseId,
+        errorCategory: mutation.errorCategory,
+        errorMessage: mutation.errorMessage,
+      });
+    }
+    case "toolExecution.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, step_id AS stepId, tool_name AS toolName,
+                  arguments_json AS argumentsJson, arguments_hash AS argumentsHash,
+                  effect_class AS effectClass, state, attempt_count AS attemptCount,
+                  requested_at_ms AS requestedAtMs, started_at_ms AS startedAtMs,
+                  completed_at_ms AS completedAtMs, result_json AS resultJson,
+                  error_json AS errorJson
+           FROM tool_executions WHERE call_id = ?`,
+        )
+        .get(mutation.callId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        stepId: mutation.stepId,
+        toolName: mutation.toolName,
+        argumentsJson: canonicalArgumentsJson(mutation.argumentsJson),
+        argumentsHash: mutation.argumentsHash,
+        effectClass: mutation.effectClass ?? "unclassified",
+        state: mutation.state,
+        attemptCount: mutation.attemptCount,
+        requestedAtMs: mutation.requestedAtMs,
+        startedAtMs: mutation.startedAtMs,
+        completedAtMs: mutation.completedAtMs,
+        resultJson: mutation.result === null ? null : canonicalJson(mutation.result),
+        errorJson: mutation.error === null ? null : canonicalJson(mutation.error),
+      });
+    }
+    case "toolCallOccurrence.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, occurred_at_ms AS occurredAtMs
+           FROM tool_call_occurrences WHERE step_id = ? AND call_id = ?`,
+        )
+        .get(mutation.stepId, mutation.callId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        occurredAtMs: mutation.occurredAtMs,
+      });
+    }
+    case "approval.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, call_id AS callId, state,
+                  action_digest AS actionDigest, requested_at_ms AS requestedAtMs,
+                  resolved_at_ms AS resolvedAtMs, resolution,
+                  resolved_by_client_id AS resolvedByClientId
+           FROM approvals WHERE approval_id = ?`,
+        )
+        .get(mutation.approvalId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        callId: mutation.callId,
+        state: "pending",
+        actionDigest: mutation.actionDigest,
+        requestedAtMs: mutation.requestedAtMs,
+        resolvedAtMs: null,
+        resolution: null,
+        resolvedByClientId: null,
+      });
+    }
+    case "approval.resolve": {
+      const row = database
+        .prepare(
+          `SELECT state, resolved_at_ms AS resolvedAtMs, resolution,
+                  resolved_by_client_id AS resolvedByClientId
+           FROM approvals WHERE approval_id = ?`,
+        )
+        .get(mutation.approvalId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        state: mutation.resolution,
+        resolvedAtMs: mutation.resolvedAtMs,
+        resolution: mutation.resolution,
+        resolvedByClientId: mutation.resolvedByClientId,
+      });
+    }
+    case "input.put": {
+      const row = database
+        .prepare(
+          `SELECT run_id AS runId, state, prompt, requested_at_ms AS requestedAtMs,
+                  resolved_at_ms AS resolvedAtMs, value_json AS valueJson
+           FROM pending_inputs WHERE input_id = ?`,
+        )
+        .get(mutation.inputId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        runId: mutation.runId,
+        state: "pending",
+        prompt: mutation.prompt,
+        requestedAtMs: mutation.requestedAtMs,
+        resolvedAtMs: null,
+        valueJson: null,
+      });
+    }
+    case "input.resolve": {
+      const row = database
+        .prepare(
+          `SELECT state, resolved_at_ms AS resolvedAtMs, value_json AS valueJson
+           FROM pending_inputs WHERE input_id = ?`,
+        )
+        .get(mutation.inputId) as Record<string, unknown> | undefined;
+      return rowMatches(row, {
+        state: "resolved",
+        resolvedAtMs: mutation.resolvedAtMs,
+        valueJson: canonicalJson(mutation.value),
+      });
+    }
+    case "run.pendingInteractions.cancel": {
+      const row = database
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM approvals WHERE run_id = @runId AND state = 'pending') AS approvals,
+             (SELECT COUNT(*) FROM pending_inputs WHERE run_id = @runId AND state = 'pending') AS inputs,
+             (SELECT COUNT(*) FROM tool_executions
+              WHERE run_id = @runId AND state IN ('requested', 'awaiting_approval', 'approved')) AS tools`,
+        )
+        .get(mutation) as Record<string, unknown> | undefined;
+      return rowMatches(row, { approvals: 0, inputs: 0, tools: 0 });
+    }
+  }
+}
+
+/** Verifies the final durable projection values represented by one committed event batch. */
+export function areProjectionsApplied(
+  database: Database.Database,
+  mutations: readonly ProjectionMutation[],
+): boolean {
+  const finalMutations = new Map<string, ProjectionMutation>();
+  for (const mutation of mutations) finalMutations.set(projectionTarget(mutation), mutation);
+  for (const mutation of finalMutations.values()) {
+    if (!projectionApplied(database, mutation)) return false;
+  }
+  return true;
+}

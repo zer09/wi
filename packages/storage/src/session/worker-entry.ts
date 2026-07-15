@@ -195,6 +195,8 @@ function execute(operation: string, payloadValue: unknown): unknown {
       return repository.acceptCommand(payload.input);
     case "session.appendTransaction":
       return repository.appendTransaction(payload.input);
+    case "session.inspectAppendTransaction":
+      return repository.inspectAppendTransaction(payload.input);
     case "session.getEventsAfter":
       return repository.getEventsAfter(
         z.number().int().nonnegative().safe().parse(payload.afterSequence),
@@ -208,12 +210,24 @@ function execute(operation: string, payloadValue: unknown): unknown {
       return repository.getEventById(z.string().min(1).parse(payload.eventId));
     case "session.getRun":
       return repository.getRun(z.string().min(1).parse(payload.runId));
+    case "session.getRunProviderMatch":
+      return repository.getRunProviderMatch(
+        z.string().min(1).parse(payload.runId),
+        z.string().min(1).max(256).parse(payload.expectedProviderId),
+      );
+    case "session.getBoundedProviderRequestData":
+      return repository.getBoundedProviderRequestData(payload.input);
     case "session.getAcceptedCommand":
       return repository.getAcceptedCommand(z.string().min(1).parse(payload.commandId));
     case "session.getProviderStep":
       return repository.getProviderStep(z.string().min(1).parse(payload.stepId));
     case "session.getProviderStepsForRun":
       return repository.getProviderStepsForRun(z.string().min(1).parse(payload.runId));
+    case "session.getRecentProviderStepsForRun":
+      return repository.getRecentProviderStepsForRun(
+        z.string().min(1).parse(payload.runId),
+        payload.limit,
+      );
     case "session.getToolExecution":
       return repository.getToolExecution(z.string().min(1).parse(payload.callId));
     case "session.getToolExecutionsForStep":

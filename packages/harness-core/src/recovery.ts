@@ -6,6 +6,7 @@ import type {
 } from "@wi/protocol";
 import type {
   AppendTransactionInput,
+  AppendTransactionInspection,
   AppendTransactionResult,
   ProviderStepRecord,
   RunMessageRecord,
@@ -44,6 +45,7 @@ export interface RecoveryStorage {
   recover(): Promise<SessionRecoveryResult>;
   getRun(runId: string): Promise<RunRecord | null>;
   getEventById(eventId: string): Promise<SessionEvent | null>;
+  inspectAppendTransaction(input: AppendTransactionInput): Promise<AppendTransactionInspection>;
   getProviderStep(stepId: string): Promise<ProviderStepRecord | null>;
   getToolExecution?(callId: string): Promise<ToolExecutionRecord | null>;
   getToolExecutionsForStep?(stepId: string): Promise<readonly ToolExecutionRecord[]>;
@@ -72,13 +74,13 @@ async function reconcileRecoveryEvents(options: {
   readonly storage: RecoveryStorage;
   readonly transaction: AppendTransactionInput;
 }): Promise<AppendTransactionResult | null> {
-  const storedEvents = await Promise.all(
-    options.transaction.events.map((event) => options.storage.getEventById(event.eventId)),
-  );
+  const inspection = await options.storage.inspectAppendTransaction(options.transaction);
   return reconcileCommittedEventBatch(
     options.sessionId,
     options.transaction.events,
-    storedEvents,
+    inspection.storedEvents,
+    inspection.headSequence,
+    inspection.projectionsApplied,
   );
 }
 

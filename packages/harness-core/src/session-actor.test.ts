@@ -5,6 +5,7 @@ import type {
   AcceptCommandInput,
   AcceptedCommandResult,
   AppendTransactionInput,
+  AppendTransactionInspection,
   AppendTransactionResult,
   PendingApprovalRecord,
   PendingInputRecord,
@@ -174,6 +175,19 @@ class FakeActorStorage implements SessionActorStorage {
 
   async appendTransaction(input: AppendTransactionInput): Promise<AppendTransactionResult> {
     return this.apply(input);
+  }
+
+  async inspectAppendTransaction(
+    input: AppendTransactionInput,
+  ): Promise<AppendTransactionInspection> {
+    const storedEvents = await Promise.all(
+      input.events.map((event) => this.getEventById(event.eventId)),
+    );
+    return {
+      storedEvents,
+      headSequence: this.sequence,
+      projectionsApplied: storedEvents.every((event) => event !== null),
+    };
   }
 
   async getEventsAfter(

@@ -6,6 +6,7 @@ import type {
   AcceptCommandInput,
   AcceptedCommandResult,
   AppendTransactionInput,
+  AppendTransactionInspection,
   AppendTransactionResult,
   PendingApprovalRecord,
   PendingInputRecord,
@@ -160,6 +161,19 @@ class PropertyStorage implements SessionActorStorage {
 
   async appendTransaction(input: AppendTransactionInput): Promise<AppendTransactionResult> {
     return this.apply(input);
+  }
+
+  async inspectAppendTransaction(
+    input: AppendTransactionInput,
+  ): Promise<AppendTransactionInspection> {
+    const storedEvents = input.events.map(
+      (event) => this.events.find((stored) => stored.eventId === event.eventId) ?? null,
+    );
+    return {
+      storedEvents,
+      headSequence: this.sequence,
+      projectionsApplied: storedEvents.every((event) => event !== null),
+    };
   }
 
   async getEventsAfter(
@@ -1073,6 +1087,11 @@ describe("Milestone 3 property models", () => {
             }),
             getRun: async () => run,
             getEventById: async () => null,
+            inspectAppendTransaction: async (input: AppendTransactionInput) => ({
+              storedEvents: input.events.map(() => null),
+              headSequence: events.length,
+              projectionsApplied: false,
+            }),
             getProviderStep: async () => null,
             appendTransaction: async (input: AppendTransactionInput) => {
               const projection = input.projections?.find(

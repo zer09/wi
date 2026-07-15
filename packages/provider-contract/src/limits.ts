@@ -8,6 +8,7 @@ export const PROVIDER_LIMITS = {
   providerConfigMaxDepth: 32,
   providerConfigMaxNodes: 4_096,
   inputItemMaxCount: 256,
+  toolCallMaxCountPerStep: 256,
   requestMaxBytes: 512 * 1024,
   requestMaxDepth: 34,
   requestMaxNodes: 16_384,

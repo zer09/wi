@@ -4,7 +4,10 @@ import type {
   AcceptCommandInput,
   AcceptedCommandResult,
   AppendTransactionInput,
+  AppendTransactionInspection,
   AppendTransactionResult,
+  BoundedProviderRequestData,
+  BoundedProviderRequestDataInput,
   PendingApprovalRecord,
   PendingInputRecord,
   ProviderStepRecord,
@@ -57,6 +60,13 @@ export class SessionClient {
     return result;
   }
 
+  async inspectAppendTransaction(
+    input: AppendTransactionInput,
+  ): Promise<AppendTransactionInspection> {
+    await this.prepare();
+    return this.pool.inspectAppendTransaction(this.sessionId, input);
+  }
+
   async getEventsAfter(
     afterSequence: number,
     throughSequence?: number,
@@ -80,6 +90,21 @@ export class SessionClient {
     return this.pool.getRun(this.sessionId, runId);
   }
 
+  async getRunProviderMatch(
+    runId: string,
+    expectedProviderId: string,
+  ): Promise<"missing" | "match" | "mismatch"> {
+    await this.prepare();
+    return this.pool.getRunProviderMatch(this.sessionId, runId, expectedProviderId);
+  }
+
+  async getBoundedProviderRequestData(
+    input: BoundedProviderRequestDataInput,
+  ): Promise<BoundedProviderRequestData> {
+    await this.prepare();
+    return this.pool.getBoundedProviderRequestData(this.sessionId, input);
+  }
+
   async getAcceptedCommand(commandId: string): Promise<AcceptedCommandResult | null> {
     await this.prepare();
     return this.pool.getAcceptedCommand(this.sessionId, commandId);
@@ -93,6 +118,14 @@ export class SessionClient {
   async getProviderStepsForRun(runId: string): Promise<readonly ProviderStepRecord[]> {
     await this.prepare();
     return this.pool.getProviderStepsForRun(this.sessionId, runId);
+  }
+
+  async getRecentProviderStepsForRun(
+    runId: string,
+    limit: number,
+  ): Promise<readonly ProviderStepRecord[]> {
+    await this.prepare();
+    return this.pool.getRecentProviderStepsForRun(this.sessionId, runId, limit);
   }
 
   async getToolExecution(callId: string): Promise<ToolExecutionRecord | null> {

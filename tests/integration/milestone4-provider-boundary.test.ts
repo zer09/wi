@@ -11,7 +11,11 @@ import {
   type ProviderRequest,
 } from "@wi/provider-contract";
 import type { CanonicalJsonValue, SessionEvent } from "@wi/protocol";
-import { SessionStoreManager } from "@wi/storage";
+import {
+  SessionStoreManager,
+  type BoundedProviderRequestData,
+  type SessionClient,
+} from "@wi/storage";
 import { ToolExecutor, createBuiltinToolRegistry } from "@wi/tools";
 import {
   AgentRunLoop,
@@ -79,7 +83,8 @@ async function runBoundaryFixture(options: {
   readonly messageText?: string;
   readonly providerConfig?: CanonicalJsonValue;
 }): Promise<{
-  readonly runId: string;
+  readonly runId: string | null;
+  readonly submissionError: unknown | null;
   readonly executions: readonly string[];
   readonly provider: UntrustedProvider;
   readonly events: readonly SessionEvent[];
@@ -151,14 +156,25 @@ async function runBoundaryFixture(options: {
     resumeRestoredRuns: true,
   });
   actors.push(actor);
-  const submitted = await actor.submitMessage({
-    v: 1,
-    kind: "command",
-    commandId: `cmd_providerBoundarySubmit${number}`,
-    sessionId: session.sessionId,
-    method: "message.submit",
-    params: { text: options.messageText ?? "provider boundary" },
-  });
+  let submitted: Awaited<ReturnType<SessionActor["submitMessage"]>>;
+  try {
+    submitted = await actor.submitMessage({
+      v: 1,
+      kind: "command",
+      commandId: `cmd_providerBoundarySubmit${number}`,
+      sessionId: session.sessionId,
+      method: "message.submit",
+      params: { text: options.messageText ?? "provider boundary" },
+    });
+  } catch (submissionError) {
+    return {
+      runId: null,
+      submissionError,
+      executions,
+      provider,
+      events: await session.getEventsAfter(0),
+    };
+  }
   await terminal;
   await expect(session.getRun(submitted.runId)).resolves.toMatchObject({
     state: "failed",
@@ -167,6 +183,7 @@ async function runBoundaryFixture(options: {
   });
   return {
     runId: submitted.runId,
+    submissionError: null,
     executions,
     provider,
     events: await session.getEventsAfter(0),
@@ -377,6 +394,7 @@ describe("Milestone 4 provider runtime boundary", () => {
     ],
   ] as const)("rejects %s before any tool effect", async (_name, values) => {
     const value = await runBoundaryFixture({ values });
+    expect(value.submissionError).toBeNull();
     expect(value.executions).toEqual([]);
     expect(
       value.events.filter((event) => event.eventType === "provider.tool_call.staged"),
@@ -394,6 +412,7 @@ describe("Milestone 4 provider runtime boundary", () => {
       values: () => [],
       messageText: "x".repeat(PROVIDER_LIMITS.messageTextMaxBytes + 1),
     });
+    expect(value.submissionError).toBeNull();
     expect(value.provider.requests).toEqual([]);
     expect(value.executions).toEqual([]);
     expect(
@@ -401,11 +420,156 @@ describe("Milestone 4 provider runtime boundary", () => {
     ).toEqual([]);
   });
 
+  it("bounds durable history acquisition before constructing all provider items", async () => {
+    const number = ++fixtureNumber;
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-m4-provider-history-"));
+    homes.push(homeDirectory);
+    const manager = new SessionStoreManager({
+      homeDirectory,
+      now: () => 1_000,
+      ids: {
+        sessionId: () => `ses_providerHistory${number}`,
+        eventId: () => `evt_providerHistorySession${number}`,
+      },
+      sessionWorkers: { size: 1 },
+    });
+    managers.push(manager);
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: `cmd_providerHistoryCreate${number}`,
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    const runId = `run_providerHistory${number}`;
+    const messageCount = PROVIDER_LIMITS.inputItemMaxCount + 1;
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: `evt_providerHistoryRun${number}`,
+          eventType: "run.created",
+          createdAtMs: 2_000,
+          data: { eventVersion: 1, runId },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.put",
+          runId,
+          state: "queued",
+          providerId: "untrusted-test",
+          providerConfig: {},
+          createdAtMs: 2_000,
+          startedAtMs: null,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        ...Array.from({ length: messageCount }, (_, index) => {
+          const messageId = `msg_providerHistory${number}_${index}`;
+          return [
+            {
+              kind: "message.put" as const,
+              messageId,
+              runId,
+              role: "user" as const,
+              state: "completed",
+              createdAtMs: 2_001 + index,
+              completedAtMs: 2_001 + index,
+            },
+            {
+              kind: "messagePart.put" as const,
+              partId: `part_providerHistory${number}_${index}`,
+              messageId,
+              partIndex: 0,
+              partType: "text",
+              textContent: "x",
+              data: null,
+            },
+          ];
+        }).flat(),
+      ],
+    });
+
+    let boundedReads = 0;
+    let fullHistoryReads = 0;
+    let boundedResult: BoundedProviderRequestData | null = null;
+    const storage = new Proxy(session, {
+      get(target, property) {
+        if (property === "getBoundedProviderRequestData") {
+          return async (input: Parameters<SessionClient["getBoundedProviderRequestData"]>[0]) => {
+            boundedReads += 1;
+            boundedResult = await target.getBoundedProviderRequestData(input);
+            return boundedResult;
+          };
+        }
+        if (property === "getRunMessages" || property === "getToolExecutionsForRun") {
+          return () => {
+            fullHistoryReads += 1;
+            throw new Error("Run loop attempted an unbounded provider-history read");
+          };
+        }
+        const member = Reflect.get(target, property) as unknown;
+        return typeof member === "function" ? member.bind(target) : member;
+      },
+    }) as SessionClient;
+    const provider = new UntrustedProvider(() => []);
+    const generated = ids(`providerHistory${number}`);
+    const loop = new AgentRunLoop({
+      storage,
+      provider,
+      registry: createBuiltinToolRegistry(),
+      executor: new ToolExecutor(),
+      ids: generated.loop,
+    });
+    let signalTerminal = (): void => {};
+    const terminal = new Promise<void>((resolve) => {
+      signalTerminal = resolve;
+    });
+    const events: SessionEvent[] = [];
+    const hub = new CommittedEventHub();
+    hub.subscribe(session.sessionId, (event) => {
+      events.push(event);
+      if (event.eventType === "run.failed" && event.data.runId === runId) signalTerminal();
+    });
+    const actor = await SessionActor.create({
+      storage,
+      eventHub: hub,
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: generated.actor,
+      now: () => 3_000,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(actor);
+    await terminal;
+
+    expect(boundedReads).toBe(1);
+    expect(fullHistoryReads).toBe(0);
+    expect(boundedResult).toEqual({ status: "limit_exceeded", boundary: "input_items" });
+    expect(provider.requests).toEqual([]);
+    expect(events.filter((event) => event.eventType === "provider.step.started")).toEqual([]);
+    await expect(session.getRun(runId)).resolves.toMatchObject({
+      state: "failed",
+      failureCategory: "provider.protocol_error",
+      activeProviderStepId: null,
+    });
+  });
+
   it("rejects oversized provider configuration before invoking the provider", async () => {
     const value = await runBoundaryFixture({
       values: () => [],
       providerConfig: { value: "x".repeat(PROVIDER_LIMITS.providerConfigMaxBytes) },
     });
+    expect(value.submissionError).toMatchObject({ code: "provider.protocol_error" });
+    expect(value.runId).toBeNull();
     expect(value.provider.requests).toEqual([]);
     expect(value.executions).toEqual([]);
     expect(

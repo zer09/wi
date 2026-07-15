@@ -14,6 +14,8 @@ export function reconcileCommittedEventBatch(
   sessionId: string,
   expectedEvents: AppendTransactionInput["events"],
   storedEvents: readonly (SessionEvent | null)[],
+  currentHeadSequence: number,
+  projectionsApplied: boolean,
 ): AppendTransactionResult | null {
   if (expectedEvents.length === 0 || storedEvents.length !== expectedEvents.length) {
     throw new EventReconciliationIntegrityError("Ambiguous event batch has an invalid size");
@@ -57,8 +59,20 @@ export function reconcileCommittedEventBatch(
     }
   }
 
+  const batchHeadSequence = committed.at(-1)?.sequence ?? firstSequence;
+  if (batchHeadSequence !== currentHeadSequence) {
+    throw new EventReconciliationIntegrityError(
+      "Ambiguous event batch is not the current committed session suffix",
+    );
+  }
+  if (!projectionsApplied) {
+    throw new EventReconciliationIntegrityError(
+      "Ambiguous event batch does not match its durable projections",
+    );
+  }
+
   return {
     events: [...committed],
-    headSequence: committed.at(-1)?.sequence ?? firstSequence,
+    headSequence: batchHeadSequence,
   };
 }

@@ -110,6 +110,22 @@ export interface ProviderContext {
   readonly now: () => number;
 }
 
+export function decodeProviderConfiguration(value: unknown): z.infer<typeof CanonicalJsonValueSchema> {
+  const bounded = cloneJsonWithinBounds(value, {
+    label: "Provider configuration",
+    maxBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+    maxDepth: PROVIDER_LIMITS.providerConfigMaxDepth,
+    maxNodes: PROVIDER_LIMITS.providerConfigMaxNodes,
+  });
+  const decoded = CanonicalJsonValueSchema.safeParse(bounded);
+  if (!decoded.success) {
+    throw new ProviderBoundaryError("Provider configuration is not bounded canonical JSON.", {
+      cause: decoded.error,
+    });
+  }
+  return decoded.data;
+}
+
 export function decodeProviderInputItem(value: unknown): ProviderInputItem {
   const bounded = cloneJsonWithinBounds(value, {
     label: "Provider input item",

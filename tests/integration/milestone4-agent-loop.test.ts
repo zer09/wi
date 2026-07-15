@@ -1018,26 +1018,55 @@ describe("Milestone 4 agent loop with real session databases", () => {
     );
   });
 
-  it("allows provider cleanup after durable cancellation without stale executable state", async () => {
+  it("finishes provider cleanup that starts before durable cancellation", async () => {
+    let signalCleanupRead = (): void => {};
+    const cleanupRead = new Promise<void>((resolve) => {
+      signalCleanupRead = resolve;
+    });
+    let releaseCleanupRead = (): void => {};
+    const cleanupRelease = new Promise<void>((resolve) => {
+      releaseCleanupRead = resolve;
+    });
+    let blocked = false;
     const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
-    const value = await fixture({ scenario: "provider-cleanup-probe" }, { scheduler });
+    const value = await fixture(
+      { scenario: "partial-tool-call-without-terminal" },
+      {
+        scheduler,
+        storageDecorator: (session) =>
+          new Proxy(session, {
+            get(target, property) {
+              if (property === "getToolExecutionsForStep") {
+                return async (stepId: string) => {
+                  if (!blocked) {
+                    blocked = true;
+                    signalCleanupRead();
+                    await cleanupRelease;
+                  }
+                  return target.getToolExecutionsForStep(stepId);
+                };
+              }
+              const member = Reflect.get(target, property) as unknown;
+              return typeof member === "function" ? member.bind(target) : member;
+            },
+          }) as SessionClient,
+      },
+    );
     const partialLabel = fakeProviderGateLabel(value.runId, "partial");
-    const cleanupLabel = fakeProviderGateLabel(value.runId, "cleanup");
     await value.controller.waitUntilBlocked(partialLabel);
-    await value.actor.cancelRun(cancelCommand(value, "ProviderCleanupProbe"));
-    await value.controller.waitUntilBlocked(cleanupLabel);
+    value.controller.release(partialLabel);
+    await cleanupRead;
 
+    await value.actor.cancelRun(cancelCommand(value, "ProviderCleanupRace"));
     await expect(value.session.getRun(value.runId)).resolves.toMatchObject({
       state: "cancelling",
       activeProviderStepId: expect.any(String),
     });
-    await expect(value.session.getToolExecution("call_providerCleanupProbe")).resolves.toMatchObject({
-      state: "staged",
-      attemptCount: 0,
-    });
-    expect(scheduler.state.provider).toMatchObject({ active: 1, available: 0 });
+    await expect(
+      value.session.getToolExecution("call_partialWithoutTerminal"),
+    ).resolves.toMatchObject({ state: "staged", attemptCount: 0 });
 
-    value.controller.release(cleanupLabel);
+    releaseCleanupRead();
     await expect(waitForTerminal(value)).resolves.toMatchObject({
       state: "cancelled",
       activeProviderStepId: null,
@@ -1047,10 +1076,9 @@ describe("Milestone 4 agent loop with real session databases", () => {
     await expect(value.session.getProviderStepsForRun(value.runId)).resolves.toMatchObject([
       { state: "interrupted" },
     ]);
-    await expect(value.session.getToolExecution("call_providerCleanupProbe")).resolves.toMatchObject({
-      state: "discarded",
-      attemptCount: 0,
-    });
+    await expect(
+      value.session.getToolExecution("call_partialWithoutTerminal"),
+    ).resolves.toMatchObject({ state: "discarded", attemptCount: 0 });
     expect(
       value.events.filter((event) =>
         ["run.completed", "run.failed", "run.cancelled", "run.interrupted"].includes(
@@ -1065,7 +1093,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
     await assertTerminalRestartNoop(value);
   });
 
-  it("allows tool cleanup after durable cancellation without duplicate terminal state", async () => {
+  it("finishes tool cleanup that starts before durable cancellation", async () => {
     const echo = createBuiltinToolRegistry().get("echo");
     if (echo === null) throw new Error("Echo definition missing");
     let effectCount = 0;
@@ -1073,40 +1101,61 @@ describe("Milestone 4 agent loop with real session databases", () => {
     const started = new Promise<void>((resolve) => {
       signalStarted = resolve;
     });
-    let signalCleanupBlocked = (): void => {};
-    const cleanupBlocked = new Promise<void>((resolve) => {
-      signalCleanupBlocked = resolve;
+    let releaseFailure = (): void => {};
+    const failExecution = new Promise<void>((resolve) => {
+      releaseFailure = resolve;
     });
-    let releaseCleanup = (): void => {};
-    const cleanup = new Promise<void>((resolve) => {
-      releaseCleanup = resolve;
+    let signalCleanupRead = (): void => {};
+    const cleanupRead = new Promise<void>((resolve) => {
+      signalCleanupRead = resolve;
+    });
+    let releaseCleanupRead = (): void => {};
+    const cleanupRelease = new Promise<void>((resolve) => {
+      releaseCleanupRead = resolve;
     });
     const registry = new ToolRegistry();
     registry.register({
       ...echo,
       timeoutMs: 60_000,
-      execute: async (_input, _context, signal) => {
+      execute: async () => {
         effectCount += 1;
         signalStarted();
-        if (!signal.aborted) {
-          await new Promise<void>((resolve) => {
-            signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-        }
-        signalCleanupBlocked();
-        await cleanup;
-        throw signal.reason;
+        await failExecution;
+        throw new Error("controlled tool failure");
       },
     });
+    let blocked = false;
     const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
     const value = await fixture(
       { scenario: "echo-tool-round-trip" },
-      { registry, scheduler },
+      {
+        registry,
+        scheduler,
+        storageDecorator: (session) =>
+          new Proxy(session, {
+            get(target, property) {
+              if (property === "getToolExecution") {
+                return async (callId: string) => {
+                  const tool = await target.getToolExecution(callId);
+                  if (!blocked && tool?.state === "started") {
+                    blocked = true;
+                    signalCleanupRead();
+                    await cleanupRelease;
+                  }
+                  return tool;
+                };
+              }
+              const member = Reflect.get(target, property) as unknown;
+              return typeof member === "function" ? member.bind(target) : member;
+            },
+          }) as SessionClient,
+      },
     );
     await started;
-    await value.actor.cancelRun(cancelCommand(value, "ToolCleanupProbe"));
-    await cleanupBlocked;
+    releaseFailure();
+    await cleanupRead;
 
+    await value.actor.cancelRun(cancelCommand(value, "ToolCleanupRace"));
     await expect(value.session.getRun(value.runId)).resolves.toMatchObject({ state: "cancelling" });
     await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
       state: "started",
@@ -1115,7 +1164,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
     expect(effectCount).toBe(1);
     expect(scheduler.state.tool).toMatchObject({ active: 1, available: 0 });
 
-    releaseCleanup();
+    releaseCleanupRead();
     await expect(waitForTerminal(value)).resolves.toMatchObject({ state: "cancelled" });
     expect(effectCount).toBe(1);
     expect(value.executions).toEqual(["call_echoRoundTrip"]);

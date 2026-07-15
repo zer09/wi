@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import type { ProviderStepState, SessionEvent } from "@wi/protocol";
-import type { RunRecord, SessionRecoveryResult } from "@wi/storage";
+import type {
+  AppendTransactionInput,
+  AppendTransactionInspection,
+  RunRecord,
+  SessionRecoveryResult,
+} from "@wi/storage";
 
 import { recoverSession, recoveryDecision, type RecoveryStorage } from "./recovery.js";
+
+function emptyInspection(input: AppendTransactionInput): AppendTransactionInspection {
+  return {
+    storedEvents: input.events.map(() => null),
+    headSequence: 0,
+    projectionsApplied: false,
+  };
+}
 
 describe("startup recovery", () => {
   it.each([
@@ -30,6 +43,7 @@ describe("startup recovery", () => {
       }),
       getRun: async () => current,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async () => null,
       appendTransaction: async (input) => {
         const runState = input.projections?.find((projection) => projection.kind === "run.state");
@@ -82,6 +96,7 @@ describe("startup recovery", () => {
       }),
       getRun: async () => interrupted,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async () => {
         providerRead += 1;
         return {
@@ -128,6 +143,11 @@ describe("startup recovery", () => {
       }),
       getRun: async () => current,
       getEventById: async (eventId) => storedEvents.get(eventId) ?? null,
+      inspectAppendTransaction: async (input) => ({
+        storedEvents: input.events.map((event) => storedEvents.get(event.eventId) ?? null),
+        headSequence: sequence,
+        projectionsApplied: current.state === "interrupted",
+      }),
       getProviderStep: async () => null,
       appendTransaction: async (input) => {
         const transition = input.projections?.find((projection) => projection.kind === "run.state");
@@ -194,6 +214,7 @@ describe("startup recovery", () => {
       }),
       getRun: async (runId) => runs.get(runId) ?? null,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async (stepId) =>
         stepId === "step_streaming"
           ? {

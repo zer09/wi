@@ -490,6 +490,81 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     expect(events.filter((event) => event.eventType === "tool.execution.recovered")).toHaveLength(1);
   });
 
+  it("quarantines an exact stale start event behind pure-tool recovery before execution", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "started");
+    const generated = generatedIds("staleExactStart");
+    const executions: string[] = [];
+    const published: SessionEvent[] = [];
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider: new FakeProviderAdapter(),
+      registry: createBuiltinToolRegistry(),
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: {
+        ...generated.loop,
+        eventId: () => "evt_recoverstartedToolStarted",
+      },
+    });
+    let signalFault: (error: unknown) => void = () => undefined;
+    const faulted = new Promise<unknown>((resolve) => {
+      signalFault = resolve;
+    });
+    const hub = new CommittedEventHub();
+    hub.subscribe(session.sessionId, (event) => {
+      published.push(event);
+    });
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: hub,
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: generated.actor,
+      now: () => 2_004,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+      onFault: signalFault,
+    });
+    actors.push(actor);
+
+    await expect(faulted).resolves.toMatchObject({
+      code: "storage.corrupt",
+      name: "EventReconciliationIntegrityError",
+    });
+    expect(executions).toEqual([]);
+    expect(actor.snapshot.faulted).toBe(true);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "requested",
+      attemptCount: 1,
+    });
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" && event.data.callId === seeded.callId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      published.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" && event.data.callId === seeded.callId,
+      ),
+    ).toEqual([]);
+    await expect(
+      actor.submitMessage({
+        v: 1,
+        kind: "command",
+        commandId: "cmd_afterStaleExactStart",
+        sessionId: session.sessionId,
+        method: "message.submit",
+        params: { text: "must remain quarantined" },
+      }),
+    ).rejects.toMatchObject({ code: "session.unavailable" });
+  });
+
   it("reuses a committed tool result without a second execution", async () => {
     const { session } = await storageFixture();
     const seeded = await seedRecoverableTool(session, "completed");

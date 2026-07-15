@@ -44,9 +44,11 @@ function storedEvents(): SessionEvent[] {
 describe("ambiguous event reconciliation", () => {
   it("adopts only an exact contiguous batch in attempted order", () => {
     expect(
-      reconcileCommittedEventBatch("ses_reconcile", attempted, storedEvents()),
+      reconcileCommittedEventBatch("ses_reconcile", attempted, storedEvents(), 21, true),
     ).toEqual({ events: storedEvents(), headSequence: 21 });
-    expect(reconcileCommittedEventBatch("ses_reconcile", attempted, [null, null])).toBeNull();
+    expect(
+      reconcileCommittedEventBatch("ses_reconcile", attempted, [null, null], 21, false),
+    ).toBeNull();
   });
 
   it.each([
@@ -64,15 +66,33 @@ describe("ambiguous event reconciliation", () => {
   ] as const)("rejects a same-ID conflict in %s", (_name, conflict) => {
     const events = storedEvents();
     events[0] = conflict(events) as SessionEvent;
-    expect(() => reconcileCommittedEventBatch("ses_reconcile", attempted, events)).toThrow(
-      EventReconciliationIntegrityError,
-    );
+    expect(() =>
+      reconcileCommittedEventBatch("ses_reconcile", attempted, events, 21, true),
+    ).toThrow(EventReconciliationIntegrityError);
   });
 
   it("rejects a partial batch as an integrity fault", () => {
     const events = storedEvents();
     expect(() =>
-      reconcileCommittedEventBatch("ses_reconcile", attempted, [events[0] ?? null, null]),
+      reconcileCommittedEventBatch(
+        "ses_reconcile",
+        attempted,
+        [events[0] ?? null, null],
+        21,
+        true,
+      ),
+    ).toThrow(EventReconciliationIntegrityError);
+  });
+
+  it("rejects an exact stale batch behind the current session head", () => {
+    expect(() =>
+      reconcileCommittedEventBatch("ses_reconcile", attempted, storedEvents(), 22, true),
+    ).toThrow(EventReconciliationIntegrityError);
+  });
+
+  it("rejects an exact current suffix with incompatible projections", () => {
+    expect(() =>
+      reconcileCommittedEventBatch("ses_reconcile", attempted, storedEvents(), 21, false),
     ).toThrow(EventReconciliationIntegrityError);
   });
 });

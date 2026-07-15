@@ -1,10 +1,10 @@
 import {
+  PROVIDER_LIMITS,
   ProviderAdapterError,
   decodeProviderEvent,
   decodeProviderRequest,
   type ProviderAdapter,
   type ProviderEvent,
-  type ProviderInputItem,
   type ProviderRequest,
 } from "@wi/provider-contract";
 import {
@@ -15,9 +15,10 @@ import {
   type ToolEffectClass,
 } from "@wi/protocol";
 import type {
+  BoundedProviderRequestData,
+  BoundedProviderRequestDataInput,
   PendingApprovalRecord,
   ProviderStepRecord,
-  RunMessageRecord,
   RunRecord,
   ToolExecutionRecord,
 } from "@wi/storage";
@@ -51,11 +52,19 @@ import {
 export interface AgentRunStorage {
   readonly sessionId: string;
   getRun(runId: string): Promise<RunRecord | null>;
-  getProviderStepsForRun(runId: string): Promise<readonly ProviderStepRecord[]>;
+  getRunProviderMatch(
+    runId: string,
+    expectedProviderId: string,
+  ): Promise<"missing" | "match" | "mismatch">;
+  getBoundedProviderRequestData(
+    input: BoundedProviderRequestDataInput,
+  ): Promise<BoundedProviderRequestData>;
+  getRecentProviderStepsForRun(
+    runId: string,
+    limit: number,
+  ): Promise<readonly ProviderStepRecord[]>;
   getToolExecution(callId: string): Promise<ToolExecutionRecord | null>;
   getToolExecutionsForStep(stepId: string): Promise<readonly ToolExecutionRecord[]>;
-  getToolExecutionsForRun(runId: string): Promise<readonly ToolExecutionRecord[]>;
-  getRunMessages(runId: string): Promise<readonly RunMessageRecord[]>;
   getPendingApprovals(): Promise<readonly PendingApprovalRecord[]>;
 }
 
@@ -146,8 +155,12 @@ export class AgentRunLoop {
     this.textMaxChars = options.textMaxChars ?? 256;
     this.textMaxDelayMs = options.textMaxDelayMs ?? 25;
     this.retryBudget = options.retryBudget ?? 1;
-    if (!Number.isSafeInteger(this.retryBudget) || this.retryBudget < 0) {
-      throw new RangeError("Provider retry budget must be a nonnegative safe integer");
+    if (
+      !Number.isSafeInteger(this.retryBudget) ||
+      this.retryBudget < 0 ||
+      this.retryBudget > 1022
+    ) {
+      throw new RangeError("Provider retry budget must be a safe integer between 0 and 1022");
     }
 
     this.task = async (context) => {
@@ -170,12 +183,17 @@ export class AgentRunLoop {
 
   private async execute(context: RunTaskContext): Promise<RunTaskResult> {
     try {
-      const run = await this.storage.getRun(context.runId);
-      if (run === null) throw new RunLoopFailure("session.not_found", "Run was not found.", false);
-      if (run.providerId !== this.provider.id) {
+      const providerMatch = await this.storage.getRunProviderMatch(
+        context.runId,
+        this.provider.id,
+      );
+      if (providerMatch === "missing") {
+        throw new RunLoopFailure("session.not_found", "Run was not found.", false);
+      }
+      if (providerMatch === "mismatch") {
         throw new RunLoopFailure(
           "provider.protocol_error",
-          `Run selected provider ${run.providerId}, but ${this.provider.id} was composed.`,
+          `Run selected another provider, but ${this.provider.id} was composed.`,
           false,
         );
       }
@@ -183,7 +201,10 @@ export class AgentRunLoop {
       let retryAttempt = 0;
       while (true) {
         context.signal.throwIfAborted();
-        const steps = await this.storage.getProviderStepsForRun(context.runId);
+        const steps = await this.storage.getRecentProviderStepsForRun(
+          context.runId,
+          this.retryBudget + 2,
+        );
         const latest = steps.at(-1);
         let stepIndex = latest === undefined ? 0 : latest.stepIndex + 1;
 
@@ -238,7 +259,12 @@ export class AgentRunLoop {
           stepIndex = latest.stepIndex + 1;
         }
 
-        const outcome = await this.runProviderStep(context, run, stepIndex, retryAttempt);
+        const outcome = await this.runProviderStep(
+          context,
+          context.runId,
+          stepIndex,
+          retryAttempt,
+        );
         switch (outcome.kind) {
           case "final":
             return { state: "completed" };
@@ -292,58 +318,42 @@ export class AgentRunLoop {
     }
   }
 
-  private async providerInput(runId: string): Promise<readonly ProviderInputItem[]> {
-    const [messages, tools] = await Promise.all([
-      this.storage.getRunMessages(runId),
-      this.storage.getToolExecutionsForRun(runId),
-    ]);
-    const messageItems: ProviderInputItem[] = [];
-    for (const message of messages) {
-      if (message.role !== "tool" && message.text.length > 0) {
-        messageItems.push({ type: "message", role: message.role, text: message.text });
-      }
+  private async providerRequest(
+    runId: string,
+    stepId: string,
+    stepIndex: number,
+  ): Promise<ProviderRequest> {
+    const snapshot = await this.storage.getBoundedProviderRequestData({
+      runId,
+      expectedProviderId: this.provider.id,
+      maxProviderConfigBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+      maxInputItems: PROVIDER_LIMITS.inputItemMaxCount,
+      maxInputBytes: PROVIDER_LIMITS.requestMaxBytes,
+    });
+    if (snapshot.status === "missing") {
+      throw new RunLoopFailure("session.not_found", "Run was not found.", false);
     }
-    const toolItems: ProviderInputItem[] = [];
-    for (const tool of tools) {
-      if (tool.state === "completed") {
-        toolItems.push({
-          type: "tool_result",
-          callId: tool.callId,
-          toolName: tool.toolName,
-          outcome: "completed",
-          result: tool.result,
-          error: null,
-        });
-      } else if (tool.state === "denied") {
-        toolItems.push({
-          type: "tool_result",
-          callId: tool.callId,
-          toolName: tool.toolName,
-          outcome: "denied",
-          result: null,
-          error: tool.error,
-        });
-      } else if (tool.state === "failed" || tool.state === "outcome_unknown") {
-        toolItems.push({
-          type: "tool_result",
-          callId: tool.callId,
-          toolName: tool.toolName,
-          outcome: "failed",
-          result: null,
-          error: tool.error,
-        });
-      } else if (tool.state === "cancelled") {
-        toolItems.push({
-          type: "tool_result",
-          callId: tool.callId,
-          toolName: tool.toolName,
-          outcome: "cancelled",
-          result: null,
-          error: tool.error,
-        });
-      }
+    if (snapshot.status === "provider_mismatch") {
+      throw new RunLoopFailure(
+        "provider.protocol_error",
+        "Run provider identity changed while acquiring provider input.",
+        false,
+      );
     }
-    return [...messageItems, ...toolItems];
+    if (snapshot.status === "limit_exceeded") {
+      throw new RunLoopFailure(
+        "provider.protocol_error",
+        `Provider request acquisition exceeded its ${snapshot.boundary} limit.`,
+        false,
+      );
+    }
+    return decodeProviderRequest({
+      runId,
+      stepId,
+      stepIndex,
+      providerConfig: JSON.parse(snapshot.providerConfigJson) as unknown,
+      input: JSON.parse(snapshot.inputJson) as unknown,
+    });
   }
 
   private assertEventIdentity(event: ProviderEvent, request: ProviderRequest): void {
@@ -362,7 +372,7 @@ export class AgentRunLoop {
 
   private async runProviderStep(
     context: RunTaskContext,
-    run: RunRecord,
+    runId: string,
     stepIndex: number,
     attempt: number,
   ): Promise<StepOutcome> {
@@ -370,20 +380,16 @@ export class AgentRunLoop {
     const startedAtMs = context.now();
     let request: ProviderRequest;
     try {
-      request = decodeProviderRequest({
-        runId: run.runId,
-        stepId,
-        stepIndex,
-        providerConfig: run.providerConfig,
-        input: await this.providerInput(run.runId),
-      });
-    } catch {
+      request = await this.providerRequest(runId, stepId, stepIndex);
+    } catch (error) {
+      if (error instanceof RunLoopFailure) throw error;
       throw new RunLoopFailure(
         "provider.protocol_error",
         "Provider request does not match the runtime contract or limits.",
         false,
       );
     }
+    const run = { runId };
     const current = await this.storage.getRun(run.runId);
     if (current === null) throw new RunLoopFailure("session.not_found", "Run disappeared.", false);
     await context.commitTransaction({
@@ -477,7 +483,7 @@ export class AgentRunLoop {
                 },
               ],
             },
-            context.signal.aborted ? { allowWhileCancelling: true } : {},
+            { cancellationCleanup: "provider_text" },
           );
         } catch (error) {
           throw new RunLoopFailure(
@@ -606,7 +612,6 @@ export class AgentRunLoop {
           visibleText ? { messageId, partId, fullText } : null,
           "provider.cancelled",
           "Provider operation was cancelled.",
-          true,
           "interrupted",
         );
         return { kind: "interrupted", code: "provider.cancelled", message: "Provider cancelled." };
@@ -645,7 +650,6 @@ export class AgentRunLoop {
         visibleText ? { messageId, partId, fullText } : null,
         code,
         message,
-        false,
         stepState,
       );
       if (retryable) return { kind: "retry", code, message };
@@ -671,7 +675,6 @@ export class AgentRunLoop {
         visibleText ? { messageId, partId, fullText } : null,
         "provider.incomplete",
         message,
-        false,
         "interrupted",
       );
       return { kind: "interrupted", code: "provider.incomplete", message };
@@ -706,7 +709,6 @@ export class AgentRunLoop {
         visibleText ? { messageId, partId, fullText } : null,
         code,
         acceptedTerminal.message,
-        false,
         stepState,
       );
       if (retryable) return { kind: "retry", code, message: acceptedTerminal.message };
@@ -741,7 +743,6 @@ export class AgentRunLoop {
         visibleText ? { messageId, partId, fullText } : null,
         code,
         message,
-        cancelled,
         cancelled ? "interrupted" : "failed",
       );
       return {
@@ -760,6 +761,13 @@ export class AgentRunLoop {
     seenCallIds: Set<string>,
   ): Promise<void> {
     ToolCallIdSchema.parse(event.callId);
+    if (!seenCallIds.has(event.callId) && seenCallIds.size >= PROVIDER_LIMITS.toolCallMaxCountPerStep) {
+      throw new RunLoopFailure(
+        "provider.protocol_error",
+        "Provider step emitted too many tool calls.",
+        false,
+      );
+    }
     if (event.name.length === 0) {
       throw new RunLoopFailure("provider.protocol_error", "Provider tool name is empty.", false);
     }
@@ -882,7 +890,6 @@ export class AgentRunLoop {
     message: { readonly messageId: string; readonly partId: string; readonly fullText: string } | null,
     code: ErrorCode,
     failureMessage: string,
-    allowWhileCancelling: boolean,
     stepState: "failed" | "interrupted",
   ): Promise<void> {
     const atMs = context.now();
@@ -969,7 +976,7 @@ export class AgentRunLoop {
               ]),
         ],
       },
-      allowWhileCancelling ? { allowWhileCancelling: true } : {},
+      { cancellationCleanup: "provider_step" },
     );
   }
 
@@ -1380,6 +1387,23 @@ export class AgentRunLoop {
         });
       } catch (error) {
         if (isSessionActorHandoffSignal(context.signal)) throw error;
+        const durableStarted = await this.storage.getToolExecution(tool.callId);
+        if (
+          durableStarted === null ||
+          durableStarted.state !== "started" ||
+          durableStarted.runId !== tool.runId ||
+          durableStarted.stepId !== tool.stepId ||
+          durableStarted.toolName !== tool.toolName ||
+          durableStarted.argumentsHash !== tool.argumentsHash ||
+          durableStarted.effectClass !== tool.effectClass ||
+          durableStarted.attemptCount !== tool.attemptCount + 1
+        ) {
+          throw new RunLoopFailure(
+            "session.invalid_transition",
+            "Tool terminal cleanup no longer matches its durable started execution.",
+            true,
+          );
+        }
         const cancelled = isAborted(context.signal);
         const outcomeUnknown = tool.effectClass !== "pure";
         let code: ErrorCode = "tool.execution_failed";
@@ -1449,7 +1473,7 @@ export class AgentRunLoop {
               },
             ],
           },
-          cancelled ? { allowWhileCancelling: true } : {},
+          { cancellationCleanup: "tool_execution" },
         );
         if (outcomeUnknown) {
           throw new RunLoopFailure("tool.outcome_unknown", message, true);

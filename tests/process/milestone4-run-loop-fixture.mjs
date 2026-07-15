@@ -1,15 +1,5 @@
 import { appendFile, readFile } from "node:fs/promises";
 
-import { FakeProviderAdapter } from "@wi/provider-fake";
-import {
-  AgentRunLoop,
-  CommittedEventHub,
-  RunScheduler,
-  SessionActor,
-} from "../../packages/harness-core/dist/index.js";
-import { SessionStoreManager } from "@wi/storage";
-import { ToolExecutor, ToolRegistry, createEchoTool } from "@wi/tools";
-
 const [homeDirectory, sessionId, mode, window, executionLog, providerLog] = process.argv.slice(2);
 if (
   homeDirectory === undefined ||
@@ -23,7 +13,22 @@ if (
 }
 const windows = new Set(["staged", "promoted", "pure-started", "unsafe-started", "result"]);
 if (!windows.has(window)) process.exit(65);
-if (mode !== "crash" && mode !== "restart1" && mode !== "restart2") process.exit(66);
+if (mode !== "crash" && mode !== "restart1" && mode !== "restart2" && mode !== "hang") {
+  process.exit(66);
+}
+if (mode === "hang") {
+  process.on("SIGTERM", () => {});
+  process.stdout.write("hang-ready\n");
+  globalThis.setInterval(() => {}, 1_000);
+  await new Promise(() => {});
+}
+
+const { FakeProviderAdapter } = await import("@wi/provider-fake");
+const { AgentRunLoop, CommittedEventHub, RunScheduler, SessionActor } = await import(
+  "../../packages/harness-core/dist/index.js"
+);
+const { SessionStoreManager } = await import("@wi/storage");
+const { ToolExecutor, ToolRegistry, createEchoTool } = await import("@wi/tools");
 
 function scenarioForWindow() {
   return window === "staged" ? "partial-tool-call-without-terminal" : "echo-tool-round-trip";

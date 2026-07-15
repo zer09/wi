@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,53 +7,40 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SessionStoreManager } from "@wi/storage";
 
+import { FixtureProcessRunner, FixtureProcessTimeoutError } from "./fixture-process.js";
+
 const fixture = fileURLToPath(new URL("./milestone4-run-loop-fixture.mjs", import.meta.url));
 const homes: string[] = [];
+const fixtureProcesses = new FixtureProcessRunner();
 
-interface ChildResult {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-function runFixture(options: {
-  readonly homeDirectory: string;
-  readonly sessionId: string;
-  readonly mode: "crash" | "restart1" | "restart2";
-  readonly window: string;
-  readonly executionLog: string;
-  readonly providerLog: string;
-}): Promise<ChildResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      [
-        fixture,
-        options.homeDirectory,
-        options.sessionId,
-        options.mode,
-        options.window,
-        options.executionLog,
-        options.providerLog,
-      ],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-  });
+function runFixture(
+  options: {
+    readonly homeDirectory: string;
+    readonly sessionId: string;
+    readonly mode: "crash" | "restart1" | "restart2" | "hang";
+    readonly window: string;
+    readonly executionLog: string;
+    readonly providerLog: string;
+  },
+  timeoutMs?: number,
+) {
+  return fixtureProcesses.run(
+    process.execPath,
+    [
+      fixture,
+      options.homeDirectory,
+      options.sessionId,
+      options.mode,
+      options.window,
+      options.executionLog,
+      options.providerLog,
+    ],
+    timeoutMs,
+  );
 }
 
 afterEach(async () => {
+  await fixtureProcesses.terminateAll();
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
@@ -185,12 +171,11 @@ describe("Milestone 4 real process run-loop recovery", () => {
       };
 
       const crashed = await runFixture({ ...common, mode: "crash" });
-      expect(crashed.code, crashed.stderr).toBe(crashCode);
-      expect(crashed.stdout).toBe("");
+      expect(crashed).toMatchObject({ code: crashCode, signal: null, stdout: "" });
       expect(crashed.stderr).not.toContain("Error");
 
       const firstRestart = await runFixture({ ...common, mode: "restart1" });
-      expect(firstRestart.code, firstRestart.stderr).toBe(0);
+      expect(firstRestart).toMatchObject({ code: 0, signal: null });
       const first = JSON.parse(firstRestart.stdout) as Record<string, unknown>;
       expect(first).toMatchObject({
         ...expected,
@@ -202,10 +187,42 @@ describe("Milestone 4 real process run-loop recovery", () => {
       });
 
       const secondRestart = await runFixture({ ...common, mode: "restart2" });
-      expect(secondRestart.code, secondRestart.stderr).toBe(0);
+      expect(secondRestart).toMatchObject({ code: 0, signal: null });
       const second = JSON.parse(secondRestart.stdout) as Record<string, unknown>;
       expect(second).toEqual(first);
     },
     20_000,
   );
+
+  it("terminates and reaps a fixture that ignores its process deadline", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-m4-process-hang-"));
+    homes.push(homeDirectory);
+    const common = {
+      homeDirectory,
+      sessionId: "ses_processHang",
+      mode: "hang" as const,
+      window: "staged",
+      executionLog: join(homeDirectory, "execution.log"),
+      providerLog: join(homeDirectory, "provider.log"),
+    };
+
+    let timeoutError: FixtureProcessTimeoutError | null = null;
+    try {
+      await runFixture(common, 2_000);
+    } catch (error) {
+      if (error instanceof FixtureProcessTimeoutError) timeoutError = error;
+      else throw error;
+    }
+
+    expect(timeoutError).not.toBeNull();
+    expect(timeoutError?.result).toMatchObject({
+      code: null,
+      signal: "SIGKILL",
+      stdout: "hang-ready\n",
+    });
+    expect(fixtureProcesses.activeCount).toBe(0);
+    const pid = timeoutError?.result.pid;
+    if (pid === null || pid === undefined) throw new Error("Hanging fixture did not report its PID");
+    expect(() => process.kill(pid, 0)).toThrow();
+  }, 5_000);
 });

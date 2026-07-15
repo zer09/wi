@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,40 +8,21 @@ import { afterEach, describe, expect, it } from "vitest";
 import { canonicalJsonHash } from "@wi/protocol";
 import { SessionStoreManager, type SessionClient } from "@wi/storage";
 
+import { FixtureProcessRunner } from "./fixture-process.js";
+
 const fixture = fileURLToPath(
   new URL("./milestone4-unsafe-recovery-fixture.mjs", import.meta.url),
 );
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
-
-interface ChildResult {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
+const fixtureProcesses = new FixtureProcessRunner();
 
 function runFixture(
   homeDirectory: string,
   sessionId: string,
   mode: "recover-crash" | "inspect",
-): Promise<ChildResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [fixture, homeDirectory, sessionId, mode], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-  });
+) {
+  return fixtureProcesses.run(process.execPath, [fixture, homeDirectory, sessionId, mode]);
 }
 
 async function seedUnsafeStarted(session: SessionClient): Promise<void> {
@@ -148,6 +128,7 @@ async function seedUnsafeStarted(session: SessionClient): Promise<void> {
 }
 
 afterEach(async () => {
+  await fixtureProcesses.terminateAll();
   await Promise.allSettled(managers.splice(0).map((manager) => manager.close()));
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
@@ -179,11 +160,11 @@ describe("Milestone 4 unsafe recovery process window", () => {
     managers.splice(managers.indexOf(manager), 1);
 
     const crashed = await runFixture(homeDirectory, session.sessionId, "recover-crash");
-    expect(crashed).toMatchObject({ code: 91, stdout: "" });
+    expect(crashed).toMatchObject({ code: 91, signal: null, stdout: "" });
     expect(crashed.stderr).not.toContain("Error");
 
     const firstRestart = await runFixture(homeDirectory, session.sessionId, "inspect");
-    expect(firstRestart.code, firstRestart.stderr).toBe(0);
+    expect(firstRestart).toMatchObject({ code: 0, signal: null });
     const first = JSON.parse(firstRestart.stdout) as Record<string, unknown>;
     expect(first).toMatchObject({
       runState: "interrupted",
@@ -197,7 +178,7 @@ describe("Milestone 4 unsafe recovery process window", () => {
     });
 
     const secondRestart = await runFixture(homeDirectory, session.sessionId, "inspect");
-    expect(secondRestart.code, secondRestart.stderr).toBe(0);
+    expect(secondRestart).toMatchObject({ code: 0, signal: null });
     const second = JSON.parse(secondRestart.stdout) as Record<string, unknown>;
     expect(second).toEqual(first);
   }, 20_000);

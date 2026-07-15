@@ -135,6 +135,26 @@ const scenarios = [
       completedAssistantEvents: 1,
     },
   },
+  {
+    window: "live-outcome-unknown",
+    crashCode: 105,
+    expected: {
+      runState: "interrupted",
+      runFailureCategory: "tool.outcome_unknown",
+      toolState: "outcome_unknown",
+      effectClass: "non_idempotent",
+      attemptCount: 1,
+      providerRequests: 1,
+      executions: 1,
+      terminalEvents: 1,
+      stagedEvents: 1,
+      startedEvents: 1,
+      completedToolEvents: 0,
+      outcomeUnknownEvents: 1,
+      interruptedRunEvents: 1,
+      completedAssistantEvents: 0,
+    },
+  },
 ] as const;
 
 describe("Milestone 4 real process run-loop recovery", () => {

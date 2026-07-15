@@ -11,7 +11,14 @@ if (
 ) {
   process.exit(64);
 }
-const windows = new Set(["staged", "promoted", "pure-started", "unsafe-started", "result"]);
+const windows = new Set([
+  "staged",
+  "promoted",
+  "pure-started",
+  "unsafe-started",
+  "result",
+  "live-outcome-unknown",
+]);
 if (!windows.has(window)) process.exit(65);
 if (mode !== "crash" && mode !== "restart1" && mode !== "restart2" && mode !== "hang") {
   process.exit(66);
@@ -45,6 +52,8 @@ function failpointEventType() {
       return "tool.execution.started";
     case "result":
       return "tool.execution.completed";
+    case "live-outcome-unknown":
+      return "tool.execution.outcome_unknown";
     default:
       throw new Error("Unknown process failpoint window");
   }
@@ -91,10 +100,21 @@ const storage =
               const result = await target.appendTransaction(input);
               if (
                 !failpointTriggered &&
-                input.events.some((event) => event.eventType === failpointEventType())
+                input.events.some((event) => event.eventType === failpointEventType()) &&
+                !input.events.some((event) => event.eventType === "run.interrupted")
               ) {
                 failpointTriggered = true;
-                process.exit(100 + ["staged", "promoted", "pure-started", "unsafe-started", "result"].indexOf(window));
+                process.exit(
+                  100 +
+                    [
+                      "staged",
+                      "promoted",
+                      "pure-started",
+                      "unsafe-started",
+                      "result",
+                      "live-outcome-unknown",
+                    ].indexOf(window),
+                );
               }
               return result;
             };
@@ -108,9 +128,15 @@ const storage =
 const registry = new ToolRegistry();
 registry.register({
   ...createEchoTool(),
-  effectClass: window === "unsafe-started" ? "non_idempotent" : "pure",
+  effectClass:
+    window === "unsafe-started" || window === "live-outcome-unknown"
+      ? "non_idempotent"
+      : "pure",
   execute: async (input, context) => {
     await appendFile(executionLog, `${context.callId}\n`, "utf8");
+    if (window === "live-outcome-unknown") {
+      throw new Error("Live non-idempotent tool result cannot be proven");
+    }
     return { text: input.text };
   },
 });
@@ -236,6 +262,9 @@ const result = {
   ).length,
   outcomeUnknownEvents: events.filter(
     (event) => event.eventType === "tool.execution.outcome_unknown" && event.data.runId === runId,
+  ).length,
+  interruptedRunEvents: events.filter(
+    (event) => event.eventType === "run.interrupted" && event.data.runId === runId,
   ).length,
   completedAssistantEvents: events.filter(
     (event) => event.eventType === "assistant.message.completed" && event.data.runId === runId,

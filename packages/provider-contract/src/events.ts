@@ -10,6 +10,7 @@ import {
   PROVIDER_LIMITS,
   ProviderBoundaryError,
   assertJsonBounds,
+  cloneJsonWithinBounds,
   utf8ByteLength,
 } from "./limits.js";
 import { ProviderStepIndexSchema } from "./request.js";
@@ -105,13 +106,13 @@ export const ProviderEventSchema = ProviderEventDiscriminatedSchema.superRefine(
 export type ProviderEvent = z.infer<typeof ProviderEventSchema>;
 
 export function decodeProviderEvent(value: unknown): ProviderEvent {
-  assertJsonBounds(value, {
+  const bounded = cloneJsonWithinBounds(value, {
     label: "Provider event",
     maxBytes: PROVIDER_LIMITS.eventMaxBytes,
     maxDepth: PROVIDER_LIMITS.eventMaxDepth,
     maxNodes: PROVIDER_LIMITS.eventMaxNodes,
   });
-  const decoded = ProviderEventSchema.safeParse(value);
+  const decoded = ProviderEventSchema.safeParse(bounded);
   if (!decoded.success) {
     throw new ProviderBoundaryError("Provider event does not match the runtime contract.", {
       cause: decoded.error,

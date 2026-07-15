@@ -512,6 +512,7 @@ export class AgentRunLoop {
           }
           this.assertEventIdentity(event, request);
           if (terminal !== null) {
+            // An identical terminal marker is harmless; all other post-terminal data is invalid.
             const duplicateCompletion =
               terminal.type === "completed" &&
               event.type === "response.completed" &&

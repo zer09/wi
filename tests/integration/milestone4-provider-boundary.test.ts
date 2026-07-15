@@ -259,6 +259,95 @@ describe("Milestone 4 provider runtime boundary", () => {
       ],
     ],
     [
+      "oversized failure message",
+      (request: ProviderRequest) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_oversizedFailure",
+        },
+        {
+          type: "response.failed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          category: "transport",
+          message: "x".repeat(PROVIDER_LIMITS.failureMessageMaxBytes + 1),
+          retryable: false,
+        },
+      ],
+    ],
+    [
+      "oversized tool name",
+      (request: ProviderRequest) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_oversizedName",
+        },
+        {
+          type: "tool_call.completed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          callId: "call_oversizedName",
+          name: "x".repeat(PROVIDER_LIMITS.toolNameMaxBytes + 1),
+          argumentsJson: "{}",
+        },
+      ],
+    ],
+    [
+      "oversized tool arguments",
+      (request: ProviderRequest) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_oversizedArguments",
+        },
+        {
+          type: "tool_call.completed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          callId: "call_oversizedArguments",
+          name: "echo",
+          argumentsJson: "x".repeat(PROVIDER_LIMITS.toolArgumentsMaxBytes + 1),
+        },
+      ],
+    ],
+    [
+      "nonterminal event after completion",
+      (request: ProviderRequest) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_postTerminal",
+        },
+        {
+          type: "response.completed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_postTerminal",
+        },
+        {
+          type: "text.delta",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          delta: "late",
+        },
+      ],
+    ],
+    [
       "malformed tool call followed by completion",
       (request: ProviderRequest) => [
         {

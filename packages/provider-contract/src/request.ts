@@ -11,6 +11,7 @@ import {
   PROVIDER_LIMITS,
   ProviderBoundaryError,
   assertJsonBounds,
+  cloneJsonWithinBounds,
   utf8ByteLength,
 } from "./limits.js";
 
@@ -110,13 +111,13 @@ export interface ProviderContext {
 }
 
 export function decodeProviderInputItem(value: unknown): ProviderInputItem {
-  assertJsonBounds(value, {
+  const bounded = cloneJsonWithinBounds(value, {
     label: "Provider input item",
     maxBytes: PROVIDER_LIMITS.requestMaxBytes,
     maxDepth: PROVIDER_LIMITS.requestMaxDepth,
     maxNodes: PROVIDER_LIMITS.requestMaxNodes,
   });
-  const decoded = ProviderInputItemSchema.safeParse(value);
+  const decoded = ProviderInputItemSchema.safeParse(bounded);
   if (!decoded.success) {
     throw new ProviderBoundaryError("Provider input item does not match the runtime contract.", {
       cause: decoded.error,
@@ -126,21 +127,21 @@ export function decodeProviderInputItem(value: unknown): ProviderInputItem {
 }
 
 export function decodeProviderRequest(value: unknown): ProviderRequest {
-  assertJsonBounds(value, {
+  const bounded = cloneJsonWithinBounds(value, {
     label: "Provider request",
     maxBytes: PROVIDER_LIMITS.requestMaxBytes,
     maxDepth: PROVIDER_LIMITS.requestMaxDepth,
     maxNodes: PROVIDER_LIMITS.requestMaxNodes,
   });
-  if (value !== null && typeof value === "object" && "providerConfig" in value) {
-    assertJsonBounds((value as { readonly providerConfig?: unknown }).providerConfig, {
+  if (bounded !== null && typeof bounded === "object" && "providerConfig" in bounded) {
+    assertJsonBounds((bounded as { readonly providerConfig?: unknown }).providerConfig, {
       label: "Provider configuration",
       maxBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
       maxDepth: PROVIDER_LIMITS.providerConfigMaxDepth,
       maxNodes: PROVIDER_LIMITS.providerConfigMaxNodes,
     });
   }
-  const decoded = ProviderRequestSchema.safeParse(value);
+  const decoded = ProviderRequestSchema.safeParse(bounded);
   if (!decoded.success) {
     throw new ProviderBoundaryError("Provider request does not match the runtime contract.", {
       cause: decoded.error,

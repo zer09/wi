@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   PROVIDER_LIMITS,
   ProviderBoundaryError,
+  assertJsonBounds,
   decodeProviderEvent,
   decodeProviderRequest,
   jsonByteLength,
@@ -68,6 +69,70 @@ function maxEvent(): Record<string, unknown> {
 }
 
 describe("provider runtime request schemas", () => {
+  it("rejects a wide proxy array before reading or retaining its children", () => {
+    let indexReads = 0;
+    const wide = new Proxy(new Array(100_000), {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) indexReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+
+    expect(() =>
+      assertJsonBounds(wide, {
+        label: "Width probe",
+        maxBytes: PROVIDER_LIMITS.requestMaxBytes,
+        maxDepth: PROVIDER_LIMITS.requestMaxDepth,
+        maxNodes: 32,
+      }),
+    ).toThrowError("Width probe exceeds 32 values.");
+    expect(indexReads).toBe(0);
+  });
+
+  it("stops reading wide object properties at the node budget", () => {
+    const source = Object.fromEntries(
+      Array.from({ length: 1_000 }, (_, index) => [`value${index}`, index]),
+    );
+    let propertyReads = 0;
+    const wide = new Proxy(source, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && property.startsWith("value")) propertyReads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+
+    expect(() =>
+      assertJsonBounds(wide, {
+        label: "Width probe",
+        maxBytes: PROVIDER_LIMITS.requestMaxBytes,
+        maxDepth: PROVIDER_LIMITS.requestMaxDepth,
+        maxNodes: 32,
+      }),
+    ).toThrowError("Width probe exceeds 32 values.");
+    expect(propertyReads).toBeLessThanOrEqual(31);
+  });
+
+  it("matches JSON byte accounting for escaped strings and keys", () => {
+    const value = { 'quote" slash\\ control\n\0 lone\ud800': ["😀", "\b\t\f\r"] };
+    const exactBytes = jsonByteLength(value);
+    expect(() =>
+      assertJsonBounds(value, {
+        label: "Escaped probe",
+        maxBytes: exactBytes,
+        maxDepth: 3,
+        maxNodes: 4,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertJsonBounds(value, {
+        label: "Escaped probe",
+        maxBytes: exactBytes - 1,
+        maxDepth: 3,
+        maxNodes: 4,
+      }),
+    ).toThrow(ProviderBoundaryError);
+  });
+
   it("accepts and rejects the provider configuration byte boundary", () => {
     const exact = objectAtJsonBytes(PROVIDER_LIMITS.providerConfigMaxBytes);
     expect(jsonByteLength(exact)).toBe(PROVIDER_LIMITS.providerConfigMaxBytes);

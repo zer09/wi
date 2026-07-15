@@ -13,6 +13,7 @@ export const FAKE_PROVIDER_SCENARIOS = [
   "transient-failure-before-output",
   "failure-after-visible-output",
   "partial-tool-call-without-terminal",
+  "provider-cleanup-probe",
   "duplicate-call-id-same-arguments",
   "duplicate-call-id-later-step",
   "duplicate-call-id-different-arguments",
@@ -103,7 +104,7 @@ export class FakeProviderController {
 
 export function fakeProviderGateLabel(
   runId: string,
-  gate: "slow" | "before-output" | "partial" | "never",
+  gate: "slow" | "before-output" | "partial" | "cleanup" | "never",
 ): string {
   return `${runId}:${gate}`;
 }

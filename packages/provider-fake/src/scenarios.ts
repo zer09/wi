@@ -168,6 +168,26 @@ export function createFakeProviderScript(
         };
         await controller.wait(fakeProviderGateLabel(request.runId, "partial"), signal);
       });
+    case "provider-cleanup-probe":
+      return single(configuration, async function* (request, _context, controller, signal) {
+        yield* started(request);
+        yield {
+          type: "tool_call.completed",
+          ...identity(request),
+          callId: "call_providerCleanupProbe",
+          name: "echo",
+          argumentsJson: '{"text":"must not execute"}',
+        };
+        try {
+          await controller.wait(fakeProviderGateLabel(request.runId, "partial"), signal);
+        } catch (error) {
+          await controller.wait(
+            fakeProviderGateLabel(request.runId, "cleanup"),
+            new AbortController().signal,
+          );
+          throw error;
+        }
+      });
     case "duplicate-call-id-same-arguments":
       return single(configuration, async function* (request) {
         yield* started(request);

@@ -112,6 +112,7 @@ async function manager(): Promise<SessionStoreManager> {
 
 interface Fixture {
   readonly actor: SessionActor;
+  readonly manager: SessionStoreManager;
   readonly session: SessionClient;
   readonly provider: FakeProviderAdapter;
   readonly controller: FakeProviderController;
@@ -203,6 +204,7 @@ async function fixture(
   });
   return {
     actor,
+    manager: storage,
     session,
     provider,
     controller,
@@ -211,6 +213,45 @@ async function fixture(
     monitor,
     runId: submitted.runId,
   };
+}
+
+async function assertTerminalRestartNoop(
+  value: Fixture,
+  registry: ToolRegistry = createBuiltinToolRegistry(),
+): Promise<void> {
+  const head = await value.session.getHeadSequence();
+  await value.actor.handoff();
+  actors.splice(actors.indexOf(value.actor), 1);
+  const session = await value.manager.openSession(value.session.sessionId);
+  const provider = new FakeProviderAdapter();
+  const executions: string[] = [];
+  const generated = ids(`restartNoop${fixtureNumber}`);
+  const loop = new AgentRunLoop({
+    storage: session,
+    provider,
+    registry,
+    executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+    ids: generated.loop,
+  });
+  const replacement = await SessionActor.create({
+    storage: session,
+    eventHub: new CommittedEventHub(),
+    scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+    ids: generated.actor,
+    now: () => 9_000,
+    runTask: loop.task,
+    currentToolEffectClass: loop.currentToolEffectClass,
+    cancelRunTask: loop.cancel,
+    forceStopRunTask: () => ({ status: "terminated" }),
+    runTaskOwnsSchedulerPermits: true,
+    resumeRestoredRuns: true,
+  });
+  actors.push(replacement);
+  await replacement.flush();
+  expect(replacement.snapshot.activeRunId).toBeNull();
+  await expect(session.getHeadSequence()).resolves.toBe(head);
+  expect(provider.requests).toEqual([]);
+  expect(executions).toEqual([]);
 }
 
 async function waitForTerminal(value: Fixture): Promise<NonNullable<Awaited<ReturnType<SessionClient["getRun"]>>>> {
@@ -975,6 +1016,133 @@ describe("Milestone 4 agent loop with real session databases", () => {
         expect.objectContaining({ role: "assistant", state: "interrupted", text: "Slow " }),
       ]),
     );
+  });
+
+  it("allows provider cleanup after durable cancellation without stale executable state", async () => {
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const value = await fixture({ scenario: "provider-cleanup-probe" }, { scheduler });
+    const partialLabel = fakeProviderGateLabel(value.runId, "partial");
+    const cleanupLabel = fakeProviderGateLabel(value.runId, "cleanup");
+    await value.controller.waitUntilBlocked(partialLabel);
+    await value.actor.cancelRun(cancelCommand(value, "ProviderCleanupProbe"));
+    await value.controller.waitUntilBlocked(cleanupLabel);
+
+    await expect(value.session.getRun(value.runId)).resolves.toMatchObject({
+      state: "cancelling",
+      activeProviderStepId: expect.any(String),
+    });
+    await expect(value.session.getToolExecution("call_providerCleanupProbe")).resolves.toMatchObject({
+      state: "staged",
+      attemptCount: 0,
+    });
+    expect(scheduler.state.provider).toMatchObject({ active: 1, available: 0 });
+
+    value.controller.release(cleanupLabel);
+    await expect(waitForTerminal(value)).resolves.toMatchObject({
+      state: "cancelled",
+      activeProviderStepId: null,
+    });
+    expect(value.executions).toEqual([]);
+    expect(value.provider.requests).toHaveLength(1);
+    await expect(value.session.getProviderStepsForRun(value.runId)).resolves.toMatchObject([
+      { state: "interrupted" },
+    ]);
+    await expect(value.session.getToolExecution("call_providerCleanupProbe")).resolves.toMatchObject({
+      state: "discarded",
+      attemptCount: 0,
+    });
+    expect(
+      value.events.filter((event) =>
+        ["run.completed", "run.failed", "run.cancelled", "run.interrupted"].includes(
+          event.eventType,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await assertTerminalRestartNoop(value);
+  });
+
+  it("allows tool cleanup after durable cancellation without duplicate terminal state", async () => {
+    const echo = createBuiltinToolRegistry().get("echo");
+    if (echo === null) throw new Error("Echo definition missing");
+    let effectCount = 0;
+    let signalStarted = (): void => {};
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let signalCleanupBlocked = (): void => {};
+    const cleanupBlocked = new Promise<void>((resolve) => {
+      signalCleanupBlocked = resolve;
+    });
+    let releaseCleanup = (): void => {};
+    const cleanup = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const registry = new ToolRegistry();
+    registry.register({
+      ...echo,
+      timeoutMs: 60_000,
+      execute: async (_input, _context, signal) => {
+        effectCount += 1;
+        signalStarted();
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        signalCleanupBlocked();
+        await cleanup;
+        throw signal.reason;
+      },
+    });
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const value = await fixture(
+      { scenario: "echo-tool-round-trip" },
+      { registry, scheduler },
+    );
+    await started;
+    await value.actor.cancelRun(cancelCommand(value, "ToolCleanupProbe"));
+    await cleanupBlocked;
+
+    await expect(value.session.getRun(value.runId)).resolves.toMatchObject({ state: "cancelling" });
+    await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
+      state: "started",
+      attemptCount: 1,
+    });
+    expect(effectCount).toBe(1);
+    expect(scheduler.state.tool).toMatchObject({ active: 1, available: 0 });
+
+    releaseCleanup();
+    await expect(waitForTerminal(value)).resolves.toMatchObject({ state: "cancelled" });
+    expect(effectCount).toBe(1);
+    expect(value.executions).toEqual(["call_echoRoundTrip"]);
+    expect(value.provider.requests).toHaveLength(1);
+    await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
+      state: "cancelled",
+      attemptCount: 1,
+    });
+    expect(
+      value.events.filter(
+        (event) =>
+          event.eventType === "tool.execution.failed" &&
+          event.data.callId === "call_echoRoundTrip",
+      ),
+    ).toHaveLength(1);
+    expect(
+      value.events.filter((event) =>
+        ["run.completed", "run.failed", "run.cancelled", "run.interrupted"].includes(
+          event.eventType,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await assertTerminalRestartNoop(value, registry);
   });
 
   it("records a started non-idempotent effect as outcome unknown when cancellation wins", async () => {

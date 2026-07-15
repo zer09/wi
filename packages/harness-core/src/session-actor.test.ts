@@ -1308,7 +1308,14 @@ describe("SessionActor", () => {
         ],
       };
 
-      await expect(task.context.commitTransaction(transaction)).rejects.toBe(ambiguity);
+      if (runReadOutcome === "failure") {
+        await expect(task.context.commitTransaction(transaction)).rejects.toBe(ambiguity);
+      } else {
+        await expect(task.context.commitTransaction(transaction)).rejects.toMatchObject({
+          code: "storage.corrupt",
+          name: "EventReconciliationIntegrityError",
+        });
+      }
       expect(storage.events.some((event) => event.eventId === eventId)).toBe(true);
       expect(actor.snapshot.faulted).toBe(true);
       expect(faultCount).toBe(1);

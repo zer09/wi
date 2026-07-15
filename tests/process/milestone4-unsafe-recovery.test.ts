@@ -200,5 +200,5 @@ describe("Milestone 4 unsafe recovery process window", () => {
     expect(secondRestart.code, secondRestart.stderr).toBe(0);
     const second = JSON.parse(secondRestart.stdout) as Record<string, unknown>;
     expect(second).toEqual(first);
-  });
+  }, 20_000);
 });

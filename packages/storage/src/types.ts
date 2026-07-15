@@ -447,5 +447,6 @@ export const SessionRecoveryResultSchema = z.strictObject({
   interruptedRunIds: z.array(RunIdSchema),
   interruptedStepIds: z.array(z.string().min(1)),
   startedToolCalls: z.array(StartedToolRecoveryRecordSchema),
+  outcomeUnknownRunIds: z.array(RunIdSchema),
 });
 export type SessionRecoveryResult = z.infer<typeof SessionRecoveryResultSchema>;

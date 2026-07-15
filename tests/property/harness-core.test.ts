@@ -223,6 +223,7 @@ class PropertyStorage implements SessionActorStorage {
         : [],
       interruptedStepIds: [],
       startedToolCalls: [],
+      outcomeUnknownRunIds: [],
     };
   }
 }
@@ -1084,6 +1085,7 @@ describe("Milestone 3 property models", () => {
                 : [],
               interruptedStepIds: [],
               startedToolCalls: [],
+              outcomeUnknownRunIds: [],
             }),
             getRun: async () => run,
             getEventById: async () => null,

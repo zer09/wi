@@ -10,7 +10,13 @@ import {
   type SessionEvent,
   type ToolEffectClass,
 } from "@wi/protocol";
-import { SessionStoreManager, type SessionClient, type ToolExecutionRecord } from "@wi/storage";
+import {
+  SessionStoreManager,
+  type AppendTransactionInput,
+  type ProjectionMutation,
+  type SessionClient,
+  type ToolExecutionRecord,
+} from "@wi/storage";
 import {
   ToolExecutor,
   ToolRegistry,
@@ -323,6 +329,196 @@ async function seedStartedToolSet(
   return { runId, callIds };
 }
 
+type ExistingToolOutcome = "completed" | "failed" | "denied" | "cancelled" | "outcome_unknown";
+
+function terminalToolErrorCode(
+  outcome: ExistingToolOutcome,
+): "provider.cancelled" | "tool.approval_denied" | "tool.execution_failed" | "tool.outcome_unknown" {
+  if (outcome === "outcome_unknown") return "tool.outcome_unknown";
+  if (outcome === "denied") return "tool.approval_denied";
+  if (outcome === "cancelled") return "provider.cancelled";
+  return "tool.execution_failed";
+}
+
+async function seedTerminalToolSet(
+  session: SessionClient,
+  outcomes: readonly ExistingToolOutcome[],
+  runState: "running" | "interrupted" = "running",
+): Promise<{ readonly runId: string; readonly callIds: readonly string[] }> {
+  const suffix = `${fixtureNumber}_${outcomes.join("_")}_${runState}`;
+  const runId = `run_terminalSet${suffix}`;
+  const stepId = `step_terminalSet${suffix}`;
+  const callIds = outcomes.map((_outcome, index) => `call_terminalSet${suffix}_${index}`);
+  const argumentsJson = '{"text":"existing terminal"}';
+  const argumentsHash = await canonicalJsonHash({ text: "existing terminal" });
+  const toolEvents: AppendTransactionInput["events"] = [];
+  for (const [index, outcome] of outcomes.entries()) {
+    const callId = callIds[index];
+    if (callId === undefined) throw new Error("Missing terminal tool call ID");
+    const effectClass = outcome === "outcome_unknown" ? "non_idempotent" : "pure";
+    const requestedAtMs = 2_010 + index * 3;
+    const terminalAtMs = requestedAtMs + 2;
+    toolEvents.push({
+      eventId: `evt_terminalSet${suffix}Requested${index}`,
+      eventType: "tool.call.requested",
+      createdAtMs: requestedAtMs,
+      data: {
+        eventVersion: 1,
+        runId,
+        stepId,
+        callId,
+        name: "echo",
+        argumentsJson,
+        argumentsHash,
+        effectClass,
+      },
+    });
+    if (outcome !== "denied") {
+      toolEvents.push({
+        eventId: `evt_terminalSet${suffix}Started${index}`,
+        eventType: "tool.execution.started",
+        createdAtMs: requestedAtMs + 1,
+        data: { eventVersion: 1, runId, callId },
+      });
+    }
+    if (outcome === "completed") {
+      toolEvents.push({
+        eventId: `evt_terminalSet${suffix}Completed${index}`,
+        eventType: "tool.execution.completed",
+        createdAtMs: terminalAtMs,
+        data: { eventVersion: 1, runId, callId, result: { text: "existing terminal" } },
+      });
+    } else if (outcome === "outcome_unknown") {
+      toolEvents.push({
+        eventId: `evt_terminalSet${suffix}Unknown${index}`,
+        eventType: "tool.execution.outcome_unknown",
+        createdAtMs: terminalAtMs,
+        data: {
+          eventVersion: 1,
+          runId,
+          callId,
+          code: "tool.outcome_unknown",
+          message: "The existing non-idempotent outcome is unknown.",
+          diagnosticId: `err_terminalSet${suffix}Unknown${index}`,
+        },
+      });
+    } else {
+      const code = terminalToolErrorCode(outcome);
+      toolEvents.push({
+        eventId: `evt_terminalSet${suffix}Failed${index}`,
+        eventType: "tool.execution.failed",
+        createdAtMs: terminalAtMs,
+        data: {
+          eventVersion: 1,
+          runId,
+          callId,
+          code,
+          message: `Existing tool ended ${outcome}.`,
+          diagnosticId: `err_terminalSet${suffix}Failed${index}`,
+        },
+      });
+    }
+  }
+  const runEvent =
+    runState === "running"
+      ? {
+          eventId: `evt_terminalSet${suffix}RunStarted`,
+          eventType: "run.started" as const,
+          createdAtMs: 2_000,
+          data: { eventVersion: 1 as const, runId },
+        }
+      : {
+          eventId: `evt_terminalSet${suffix}RunInterrupted`,
+          eventType: "run.interrupted" as const,
+          createdAtMs: 2_000,
+          data: {
+            eventVersion: 1 as const,
+            runId,
+            code: "tool.outcome_unknown" as const,
+            message: "Run was already interrupted.",
+            diagnosticId: `err_terminalSet${suffix}RunInterrupted`,
+          },
+        };
+  const toolProjections: ProjectionMutation[] = [];
+  for (const [index, outcome] of outcomes.entries()) {
+    const callId = callIds[index];
+    if (callId === undefined) throw new Error("Missing terminal tool call ID");
+    const effectClass: ToolEffectClass =
+      outcome === "outcome_unknown" ? "non_idempotent" : "pure";
+    const requestedAtMs = 2_010 + index * 3;
+    const code = terminalToolErrorCode(outcome);
+    toolProjections.push(
+      {
+        kind: "toolExecution.put",
+        callId,
+        runId,
+        stepId,
+        toolName: "echo",
+        argumentsJson,
+        argumentsHash,
+        effectClass,
+        state: outcome,
+        attemptCount: outcome === "denied" ? 0 : 1,
+        requestedAtMs,
+        startedAtMs: outcome === "denied" ? null : requestedAtMs + 1,
+        completedAtMs: requestedAtMs + 2,
+        result: outcome === "completed" ? { text: "existing terminal" } : null,
+        error:
+          outcome === "completed" ? null : { code, message: `Existing tool ended ${outcome}.` },
+      },
+      {
+        kind: "toolCallOccurrence.put",
+        runId,
+        stepId,
+        callId,
+        occurredAtMs: requestedAtMs,
+      },
+    );
+  }
+  await session.appendTransaction({
+    events: [
+      runEvent,
+      {
+        eventId: `evt_terminalSet${suffix}StepCompleted`,
+        eventType: "provider.step.completed",
+        createdAtMs: 2_001,
+        data: { eventVersion: 1, runId, stepId },
+      },
+      ...toolEvents,
+    ],
+    projections: [
+      {
+        kind: "run.put",
+        runId,
+        state: runState,
+        providerId: "fake",
+        providerConfig: { scenario: "echo-tool-round-trip" },
+        createdAtMs: 2_000,
+        startedAtMs: 2_000,
+        completedAtMs: runState === "interrupted" ? 2_000 : null,
+        cancelledAtMs: null,
+        failureCategory: runState === "interrupted" ? "tool.outcome_unknown" : null,
+        failureMessage: runState === "interrupted" ? "Run was already interrupted." : null,
+        activeProviderStepId: null,
+      },
+      {
+        kind: "providerStep.put",
+        stepId,
+        runId,
+        stepIndex: 0,
+        state: "completed",
+        startedAtMs: 2_000,
+        completedAtMs: 2_001,
+        responseId: `response_terminalSet${suffix}`,
+        errorCategory: null,
+        errorMessage: null,
+      },
+      ...toolProjections,
+    ],
+  });
+  return { runId, callIds };
+}
+
 function registryFor(specs: readonly StartedToolSpec[]): ToolRegistry {
   const registry = new ToolRegistry();
   for (const spec of specs) {
@@ -601,6 +797,309 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       attemptCount: 1,
       result: { text: "recover" },
     });
+  });
+
+  it("interrupts a running run with existing unknown outcomes exactly once", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedTerminalToolSet(session, ["outcome_unknown", "outcome_unknown"]);
+    await expect(session.recover()).resolves.toMatchObject({
+      interruptedRunIds: [seeded.runId],
+      outcomeUnknownRunIds: [seeded.runId],
+    });
+
+    const ids = generatedIds("existingUnknownRecovery");
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const registry = new ToolRegistry();
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry,
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: ids.loop,
+    });
+    let signalTerminal = (): void => {};
+    const terminal = new Promise<void>((resolve) => {
+      signalTerminal = resolve;
+    });
+    const hub = new CommittedEventHub();
+    hub.subscribe(session.sessionId, (event) => {
+      if (event.eventType === "run.interrupted" && event.data.runId === seeded.runId) {
+        signalTerminal();
+      }
+    });
+    let now = 6_000;
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: hub,
+      scheduler,
+      ids: ids.actor,
+      now: () => ++now,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(actor);
+    await terminal;
+
+    expect(provider.requests).toEqual([]);
+    expect(executions).toEqual([]);
+    expect(actor.snapshot.activeRunId).toBeNull();
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+      activeProviderStepId: null,
+    });
+    const tools = await Promise.all(
+      seeded.callIds.map((callId) => session.getToolExecution(callId)),
+    );
+    expect(tools).toEqual([
+      expect.objectContaining({ state: "outcome_unknown", attemptCount: 1 }),
+      expect.objectContaining({ state: "outcome_unknown", attemptCount: 1 }),
+    ]);
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.outcome_unknown" &&
+          event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(2);
+    expect(
+      events.filter(
+        (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+    const head = await session.getHeadSequence();
+    let repeatedEvent = 0;
+    await expect(
+      recoverSession({
+        sessionId: session.sessionId,
+        storage: session,
+        now: () => ++now,
+        eventId: () => `evt_existingUnknownRepeated${++repeatedEvent}`,
+        diagnosticId: () => `err_existingUnknownRepeated${repeatedEvent}`,
+        publishCommitted: () => undefined,
+        resumeToolLoop: true,
+        currentToolEffectClass: () => null,
+      }),
+    ).resolves.toMatchObject({
+      interruptedRunIds: [],
+      outcomeUnknownRunIds: [],
+    });
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+  });
+
+  it("reconciles an existing unknown-outcome interruption after its response is lost", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedTerminalToolSet(session, ["outcome_unknown"]);
+    let lostResponse = false;
+    const storage = new Proxy(session, {
+      get(target, property) {
+        if (property === "appendTransaction") {
+          return async (input: Parameters<SessionClient["appendTransaction"]>[0]) => {
+            const result = await target.appendTransaction(input);
+            if (
+              !lostResponse &&
+              input.events.some((event) => event.eventType === "run.interrupted") &&
+              !input.events.some(
+                (event) => event.eventType === "tool.execution.outcome_unknown",
+              )
+            ) {
+              lostResponse = true;
+              throw Object.assign(new Error("existing unknown recovery response lost"), {
+                code: "storage.ambiguous_outcome",
+              });
+            }
+            return result;
+          };
+        }
+        const member = Reflect.get(target, property) as unknown;
+        return typeof member === "function" ? member.bind(target) : member;
+      },
+    }) as SessionClient;
+    let event = 0;
+    const options = {
+      sessionId: session.sessionId,
+      storage,
+      now: () => 6_500,
+      eventId: () => `evt_existingUnknownLost${++event}`,
+      diagnosticId: () => `err_existingUnknownLost${event}`,
+      publishCommitted: () => undefined,
+      resumeToolLoop: true,
+      currentToolEffectClass: () => null,
+    };
+
+    await expect(recoverSession(options)).resolves.toMatchObject({
+      interruptedRunIds: [seeded.runId],
+      outcomeUnknownRunIds: [seeded.runId],
+    });
+    expect(lostResponse).toBe(true);
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+    });
+    const head = await session.getHeadSequence();
+    await expect(recoverSession(options)).resolves.toMatchObject({
+      interruptedRunIds: [],
+      outcomeUnknownRunIds: [],
+    });
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (candidate) =>
+          candidate.eventType === "tool.execution.outcome_unknown" &&
+          candidate.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      events.filter(
+        (candidate) =>
+          candidate.eventType === "run.interrupted" && candidate.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("refuses provider continuation when the run loop reads an unknown outcome", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedTerminalToolSet(session, ["outcome_unknown"]);
+    const ids = generatedIds("unknownRunLoopDefense");
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const abort = new AbortController();
+    const storage = new Proxy(session, {
+      get(target, property) {
+        if (property === "getToolExecution") {
+          return async (callId: string) => {
+            const tool = await target.getToolExecution(callId);
+            abort.abort(new Error("Cancellation raced with unknown-outcome adoption"));
+            return tool;
+          };
+        }
+        const member = Reflect.get(target, property) as unknown;
+        return typeof member === "function" ? member.bind(target) : member;
+      },
+    }) as SessionClient;
+    const loop = new AgentRunLoop({
+      storage,
+      provider,
+      registry: new ToolRegistry(),
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: ids.loop,
+    });
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const head = await session.getHeadSequence();
+    const result = await loop.task({
+      sessionId: session.sessionId,
+      runId: seeded.runId,
+      generation: 1,
+      signal: abort.signal,
+      scheduler,
+      now: () => 7_000,
+      commitTransaction: (input) => session.appendTransaction(input),
+      waitForApproval: async () => undefined,
+    });
+
+    expect(result).toMatchObject({
+      state: "interrupted",
+      code: "tool.outcome_unknown",
+    });
+    expect(provider.requests).toEqual([]);
+    expect(executions).toEqual([]);
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    await expect(session.getToolExecution(seeded.callIds[0] ?? "")).resolves.toMatchObject({
+      state: "outcome_unknown",
+      attemptCount: 1,
+    });
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await scheduler.shutdown();
+  });
+
+  it("does not change an already terminal run with an unknown tool outcome", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedTerminalToolSet(session, ["outcome_unknown"], "interrupted");
+    const head = await session.getHeadSequence();
+    let event = 0;
+
+    await expect(
+      recoverSession({
+        sessionId: session.sessionId,
+        storage: session,
+        now: () => 8_000,
+        eventId: () => `evt_terminalUnknownNoop${++event}`,
+        diagnosticId: () => `err_terminalUnknownNoop${event}`,
+        publishCommitted: () => undefined,
+        resumeToolLoop: true,
+        currentToolEffectClass: () => null,
+      }),
+    ).resolves.toMatchObject({
+      interruptedRunIds: [],
+      outcomeUnknownRunIds: [],
+    });
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+    });
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (candidate) =>
+          candidate.eventType === "run.interrupted" && candidate.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("preserves provider continuation for ordinary terminal tool outcomes", async () => {
+    const { session } = await storageFixture();
+    const outcomes = ["completed", "failed", "denied", "cancelled"] as const;
+    const seeded = await seedTerminalToolSet(session, outcomes);
+    const ids = generatedIds("ordinaryTerminalOutcomes");
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry: createBuiltinToolRegistry(),
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: ids.loop,
+    });
+    const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
+    const result = await loop.task({
+      sessionId: session.sessionId,
+      runId: seeded.runId,
+      generation: 1,
+      signal: new AbortController().signal,
+      scheduler,
+      now: () => 9_000,
+      commitTransaction: (input) => session.appendTransaction(input),
+      waitForApproval: async () => undefined,
+    });
+
+    expect(result).toEqual({ state: "completed" });
+    expect(provider.requests).toHaveLength(1);
+    expect(executions).toEqual([]);
+    const tools = await Promise.all(
+      seeded.callIds.map((callId) => session.getToolExecution(callId)),
+    );
+    expect(tools.map((tool) => tool?.state)).toEqual(outcomes);
+    expect(scheduler.state).toMatchObject({
+      provider: { active: 0, queued: 0, available: 1 },
+      tool: { active: 0, queued: 0, available: 1 },
+    });
+    await scheduler.shutdown();
   });
 
   it("atomically marks one non-idempotent started call unknown and interrupts its run", async () => {

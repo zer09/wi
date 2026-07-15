@@ -40,6 +40,7 @@ describe("startup recovery", () => {
         interruptedRunIds: [current.runId],
         interruptedStepIds: [],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => current,
       getEventById: async () => null,
@@ -93,6 +94,7 @@ describe("startup recovery", () => {
         interruptedRunIds: ["run_stale"],
         interruptedStepIds: ["step_stale"],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => interrupted,
       getEventById: async () => null,
@@ -140,6 +142,7 @@ describe("startup recovery", () => {
         interruptedRunIds: current.state === "running" ? [current.runId] : [],
         interruptedStepIds: [],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => current,
       getEventById: async (eventId) => storedEvents.get(eventId) ?? null,
@@ -204,6 +207,7 @@ describe("startup recovery", () => {
       interruptedRunIds: ["run_running"],
       interruptedStepIds: ["step_streaming"],
       startedToolCalls: [],
+      outcomeUnknownRunIds: [],
     };
     const storage: RecoveryStorage = {
       recover: async () => ({

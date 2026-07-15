@@ -58,6 +58,7 @@ export interface RecoveryResult {
   readonly preservedRunIds: readonly string[];
   readonly streamingStepIds: readonly string[];
   readonly startedToolCalls: SessionRecoveryResult["startedToolCalls"];
+  readonly outcomeUnknownRunIds: readonly string[];
 }
 
 interface StartedToolDecision {
@@ -136,6 +137,7 @@ export async function recoverSession(options: {
   for (const tools of startedToolsByRun.values()) {
     tools.sort((left, right) => left.tool.callId.localeCompare(right.tool.callId));
   }
+  const outcomeUnknownRunIds = new Set(candidates.outcomeUnknownRunIds);
 
   const stepRecovery = async (step: ProviderStepRecord, atMs: number) => {
     const [stepTools, streamingMessages] = await Promise.all([
@@ -211,6 +213,7 @@ export async function recoverSession(options: {
 
     const runSteps = [...streamingSteps.values()].filter((step) => step.runId === runId);
     const startedTools = startedToolsByRun.get(runId) ?? [];
+    const hasOutcomeUnknown = outcomeUnknownRunIds.has(runId);
     const canRetryEveryStartedTool = startedTools.every(
       ({ tool, compatible }) => compatible && tool.effectClass === "pure",
     );
@@ -218,6 +221,7 @@ export async function recoverSession(options: {
       options.resumeToolLoop === true &&
       run.state === "running" &&
       runSteps.length === 0 &&
+      !hasOutcomeUnknown &&
       canRetryEveryStartedTool;
 
     if (canResume) {
@@ -283,7 +287,8 @@ export async function recoverSession(options: {
     const atMs = options.now();
     const recoveredSteps = await Promise.all(runSteps.map((step) => stepRecovery(step, atMs)));
     const incompatibleTool = startedTools.some(({ compatible }) => !compatible);
-    const ambiguousEffect = startedTools.some(({ tool }) => tool.effectClass !== "pure");
+    const ambiguousEffect =
+      hasOutcomeUnknown || startedTools.some(({ tool }) => tool.effectClass !== "pure");
     let interruptionCode:
       | "provider.incomplete"
       | "provider.protocol_error"
@@ -491,5 +496,6 @@ export async function recoverSession(options: {
     preservedRunIds,
     streamingStepIds: candidates.interruptedStepIds,
     startedToolCalls: candidates.startedToolCalls,
+    outcomeUnknownRunIds: candidates.outcomeUnknownRunIds,
   };
 }

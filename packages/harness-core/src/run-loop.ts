@@ -297,6 +297,13 @@ export class AgentRunLoop {
         }
       }
     } catch (error) {
+      if (error instanceof RunLoopFailure && error.code === "tool.outcome_unknown") {
+        return {
+          state: "interrupted",
+          code: error.code,
+          message: error.message,
+        };
+      }
       if (isAborted(context.signal)) {
         return {
           state: "interrupted",
@@ -1170,6 +1177,13 @@ export class AgentRunLoop {
     for (const initial of initialCalls) {
       let tool = await this.storage.getToolExecution(initial.callId);
       if (tool === null) throw new RunLoopFailure("session.not_found", "Tool ledger row disappeared.", false);
+      if (tool.state === "outcome_unknown") {
+        throw new RunLoopFailure(
+          "tool.outcome_unknown",
+          "A durable tool outcome is unknown, so provider continuation is unsafe.",
+          true,
+        );
+      }
       let validated: ValidatedToolCall | null = null;
       if (tool.effectClass !== null) {
         validated = this.validateCompatibleTool(tool);

@@ -905,6 +905,18 @@ export class SessionRepository {
          FROM tool_executions WHERE state = 'started' ORDER BY call_id`,
       )
       .all() as SessionRecoveryResult["startedToolCalls"];
+    const outcomeUnknownRunIds = (
+      this.database
+        .prepare(
+          `SELECT DISTINCT tool.run_id AS runId
+           FROM tool_executions AS tool
+           JOIN runs AS run ON run.run_id = tool.run_id
+           WHERE tool.state = 'outcome_unknown'
+             AND run.state IN ('running', 'cancelling')
+           ORDER BY tool.run_id`,
+        )
+        .all() as { runId: string }[]
+    ).map(({ runId }) => runId);
 
     // Milestone 2 reports raw recovery candidates. Later milestones own transition policy/events.
     return decodeStoredValue("session recovery state", () =>
@@ -912,6 +924,7 @@ export class SessionRepository {
         interruptedRunIds,
         interruptedStepIds,
         startedToolCalls,
+        outcomeUnknownRunIds,
       }),
     );
   }

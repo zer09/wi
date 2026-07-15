@@ -233,7 +233,12 @@ class FakeActorStorage implements SessionActorStorage {
   }
 
   async recover(): Promise<SessionRecoveryResult> {
-    return { interruptedRunIds: [], interruptedStepIds: [], startedToolCalls: [] };
+    return {
+      interruptedRunIds: [],
+      interruptedStepIds: [],
+      startedToolCalls: [],
+      outcomeUnknownRunIds: [],
+    };
   }
 
   async close(): Promise<void> {
@@ -1978,6 +1983,7 @@ describe("SessionActor", () => {
       interruptedRunIds: [recoveringRunId],
       interruptedStepIds: [],
       startedToolCalls: [],
+      outcomeUnknownRunIds: [],
     });
     const hub = new CommittedEventHub();
     hub.publishCommitted({

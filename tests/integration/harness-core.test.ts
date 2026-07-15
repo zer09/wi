@@ -205,6 +205,13 @@ async function seedRunWithPendingInteractions(
         error: null,
       },
       {
+        kind: "toolCallOccurrence.put",
+        runId,
+        stepId,
+        callId,
+        occurredAtMs: 2_004,
+      },
+      {
         kind: "approval.put",
         approvalId,
         runId,
@@ -466,6 +473,19 @@ describe("harness-core with real storage workers", () => {
           createdAtMs: 2_002,
           data: { eventVersion: 1, runId: "run_recovery", stepId: "step_recovery", stepIndex: 0 },
         },
+        {
+          eventId: "evt_recoveryTextDelta",
+          eventType: "provider.text.delta",
+          createdAtMs: 2_003,
+          data: {
+            eventVersion: 1,
+            runId: "run_recovery",
+            stepId: "step_recovery",
+            messageId: "msg_recoveryPartial",
+            partId: "part_recoveryPartial",
+            text: "visible",
+          },
+        },
       ],
       projections: [
         {
@@ -494,6 +514,24 @@ describe("harness-core with real storage workers", () => {
           errorCategory: null,
           errorMessage: null,
         },
+        {
+          kind: "message.put",
+          messageId: "msg_recoveryPartial",
+          runId: "run_recovery",
+          role: "assistant",
+          state: "streaming",
+          createdAtMs: 2_002,
+          completedAtMs: null,
+        },
+        {
+          kind: "messagePart.put",
+          partId: "part_recoveryPartial",
+          messageId: "msg_recoveryPartial",
+          partIndex: 0,
+          partType: "text",
+          textContent: "visible",
+          data: null,
+        },
       ],
     });
     const originalAppend = session.appendTransaction.bind(session);
@@ -520,10 +558,25 @@ describe("harness-core with real storage workers", () => {
       forceStopRunTask: () => ({ status: "terminated" }),
     });
     expect(actor.snapshot.activeRunId).toBeNull();
-    await expect(session.getRun("run_recovery")).resolves.toMatchObject({ state: "interrupted" });
+    await expect(session.getRun("run_recovery")).resolves.toMatchObject({
+      state: "interrupted",
+      activeProviderStepId: null,
+    });
     await expect(session.getProviderStep("step_recovery")).resolves.toMatchObject({
       state: "interrupted",
     });
+    const [partialMessage] = await session.getRunMessages("run_recovery");
+    expect(partialMessage).toMatchObject({
+      messageId: "msg_recoveryPartial",
+      state: "interrupted",
+      text: "visible",
+    });
+    const recoveryEvents = await session.getEventsAfter(0);
+    const replayedText = recoveryEvents
+      .filter((event) => event.eventType === "provider.text.delta")
+      .map((event) => event.data.text)
+      .join("");
+    expect(partialMessage?.text).toBe(replayedText);
     await expect(session.recover()).resolves.toMatchObject({
       interruptedRunIds: [],
       interruptedStepIds: [],
@@ -632,6 +685,13 @@ describe("harness-core with real storage workers", () => {
           completedAtMs: null,
           result: null,
           error: null,
+        },
+        {
+          kind: "toolCallOccurrence.put",
+          runId: "run_pending",
+          stepId: "step_pending",
+          callId: "call_pending",
+          occurredAtMs: 2_001,
         },
         {
           kind: "approval.put",

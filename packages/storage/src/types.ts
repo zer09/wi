@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  ApprovalIdSchema,
   CanonicalJsonValueSchema,
   CommandIdSchema,
   CommandMethodSchema,
@@ -9,16 +10,21 @@ import {
   MessageIdSchema,
   PartIdSchema,
   ProjectIdSchema,
+  ProviderStepIdSchema,
+  ProviderStepStateSchema,
   RunIdSchema,
   RunStateSchema,
   SessionEventSchema,
   SessionEventTypeSchema,
   SessionIdSchema,
   TimestampMsSchema,
+  ToolCallIdSchema,
+  ToolEffectClassSchema,
+  ToolExecutionStateSchema,
 } from "@wi/protocol";
 
 export const CATALOG_SCHEMA_VERSION = 2;
-export const SESSION_SCHEMA_VERSION = 1;
+export const SESSION_SCHEMA_VERSION = 2;
 export const SESSION_FORMAT_VERSION = 1;
 
 export const HashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -169,13 +175,20 @@ export const MessagePartProjectionSchema = z.strictObject({
   data: z.union([CanonicalJsonValueSchema, z.null()]),
 });
 
+export const RunActiveProviderStepProjectionSchema = z.strictObject({
+  kind: z.literal("run.activeProviderStep"),
+  runId: RunIdSchema,
+  expectedActiveProviderStepId: z.union([ProviderStepIdSchema, z.null()]),
+  activeProviderStepId: z.union([ProviderStepIdSchema, z.null()]),
+});
+
 export const ProviderStepProjectionSchema = z.strictObject({
   kind: z.literal("providerStep.put"),
-  stepId: z.string().min(1),
-  expectedState: z.string().min(1).optional(),
+  stepId: ProviderStepIdSchema,
+  expectedState: ProviderStepStateSchema.optional(),
   runId: RunIdSchema,
   stepIndex: z.number().int().nonnegative().safe(),
-  state: z.string().min(1),
+  state: ProviderStepStateSchema,
   startedAtMs: TimestampMsSchema,
   completedAtMs: NullableTimestampSchema,
   responseId: NullableStringSchema,
@@ -184,10 +197,10 @@ export const ProviderStepProjectionSchema = z.strictObject({
 });
 
 export const ProviderStepRecordSchema = z.strictObject({
-  stepId: z.string().min(1),
+  stepId: ProviderStepIdSchema,
   runId: RunIdSchema,
   stepIndex: z.number().int().nonnegative().safe(),
-  state: z.string().min(1),
+  state: ProviderStepStateSchema,
   startedAtMs: TimestampMsSchema,
   completedAtMs: NullableTimestampSchema,
   responseId: NullableStringSchema,
@@ -198,14 +211,15 @@ export type ProviderStepRecord = z.infer<typeof ProviderStepRecordSchema>;
 
 export const ToolExecutionProjectionSchema = z.strictObject({
   kind: z.literal("toolExecution.put"),
-  callId: z.string().min(1),
+  callId: ToolCallIdSchema,
+  expectedState: ToolExecutionStateSchema.optional(),
   runId: RunIdSchema,
-  stepId: z.string().min(1),
+  stepId: ProviderStepIdSchema,
   toolName: z.string().min(1),
   argumentsJson: z.string(),
   argumentsHash: HashSchema,
-  effectClass: z.enum(["pure", "local_transactional", "idempotent_external", "non_idempotent"]),
-  state: z.string().min(1),
+  effectClass: z.union([ToolEffectClassSchema, z.null()]),
+  state: ToolExecutionStateSchema,
   attemptCount: z.number().int().nonnegative().safe(),
   requestedAtMs: TimestampMsSchema,
   startedAtMs: NullableTimestampSchema,
@@ -214,11 +228,25 @@ export const ToolExecutionProjectionSchema = z.strictObject({
   error: z.union([CanonicalJsonValueSchema, z.null()]),
 });
 
+export const ToolCallOccurrenceProjectionSchema = z.strictObject({
+  kind: z.literal("toolCallOccurrence.put"),
+  runId: RunIdSchema,
+  stepId: ProviderStepIdSchema,
+  callId: ToolCallIdSchema,
+  occurredAtMs: TimestampMsSchema,
+});
+
+export const ToolExecutionRecordSchema = ToolExecutionProjectionSchema.omit({
+  kind: true,
+  expectedState: true,
+});
+export type ToolExecutionRecord = z.infer<typeof ToolExecutionRecordSchema>;
+
 export const ApprovalProjectionSchema = z.strictObject({
   kind: z.literal("approval.put"),
-  approvalId: z.string().min(1),
+  approvalId: ApprovalIdSchema,
   runId: RunIdSchema,
-  callId: z.string().min(1),
+  callId: ToolCallIdSchema,
   state: z.literal("pending"),
   actionDigest: HashSchema,
   requestedAtMs: TimestampMsSchema,
@@ -226,7 +254,7 @@ export const ApprovalProjectionSchema = z.strictObject({
 
 export const ApprovalResolutionProjectionSchema = z.strictObject({
   kind: z.literal("approval.resolve"),
-  approvalId: z.string().min(1),
+  approvalId: ApprovalIdSchema,
   resolution: z.enum(["approved", "denied"]),
   resolvedAtMs: TimestampMsSchema,
   resolvedByClientId: z.string().min(1),
@@ -259,8 +287,10 @@ export const ProjectionMutationSchema = z.discriminatedUnion("kind", [
   RunStateProjectionSchema,
   MessageProjectionSchema,
   MessagePartProjectionSchema,
+  RunActiveProviderStepProjectionSchema,
   ProviderStepProjectionSchema,
   ToolExecutionProjectionSchema,
+  ToolCallOccurrenceProjectionSchema,
   ApprovalProjectionSchema,
   ApprovalResolutionProjectionSchema,
   PendingInputProjectionSchema,
@@ -333,9 +363,9 @@ export const RunRecordSchema = z.strictObject({
 export type RunRecord = z.infer<typeof RunRecordSchema>;
 
 export const PendingApprovalRecordSchema = z.strictObject({
-  approvalId: z.string().min(1),
+  approvalId: ApprovalIdSchema,
   runId: RunIdSchema,
-  callId: z.string().min(1),
+  callId: ToolCallIdSchema,
   state: z.literal("pending"),
   actionDigest: HashSchema,
   requestedAtMs: TimestampMsSchema,
@@ -351,9 +381,20 @@ export const PendingInputRecordSchema = z.strictObject({
 });
 export type PendingInputRecord = z.infer<typeof PendingInputRecordSchema>;
 
+export const RunMessageRecordSchema = z.strictObject({
+  messageId: MessageIdSchema,
+  runId: RunIdSchema,
+  role: z.enum(["user", "assistant", "tool", "system"]),
+  state: z.string().min(1),
+  text: z.string(),
+  createdAtMs: TimestampMsSchema,
+  completedAtMs: NullableTimestampSchema,
+});
+export type RunMessageRecord = z.infer<typeof RunMessageRecordSchema>;
+
 export const StartedToolRecoveryRecordSchema = z.strictObject({
-  callId: z.string().min(1),
-  effectClass: z.enum(["pure", "local_transactional", "idempotent_external", "non_idempotent"]),
+  callId: ToolCallIdSchema,
+  effectClass: ToolEffectClassSchema,
 });
 
 export const SessionRecoveryResultSchema = z.strictObject({

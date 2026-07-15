@@ -148,7 +148,7 @@ describe("catalog and per-session storage workers", () => {
       projectId: "project_storageA",
       title: "Storage test",
       lastEventSequence: 1,
-      schemaVersion: 1,
+      schemaVersion: 2,
       formatVersion: 1,
     });
     await expect(
@@ -601,7 +601,16 @@ describe("catalog and per-session storage workers", () => {
             data: { eventVersion: 1, runId: "run_identityA" },
           },
         ],
-        projections: [{ ...tool, argumentsJson: '{"b":2,"a":1}', state: "started" }],
+        projections: [
+          {
+            ...tool,
+            expectedState: "requested",
+            argumentsJson: '{"b":2,"a":1}',
+            state: "started",
+            attemptCount: 1,
+            startedAtMs: 2_500,
+          },
+        ],
       }),
     ).resolves.toMatchObject({ headSequence: 3 });
   });

@@ -111,24 +111,27 @@ export async function recoverSession(options: {
   }
 
   const startedToolsByRun = new Map<string, StartedToolDecision[]>();
-  if (options.resumeToolLoop === true && options.storage.getToolExecution !== undefined) {
-    for (const candidate of candidates.startedToolCalls) {
-      const tool = await options.storage.getToolExecution(candidate.callId);
-      if (tool === null || tool.state !== "started" || tool.effectClass === null) continue;
-      let compatible = true;
-      try {
-        assertCurrentToolEffectClass(
-          tool,
-          options.currentToolEffectClass?.(tool.toolName) ?? null,
-        );
-      } catch (error) {
-        if (!(error instanceof ToolIdentityError)) throw error;
-        compatible = false;
-      }
-      const tools = startedToolsByRun.get(tool.runId) ?? [];
-      tools.push({ tool, compatible });
-      startedToolsByRun.set(tool.runId, tools);
+  if (candidates.startedToolCalls.length > 0 && options.storage.getToolExecution === undefined) {
+    throw new EventReconciliationIntegrityError(
+      "Started tool recovery requires durable ledger reads",
+    );
+  }
+  for (const candidate of candidates.startedToolCalls) {
+    const tool = await options.storage.getToolExecution?.(candidate.callId);
+    if (tool === null || tool === undefined || tool.state !== "started") continue;
+    let compatible = true;
+    try {
+      assertCurrentToolEffectClass(
+        tool,
+        options.currentToolEffectClass?.(tool.toolName) ?? null,
+      );
+    } catch (error) {
+      if (!(error instanceof ToolIdentityError)) throw error;
+      compatible = false;
     }
+    const tools = startedToolsByRun.get(tool.runId) ?? [];
+    tools.push({ tool, compatible });
+    startedToolsByRun.set(tool.runId, tools);
   }
   for (const tools of startedToolsByRun.values()) {
     tools.sort((left, right) => left.tool.callId.localeCompare(right.tool.callId));
@@ -280,28 +283,27 @@ export async function recoverSession(options: {
     const atMs = options.now();
     const recoveredSteps = await Promise.all(runSteps.map((step) => stepRecovery(step, atMs)));
     const incompatibleTool = startedTools.some(({ compatible }) => !compatible);
-    const ambiguousEffect = startedTools.some(
-      ({ tool, compatible }) => compatible && tool.effectClass !== "pure",
-    );
+    const ambiguousEffect = startedTools.some(({ tool }) => tool.effectClass !== "pure");
     let interruptionCode:
       | "provider.incomplete"
       | "provider.protocol_error"
       | "tool.outcome_unknown" = "provider.incomplete";
     let interruptionMessage = "Active work could not be safely resumed after restart.";
-    if (incompatibleTool) {
+    if (ambiguousEffect) {
+      interruptionCode = "tool.outcome_unknown";
+      interruptionMessage = "A non-idempotent tool outcome could not be proven after restart.";
+    } else if (incompatibleTool) {
       interruptionCode = "provider.protocol_error";
       interruptionMessage =
         "A durable tool call no longer matches its registered effect classification.";
-    } else if (ambiguousEffect) {
-      interruptionCode = "tool.outcome_unknown";
-      interruptionMessage = "A non-idempotent tool outcome could not be proven after restart.";
     }
 
     const toolEvents: AppendTransactionInput["events"] = [];
     const toolProjections: NonNullable<AppendTransactionInput["projections"]> = [];
     const expectedToolStates = new Map<string, ToolExecutionState>();
     for (const { tool, compatible } of startedTools) {
-      const outcomeUnknown = compatible && tool.effectClass !== "pure";
+      // Past effect ambiguity comes from the durable class, even if today's definition changed.
+      const outcomeUnknown = tool.effectClass !== "pure";
       let code:
         | "provider.protocol_error"
         | "provider.incomplete"

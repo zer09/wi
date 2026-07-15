@@ -478,11 +478,25 @@ export class SessionRepository {
       return { status: "limit_exceeded", boundary: "provider_config" };
     }
 
+    const providerConfig = this.database
+      .prepare(`SELECT provider_config_json AS providerConfigJson FROM runs WHERE run_id = ?`)
+      .get(input.runId) as { providerConfigJson: string } | undefined;
+    if (providerConfig === undefined) return { status: "missing" };
+    const requestPrefix =
+      `{"runId":${JSON.stringify(input.runId)},"stepId":${JSON.stringify(input.stepId)},` +
+      `"stepIndex":${input.stepIndex},"providerConfig":${providerConfig.providerConfigJson},` +
+      `"input":`;
+    const requestSuffix = "}";
+    const envelopeBytes = Buffer.byteLength(requestPrefix) + Buffer.byteLength(requestSuffix);
+    if (envelopeBytes + 2 > input.maxRequestBytes) {
+      return { status: "limit_exceeded", boundary: "request_bytes" };
+    }
+    const maxInputBytes = input.maxRequestBytes - envelopeBytes;
+
     const messages = this.database
       .prepare(
         `SELECT m.message_id AS messageId, m.role,
-                SUM(length(CAST(json_quote(COALESCE(p.text_content, '')) AS BLOB)) - 2) + 2
-                  AS textJsonBytes
+                SUM(length(CAST(COALESCE(p.text_content, '') AS BLOB))) AS rawTextBytes
          FROM messages m
          JOIN message_parts p ON p.message_id = m.message_id
          WHERE m.run_id = @runId AND m.role != 'tool'
@@ -494,17 +508,20 @@ export class SessionRepository {
       .all({ runId: input.runId, limit: input.maxInputItems + 1 }) as {
       messageId: string;
       role: "user" | "assistant" | "system";
-      textJsonBytes: number;
+      rawTextBytes: number;
     }[];
     if (messages.length > input.maxInputItems) {
       return { status: "limit_exceeded", boundary: "input_items" };
+    }
+    if (messages.some((message) => message.rawTextBytes > input.maxMessageTextBytes)) {
+      return { status: "limit_exceeded", boundary: "message_text" };
     }
 
     const remainingItems = input.maxInputItems - messages.length;
     const tools = this.database
       .prepare(
         `SELECT call_id AS callId, state,
-                length(CAST(json_quote(tool_name) AS BLOB)) AS toolNameJsonBytes,
+                length(CAST(tool_name AS BLOB)) AS rawToolNameBytes,
                 CASE WHEN result_json IS NULL THEN 4
                      ELSE length(CAST(result_json AS BLOB)) END AS resultJsonBytes,
                 CASE WHEN error_json IS NULL THEN 4
@@ -518,20 +535,23 @@ export class SessionRepository {
       .all({ runId: input.runId, limit: remainingItems + 1 }) as {
       callId: string;
       state: "completed" | "failed" | "denied" | "cancelled" | "outcome_unknown";
-      toolNameJsonBytes: number;
+      rawToolNameBytes: number;
       resultJsonBytes: number;
       errorJsonBytes: number;
     }[];
     if (tools.length > remainingItems) {
       return { status: "limit_exceeded", boundary: "input_items" };
     }
+    if (tools.some((tool) => tool.rawToolNameBytes > input.maxToolNameBytes)) {
+      return { status: "limit_exceeded", boundary: "tool_name" };
+    }
 
-    let inputBytes = 2 + Math.max(0, messages.length + tools.length - 1);
+    let minimumInputBytes = 2 + Math.max(0, messages.length + tools.length - 1);
     for (const message of messages) {
       const emptyItem = JSON.stringify({ type: "message", role: message.role, text: "" });
-      inputBytes += Buffer.byteLength(emptyItem) - 2 + message.textJsonBytes;
-      if (inputBytes > input.maxInputBytes) {
-        return { status: "limit_exceeded", boundary: "input_bytes" };
+      minimumInputBytes += Buffer.byteLength(emptyItem) + message.rawTextBytes;
+      if (minimumInputBytes > maxInputBytes) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
       }
     }
     for (const tool of tools) {
@@ -544,20 +564,28 @@ export class SessionRepository {
         result: null,
         error: null,
       });
-      inputBytes +=
+      minimumInputBytes +=
         Buffer.byteLength(emptyItem) -
-        2 -
         4 -
         4 +
-        tool.toolNameJsonBytes +
+        tool.rawToolNameBytes +
         tool.resultJsonBytes +
         tool.errorJsonBytes;
-      if (inputBytes > input.maxInputBytes) {
-        return { status: "limit_exceeded", boundary: "input_bytes" };
+      if (minimumInputBytes > maxInputBytes) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
       }
     }
 
     const inputItems: string[] = [];
+    let inputBytes = 2;
+    const appendItem = (item: string): boolean => {
+      const separatorBytes = inputItems.length === 0 ? 0 : 1;
+      const nextBytes = inputBytes + separatorBytes + Buffer.byteLength(item);
+      if (nextBytes > maxInputBytes) return false;
+      inputItems.push(item);
+      inputBytes = nextBytes;
+      return true;
+    };
     const messageText = this.database.prepare(
       `SELECT group_concat(text_content, '') AS text
        FROM (
@@ -567,9 +595,10 @@ export class SessionRepository {
     );
     for (const message of messages) {
       const row = messageText.get(message.messageId) as { text: string | null };
-      inputItems.push(
-        JSON.stringify({ type: "message", role: message.role, text: row.text ?? "" }),
-      );
+      const item = JSON.stringify({ type: "message", role: message.role, text: row.text ?? "" });
+      if (!appendItem(item)) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
     }
 
     const toolData = this.database.prepare(
@@ -584,25 +613,21 @@ export class SessionRepository {
         errorJson: string | null;
       };
       const outcome = row.state === "outcome_unknown" ? "failed" : row.state;
-      inputItems.push(
+      const item =
         `{"type":"tool_result","callId":${JSON.stringify(tool.callId)},` +
-          `"toolName":${JSON.stringify(row.toolName)},"outcome":${JSON.stringify(outcome)},` +
-          `"result":${row.resultJson ?? "null"},"error":${row.errorJson ?? "null"}}`,
-      );
+        `"toolName":${JSON.stringify(row.toolName)},"outcome":${JSON.stringify(outcome)},` +
+        `"result":${row.resultJson ?? "null"},"error":${row.errorJson ?? "null"}}`;
+      if (!appendItem(item)) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
     }
+
     const inputJson = `[${inputItems.join(",")}]`;
-    if (Buffer.byteLength(inputJson) > input.maxInputBytes) {
-      return { status: "limit_exceeded", boundary: "input_bytes" };
+    const requestJson = `${requestPrefix}${inputJson}${requestSuffix}`;
+    if (Buffer.byteLength(requestJson) > input.maxRequestBytes) {
+      return { status: "limit_exceeded", boundary: "request_bytes" };
     }
-    const providerConfig = this.database
-      .prepare(`SELECT provider_config_json AS providerConfigJson FROM runs WHERE run_id = ?`)
-      .get(input.runId) as { providerConfigJson: string } | undefined;
-    if (providerConfig === undefined) return { status: "missing" };
-    return {
-      status: "ready",
-      providerConfigJson: providerConfig.providerConfigJson,
-      inputJson,
-    };
+    return { status: "ready", requestJson };
   }
 
   getProviderStep(stepId: string): ProviderStepRecord | null {

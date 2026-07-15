@@ -457,6 +457,31 @@ async function recoverStartedSet(
   return { actor, provider, executions, registry, storage };
 }
 
+async function createRecoveryOnlyActor(
+  session: SessionClient,
+  registry: ToolRegistry,
+  suffix: string,
+): Promise<{ readonly actor: SessionActor; readonly runTaskCalls: () => number }> {
+  const ids = generatedIds(suffix);
+  let taskCalls = 0;
+  const actor = await SessionActor.create({
+    storage: session,
+    eventHub: new CommittedEventHub(),
+    scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+    ids: ids.actor,
+    now: () => 5_000,
+    runTask: async () => {
+      taskCalls += 1;
+    },
+    currentToolEffectClass: (name) => registry.get(name)?.effectClass ?? null,
+    cancelRunTask: async () => undefined,
+    forceStopRunTask: () => ({ status: "terminated" }),
+    resumeRestoredRuns: false,
+  });
+  actors.push(actor);
+  return { actor, runTaskCalls: () => taskCalls };
+}
+
 afterEach(async () => {
   await Promise.allSettled(actors.splice(0).map((actor) => actor.shutdown()));
   await Promise.allSettled(managers.splice(0).map((manager) => manager.close()));
@@ -606,6 +631,51 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     );
     expect(unknown?.sequence).toBeDefined();
     expect(interrupted?.sequence).toBe((unknown?.sequence ?? 0) + 1);
+  });
+
+  it("reconciles unsafe started calls across two restarts when resumption is disabled", async () => {
+    const { manager, session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "started", "non_idempotent");
+    const registry = echoRegistry("non_idempotent");
+
+    const first = await createRecoveryOnlyActor(session, registry, "disabledResumeFirst");
+    expect(first.runTaskCalls()).toBe(0);
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+    });
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "outcome_unknown",
+      effectClass: "non_idempotent",
+      attemptCount: 1,
+    });
+    const head = await session.getHeadSequence();
+    await first.actor.handoff();
+    const firstIndex = actors.indexOf(first.actor);
+    if (firstIndex >= 0) actors.splice(firstIndex, 1);
+
+    const reopened = await manager.openSession(session.sessionId);
+    const second = await createRecoveryOnlyActor(reopened, registry, "disabledResumeSecond");
+    expect(second.runTaskCalls()).toBe(0);
+    await expect(reopened.getHeadSequence()).resolves.toBe(head);
+    await expect(reopened.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "outcome_unknown",
+      effectClass: "non_idempotent",
+      attemptCount: 1,
+    });
+    const events = await reopened.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.outcome_unknown" &&
+          event.data.callId === seeded.callId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      events.filter(
+        (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("terminalizes multiple unsafe started calls in one recovery transaction", async () => {
@@ -767,7 +837,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     });
   });
 
-  it("rejects the inverse started effect-class mismatch without retry", async () => {
+  it("preserves outcome ambiguity across an inverse started effect-class mismatch", async () => {
     const { session } = await storageFixture();
     const seeded = await seedRecoverableTool(session, "started", "non_idempotent");
     const resumed = await resumeSeeded(session, seeded, {
@@ -777,9 +847,31 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
 
     expect(resumed.executions).toEqual([]);
     await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
-      state: "failed",
+      state: "outcome_unknown",
       attemptCount: 1,
       effectClass: "non_idempotent",
+      error: { code: "tool.outcome_unknown" },
+    });
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+    });
+  });
+
+  it("preserves outcome ambiguity when a started non-idempotent definition is missing", async () => {
+    const { session } = await storageFixture();
+    const seeded = await seedRecoverableTool(session, "started", "non_idempotent");
+    const resumed = await resumeSeeded(session, seeded, {
+      registry: new ToolRegistry(),
+      expectedRunState: "interrupted",
+    });
+
+    expect(resumed.executions).toEqual([]);
+    await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
+      state: "outcome_unknown",
+      attemptCount: 1,
+      effectClass: "non_idempotent",
+      error: { code: "tool.outcome_unknown" },
     });
   });
 

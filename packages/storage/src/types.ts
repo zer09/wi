@@ -357,10 +357,14 @@ export type AppendTransactionInspection = z.infer<typeof AppendTransactionInspec
 const ProviderRequestAcquisitionLimitSchema = z.number().int().positive().max(1024 * 1024);
 export const BoundedProviderRequestDataInputSchema = z.strictObject({
   runId: RunIdSchema,
+  stepId: ProviderStepIdSchema,
+  stepIndex: z.number().int().nonnegative().safe(),
   expectedProviderId: z.string().min(1).max(256),
   maxProviderConfigBytes: ProviderRequestAcquisitionLimitSchema,
+  maxMessageTextBytes: ProviderRequestAcquisitionLimitSchema,
+  maxToolNameBytes: ProviderRequestAcquisitionLimitSchema,
   maxInputItems: z.number().int().positive().max(1024),
-  maxInputBytes: ProviderRequestAcquisitionLimitSchema,
+  maxRequestBytes: ProviderRequestAcquisitionLimitSchema,
 });
 export type BoundedProviderRequestDataInput = z.infer<
   typeof BoundedProviderRequestDataInputSchema
@@ -374,12 +378,17 @@ export const BoundedProviderRequestDataSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("provider_mismatch") }),
   z.strictObject({
     status: z.literal("limit_exceeded"),
-    boundary: z.enum(["provider_config", "input_items", "input_bytes"]),
+    boundary: z.enum([
+      "provider_config",
+      "message_text",
+      "tool_name",
+      "input_items",
+      "request_bytes",
+    ]),
   }),
   z.strictObject({
     status: z.literal("ready"),
-    providerConfigJson: z.string().max(1024 * 1024),
-    inputJson: z.string().max(1024 * 1024),
+    requestJson: z.string().max(1024 * 1024),
   }),
 ]);
 export type BoundedProviderRequestData = z.infer<typeof BoundedProviderRequestDataSchema>;

@@ -72,7 +72,7 @@ May retry only when the target system accepts and guarantees an idempotency key 
 
 ### Non-idempotent/unknown
 
-If execution began and result cannot be proven, mark `outcome_unknown` and never retry automatically.
+If execution began and result cannot be proven, mark `outcome_unknown` and never retry automatically. Recovery derives that ambiguity from the persisted effect class even when automatic resumption is disabled or the current tool definition changed or disappeared.
 
 ## Approval integration
 

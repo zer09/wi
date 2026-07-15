@@ -82,6 +82,10 @@ async function runBoundaryFixture(options: {
   readonly values: (request: ProviderRequest, context: ProviderContext) => readonly unknown[];
   readonly messageText?: string;
   readonly providerConfig?: CanonicalJsonValue;
+  readonly expectedRun?: {
+    readonly state: "completed" | "failed" | "interrupted";
+    readonly failureCategory: string | null;
+  };
 }): Promise<{
   readonly runId: string | null;
   readonly submissionError: unknown | null;
@@ -177,8 +181,10 @@ async function runBoundaryFixture(options: {
   }
   await terminal;
   await expect(session.getRun(submitted.runId)).resolves.toMatchObject({
-    state: "failed",
-    failureCategory: "provider.protocol_error",
+    ...(options.expectedRun ?? {
+      state: "failed",
+      failureCategory: "provider.protocol_error",
+    }),
     activeProviderStepId: null,
   });
   return {
@@ -188,6 +194,84 @@ async function runBoundaryFixture(options: {
     provider,
     events: await session.getEventsAfter(0),
   };
+}
+
+async function seedProviderHistory(
+  messageTexts: readonly string[],
+  providerConfig: CanonicalJsonValue = {},
+): Promise<{ readonly runId: string; readonly session: SessionClient }> {
+  const number = ++fixtureNumber;
+  const homeDirectory = await mkdtemp(join(tmpdir(), "wi-m4-provider-byte-history-"));
+  homes.push(homeDirectory);
+  const manager = new SessionStoreManager({
+    homeDirectory,
+    now: () => 1_000,
+    ids: {
+      sessionId: () => `ses_providerByteHistory${number}`,
+      eventId: () => `evt_providerByteHistorySession${number}`,
+    },
+    sessionWorkers: { size: 1 },
+  });
+  managers.push(manager);
+  const created = await manager.createSession({
+    v: 1,
+    kind: "command",
+    commandId: `cmd_providerByteHistoryCreate${number}`,
+    method: "session.create",
+    params: {},
+  });
+  const session = await manager.openSession(created.session.sessionId);
+  const runId = `run_providerByteHistory${number}`;
+  await session.appendTransaction({
+    events: [
+      {
+        eventId: `evt_providerByteHistoryRun${number}`,
+        eventType: "run.created",
+        createdAtMs: 2_000,
+        data: { eventVersion: 1, runId },
+      },
+    ],
+    projections: [
+      {
+        kind: "run.put",
+        runId,
+        state: "queued",
+        providerId: "untrusted-test",
+        providerConfig,
+        createdAtMs: 2_000,
+        startedAtMs: null,
+        completedAtMs: null,
+        cancelledAtMs: null,
+        failureCategory: null,
+        failureMessage: null,
+        activeProviderStepId: null,
+      },
+      ...messageTexts.flatMap((textContent, index) => {
+        const messageId = `msg_providerByteHistory${number}_${index}`;
+        return [
+          {
+            kind: "message.put" as const,
+            messageId,
+            runId,
+            role: "user" as const,
+            state: "completed" as const,
+            createdAtMs: 2_001 + index,
+            completedAtMs: 2_001 + index,
+          },
+          {
+            kind: "messagePart.put" as const,
+            partId: `part_providerByteHistory${number}_${index}`,
+            messageId,
+            partIndex: 0,
+            partType: "text" as const,
+            textContent,
+            data: null,
+          },
+        ];
+      }),
+    ],
+  });
+  return { runId, session };
 }
 
 afterEach(async () => {
@@ -407,6 +491,130 @@ describe("Milestone 4 provider runtime boundary", () => {
     ).toHaveLength(1);
   });
 
+  it("accepts cumulative assistant text at the per-step byte limit", async () => {
+    const chunk = "x".repeat(PROVIDER_LIMITS.responseTextMaxBytes / 16);
+    const value = await runBoundaryFixture({
+      expectedRun: { state: "completed", failureCategory: null },
+      values: (request) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_cumulativeExact",
+        },
+        ...Array.from({ length: 16 }, () => ({
+          type: "text.delta",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          delta: chunk,
+        })),
+        {
+          type: "response.completed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_cumulativeExact",
+        },
+      ],
+    });
+
+    const committedText = value.events
+      .flatMap((event) => event.eventType === "provider.text.delta" ? [event.data.text] : [])
+      .join("");
+    expect(Buffer.byteLength(committedText)).toBe(PROVIDER_LIMITS.responseTextMaxBytes);
+  });
+
+  it("rejects many valid deltas before cumulative assistant text exceeds its limit", async () => {
+    const chunk = "x".repeat(PROVIDER_LIMITS.responseTextMaxBytes / 16);
+    const value = await runBoundaryFixture({
+      values: (request) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: "response_cumulativeOver",
+        },
+        ...Array.from({ length: 16 }, () => ({
+          type: "text.delta",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          delta: chunk,
+        })),
+        {
+          type: "text.delta",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          delta: "x",
+        },
+      ],
+    });
+
+    const committedText = value.events
+      .flatMap((event) => event.eventType === "provider.text.delta" ? [event.data.text] : [])
+      .join("");
+    expect(Buffer.byteLength(committedText)).toBe(PROVIDER_LIMITS.responseTextMaxBytes);
+    expect(value.executions).toEqual([]);
+  });
+
+  it.each([
+    {
+      count: PROVIDER_LIMITS.toolCallMaxCountPerStep,
+      expectedRun: {
+        state: "interrupted" as const,
+        failureCategory: "provider.transport_after_output",
+      },
+    },
+    {
+      count: PROVIDER_LIMITS.toolCallMaxCountPerStep + 1,
+      expectedRun: { state: "failed" as const, failureCategory: "provider.protocol_error" },
+    },
+  ])(
+    "bounds one provider step at $count completed tool calls",
+    async ({ count, expectedRun }) => {
+      const value = await runBoundaryFixture({
+      expectedRun,
+      values: (request) => [
+        {
+          type: "response.started",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          responseId: `response_toolCount${count}`,
+        },
+        ...Array.from({ length: count }, (_, index) => ({
+          type: "tool_call.completed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          callId: `call_toolCount_${index}`,
+          name: "echo",
+          argumentsJson: "{}",
+        })),
+        {
+          type: "response.failed",
+          runId: request.runId,
+          stepId: request.stepId,
+          stepIndex: request.stepIndex,
+          category: "terminal",
+          message: "stop after count probe",
+          retryable: false,
+        },
+      ],
+    });
+
+      expect(
+        value.events.filter((event) => event.eventType === "provider.tool_call.staged"),
+      ).toHaveLength(PROVIDER_LIMITS.toolCallMaxCountPerStep);
+      expect(value.executions).toEqual([]);
+    },
+    30_000,
+  );
+
   it("rejects oversized request history before invoking the provider", async () => {
     const value = await runBoundaryFixture({
       values: () => [],
@@ -561,6 +769,57 @@ describe("Milestone 4 provider runtime boundary", () => {
       failureCategory: "provider.protocol_error",
       activeProviderStepId: null,
     });
+  });
+
+  it("bounds the complete worker-built request at its exact byte size", async () => {
+    const { runId, session } = await seedProviderHistory(
+      Array.from({ length: 8 }, (_, index) => `row-${index}:"\\\n`.repeat(16)),
+      { endpoint: "x".repeat(1_024) },
+    );
+    const acquisition = {
+      runId,
+      stepId: "step_providerByteHistory",
+      stepIndex: 0,
+      expectedProviderId: "untrusted-test",
+      maxProviderConfigBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+      maxMessageTextBytes: PROVIDER_LIMITS.messageTextMaxBytes,
+      maxToolNameBytes: PROVIDER_LIMITS.toolNameMaxBytes,
+      maxInputItems: PROVIDER_LIMITS.inputItemMaxCount,
+      maxRequestBytes: 1024 * 1024,
+    };
+    const initial = await session.getBoundedProviderRequestData(acquisition);
+    if (initial.status !== "ready") throw new Error("Expected bounded provider request data");
+    const exactBytes = Buffer.byteLength(initial.requestJson);
+
+    await expect(
+      session.getBoundedProviderRequestData({ ...acquisition, maxRequestBytes: exactBytes }),
+    ).resolves.toEqual(initial);
+    await expect(
+      session.getBoundedProviderRequestData({ ...acquisition, maxRequestBytes: exactBytes - 1 }),
+    ).resolves.toEqual({ status: "limit_exceeded", boundary: "request_bytes" });
+    const request = JSON.parse(initial.requestJson) as ProviderRequest;
+    expect(request.providerConfig).toEqual({ endpoint: "x".repeat(1_024) });
+    expect(request.input).toHaveLength(8);
+  });
+
+  it("rejects one oversized durable message before JSON escaping", async () => {
+    const { runId, session } = await seedProviderHistory([
+      "x".repeat(PROVIDER_LIMITS.messageTextMaxBytes + 1),
+    ]);
+
+    await expect(
+      session.getBoundedProviderRequestData({
+        runId,
+        stepId: "step_providerRawTextPreflight",
+        stepIndex: 0,
+        expectedProviderId: "untrusted-test",
+        maxProviderConfigBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+        maxMessageTextBytes: PROVIDER_LIMITS.messageTextMaxBytes,
+        maxToolNameBytes: PROVIDER_LIMITS.toolNameMaxBytes,
+        maxInputItems: PROVIDER_LIMITS.inputItemMaxCount,
+        maxRequestBytes: PROVIDER_LIMITS.requestMaxBytes,
+      }),
+    ).resolves.toEqual({ status: "limit_exceeded", boundary: "message_text" });
   });
 
   it("rejects oversized provider configuration before invoking the provider", async () => {

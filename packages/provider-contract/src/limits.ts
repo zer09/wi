@@ -13,6 +13,7 @@ export const PROVIDER_LIMITS = {
   requestMaxDepth: 34,
   requestMaxNodes: 16_384,
   messageTextMaxBytes: 16 * 1024,
+  responseTextMaxBytes: 16 * 1024,
   textDeltaMaxBytes: 16 * 1024,
   toolNameMaxBytes: 256,
   toolArgumentsMaxBytes: 48 * 1024,

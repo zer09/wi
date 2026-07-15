@@ -37,6 +37,10 @@ Retry from the beginning is allowed only when:
 
 After semantic output begins, Wi may continue only through a verified provider continuation mechanism that proves exact compatibility. Otherwise the run ends interrupted/failed and a later user action starts new work.
 
+## Bounded streaming text
+
+One provider step may commit at most 16 KiB of assistant text, measured in UTF-8 bytes. Wi rejects the delta that would cross that cumulative limit before coalescing, concatenating, or persisting it. Text already committed within the limit remains visible and is marked interrupted when the step fails.
+
 ## Terminal event validation
 
 A provider adapter must validate:
@@ -48,6 +52,11 @@ A provider adapter must validate:
 - final tool-call identity and arguments
 
 After one terminal marker is accepted, Wi accepts only an identical duplicate of that same terminal marker. Any other post-terminal event—including text, tool calls, response starts, or a different terminal marker—is a provider protocol error.
+
+## Amendment history
+
+- 2026-07-15: clarified the identical-terminal-duplicate rule and rejection of every other post-terminal event.
+- 2026-07-15: bounded cumulative assistant text per provider step at 16 KiB before concatenation or persistence.
 
 ## Consequences
 
@@ -84,4 +93,5 @@ Rejected because it can duplicate tool calls and visible content.
 - fake provider emits complete-looking tool arguments without terminal completion
 - fake provider closes without a terminal event
 - tests prove tool execution count remains zero in all nonterminal cases
+- exact-limit and one-byte-over tests enforce bounded cumulative assistant text
 - property tests prove no tool state reaches `started` before provider completion

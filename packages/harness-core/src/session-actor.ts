@@ -941,12 +941,7 @@ export class SessionActor {
       const createdAtMs = this.now();
       const wasQueued = this.activeRun !== null || this.queuedRuns.length > 0;
       const payloadHash = await hashCommandContent(command);
-      let existingCommand: AcceptedCommandResult | null = null;
-      try {
-        existingCommand = await this.storage.getAcceptedCommand(command.commandId);
-      } catch {
-        // Command acceptance remains authoritative and performs its own ambiguous-write recovery.
-      }
+      const existingCommand = await this.storage.getAcceptedCommand(command.commandId);
       let providerSnapshot: RunProviderSnapshot = { providerId: "duplicate", providerConfig: {} };
       if (existingCommand === null) {
         const createdProviderSnapshot = this.createRunProviderSnapshot(command);

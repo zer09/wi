@@ -3,6 +3,7 @@ import {
   ProviderAdapterError,
   decodeProviderEvent,
   decodeProviderRequest,
+  utf8ByteLength,
   type ProviderAdapter,
   type ProviderEvent,
   type ProviderRequest,
@@ -325,10 +326,14 @@ export class AgentRunLoop {
   ): Promise<ProviderRequest> {
     const snapshot = await this.storage.getBoundedProviderRequestData({
       runId,
+      stepId,
+      stepIndex,
       expectedProviderId: this.provider.id,
       maxProviderConfigBytes: PROVIDER_LIMITS.providerConfigMaxBytes,
+      maxMessageTextBytes: PROVIDER_LIMITS.messageTextMaxBytes,
+      maxToolNameBytes: PROVIDER_LIMITS.toolNameMaxBytes,
       maxInputItems: PROVIDER_LIMITS.inputItemMaxCount,
-      maxInputBytes: PROVIDER_LIMITS.requestMaxBytes,
+      maxRequestBytes: PROVIDER_LIMITS.requestMaxBytes,
     });
     if (snapshot.status === "missing") {
       throw new RunLoopFailure("session.not_found", "Run was not found.", false);
@@ -347,13 +352,7 @@ export class AgentRunLoop {
         false,
       );
     }
-    return decodeProviderRequest({
-      runId,
-      stepId,
-      stepIndex,
-      providerConfig: JSON.parse(snapshot.providerConfigJson) as unknown,
-      input: JSON.parse(snapshot.inputJson) as unknown,
-    });
+    return decodeProviderRequest(JSON.parse(snapshot.requestJson) as unknown);
   }
 
   private assertEventIdentity(event: ProviderEvent, request: ProviderRequest): void {
@@ -439,6 +438,7 @@ export class AgentRunLoop {
     const messageId = this.ids.messageId();
     const partId = this.ids.partId();
     let fullText = "";
+    let acceptedTextBytes = 0;
     let visibleText = false;
     let semanticOutput = false;
     let responseId: string | null = null;
@@ -547,7 +547,7 @@ export class AgentRunLoop {
               }
               responseId = event.responseId;
               break;
-            case "text.delta":
+            case "text.delta": {
               if (responseId === null) {
                 throw new RunLoopFailure(
                   "provider.protocol_error",
@@ -556,8 +556,18 @@ export class AgentRunLoop {
                 );
               }
               semanticOutput = true;
+              const deltaBytes = utf8ByteLength(event.delta);
+              if (acceptedTextBytes > PROVIDER_LIMITS.responseTextMaxBytes - deltaBytes) {
+                throw new RunLoopFailure(
+                  "provider.protocol_error",
+                  "Provider response text exceeded its cumulative limit.",
+                  false,
+                );
+              }
+              acceptedTextBytes += deltaBytes;
               await coalescer.push(event.delta);
               break;
+            }
             case "tool_call.completed":
               if (responseId === null) {
                 throw new RunLoopFailure(

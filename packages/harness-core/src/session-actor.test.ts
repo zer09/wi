@@ -19,6 +19,7 @@ import { SessionActorRegistry } from "./session-registry.js";
 import {
   SessionActor,
   type ForceStopRunTask,
+  type CreateRunProviderSnapshot,
   type RunTask,
   type RunTaskContext,
   type RunTaskResult,
@@ -282,7 +283,10 @@ const actorMonitors = new WeakMap<SessionActor, ActivityMonitor>();
 
 async function actorFixture(
   name = "actor",
-  options: { readonly onFault?: (error: unknown) => void } = {},
+  options: {
+    readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
+    readonly onFault?: (error: unknown) => void;
+  } = {},
 ) {
   const storage = new FakeActorStorage(`ses_${name}`);
   const tasks = new ControlledTasks();
@@ -299,6 +303,9 @@ async function actorFixture(
     cancelRunTask: tasks.cancel,
     forceStopRunTask: () => ({ status: "terminated" }),
     onActivity: () => monitor.signal(),
+    ...(options.createRunProviderSnapshot === undefined
+      ? {}
+      : { createRunProviderSnapshot: options.createRunProviderSnapshot }),
     ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
   });
   actorMonitors.set(actor, monitor);
@@ -390,18 +397,76 @@ describe("SessionActor", () => {
     expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
   });
 
+  it("returns a durable duplicate without validating changed provider configuration", async () => {
+    let providerConfig: RunRecord["providerConfig"] = {};
+    const { actor, storage, tasks } = await actorFixture("duplicateChangedProvider", {
+      createRunProviderSnapshot: () => ({ providerId: "fake", providerConfig }),
+    });
+    const command = message(actor.sessionId, "cmd_duplicateChangedProvider");
+    const first = await actor.submitMessage(command);
+    providerConfig = { value: "x".repeat(64 * 1024) };
+
+    const duplicate = await actor.submitMessage(command);
+
+    expect(duplicate).toMatchObject({
+      runId: first.runId,
+      acceptance: { duplicate: true, runId: first.runId },
+    });
+    expect(storage.runs.size).toBe(1);
+    expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
+    (await waitForTask(tasks, first.runId)).resolve({ state: "completed" });
+    await waitForState(actor, null);
+  });
+
+  it("retries a duplicate after its preliminary durable lookup transiently fails", async () => {
+    let providerConfig: RunRecord["providerConfig"] = {};
+    const { actor, storage, tasks } = await actorFixture("duplicateLookupFailure", {
+      createRunProviderSnapshot: () => ({ providerId: "fake", providerConfig }),
+    });
+    const command = message(actor.sessionId, "cmd_duplicateLookupFailure");
+    const first = await actor.submitMessage(command);
+    providerConfig = { value: "x".repeat(64 * 1024) };
+    const transientRead = Object.assign(new Error("accepted command lookup unavailable"), {
+      code: "storage.worker_failed",
+    });
+    const originalGetAccepted = storage.getAcceptedCommand.bind(storage);
+    let failNextLookup = true;
+    vi.spyOn(storage, "getAcceptedCommand").mockImplementation(async (commandId) => {
+      if (commandId === command.commandId && failNextLookup) {
+        failNextLookup = false;
+        throw transientRead;
+      }
+      return originalGetAccepted(commandId);
+    });
+
+    await expect(actor.submitMessage(command)).rejects.toBe(transientRead);
+    expect(actor.snapshot.faulted).toBe(false);
+    await expect(actor.submitMessage(command)).resolves.toMatchObject({
+      runId: first.runId,
+      acceptance: { duplicate: true, runId: first.runId },
+    });
+    expect(storage.runs.size).toBe(1);
+    expect(storage.events.filter((event) => event.eventType === "run.created")).toHaveLength(1);
+    (await waitForTask(tasks, first.runId)).resolve({ state: "completed" });
+    await waitForState(actor, null);
+  });
+
   it("faults before later mutations when ambiguous command reconciliation fails", async () => {
     const { actor, storage } = await actorFixture("unresolvedAmbiguousSubmit");
     const originalAccept = storage.acceptCommand.bind(storage);
+    let reconciliationUnavailable = false;
     vi.spyOn(storage, "acceptCommand").mockImplementation(async (input) => {
       await originalAccept(input);
+      reconciliationUnavailable = true;
       throw Object.assign(new Error("ambiguous command result"), {
         code: "storage.ambiguous_outcome",
       });
     });
-    vi.spyOn(storage, "getAcceptedCommand").mockRejectedValue(
-      new Error("replacement storage unavailable"),
-    );
+    const originalGetAccepted = storage.getAcceptedCommand.bind(storage);
+    vi.spyOn(storage, "getAcceptedCommand").mockImplementation(async (commandId) => {
+      if (reconciliationUnavailable) throw new Error("replacement storage unavailable");
+      return originalGetAccepted(commandId);
+    });
 
     await expect(
       actor.submitMessage(message(actor.sessionId, "cmd_unresolvedAmbiguousSubmit")),

@@ -31,6 +31,7 @@ import {
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
 const actors: SessionActor[] = [];
+const unhandledRejectionListeners = new Set<(reason: unknown) => void>();
 let fixtureNumber = 0;
 
 function sequence(prefix: string): () => string {
@@ -220,38 +221,58 @@ async function assertTerminalRestartNoop(
   registry: ToolRegistry = createBuiltinToolRegistry(),
 ): Promise<void> {
   const head = await value.session.getHeadSequence();
-  await value.actor.handoff();
-  actors.splice(actors.indexOf(value.actor), 1);
-  const session = await value.manager.openSession(value.session.sessionId);
-  const provider = new FakeProviderAdapter();
-  const executions: string[] = [];
-  const generated = ids(`restartNoop${fixtureNumber}`);
-  const loop = new AgentRunLoop({
-    storage: session,
-    provider,
-    registry,
-    executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
-    ids: generated.loop,
-  });
-  const replacement = await SessionActor.create({
-    storage: session,
-    eventHub: new CommittedEventHub(),
-    scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
-    ids: generated.actor,
-    now: () => 9_000,
-    runTask: loop.task,
-    currentToolEffectClass: loop.currentToolEffectClass,
-    cancelRunTask: loop.cancel,
-    forceStopRunTask: () => ({ status: "terminated" }),
-    runTaskOwnsSchedulerPermits: true,
-    resumeRestoredRuns: true,
-  });
-  actors.push(replacement);
-  await replacement.flush();
-  expect(replacement.snapshot.activeRunId).toBeNull();
-  await expect(session.getHeadSequence()).resolves.toBe(head);
-  expect(provider.requests).toEqual([]);
-  expect(executions).toEqual([]);
+  let current = value.actor;
+  for (let restart = 1; restart <= 2; restart += 1) {
+    await current.handoff();
+    const actorIndex = actors.indexOf(current);
+    if (actorIndex >= 0) actors.splice(actorIndex, 1);
+    const session = await value.manager.openSession(value.session.sessionId);
+    const provider = new FakeProviderAdapter();
+    const executions: string[] = [];
+    const generated = ids(`restartNoop${fixtureNumber}_${restart}`);
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry,
+      executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+      ids: generated.loop,
+    });
+    const replacement = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: generated.actor,
+      now: () => 9_000 + restart,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(replacement);
+    await replacement.flush();
+    expect(replacement.snapshot.activeRunId).toBeNull();
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    expect(provider.requests).toEqual([]);
+    expect(executions).toEqual([]);
+    current = replacement;
+  }
+}
+
+function trackUnhandledRejections(): () => Promise<void> {
+  const reasons: unknown[] = [];
+  const listener = (reason: unknown): void => {
+    reasons.push(reason);
+  };
+  unhandledRejectionListeners.add(listener);
+  process.on("unhandledRejection", listener);
+  return async () => {
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
+    process.off("unhandledRejection", listener);
+    unhandledRejectionListeners.delete(listener);
+    expect(reasons).toEqual([]);
+  };
 }
 
 async function waitForTerminal(value: Fixture): Promise<NonNullable<Awaited<ReturnType<SessionClient["getRun"]>>>> {
@@ -293,6 +314,10 @@ class ControlledDelay implements DelayWaiter {
 
 afterEach(async () => {
   await Promise.allSettled(actors.splice(0).map((actor) => actor.shutdown()));
+  for (const listener of unhandledRejectionListeners) {
+    process.off("unhandledRejection", listener);
+  }
+  unhandledRejectionListeners.clear();
   await Promise.allSettled(managers.splice(0).map((storage) => storage.close()));
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
@@ -529,6 +554,80 @@ describe("Milestone 4 agent loop with real session databases", () => {
           event.data.callId === "call_echoRoundTrip",
       ),
     ).toHaveLength(1);
+  });
+
+  it("quarantines a current tool-start event whose projection was not applied", async () => {
+    let injected = false;
+    let signalFault: (error: unknown) => void = () => undefined;
+    const faulted = new Promise<unknown>((resolve) => {
+      signalFault = resolve;
+    });
+    const value = await fixture(
+      { scenario: "echo-tool-round-trip" },
+      {
+        onFault: signalFault,
+        storageDecorator: (session) =>
+          new Proxy(session, {
+            get(target, property) {
+              if (property === "appendTransaction") {
+                return async (input: Parameters<SessionClient["appendTransaction"]>[0]) => {
+                  if (
+                    !injected &&
+                    input.events.some((event) => event.eventType === "tool.execution.started")
+                  ) {
+                    injected = true;
+                    await target.appendTransaction({ events: input.events });
+                    throw Object.assign(new Error("tool start projection response lost"), {
+                      code: "storage.ambiguous_outcome",
+                    });
+                  }
+                  return target.appendTransaction(input);
+                };
+              }
+              const member = Reflect.get(target, property) as unknown;
+              return typeof member === "function" ? member.bind(target) : member;
+            },
+          }) as SessionClient,
+      },
+    );
+
+    await expect(faulted).resolves.toMatchObject({
+      code: "storage.corrupt",
+      name: "EventReconciliationIntegrityError",
+    });
+    expect(injected).toBe(true);
+    expect(value.executions).toEqual([]);
+    expect(value.actor.snapshot.faulted).toBe(true);
+    await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
+      state: "requested",
+      attemptCount: 0,
+      effectClass: "pure",
+    });
+    const events = await value.session.getEventsAfter(0);
+    const durableStart = events.filter(
+      (event) =>
+        event.eventType === "tool.execution.started" &&
+        event.data.callId === "call_echoRoundTrip",
+    );
+    expect(durableStart).toHaveLength(1);
+    await expect(value.session.getHeadSequence()).resolves.toBe(durableStart[0]?.sequence);
+    expect(
+      value.events.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" &&
+          event.data.callId === "call_echoRoundTrip",
+      ),
+    ).toEqual([]);
+    await expect(
+      value.actor.submitMessage({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_afterMissingProjection${fixtureNumber}`,
+        sessionId: value.session.sessionId,
+        method: "message.submit",
+        params: { text: "must remain unavailable" },
+      }),
+    ).rejects.toMatchObject({ code: "session.unavailable" });
   });
 
   it("quarantines an event-ID collision before a tool effect starts", async () => {
@@ -1019,6 +1118,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
   });
 
   it("finishes provider cleanup that starts before durable cancellation", async () => {
+    const assertNoUnhandledRejections = trackUnhandledRejections();
     let signalCleanupRead = (): void => {};
     const cleanupRead = new Promise<void>((resolve) => {
       signalCleanupRead = resolve;
@@ -1091,9 +1191,11 @@ describe("Milestone 4 agent loop with real session databases", () => {
       tool: { active: 0, queued: 0, available: 1 },
     });
     await assertTerminalRestartNoop(value);
+    await assertNoUnhandledRejections();
   });
 
   it("finishes tool cleanup that starts before durable cancellation", async () => {
+    const assertNoUnhandledRejections = trackUnhandledRejections();
     const echo = createBuiltinToolRegistry().get("echo");
     if (echo === null) throw new Error("Echo definition missing");
     let effectCount = 0;
@@ -1165,7 +1267,13 @@ describe("Milestone 4 agent loop with real session databases", () => {
     expect(scheduler.state.tool).toMatchObject({ active: 1, available: 0 });
 
     releaseCleanupRead();
-    await expect(waitForTerminal(value)).resolves.toMatchObject({ state: "cancelled" });
+    await expect(waitForTerminal(value)).resolves.toMatchObject({
+      state: "cancelled",
+      activeProviderStepId: null,
+    });
+    await expect(value.session.getProviderStepsForRun(value.runId)).resolves.toMatchObject([
+      { state: "completed" },
+    ]);
     expect(effectCount).toBe(1);
     expect(value.executions).toEqual(["call_echoRoundTrip"]);
     expect(value.provider.requests).toHaveLength(1);
@@ -1192,6 +1300,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
       tool: { active: 0, queued: 0, available: 1 },
     });
     await assertTerminalRestartNoop(value, registry);
+    await assertNoUnhandledRejections();
   });
 
   it("records a started non-idempotent effect as outcome unknown when cancellation wins", async () => {

@@ -27,6 +27,10 @@ import type {
 import { ActorMailbox, MailboxClosedError } from "./actor-mailbox.js";
 import { CancellationController } from "./cancellation.js";
 import type { CommittedEventHub } from "./event-hub.js";
+import {
+  EventReconciliationIntegrityError,
+  reconcileCommittedEventBatch,
+} from "./event-reconciliation.js";
 import { recoverSession } from "./recovery.js";
 import {
   isTerminalRunState,
@@ -608,31 +612,35 @@ export class SessionActor {
           this.faultUnresolvedAmbiguousWrite(operationError);
           throw operationError;
         }
-        if (storedEvents.every((event): event is SessionEvent => event !== null)) {
-          let current: RunRecord | null;
-          try {
-            current = await this.storage.getRun(runId);
-          } catch {
-            this.faultUnresolvedAmbiguousWrite(operationError);
-            throw operationError;
-          }
-          if (current === null) {
-            this.faultUnresolvedAmbiguousWrite(operationError);
-            throw operationError;
-          }
-          committed = {
-            events: storedEvents,
-            headSequence: Math.max(...storedEvents.map((event) => event.sequence)),
-          };
-          active.record = current;
-        } else {
-          // No matching event proves a pre-commit rejection. A partial match is impossible for
-          // one transaction, so retain quarantine behavior for that ambiguous/corrupt case.
-          if (storedEvents.some((event) => event !== null)) {
-            this.faultUnresolvedAmbiguousWrite(operationError);
-          }
+        try {
+          const reconciled = reconcileCommittedEventBatch(
+            this.sessionId,
+            input.events,
+            storedEvents,
+          );
+          if (reconciled === null) throw operationError;
+          committed = reconciled;
+        } catch (error) {
+          if (error instanceof EventReconciliationIntegrityError) this.recordFault(error);
+          else this.faultUnresolvedAmbiguousWrite(operationError);
+          throw error;
+        }
+
+        let current: RunRecord | null;
+        try {
+          current = await this.storage.getRun(runId);
+        } catch {
+          this.faultUnresolvedAmbiguousWrite(operationError);
           throw operationError;
         }
+        if (current === null) {
+          const integrityError = new EventReconciliationIntegrityError(
+            `Reconciled task transaction has no run ${runId}`,
+          );
+          this.recordFault(integrityError);
+          throw integrityError;
+        }
+        active.record = current;
       }
       this.publishOrThrow(committed.events);
       this.applyProjectionMemory(input);

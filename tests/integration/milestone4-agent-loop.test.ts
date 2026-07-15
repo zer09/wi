@@ -129,6 +129,8 @@ async function fixture(
     readonly storageDecorator?: (session: SessionClient) => SessionClient;
     readonly scheduler?: RunScheduler;
     readonly textMaxChars?: number;
+    readonly loopEventId?: () => string;
+    readonly onFault?: (error: unknown) => void;
   } = {},
 ): Promise<Fixture> {
   const storage = await manager();
@@ -157,7 +159,10 @@ async function fixture(
     executor: new ToolExecutor({
       onExecutionStart: ({ callId }) => executions.push(callId),
     }),
-    ids: generated.loop,
+    ids:
+      options.loopEventId === undefined
+        ? generated.loop
+        : { ...generated.loop, eventId: options.loopEventId },
     textMaxChars: options.textMaxChars ?? 8,
     textMaxDelayMs: 1_000,
   });
@@ -184,6 +189,7 @@ async function fixture(
     }),
     runTaskOwnsSchedulerPermits: true,
     resumeRestoredRuns: true,
+    ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
   });
   actors.push(actor);
   const submitted = await actor.submitMessage({
@@ -434,6 +440,115 @@ describe("Milestone 4 agent loop with real session databases", () => {
     expect(sequenceOf("tool.execution.completed")).toBeLessThan(
       events.filter((event) => event.eventType === "provider.step.started")[1]?.sequence ?? 0,
     );
+  });
+
+  it("reconciles an exact tool-start commit whose worker response is lost", async () => {
+    let injected = false;
+    const value = await fixture(
+      { scenario: "echo-tool-round-trip" },
+      {
+        storageDecorator: (session) =>
+          new Proxy(session, {
+            get(target, property) {
+              if (property === "appendTransaction") {
+                return async (input: Parameters<SessionClient["appendTransaction"]>[0]) => {
+                  const result = await target.appendTransaction(input);
+                  if (
+                    !injected &&
+                    input.events.some((event) => event.eventType === "tool.execution.started")
+                  ) {
+                    injected = true;
+                    throw Object.assign(new Error("tool start response lost after commit"), {
+                      code: "storage.ambiguous_outcome",
+                    });
+                  }
+                  return result;
+                };
+              }
+              const member = Reflect.get(target, property) as unknown;
+              return typeof member === "function" ? member.bind(target) : member;
+            },
+          }) as SessionClient,
+      },
+    );
+
+    await expect(waitForTerminal(value)).resolves.toMatchObject({ state: "completed" });
+    expect(injected).toBe(true);
+    expect(value.executions).toEqual(["call_echoRoundTrip"]);
+    await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
+      state: "completed",
+      attemptCount: 1,
+    });
+    const events = await value.session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" &&
+          event.data.callId === "call_echoRoundTrip",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("quarantines an event-ID collision before a tool effect starts", async () => {
+    const collisionId = `evt_sessionCreated${fixtureNumber + 1}`;
+    let loopEventNumber = 0;
+    let signalFault = (_error: unknown): void => {};
+    const faulted = new Promise<unknown>((resolve) => {
+      signalFault = resolve;
+    });
+    const value = await fixture(
+      { scenario: "echo-tool-round-trip" },
+      {
+        loopEventId: () => {
+          loopEventNumber += 1;
+          return loopEventNumber === 5
+            ? collisionId
+            : `evt_collisionLoop${loopEventNumber}`;
+        },
+        onFault: signalFault,
+      },
+    );
+    const existingBefore = await value.session.getEventById(collisionId);
+    expect(existingBefore?.eventType).toBe("session.created");
+
+    await expect(faulted).resolves.toMatchObject({
+      code: "storage.corrupt",
+      name: "EventReconciliationIntegrityError",
+    });
+
+    expect(value.executions).toEqual([]);
+    expect(value.actor.snapshot.faulted).toBe(true);
+    await expect(value.session.getToolExecution("call_echoRoundTrip")).resolves.toMatchObject({
+      state: "requested",
+      attemptCount: 0,
+      effectClass: "pure",
+    });
+    const events = await value.session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" &&
+          event.data.callId === "call_echoRoundTrip",
+      ),
+    ).toEqual([]);
+    expect(
+      value.events.filter(
+        (event) =>
+          event.eventType === "tool.execution.started" &&
+          event.data.callId === "call_echoRoundTrip",
+      ),
+    ).toEqual([]);
+    await expect(value.session.getEventById(collisionId)).resolves.toEqual(existingBefore);
+    await expect(
+      value.actor.submitMessage({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_afterCollision${fixtureNumber}`,
+        sessionId: value.session.sessionId,
+        method: "message.submit",
+        params: { text: "must remain unavailable" },
+      }),
+    ).rejects.toMatchObject({ code: "session.unavailable" });
   });
 
   it("serializes terminal completion with simultaneous cancellation without executing", async () => {

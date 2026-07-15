@@ -468,12 +468,19 @@ export class SessionRepository {
     const run = this.database
       .prepare(
         `SELECT CASE WHEN provider_id = @expectedProviderId THEN 1 ELSE 0 END AS providerMatches,
-                length(CAST(provider_config_json AS BLOB)) AS providerConfigBytes
+                length(CAST(provider_config_json AS BLOB)) AS providerConfigBytes,
+                EXISTS(
+                  SELECT 1 FROM tool_executions
+                  WHERE run_id = @runId AND state = 'outcome_unknown'
+                ) AS hasOutcomeUnknown
          FROM runs WHERE run_id = @runId`,
       )
-      .get(input) as { providerMatches: number; providerConfigBytes: number } | undefined;
+      .get(input) as
+      | { providerMatches: number; providerConfigBytes: number; hasOutcomeUnknown: number }
+      | undefined;
     if (run === undefined) return { status: "missing" };
     if (run.providerMatches !== 1) return { status: "provider_mismatch" };
+    if (run.hasOutcomeUnknown === 1) return { status: "unsafe_outcome_unknown" };
     if (run.providerConfigBytes > input.maxProviderConfigBytes) {
       return { status: "limit_exceeded", boundary: "provider_config" };
     }
@@ -528,13 +535,13 @@ export class SessionRepository {
                      ELSE length(CAST(error_json AS BLOB)) END AS errorJsonBytes
          FROM tool_executions
          WHERE run_id = @runId
-           AND state IN ('completed', 'failed', 'denied', 'cancelled', 'outcome_unknown')
+           AND state IN ('completed', 'failed', 'denied', 'cancelled')
          ORDER BY requested_at_ms, call_id
          LIMIT @limit`,
       )
       .all({ runId: input.runId, limit: remainingItems + 1 }) as {
       callId: string;
-      state: "completed" | "failed" | "denied" | "cancelled" | "outcome_unknown";
+      state: "completed" | "failed" | "denied" | "cancelled";
       rawToolNameBytes: number;
       resultJsonBytes: number;
       errorJsonBytes: number;
@@ -555,12 +562,11 @@ export class SessionRepository {
       }
     }
     for (const tool of tools) {
-      const outcome = tool.state === "outcome_unknown" ? "failed" : tool.state;
       const emptyItem = JSON.stringify({
         type: "tool_result",
         callId: tool.callId,
         toolName: "",
-        outcome,
+        outcome: tool.state,
         result: null,
         error: null,
       });
@@ -612,10 +618,9 @@ export class SessionRepository {
         resultJson: string | null;
         errorJson: string | null;
       };
-      const outcome = row.state === "outcome_unknown" ? "failed" : row.state;
       const item =
         `{"type":"tool_result","callId":${JSON.stringify(tool.callId)},` +
-        `"toolName":${JSON.stringify(row.toolName)},"outcome":${JSON.stringify(outcome)},` +
+        `"toolName":${JSON.stringify(row.toolName)},"outcome":${JSON.stringify(row.state)},` +
         `"result":${row.resultJson ?? "null"},"error":${row.errorJson ?? "null"}}`;
       if (!appendItem(item)) {
         return { status: "limit_exceeded", boundary: "request_bytes" };
@@ -912,7 +917,7 @@ export class SessionRepository {
            FROM tool_executions AS tool
            JOIN runs AS run ON run.run_id = tool.run_id
            WHERE tool.state = 'outcome_unknown'
-             AND run.state IN ('running', 'cancelling')
+             AND run.state IN ('created', 'queued', 'running', 'waiting_for_user', 'cancelling')
            ORDER BY tool.run_id`,
         )
         .all() as { runId: string }[]

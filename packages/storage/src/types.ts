@@ -376,6 +376,7 @@ export type RunProviderMatch = z.infer<typeof RunProviderMatchSchema>;
 export const BoundedProviderRequestDataSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("missing") }),
   z.strictObject({ status: z.literal("provider_mismatch") }),
+  z.strictObject({ status: z.literal("unsafe_outcome_unknown") }),
   z.strictObject({
     status: z.literal("limit_exceeded"),
     boundary: z.enum([

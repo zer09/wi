@@ -352,6 +352,13 @@ export class AgentRunLoop {
         false,
       );
     }
+    if (snapshot.status === "unsafe_outcome_unknown") {
+      throw new RunLoopFailure(
+        "tool.outcome_unknown",
+        "A durable tool outcome is unknown, so provider continuation is unsafe.",
+        true,
+      );
+    }
     if (snapshot.status === "limit_exceeded") {
       throw new RunLoopFailure(
         "provider.protocol_error",

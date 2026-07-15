@@ -138,6 +138,9 @@ export async function recoverSession(options: {
     tools.sort((left, right) => left.tool.callId.localeCompare(right.tool.callId));
   }
   const outcomeUnknownRunIds = new Set(candidates.outcomeUnknownRunIds);
+  const recoveryRunIds = [
+    ...new Set([...candidates.interruptedRunIds, ...candidates.outcomeUnknownRunIds]),
+  ].sort();
 
   const stepRecovery = async (step: ProviderStepRecord, atMs: number) => {
     const [stepTools, streamingMessages] = await Promise.all([
@@ -204,16 +207,20 @@ export async function recoverSession(options: {
     };
   };
 
-  for (const runId of candidates.interruptedRunIds) {
+  for (const runId of recoveryRunIds) {
     const run = await options.storage.getRun(runId);
-    if (run === null || recoveryDecision(run.state) !== "interrupt") {
-      if (run !== null) preservedRunIds.push(runId);
+    if (run === null) continue;
+    const decision = recoveryDecision(run.state);
+    const hasOutcomeUnknown = outcomeUnknownRunIds.has(runId);
+    const mustInterrupt =
+      decision === "interrupt" || (hasOutcomeUnknown && decision !== "preserve");
+    if (!mustInterrupt) {
+      preservedRunIds.push(runId);
       continue;
     }
 
     const runSteps = [...streamingSteps.values()].filter((step) => step.runId === runId);
     const startedTools = startedToolsByRun.get(runId) ?? [];
-    const hasOutcomeUnknown = outcomeUnknownRunIds.has(runId);
     const canRetryEveryStartedTool = startedTools.every(
       ({ tool, compatible }) => compatible && tool.effectClass === "pure",
     );
@@ -394,12 +401,29 @@ export async function recoverSession(options: {
       projections: [
         ...recoveredSteps.flatMap((step) => step.projections),
         ...toolProjections,
+        ...(decision === "resume_queued"
+          ? [
+              {
+                // Normalize this impossible persisted state only inside the atomic interruption.
+                kind: "run.state" as const,
+                runId,
+                expectedState: run.state,
+                nextState: "running" as const,
+                startedAtMs: run.startedAtMs ?? atMs,
+                completedAtMs: null,
+                cancelledAtMs: run.cancelledAtMs,
+                failureCategory: null,
+                failureMessage: null,
+                activeProviderStepId: run.activeProviderStepId,
+              },
+            ]
+          : []),
         {
           kind: "run.state",
           runId,
-          expectedState: run.state,
+          expectedState: decision === "resume_queued" ? "running" : run.state,
           nextState: "interrupted",
-          startedAtMs: run.startedAtMs,
+          startedAtMs: run.startedAtMs ?? atMs,
           completedAtMs: atMs,
           cancelledAtMs: run.cancelledAtMs,
           failureCategory: interruptionCode,

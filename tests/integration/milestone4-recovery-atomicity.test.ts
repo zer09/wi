@@ -344,7 +344,7 @@ function terminalToolErrorCode(
 async function seedTerminalToolSet(
   session: SessionClient,
   outcomes: readonly ExistingToolOutcome[],
-  runState: "running" | "interrupted" = "running",
+  runState: "created" | "queued" | "running" | "interrupted" = "running",
 ): Promise<{ readonly runId: string; readonly callIds: readonly string[] }> {
   const suffix = `${fixtureNumber}_${outcomes.join("_")}_${runState}`;
   const runId = `run_terminalSet${suffix}`;
@@ -420,26 +420,35 @@ async function seedTerminalToolSet(
       });
     }
   }
-  const runEvent =
-    runState === "running"
-      ? {
-          eventId: `evt_terminalSet${suffix}RunStarted`,
-          eventType: "run.started" as const,
-          createdAtMs: 2_000,
-          data: { eventVersion: 1 as const, runId },
-        }
-      : {
-          eventId: `evt_terminalSet${suffix}RunInterrupted`,
-          eventType: "run.interrupted" as const,
-          createdAtMs: 2_000,
-          data: {
-            eventVersion: 1 as const,
-            runId,
-            code: "tool.outcome_unknown" as const,
-            message: "Run was already interrupted.",
-            diagnosticId: `err_terminalSet${suffix}RunInterrupted`,
-          },
-        };
+  let runEvent: AppendTransactionInput["events"][number];
+  if (runState === "running") {
+    runEvent = {
+      eventId: `evt_terminalSet${suffix}RunStarted`,
+      eventType: "run.started",
+      createdAtMs: 2_000,
+      data: { eventVersion: 1, runId },
+    };
+  } else if (runState === "interrupted") {
+    runEvent = {
+      eventId: `evt_terminalSet${suffix}RunInterrupted`,
+      eventType: "run.interrupted",
+      createdAtMs: 2_000,
+      data: {
+        eventVersion: 1,
+        runId,
+        code: "tool.outcome_unknown",
+        message: "Run was already interrupted.",
+        diagnosticId: `err_terminalSet${suffix}RunInterrupted`,
+      },
+    };
+  } else {
+    runEvent = {
+      eventId: `evt_terminalSet${suffix}RunCreated`,
+      eventType: "run.created",
+      createdAtMs: 2_000,
+      data: { eventVersion: 1, runId },
+    };
+  }
   const toolProjections: ProjectionMutation[] = [];
   for (const [index, outcome] of outcomes.entries()) {
     const callId = callIds[index];
@@ -495,7 +504,7 @@ async function seedTerminalToolSet(
         providerId: "fake",
         providerConfig: { scenario: "echo-tool-round-trip" },
         createdAtMs: 2_000,
-        startedAtMs: 2_000,
+        startedAtMs: runState === "created" || runState === "queued" ? null : 2_000,
         completedAtMs: runState === "interrupted" ? 2_000 : null,
         cancelledAtMs: null,
         failureCategory: runState === "interrupted" ? "tool.outcome_unknown" : null,
@@ -1429,6 +1438,53 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     });
     await scheduler.shutdown();
   });
+
+  it.each(["created", "queued"] as const)(
+    "interrupts an unsafe %s run instead of launching it",
+    async (runState) => {
+      const { session } = await storageFixture();
+      const seeded = await seedTerminalToolSet(session, ["outcome_unknown"], runState);
+      await expect(session.recover()).resolves.toMatchObject({
+        interruptedRunIds: [],
+        outcomeUnknownRunIds: [seeded.runId],
+      });
+      const head = await session.getHeadSequence();
+      let event = 0;
+
+      await expect(
+        recoverSession({
+          sessionId: session.sessionId,
+          storage: session,
+          now: () => 7_500,
+          eventId: () => `evt_unstartedUnknown${runState}${++event}`,
+          diagnosticId: () => `err_unstartedUnknown${runState}${event}`,
+          publishCommitted: () => undefined,
+          resumeToolLoop: true,
+          currentToolEffectClass: () => null,
+        }),
+      ).resolves.toMatchObject({
+        interruptedRunIds: [seeded.runId],
+        outcomeUnknownRunIds: [seeded.runId],
+      });
+      await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+        state: "interrupted",
+        failureCategory: "tool.outcome_unknown",
+        activeProviderStepId: null,
+      });
+      await expect(session.getToolExecution(seeded.callIds[0] ?? "")).resolves.toMatchObject({
+        state: "outcome_unknown",
+        attemptCount: 1,
+      });
+      await expect(session.getHeadSequence()).resolves.toBe(head + 1);
+      const events = await session.getEventsAfter(0);
+      expect(
+        events.filter(
+          (candidate) =>
+            candidate.eventType === "run.interrupted" && candidate.data.runId === seeded.runId,
+        ),
+      ).toHaveLength(1);
+    },
+  );
 
   it("does not change an already terminal run with an unknown tool outcome", async () => {
     const { session } = await storageFixture();

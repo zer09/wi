@@ -493,7 +493,7 @@ describe("Milestone 4 agent loop with real session databases", () => {
   it("quarantines an event-ID collision before a tool effect starts", async () => {
     const collisionId = `evt_sessionCreated${fixtureNumber + 1}`;
     let loopEventNumber = 0;
-    let signalFault = (_error: unknown): void => {};
+    let signalFault: (error: unknown) => void = () => undefined;
     const faulted = new Promise<unknown>((resolve) => {
       signalFault = resolve;
     });

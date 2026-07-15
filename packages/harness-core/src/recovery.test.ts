@@ -59,6 +59,7 @@ describe("startup recovery", () => {
     };
 
     await recoverSession({
+      sessionId: "ses_cancellingRecovery",
       storage,
       now: () => 10,
       eventId: () => "evt_cancellingRecovery",
@@ -102,6 +103,7 @@ describe("startup recovery", () => {
     const published: SessionEvent[] = [];
     await expect(
       recoverSession({
+        sessionId: "ses_staleRecovery",
         storage,
         now: () => 10,
         eventId: () => "evt_staleRecovery",
@@ -154,6 +156,7 @@ describe("startup recovery", () => {
     };
     const published: SessionEvent[] = [];
     const options = {
+      sessionId: "ses_ambiguousRecovery",
       storage,
       now: () => 10,
       eventId: () => "evt_ambiguousRecovery",
@@ -233,6 +236,7 @@ describe("startup recovery", () => {
     const published: number[] = [];
     let eventNumber = 0;
     const options = {
+      sessionId: "ses_recovery",
       storage,
       now: () => 10,
       eventId: () => `evt_recovery${++eventNumber}`,

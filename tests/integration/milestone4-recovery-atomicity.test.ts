@@ -22,6 +22,7 @@ import {
   CommittedEventHub,
   RunScheduler,
   SessionActor,
+  recoverSession,
   type AgentRunLoopIds,
   type SessionActorIds,
 } from "../../packages/harness-core/src/index.js";
@@ -204,6 +205,132 @@ async function seedRecoverableTool(
   return tool;
 }
 
+interface StartedToolSpec {
+  readonly name: string;
+  readonly effectClass: ToolEffectClass;
+}
+
+async function seedStartedToolSet(
+  session: SessionClient,
+  specs: readonly StartedToolSpec[],
+): Promise<{ readonly runId: string; readonly callIds: readonly string[] }> {
+  const runId = `run_recoverSet${fixtureNumber}`;
+  const stepId = `step_recoverSet${fixtureNumber}`;
+  const callIds = specs.map((_spec, index) => `call_recoverSet${fixtureNumber}_${index}`);
+  const argumentsJson = '{"text":"recover set"}';
+  const argumentsHash = await canonicalJsonHash({ text: "recover set" });
+  await session.appendTransaction({
+    events: [
+      {
+        eventId: `evt_recoverSet${fixtureNumber}Run`,
+        eventType: "run.started",
+        createdAtMs: 2_000,
+        data: { eventVersion: 1, runId },
+      },
+      {
+        eventId: `evt_recoverSet${fixtureNumber}Step`,
+        eventType: "provider.step.completed",
+        createdAtMs: 2_001,
+        data: { eventVersion: 1, runId, stepId },
+      },
+      ...specs.flatMap((spec, index) => {
+        const callId = callIds[index];
+        if (callId === undefined) throw new Error("Missing generated call ID");
+        return [
+          {
+            eventId: `evt_recoverSet${fixtureNumber}Requested${index}`,
+            eventType: "tool.call.requested" as const,
+            createdAtMs: 2_002 + index * 2,
+            data: {
+              eventVersion: 1 as const,
+              runId,
+              stepId,
+              callId,
+              name: spec.name,
+              argumentsJson,
+              argumentsHash,
+              effectClass: spec.effectClass,
+            },
+          },
+          {
+            eventId: `evt_recoverSet${fixtureNumber}Started${index}`,
+            eventType: "tool.execution.started" as const,
+            createdAtMs: 2_003 + index * 2,
+            data: { eventVersion: 1 as const, runId, callId },
+          },
+        ];
+      }),
+    ],
+    projections: [
+      {
+        kind: "run.put",
+        runId,
+        state: "running",
+        providerId: "fake",
+        providerConfig: { scenario: "echo-tool-round-trip" },
+        createdAtMs: 2_000,
+        startedAtMs: 2_000,
+        completedAtMs: null,
+        cancelledAtMs: null,
+        failureCategory: null,
+        failureMessage: null,
+        activeProviderStepId: null,
+      },
+      {
+        kind: "providerStep.put",
+        stepId,
+        runId,
+        stepIndex: 0,
+        state: "completed",
+        startedAtMs: 2_000,
+        completedAtMs: 2_001,
+        responseId: `response_recoverSet${fixtureNumber}`,
+        errorCategory: null,
+        errorMessage: null,
+      },
+      ...specs.flatMap((spec, index) => {
+        const callId = callIds[index];
+        if (callId === undefined) throw new Error("Missing generated call ID");
+        return [
+          {
+            kind: "toolExecution.put" as const,
+            callId,
+            runId,
+            stepId,
+            toolName: spec.name,
+            argumentsJson,
+            argumentsHash,
+            effectClass: spec.effectClass,
+            state: "started" as const,
+            attemptCount: 1,
+            requestedAtMs: 2_002 + index * 2,
+            startedAtMs: 2_003 + index * 2,
+            completedAtMs: null,
+            result: null,
+            error: null,
+          },
+          {
+            kind: "toolCallOccurrence.put" as const,
+            runId,
+            stepId,
+            callId,
+            occurredAtMs: 2_002 + index * 2,
+          },
+        ];
+      }),
+    ],
+  });
+  return { runId, callIds };
+}
+
+function registryFor(specs: readonly StartedToolSpec[]): ToolRegistry {
+  const registry = new ToolRegistry();
+  for (const spec of specs) {
+    registry.register({ ...createEchoTool(), name: spec.name, effectClass: spec.effectClass });
+  }
+  return registry;
+}
+
 function echoRegistry(effectClass: ToolEffectClass): ToolRegistry {
   const registry = new ToolRegistry();
   registry.register({ ...createEchoTool(), effectClass });
@@ -270,6 +397,66 @@ async function resumeSeeded(
   return { actor, executions };
 }
 
+async function recoverStartedSet(
+  session: SessionClient,
+  seeded: { readonly runId: string; readonly callIds: readonly string[] },
+  specs: readonly StartedToolSpec[],
+  decorateStorage?: (storage: SessionClient) => SessionClient,
+): Promise<{
+  readonly actor: SessionActor;
+  readonly provider: FakeProviderAdapter;
+  readonly executions: readonly string[];
+  readonly registry: ToolRegistry;
+  readonly storage: SessionClient;
+}> {
+  const storage = decorateStorage?.(session) ?? session;
+  const registry = registryFor(specs);
+  const provider = new FakeProviderAdapter();
+  const executions: string[] = [];
+  const ids = generatedIds(`set${fixtureNumber}`);
+  const loop = new AgentRunLoop({
+    storage,
+    provider,
+    registry,
+    executor: new ToolExecutor({ onExecutionStart: ({ callId }) => executions.push(callId) }),
+    ids: ids.loop,
+  });
+  let signalTerminal = (): void => {};
+  const terminal = new Promise<void>((resolve) => {
+    signalTerminal = resolve;
+  });
+  const hub = new CommittedEventHub();
+  hub.subscribe(session.sessionId, (event) => {
+    if (
+      event.eventType === "run.interrupted" &&
+      event.data.runId === seeded.runId
+    ) {
+      signalTerminal();
+    }
+  });
+  let now = 4_000;
+  const actor = await SessionActor.create({
+    storage,
+    eventHub: hub,
+    scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+    ids: ids.actor,
+    now: () => ++now,
+    runTask: loop.task,
+    currentToolEffectClass: loop.currentToolEffectClass,
+    cancelRunTask: loop.cancel,
+    forceStopRunTask: () => ({ status: "terminated" }),
+    createRunProviderSnapshot: () => ({
+      providerId: "fake",
+      providerConfig: { scenario: "echo-tool-round-trip" },
+    }),
+    runTaskOwnsSchedulerPermits: true,
+    resumeRestoredRuns: true,
+  });
+  actors.push(actor);
+  await terminal;
+  return { actor, provider, executions, registry, storage };
+}
+
 afterEach(async () => {
   await Promise.allSettled(actors.splice(0).map((actor) => actor.shutdown()));
   await Promise.allSettled(managers.splice(0).map((manager) => manager.close()));
@@ -316,6 +503,155 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     });
   });
 
+  it("atomically marks one non-idempotent started call unknown and interrupts its run", async () => {
+    const { session } = await storageFixture();
+    const specs = [{ name: "unsafe_once", effectClass: "non_idempotent" }] as const;
+    const seeded = await seedStartedToolSet(session, specs);
+    const recovered = await recoverStartedSet(session, seeded, specs);
+
+    expect(recovered.executions).toEqual([]);
+    expect(recovered.provider.requests).toEqual([]);
+    await expect(session.getRun(seeded.runId)).resolves.toMatchObject({
+      state: "interrupted",
+      failureCategory: "tool.outcome_unknown",
+    });
+    await expect(session.getToolExecution(seeded.callIds[0] ?? "")).resolves.toMatchObject({
+      state: "outcome_unknown",
+      effectClass: "non_idempotent",
+      attemptCount: 1,
+    });
+    const events = await session.getEventsAfter(0);
+    const unknown = events.find(
+      (event) =>
+        event.eventType === "tool.execution.outcome_unknown" &&
+        event.data.callId === seeded.callIds[0],
+    );
+    const interrupted = events.find(
+      (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+    );
+    expect(unknown?.sequence).toBeDefined();
+    expect(interrupted?.sequence).toBe((unknown?.sequence ?? 0) + 1);
+  });
+
+  it("terminalizes multiple unsafe started calls in one recovery transaction", async () => {
+    const { session } = await storageFixture();
+    const specs = [
+      { name: "unsafe_first", effectClass: "non_idempotent" },
+      { name: "unsafe_second", effectClass: "idempotent_external" },
+    ] as const;
+    const seeded = await seedStartedToolSet(session, specs);
+    const recovered = await recoverStartedSet(session, seeded, specs);
+
+    expect(recovered.executions).toEqual([]);
+    expect(recovered.provider.requests).toEqual([]);
+    const tools = await Promise.all(
+      seeded.callIds.map((callId) => session.getToolExecution(callId)),
+    );
+    expect(tools).toEqual([
+      expect.objectContaining({ state: "outcome_unknown", attemptCount: 1 }),
+      expect.objectContaining({ state: "outcome_unknown", attemptCount: 1 }),
+    ]);
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.outcome_unknown" &&
+          event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(2);
+    expect(
+      events.filter(
+        (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("interrupts a mixed pure and unsafe started set without retrying either call", async () => {
+    const { session } = await storageFixture();
+    const specs = [
+      { name: "pure_mixed", effectClass: "pure" },
+      { name: "unsafe_mixed", effectClass: "non_idempotent" },
+    ] as const;
+    const seeded = await seedStartedToolSet(session, specs);
+    const recovered = await recoverStartedSet(session, seeded, specs);
+
+    expect(recovered.executions).toEqual([]);
+    expect(recovered.provider.requests).toEqual([]);
+    await expect(session.getToolExecution(seeded.callIds[0] ?? "")).resolves.toMatchObject({
+      state: "failed",
+      effectClass: "pure",
+      attemptCount: 1,
+    });
+    await expect(session.getToolExecution(seeded.callIds[1] ?? "")).resolves.toMatchObject({
+      state: "outcome_unknown",
+      effectClass: "non_idempotent",
+      attemptCount: 1,
+    });
+  });
+
+  it("reconciles unsafe recovery committed before response loss and repeats as a no-op", async () => {
+    const { session } = await storageFixture();
+    const specs = [{ name: "unsafe_ambiguous", effectClass: "non_idempotent" }] as const;
+    const seeded = await seedStartedToolSet(session, specs);
+    let lostResponse = false;
+    const recovered = await recoverStartedSet(session, seeded, specs, (raw) =>
+      new Proxy(raw, {
+        get(target, property) {
+          if (property === "appendTransaction") {
+            return async (input: Parameters<SessionClient["appendTransaction"]>[0]) => {
+              const result = await target.appendTransaction(input);
+              if (
+                !lostResponse &&
+                input.events.some((event) => event.eventType === "tool.execution.outcome_unknown") &&
+                input.events.some((event) => event.eventType === "run.interrupted")
+              ) {
+                lostResponse = true;
+                throw Object.assign(new Error("unsafe recovery response lost"), {
+                  code: "storage.ambiguous_outcome",
+                });
+              }
+              return result;
+            };
+          }
+          const member = Reflect.get(target, property) as unknown;
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      }) as SessionClient,
+    );
+
+    expect(lostResponse).toBe(true);
+    expect(recovered.executions).toEqual([]);
+    expect(recovered.provider.requests).toEqual([]);
+    const head = await session.getHeadSequence();
+    let repeatedEvent = 0;
+    await expect(
+      recoverSession({
+        sessionId: session.sessionId,
+        storage: recovered.storage,
+        now: () => 5_000,
+        eventId: () => `evt_repeatedUnsafe${++repeatedEvent}`,
+        diagnosticId: () => `err_repeatedUnsafe${repeatedEvent}`,
+        publishCommitted: () => undefined,
+        resumeToolLoop: true,
+        currentToolEffectClass: (name) => recovered.registry.get(name)?.effectClass ?? null,
+      }),
+    ).resolves.toMatchObject({ interruptedRunIds: [], startedToolCalls: [] });
+    await expect(session.getHeadSequence()).resolves.toBe(head);
+    const events = await session.getEventsAfter(0);
+    expect(
+      events.filter(
+        (event) =>
+          event.eventType === "tool.execution.outcome_unknown" &&
+          event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      events.filter(
+        (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("rejects a requested call when its current effect class changed", async () => {
     const { session } = await storageFixture();
     const seeded = await seedRecoverableTool(session, "requested", "pure");
@@ -346,7 +682,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
 
     expect(resumed.executions).toEqual([]);
     await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
-      state: "started",
+      state: "failed",
       attemptCount: 1,
       effectClass: "pure",
     });
@@ -366,7 +702,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
 
     expect(resumed.executions).toEqual([]);
     await expect(session.getToolExecution(seeded.callId)).resolves.toMatchObject({
-      state: "started",
+      state: "failed",
       attemptCount: 1,
       effectClass: "non_idempotent",
     });

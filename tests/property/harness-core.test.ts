@@ -874,6 +874,7 @@ describe("Milestone 3 property models", () => {
               subscriberConnected = false;
             } else if (operation.type === "recover") {
               await recoverSession({
+                sessionId: storage.sessionId,
                 storage,
                 now: () => 5,
                 eventId: () => `evt_propertyInteractionRecovery${index}`,
@@ -969,6 +970,7 @@ describe("Milestone 3 property models", () => {
           storage.recoverActiveRuns = true;
           for (let index = 0; index < recoveryCount; index += 1) {
             await recoverSession({
+              sessionId: storage.sessionId,
               storage,
               now: () => 20 + index,
               eventId: () => `evt_propertyRecoveryActor${index}`,
@@ -1109,6 +1111,7 @@ describe("Milestone 3 property models", () => {
           let eventId = 0;
           const recover = () =>
             recoverSession({
+              sessionId: "ses_propertyRecovery",
               storage,
               now: () => 10,
               eventId: () => `evt_propertyRecovery${++eventId}`,
@@ -1483,6 +1486,7 @@ describe("Milestone 3 property models", () => {
             case "recover": {
               const eventCount = storages[item.session].events.length;
               await recoverSession({
+                sessionId: storages[item.session].sessionId,
                 storage: storages[item.session],
                 now: () => ++now,
                 eventId: () => `evt_propertyNoopRecovery${item.session}${index}`,

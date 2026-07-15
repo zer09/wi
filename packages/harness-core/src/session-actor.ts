@@ -660,6 +660,7 @@ export class SessionActor {
   private async initialize(): Promise<void> {
     try {
       await recoverSession({
+        sessionId: this.sessionId,
         storage: this.storage,
         now: this.now,
         eventId: this.ids.eventId,

@@ -11,7 +11,7 @@
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
     "build": "pnpm -r build && node scripts/check-package-exports.mjs",
-    "build:test-deps": "pnpm --filter @wi/protocol build && pnpm --filter @wi/provider-contract build && pnpm --filter @wi/tools build && pnpm --filter @wi/provider-fake build && pnpm --filter @wi/storage build",
+    "build:test-deps": "pnpm --filter @wi/protocol build && pnpm --filter @wi/provider-contract build && pnpm --filter @wi/tools build && pnpm --filter @wi/provider-fake build && pnpm --filter @wi/storage build && pnpm --filter @wi/harness-core build",
     "typecheck": "pnpm build:test-deps && tsc -p tsconfig.json && pnpm -r typecheck",
     "lint": "eslint .",
     "test": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts",

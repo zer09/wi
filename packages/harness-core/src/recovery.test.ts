@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import type { ProviderStepState, SessionEvent } from "@wi/protocol";
-import type { RunRecord, SessionRecoveryResult } from "@wi/storage";
+import type {
+  AppendTransactionInput,
+  AppendTransactionInspection,
+  RunRecord,
+  SessionRecoveryResult,
+} from "@wi/storage";
 
 import { recoverSession, recoveryDecision, type RecoveryStorage } from "./recovery.js";
+
+function emptyInspection(input: AppendTransactionInput): AppendTransactionInspection {
+  return {
+    storedEvents: input.events.map(() => null),
+    headSequence: 0,
+    projectionsApplied: false,
+  };
+}
 
 describe("startup recovery", () => {
   it.each([
@@ -27,9 +40,11 @@ describe("startup recovery", () => {
         interruptedRunIds: [current.runId],
         interruptedStepIds: [],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => current,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async () => null,
       appendTransaction: async (input) => {
         const runState = input.projections?.find((projection) => projection.kind === "run.state");
@@ -59,6 +74,7 @@ describe("startup recovery", () => {
     };
 
     await recoverSession({
+      sessionId: "ses_cancellingRecovery",
       storage,
       now: () => 10,
       eventId: () => "evt_cancellingRecovery",
@@ -78,9 +94,11 @@ describe("startup recovery", () => {
         interruptedRunIds: ["run_stale"],
         interruptedStepIds: ["step_stale"],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => interrupted,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async () => {
         providerRead += 1;
         return {
@@ -102,6 +120,7 @@ describe("startup recovery", () => {
     const published: SessionEvent[] = [];
     await expect(
       recoverSession({
+        sessionId: "ses_staleRecovery",
         storage,
         now: () => 10,
         eventId: () => "evt_staleRecovery",
@@ -123,9 +142,15 @@ describe("startup recovery", () => {
         interruptedRunIds: current.state === "running" ? [current.runId] : [],
         interruptedStepIds: [],
         startedToolCalls: [],
+        outcomeUnknownRunIds: [],
       }),
       getRun: async () => current,
       getEventById: async (eventId) => storedEvents.get(eventId) ?? null,
+      inspectAppendTransaction: async (input) => ({
+        storedEvents: input.events.map((event) => storedEvents.get(event.eventId) ?? null),
+        headSequence: sequence,
+        projectionsApplied: current.state === "interrupted",
+      }),
       getProviderStep: async () => null,
       appendTransaction: async (input) => {
         const transition = input.projections?.find((projection) => projection.kind === "run.state");
@@ -154,6 +179,7 @@ describe("startup recovery", () => {
     };
     const published: SessionEvent[] = [];
     const options = {
+      sessionId: "ses_ambiguousRecovery",
       storage,
       now: () => 10,
       eventId: () => "evt_ambiguousRecovery",
@@ -181,6 +207,7 @@ describe("startup recovery", () => {
       interruptedRunIds: ["run_running"],
       interruptedStepIds: ["step_streaming"],
       startedToolCalls: [],
+      outcomeUnknownRunIds: [],
     };
     const storage: RecoveryStorage = {
       recover: async () => ({
@@ -191,6 +218,7 @@ describe("startup recovery", () => {
       }),
       getRun: async (runId) => runs.get(runId) ?? null,
       getEventById: async () => null,
+      inspectAppendTransaction: async (input) => emptyInspection(input),
       getProviderStep: async (stepId) =>
         stepId === "step_streaming"
           ? {
@@ -233,6 +261,7 @@ describe("startup recovery", () => {
     const published: number[] = [];
     let eventNumber = 0;
     const options = {
+      sessionId: "ses_recovery",
       storage,
       now: () => 10,
       eventId: () => `evt_recovery${++eventNumber}`,

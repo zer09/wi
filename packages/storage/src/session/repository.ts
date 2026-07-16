@@ -16,6 +16,7 @@ import {
   AcceptCommandInputSchema,
   AcceptedCommandResultSchema,
   AppendTransactionInputSchema,
+  BoundedProviderRequestDataInputSchema,
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
@@ -32,6 +33,8 @@ import {
   type AcceptCommandInput,
   type AcceptedCommandResult,
   type AppendTransactionInput,
+  type AppendTransactionInspection,
+  type BoundedProviderRequestData,
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
@@ -44,7 +47,7 @@ import {
   type SessionRecoveryResult,
 } from "../types.js";
 import { sessionMigrations } from "./migrations.js";
-import { applyProjection } from "./projections.js";
+import { applyProjection, areProjectionsApplied } from "./projections.js";
 
 export const InitializeSessionInputSchema = z.strictObject({
   sessionId: SessionIdSchema,
@@ -269,6 +272,16 @@ export class SessionRepository {
     return result;
   }
 
+  inspectAppendTransaction(inputValue: unknown): AppendTransactionInspection {
+    const input = AppendTransactionInputSchema.parse(inputValue);
+    const inspect = this.database.transaction(() => ({
+      storedEvents: input.events.map((event) => this.getEventById(event.eventId)),
+      headSequence: this.getHeadSequence(),
+      projectionsApplied: areProjectionsApplied(this.database, input.projections),
+    }));
+    return inspect.deferred();
+  }
+
   acceptCommand(inputValue: unknown): AcceptedCommandResult {
     const input = AcceptCommandInputSchema.parse(inputValue);
     if (input.transaction.testFailpoint !== undefined && !this.allowTestOperations) {
@@ -439,6 +452,189 @@ export class SessionRepository {
     );
   }
 
+  getRunProviderMatch(runId: string, expectedProviderId: string): "missing" | "match" | "mismatch" {
+    const row = this.database
+      .prepare(
+        `SELECT CASE WHEN provider_id = @expectedProviderId THEN 1 ELSE 0 END AS matches
+         FROM runs WHERE run_id = @runId`,
+      )
+      .get({ runId, expectedProviderId }) as { matches: number } | undefined;
+    if (row === undefined) return "missing";
+    return row.matches === 1 ? "match" : "mismatch";
+  }
+
+  getBoundedProviderRequestData(inputValue: unknown): BoundedProviderRequestData {
+    const input = BoundedProviderRequestDataInputSchema.parse(inputValue);
+    const run = this.database
+      .prepare(
+        `SELECT CASE WHEN provider_id = @expectedProviderId THEN 1 ELSE 0 END AS providerMatches,
+                length(CAST(provider_config_json AS BLOB)) AS providerConfigBytes,
+                EXISTS(
+                  SELECT 1 FROM tool_executions
+                  WHERE run_id = @runId AND state = 'outcome_unknown'
+                ) AS hasOutcomeUnknown
+         FROM runs WHERE run_id = @runId`,
+      )
+      .get(input) as
+      | { providerMatches: number; providerConfigBytes: number; hasOutcomeUnknown: number }
+      | undefined;
+    if (run === undefined) return { status: "missing" };
+    if (run.providerMatches !== 1) return { status: "provider_mismatch" };
+    if (run.hasOutcomeUnknown === 1) return { status: "unsafe_outcome_unknown" };
+    if (run.providerConfigBytes > input.maxProviderConfigBytes) {
+      return { status: "limit_exceeded", boundary: "provider_config" };
+    }
+
+    const providerConfig = this.database
+      .prepare(`SELECT provider_config_json AS providerConfigJson FROM runs WHERE run_id = ?`)
+      .get(input.runId) as { providerConfigJson: string } | undefined;
+    if (providerConfig === undefined) return { status: "missing" };
+    const requestPrefix =
+      `{"runId":${JSON.stringify(input.runId)},"stepId":${JSON.stringify(input.stepId)},` +
+      `"stepIndex":${input.stepIndex},"providerConfig":${providerConfig.providerConfigJson},` +
+      `"input":`;
+    const requestSuffix = "}";
+    const envelopeBytes = Buffer.byteLength(requestPrefix) + Buffer.byteLength(requestSuffix);
+    if (envelopeBytes + 2 > input.maxRequestBytes) {
+      return { status: "limit_exceeded", boundary: "request_bytes" };
+    }
+    const maxInputBytes = input.maxRequestBytes - envelopeBytes;
+
+    const messages = this.database
+      .prepare(
+        `SELECT m.message_id AS messageId, m.role,
+                SUM(length(CAST(COALESCE(p.text_content, '') AS BLOB))) AS rawTextBytes
+         FROM messages m
+         JOIN message_parts p ON p.message_id = m.message_id
+         WHERE m.run_id = @runId AND m.role != 'tool'
+         GROUP BY m.message_id, m.role, m.created_at_ms
+         HAVING SUM(length(CAST(COALESCE(p.text_content, '') AS BLOB))) > 0
+         ORDER BY m.created_at_ms, m.message_id
+         LIMIT @limit`,
+      )
+      .all({ runId: input.runId, limit: input.maxInputItems + 1 }) as {
+      messageId: string;
+      role: "user" | "assistant" | "system";
+      rawTextBytes: number;
+    }[];
+    if (messages.length > input.maxInputItems) {
+      return { status: "limit_exceeded", boundary: "input_items" };
+    }
+    if (messages.some((message) => message.rawTextBytes > input.maxMessageTextBytes)) {
+      return { status: "limit_exceeded", boundary: "message_text" };
+    }
+
+    const remainingItems = input.maxInputItems - messages.length;
+    const tools = this.database
+      .prepare(
+        `SELECT call_id AS callId, state,
+                length(CAST(tool_name AS BLOB)) AS rawToolNameBytes,
+                CASE WHEN result_json IS NULL THEN 4
+                     ELSE length(CAST(result_json AS BLOB)) END AS resultJsonBytes,
+                CASE WHEN error_json IS NULL THEN 4
+                     ELSE length(CAST(error_json AS BLOB)) END AS errorJsonBytes
+         FROM tool_executions
+         WHERE run_id = @runId
+           AND state IN ('completed', 'failed', 'denied', 'cancelled')
+         ORDER BY requested_at_ms, call_id
+         LIMIT @limit`,
+      )
+      .all({ runId: input.runId, limit: remainingItems + 1 }) as {
+      callId: string;
+      state: "completed" | "failed" | "denied" | "cancelled";
+      rawToolNameBytes: number;
+      resultJsonBytes: number;
+      errorJsonBytes: number;
+    }[];
+    if (tools.length > remainingItems) {
+      return { status: "limit_exceeded", boundary: "input_items" };
+    }
+    if (tools.some((tool) => tool.rawToolNameBytes > input.maxToolNameBytes)) {
+      return { status: "limit_exceeded", boundary: "tool_name" };
+    }
+
+    let minimumInputBytes = 2 + Math.max(0, messages.length + tools.length - 1);
+    for (const message of messages) {
+      const emptyItem = JSON.stringify({ type: "message", role: message.role, text: "" });
+      minimumInputBytes += Buffer.byteLength(emptyItem) + message.rawTextBytes;
+      if (minimumInputBytes > maxInputBytes) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
+    }
+    for (const tool of tools) {
+      const emptyItem = JSON.stringify({
+        type: "tool_result",
+        callId: tool.callId,
+        toolName: "",
+        outcome: tool.state,
+        result: null,
+        error: null,
+      });
+      minimumInputBytes +=
+        Buffer.byteLength(emptyItem) -
+        4 -
+        4 +
+        tool.rawToolNameBytes +
+        tool.resultJsonBytes +
+        tool.errorJsonBytes;
+      if (minimumInputBytes > maxInputBytes) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
+    }
+
+    const inputItems: string[] = [];
+    let inputBytes = 2;
+    const appendItem = (item: string): boolean => {
+      const separatorBytes = inputItems.length === 0 ? 0 : 1;
+      const nextBytes = inputBytes + separatorBytes + Buffer.byteLength(item);
+      if (nextBytes > maxInputBytes) return false;
+      inputItems.push(item);
+      inputBytes = nextBytes;
+      return true;
+    };
+    const messageText = this.database.prepare(
+      `SELECT group_concat(text_content, '') AS text
+       FROM (
+         SELECT COALESCE(text_content, '') AS text_content
+         FROM message_parts WHERE message_id = ? ORDER BY part_index
+       )`,
+    );
+    for (const message of messages) {
+      const row = messageText.get(message.messageId) as { text: string | null };
+      const item = JSON.stringify({ type: "message", role: message.role, text: row.text ?? "" });
+      if (!appendItem(item)) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
+    }
+
+    const toolData = this.database.prepare(
+      `SELECT tool_name AS toolName, state, result_json AS resultJson, error_json AS errorJson
+       FROM tool_executions WHERE call_id = ?`,
+    );
+    for (const tool of tools) {
+      const row = toolData.get(tool.callId) as {
+        toolName: string;
+        state: typeof tool.state;
+        resultJson: string | null;
+        errorJson: string | null;
+      };
+      const item =
+        `{"type":"tool_result","callId":${JSON.stringify(tool.callId)},` +
+        `"toolName":${JSON.stringify(row.toolName)},"outcome":${JSON.stringify(row.state)},` +
+        `"result":${row.resultJson ?? "null"},"error":${row.errorJson ?? "null"}}`;
+      if (!appendItem(item)) {
+        return { status: "limit_exceeded", boundary: "request_bytes" };
+      }
+    }
+
+    const inputJson = `[${inputItems.join(",")}]`;
+    const requestJson = `${requestPrefix}${inputJson}${requestSuffix}`;
+    if (Buffer.byteLength(requestJson) > input.maxRequestBytes) {
+      return { status: "limit_exceeded", boundary: "request_bytes" };
+    }
+    return { status: "ready", requestJson };
+  }
+
   getProviderStep(stepId: string): ProviderStepRecord | null {
     const row = this.database
       .prepare(
@@ -501,6 +697,22 @@ export class SessionRepository {
       )
       .all(...values) as Record<string, unknown>[];
     return rows.map((row) => this.decodeToolExecution(row));
+  }
+
+  getRecentProviderStepsForRun(runId: string, limitValue: unknown): readonly ProviderStepRecord[] {
+    const limit = z.number().int().positive().max(1024).parse(limitValue);
+    const rows = this.database
+      .prepare(
+        `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
+                started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
+                response_id AS responseId, error_category AS errorCategory,
+                error_message AS errorMessage
+         FROM provider_steps WHERE run_id = ? ORDER BY step_index DESC LIMIT ?`,
+      )
+      .all(runId, limit) as unknown[];
+    return rows
+      .map((row) => decodeStoredValue("provider step", () => ProviderStepRecordSchema.parse(row)))
+      .reverse();
   }
 
   getToolExecution(callId: string): ToolExecutionRecord | null {
@@ -698,6 +910,18 @@ export class SessionRepository {
          FROM tool_executions WHERE state = 'started' ORDER BY call_id`,
       )
       .all() as SessionRecoveryResult["startedToolCalls"];
+    const outcomeUnknownRunIds = (
+      this.database
+        .prepare(
+          `SELECT DISTINCT tool.run_id AS runId
+           FROM tool_executions AS tool
+           JOIN runs AS run ON run.run_id = tool.run_id
+           WHERE tool.state = 'outcome_unknown'
+             AND run.state IN ('created', 'queued', 'running', 'waiting_for_user', 'cancelling')
+           ORDER BY tool.run_id`,
+        )
+        .all() as { runId: string }[]
+    ).map(({ runId }) => runId);
 
     // Milestone 2 reports raw recovery candidates. Later milestones own transition policy/events.
     return decodeStoredValue("session recovery state", () =>
@@ -705,6 +929,7 @@ export class SessionRepository {
         interruptedRunIds,
         interruptedStepIds,
         startedToolCalls,
+        outcomeUnknownRunIds,
       }),
     );
   }

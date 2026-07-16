@@ -1,6 +1,34 @@
 import type { ProviderStepState, ToolEffectClass } from "@wi/protocol";
 import type { ToolExecutionRecord } from "@wi/storage";
 
+export class ToolIdentityError extends Error {
+  readonly code = "provider.protocol_error";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ToolIdentityError";
+  }
+}
+
+export function assertCurrentToolEffectClass(
+  tool: Pick<ToolExecutionRecord, "callId" | "toolName" | "effectClass">,
+  currentEffectClass: ToolEffectClass | null,
+): void {
+  if (tool.effectClass === null) {
+    throw new ToolIdentityError(`Tool call ${tool.callId} has no durable effect classification.`);
+  }
+  if (currentEffectClass === null) {
+    throw new ToolIdentityError(
+      `Tool call ${tool.callId} references missing definition ${tool.toolName}.`,
+    );
+  }
+  if (currentEffectClass !== tool.effectClass) {
+    throw new ToolIdentityError(
+      `Tool call ${tool.callId} effect class changed from ${tool.effectClass} to ${currentEffectClass}.`,
+    );
+  }
+}
+
 export interface StagedToolCallIdentity {
   readonly runId: string;
   readonly toolName: string;
@@ -21,9 +49,7 @@ export function sameToolCallIdentity(
     existing.toolName === incoming.toolName &&
     existing.argumentsJson === incoming.argumentsJson &&
     existing.argumentsHash === incoming.argumentsHash &&
-    (existing.effectClass === null ||
-      incoming.effectClass === null ||
-      existing.effectClass === incoming.effectClass);
+    (existing.effectClass === null || existing.effectClass === incoming.effectClass);
 }
 
 export function providerStepAllowsToolPromotion(state: ProviderStepState): boolean {

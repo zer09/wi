@@ -347,6 +347,53 @@ export const AppendTransactionResultSchema = z.strictObject({
 });
 export type AppendTransactionResult = z.infer<typeof AppendTransactionResultSchema>;
 
+export const AppendTransactionInspectionSchema = z.strictObject({
+  storedEvents: z.array(z.union([SessionEventSchema, z.null()])),
+  headSequence: z.number().int().nonnegative().safe(),
+  projectionsApplied: z.boolean(),
+});
+export type AppendTransactionInspection = z.infer<typeof AppendTransactionInspectionSchema>;
+
+const ProviderRequestAcquisitionLimitSchema = z.number().int().positive().max(1024 * 1024);
+export const BoundedProviderRequestDataInputSchema = z.strictObject({
+  runId: RunIdSchema,
+  stepId: ProviderStepIdSchema,
+  stepIndex: z.number().int().nonnegative().safe(),
+  expectedProviderId: z.string().min(1).max(256),
+  maxProviderConfigBytes: ProviderRequestAcquisitionLimitSchema,
+  maxMessageTextBytes: ProviderRequestAcquisitionLimitSchema,
+  maxToolNameBytes: ProviderRequestAcquisitionLimitSchema,
+  maxInputItems: z.number().int().positive().max(1024),
+  maxRequestBytes: ProviderRequestAcquisitionLimitSchema,
+});
+export type BoundedProviderRequestDataInput = z.infer<
+  typeof BoundedProviderRequestDataInputSchema
+>;
+
+export const RunProviderMatchSchema = z.enum(["missing", "match", "mismatch"]);
+export type RunProviderMatch = z.infer<typeof RunProviderMatchSchema>;
+
+export const BoundedProviderRequestDataSchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("missing") }),
+  z.strictObject({ status: z.literal("provider_mismatch") }),
+  z.strictObject({ status: z.literal("unsafe_outcome_unknown") }),
+  z.strictObject({
+    status: z.literal("limit_exceeded"),
+    boundary: z.enum([
+      "provider_config",
+      "message_text",
+      "tool_name",
+      "input_items",
+      "request_bytes",
+    ]),
+  }),
+  z.strictObject({
+    status: z.literal("ready"),
+    requestJson: z.string().max(1024 * 1024),
+  }),
+]);
+export type BoundedProviderRequestData = z.infer<typeof BoundedProviderRequestDataSchema>;
+
 export const RunRecordSchema = z.strictObject({
   runId: RunIdSchema,
   state: RunStateSchema,
@@ -401,5 +448,6 @@ export const SessionRecoveryResultSchema = z.strictObject({
   interruptedRunIds: z.array(RunIdSchema),
   interruptedStepIds: z.array(z.string().min(1)),
   startedToolCalls: z.array(StartedToolRecoveryRecordSchema),
+  outcomeUnknownRunIds: z.array(RunIdSchema),
 });
 export type SessionRecoveryResult = z.infer<typeof SessionRecoveryResultSchema>;

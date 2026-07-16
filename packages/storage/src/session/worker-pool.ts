@@ -12,11 +12,14 @@ import {
 import { stableSessionWorkerIndex } from "../manager/paths.js";
 import {
   AcceptedCommandResultSchema,
+  AppendTransactionInspectionSchema,
   AppendTransactionResultSchema,
+  BoundedProviderRequestDataSchema,
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
   RunMessageRecordSchema,
+  RunProviderMatchSchema,
   RunRecordSchema,
   ToolExecutionRecordSchema,
   SessionCatalogObservationSchema,
@@ -26,7 +29,10 @@ import {
   type AcceptCommandInput,
   type AcceptedCommandResult,
   type AppendTransactionInput,
+  type AppendTransactionInspection,
   type AppendTransactionResult,
+  type BoundedProviderRequestData,
+  type BoundedProviderRequestDataInput,
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
@@ -262,6 +268,18 @@ export class SessionWorkerPool {
     );
   }
 
+  async inspectAppendTransaction(
+    sessionId: string,
+    input: AppendTransactionInput,
+  ): Promise<AppendTransactionInspection> {
+    return this.request(
+      sessionId,
+      "session.inspectAppendTransaction",
+      { input },
+      AppendTransactionInspectionSchema,
+    );
+  }
+
   async getEventsAfter(
     sessionId: string,
     afterSequence: number,
@@ -307,6 +325,31 @@ export class SessionWorkerPool {
     );
   }
 
+  async getRunProviderMatch(
+    sessionId: string,
+    runId: string,
+    expectedProviderId: string,
+  ): Promise<"missing" | "match" | "mismatch"> {
+    return this.request(
+      sessionId,
+      "session.getRunProviderMatch",
+      { runId, expectedProviderId },
+      RunProviderMatchSchema,
+    );
+  }
+
+  async getBoundedProviderRequestData(
+    sessionId: string,
+    input: BoundedProviderRequestDataInput,
+  ): Promise<BoundedProviderRequestData> {
+    return this.request(
+      sessionId,
+      "session.getBoundedProviderRequestData",
+      { input },
+      BoundedProviderRequestDataSchema,
+    );
+  }
+
   async getAcceptedCommand(
     sessionId: string,
     commandId: string,
@@ -337,6 +380,19 @@ export class SessionWorkerPool {
       "session.getProviderStepsForRun",
       { runId },
       z.array(ProviderStepRecordSchema),
+    );
+  }
+
+  async getRecentProviderStepsForRun(
+    sessionId: string,
+    runId: string,
+    limit: number,
+  ): Promise<readonly ProviderStepRecord[]> {
+    return this.request(
+      sessionId,
+      "session.getRecentProviderStepsForRun",
+      { runId, limit },
+      z.array(ProviderStepRecordSchema).max(1024),
     );
   }
 

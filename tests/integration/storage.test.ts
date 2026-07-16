@@ -2063,6 +2063,7 @@ describe("catalog and per-session storage workers", () => {
         { callId: "call_recoveryExternal", effectClass: "non_idempotent" },
         { callId: "call_recoveryPure", effectClass: "pure" },
       ],
+      outcomeUnknownRunIds: [],
     });
     await expect(session.getRun("run_recoveryA")).resolves.toMatchObject({ state: "running" });
     await expect(session.getPendingApprovals()).resolves.toHaveLength(1);

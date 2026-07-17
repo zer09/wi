@@ -8,7 +8,12 @@ import type {
   SessionRecoveryResult,
 } from "@wi/storage";
 
-import { recoverSession, recoveryDecision, type RecoveryStorage } from "./recovery.js";
+import {
+  recoverSession,
+  recoveryDecision,
+  type RecoveryFailureDiagnostic,
+  type RecoveryStorage,
+} from "./recovery.js";
 
 function emptyInspection(input: AppendTransactionInput): AppendTransactionInspection {
   return {
@@ -111,6 +116,7 @@ describe("startup recovery", () => {
           responseId: null,
           errorCategory: null,
           errorMessage: null,
+          diagnosticId: null,
         };
       },
       appendTransaction: async () => {
@@ -231,6 +237,7 @@ describe("startup recovery", () => {
               responseId: null,
               errorCategory: stepState === "streaming" ? null : "provider.incomplete",
               errorMessage: null,
+              diagnosticId: null,
             }
           : null,
       appendTransaction: async (input) => {
@@ -258,15 +265,19 @@ describe("startup recovery", () => {
         return { events, headSequence: sequence };
       },
     };
-    const published: number[] = [];
+    const published: SessionEvent[] = [];
+    const diagnostics: RecoveryFailureDiagnostic[] = [];
     let eventNumber = 0;
+    let diagnosticNumber = 0;
     const options = {
       sessionId: "ses_recovery",
       storage,
       now: () => 10,
       eventId: () => `evt_recovery${++eventNumber}`,
-      diagnosticId: () => `err_recovery${eventNumber}`,
-      publishCommitted: (event: SessionEvent) => published.push(event.sequence),
+      diagnosticId: () => `err_recovery${++diagnosticNumber}`,
+      publishCommitted: (event: SessionEvent) => published.push(event),
+      onFailureDiagnostic: (diagnostic: RecoveryFailureDiagnostic) =>
+        diagnostics.push(diagnostic),
     };
 
     await expect(recoverSession(options)).resolves.toMatchObject({
@@ -278,7 +289,29 @@ describe("startup recovery", () => {
     expect(runs.get("run_waiting")?.state).toBe("waiting_for_user");
     expect(runs.get("run_completed")?.state).toBe("completed");
     expect(stepState).toBe("interrupted");
-    expect(published).toEqual([1, 2]);
+    expect(published.map((event) => event.sequence)).toEqual([1, 2]);
+    const stepEvent = published.find(
+      (event) => event.eventType === "provider.step.interrupted",
+    );
+    const runEvent = published.find((event) => event.eventType === "run.interrupted");
+    expect(stepEvent?.data).toMatchObject({
+      eventVersion: 2,
+      diagnosticId: "err_recovery1",
+    });
+    expect(runEvent?.data).toMatchObject({
+      eventVersion: 2,
+      diagnosticId: "err_recovery1",
+    });
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        diagnosticId: "err_recovery1",
+        sessionId: "ses_recovery",
+        runId: "run_running",
+        stepIds: ["step_streaming"],
+        callIds: [],
+        code: "provider.incomplete",
+      }),
+    ]);
   });
 });
 

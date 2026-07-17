@@ -1,14 +1,18 @@
 import { z } from "zod";
 
 import { CanonicalJsonValueSchema } from "./canonical-json.js";
-import { ProtocolErrorCodeSchema, ErrorCodeSchema } from "./errors.js";
+import {
+  ErrorCodeSchema,
+  ProtocolErrorCodeSchema,
+  SafeDiagnosticMessageSchema,
+} from "./errors.js";
 import {
   EventSequenceSchema,
   ProtocolVersionSchema,
   SequenceSchema,
   TimestampMsSchema,
 } from "./envelope.js";
-import { SessionEventSchema } from "./events.js";
+import { BrowserSessionEventSchema } from "./events.js";
 import {
   CommandIdSchema,
   ConnectionIdSchema,
@@ -42,7 +46,7 @@ export const CommandRejectedMessageSchema = z.strictObject({
   kind: z.literal("command.rejected"),
   commandId: CommandIdSchema,
   code: ErrorCodeSchema,
-  message: z.string(),
+  message: SafeDiagnosticMessageSchema,
   diagnosticId: DiagnosticIdSchema,
   recoverable: z.boolean(),
 });
@@ -59,8 +63,9 @@ export const ProtocolErrorMessageSchema = z.strictObject({
   v: ProtocolVersionSchema,
   kind: z.literal("protocol.error"),
   requestId: RequestIdSchema.optional(),
+  sessionId: SessionIdSchema.optional(),
   code: ProtocolErrorCodeSchema,
-  message: z.string(),
+  message: SafeDiagnosticMessageSchema,
   diagnosticId: DiagnosticIdSchema,
   recoverable: z.boolean(),
 });
@@ -75,7 +80,7 @@ export const ServerMessageSchema = z.union([
   WelcomeMessageSchema,
   CommandAcceptedMessageSchema,
   CommandRejectedMessageSchema,
-  SessionEventSchema,
+  BrowserSessionEventSchema,
   ReplayCompleteMessageSchema,
   ProtocolErrorMessageSchema,
   ServerHeartbeatMessageSchema,

@@ -5,6 +5,18 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@wi/harness-core": "workspace:*",
+    "@wi/protocol": "workspace:*",
+    "@wi/provider-fake": "workspace:*",
+    "@wi/storage": "workspace:*",
+    "@wi/tools": "workspace:*",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
   }
 }

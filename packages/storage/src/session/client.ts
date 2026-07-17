@@ -8,6 +8,7 @@ import type {
   AppendTransactionResult,
   BoundedProviderRequestData,
   BoundedProviderRequestDataInput,
+  InputRecord,
   PendingApprovalRecord,
   PendingInputRecord,
   ProviderStepRecord,
@@ -15,6 +16,8 @@ import type {
   RunRecord,
   ToolExecutionRecord,
   SessionCatalogProjection,
+  SessionEventPage,
+  SessionEventPageInput,
   SessionManifest,
   SessionRecoveryResult,
 } from "../types.js";
@@ -75,9 +78,21 @@ export class SessionClient {
     return this.pool.getEventsAfter(this.sessionId, afterSequence, throughSequence);
   }
 
-  async getHeadSequence(): Promise<number> {
+  async getEventPageAfter(
+    input: SessionEventPageInput,
+    signal?: AbortSignal,
+  ): Promise<SessionEventPage> {
+    signal?.throwIfAborted();
     await this.prepare();
-    return this.pool.getHeadSequence(this.sessionId);
+    signal?.throwIfAborted();
+    return this.pool.getEventPageAfter(this.sessionId, input, signal);
+  }
+
+  async getHeadSequence(signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted();
+    await this.prepare();
+    signal?.throwIfAborted();
+    return this.pool.getHeadSequence(this.sessionId, signal);
   }
 
   async getEventById(eventId: string): Promise<SessionEvent | null> {
@@ -171,6 +186,11 @@ export class SessionClient {
   async getPendingInputs(): Promise<readonly PendingInputRecord[]> {
     await this.prepare();
     return this.pool.getPendingInputs(this.sessionId);
+  }
+
+  async getInput(inputId: string): Promise<InputRecord | null> {
+    await this.prepare();
+    return this.pool.getInput(this.sessionId, inputId);
   }
 
   async getPendingInputCount(): Promise<number> {

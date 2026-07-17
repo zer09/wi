@@ -47,6 +47,9 @@ Examples:
 Action:
 
 - reject the message with a typed safe error
+- when a global command already has a durable terminal failure, reuse its safe code, message, and diagnostic ID on every identical retry
+- for rejected WebSocket upgrades and direct HTTP errors, return the same opaque diagnostic ID in the bounded response and redacted server record
+- classify a quarantined actor during subscription setup as non-recoverable `storage.corrupt`, not a retryable replay query
 - do not mutate session state
 - keep the connection open for ordinary recoverable mistakes
 - close the connection for repeated abuse, severe size violations, or authentication/origin failure
@@ -86,7 +89,9 @@ Action:
 - preserve committed partial text and mark it interrupted when required
 - discard/non-execute staged tool calls when terminal completion was not accepted
 - fail or interrupt the affected provider step and run
-- emit a safe `run.failed` or `run.interrupted` event
+- generate one diagnostic ID at the failure boundary
+- emit a bounded, server-authored `provider.step.failed`/`interrupted` and `run.failed`/`interrupted` message using that diagnostic ID
+- report raw failure detail only to the redacting diagnostic sink; never persist provider exception or provider-reported failure text
 
 Do not invoke `codex app-server` or silently change provider/endpoint/transport.
 
@@ -126,7 +131,7 @@ Action depends on the tool state and effect class:
 - transactional local effect: reconcile intended and observed state
 - non-idempotent effect with unknown outcome: mark `outcome_unknown`; never retry automatically
 
-Commit the ledger outcome before provider continuation.
+Commit the ledger outcome before provider continuation. A failed, cancelled, or unknown tool outcome receives one diagnostic ID; its durable event and redacted server diagnostic reuse that ID with session, run, step, call, tool, and error-code context. When an unknown outcome interrupts the run, the run terminal event reuses the same ID.
 
 ## 8. Run failure
 
@@ -135,7 +140,10 @@ A run fails when its provider/tool loop cannot safely continue.
 Action:
 
 - transition exactly once to `failed`, `cancelled`, or `interrupted`
-- persist partial assistant content and diagnostics
+- map the durable/browser message from the stable error code; never trust arbitrary `RunTaskResult.message` or exception text
+- generate one diagnostic ID at the actor boundary when the run task did not already report one
+- persist partial assistant content and the bounded server-authored message
+- write raw run-task or cancellation-cleanup detail only through the redacting diagnostic sink using that same ID
 - release scheduler permits
 - terminate or detach active resources according to policy
 - keep the session available for a later user message/resume decision
@@ -229,7 +237,9 @@ Before graceful termination, Wi attempts to:
 - close handles
 - write final redacted diagnostics
 
-A sudden crash may bypass these steps; recovery tests cover durable consequences.
+Startup and shutdown use one explicit lifecycle. All runtime and nested worker scalar bounds are validated before any provider, scheduler, storage worker, or actor registry is constructed. Shutdown begins closing the HTTP listener immediately; non-upgraded sockets drain only until the configured HTTP deadline, then incomplete or stalled connections are force-closed. Every socket entering the HTTP upgrade path transfers to gateway ownership before validation; rejected sockets have a fixed bounded response-drain window and are force-destroyed on its expiry or immediately during gateway shutdown. Accepted WebSockets remain under the same gateway deadline. A rejected WebSocket connection cleanup is treated like a timeout: remaining transports are terminated before errors are reported, custom logger failures cannot block isolation, and WebSocket-server close is attempted through an unconditional bounded path. If startup fails after the HTTP listener opens, Wi applies the same bounded listener cleanup, stops the WebSocket gateway, and then closes runtime storage before rejecting startup. Concurrent close waits for startup cleanup without awaiting itself. During graceful cancellation, the actor preserves a run task's diagnostic-bearing terminal result; a provider-step interruption and its resulting run interruption therefore share one causal diagnostic ID instead of replacing it with a synthetic stop result.
+
+A sudden crash may bypass these steps; recovery tests cover durable consequences. When restart recovery terminalizes related provider-step, tool, and run state as one causal boundary, those events share one diagnostic ID and one redacted `session_recovery_interrupted` server record. When a provider-step terminal event committed before the crash but its run terminal event did not, the provider-step projection retains the canonical diagnostic ID and run adoption reuses it.
 
 ## 14. Error categories
 
@@ -291,6 +301,8 @@ callId
 workerId
 pluginId
 ```
+
+Untrusted malformed payloads and exception messages are sampled to a fixed-size prefix before regular-expression scrubbing, UTF-8 encoding, or hashing. Logs retain source unit/length, sampled byte length, sampled digest, and a truncation flag rather than raw content or a synchronous full-input digest. A provider diagnostic record reuses the diagnostic ID stored in its safe durable failure event. Injected loggers are wrapped once in a non-throwing adapter; logging failure may discard a record but never changes rejection, isolation, persistence, or cleanup control flow. The production stdout sink handles stream errors, drops while backpressured, resumes only on `drain`, and disables itself permanently after sink failure, so `EPIPE` cannot terminate the backend and stalled output cannot build an application-level queue. Every in-band protocol rejection and every pre-upgrade or HTTP-parser rejection records the same diagnostic ID returned to the browser or raw HTTP peer.
 
 Mandatory redaction:
 

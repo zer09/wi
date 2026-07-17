@@ -7,8 +7,9 @@ describe("error taxonomy", () => {
     for (const code of ERROR_CODES) expect(ErrorCodeSchema.parse(code)).toBe(code);
   });
 
-  it("keeps connection-level protocol errors to the protocol subset", () => {
+  it("keeps control-plane error codes within the canonical taxonomy", () => {
     expect(PROTOCOL_ERROR_CODES.every((code) => ERROR_CODES.includes(code))).toBe(true);
+    expect(PROTOCOL_ERROR_CODES).toContain("storage.corrupt");
     expect(ErrorCodeSchema.safeParse("unknown.error").success).toBe(false);
   });
 });

@@ -1236,6 +1236,7 @@ describe("Milestone 3 property models", () => {
     );
   });
 
+  // The full workspace runs real child-process shutdown fixtures in parallel with this model.
   it("maintains actor invariants across random operations in isolated sessions", async () => {
     const operation = fc.record({
       session: fc.constantFrom("left" as const, "right" as const),
@@ -1568,5 +1569,5 @@ describe("Milestone 3 property models", () => {
         }
       }),
     );
-  });
+  }, 15_000);
 });

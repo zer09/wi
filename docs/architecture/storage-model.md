@@ -51,7 +51,7 @@ The catalog database is a rebuildable index used to:
 - locate sessions needing recovery or migration
 - avoid opening every session database at startup
 
-A successful session write never depends on a catalog write succeeding. The committed session result is returned to the caller before catalog observation completes, so publication can proceed immediately after commit. Catalog observations are queued independently and serialized per session.
+A successful session write never depends on a catalog write succeeding. The committed session result is returned to the caller before catalog observation completes, so publication can proceed immediately after commit. Catalog observations are independent and serialized per session. Each session retains at most one in-flight observation plus one coalesced latest dirty head; repeated commits never form an unbounded promise chain or retain every intermediate event array. The coalesced observer rereads the canonical session projection, so intermediate catalog work is safely skipped. A failed observation leaves the session database canonical and reports a diagnostic containing the session ID, attempted head sequence, and stable storage classification; diagnostic callback failures cannot replace or invalidate the committed result.
 
 ```text
 session transaction commit
@@ -180,7 +180,7 @@ It stores:
 
 `runs`, `messages`, `message_parts`, `provider_steps`, `tool_executions`, `approvals`, and `pending_inputs` are query-optimized projections maintained transactionally with events.
 
-They are rebuildable from canonical events in principle, but Wi updates them during normal operation to avoid full-history replay for ordinary UI reads.
+They are rebuildable from canonical events in principle, but Wi updates them during normal operation to avoid full-history replay for ordinary UI reads. Session schema version 3 adds `provider_steps.diagnostic_id`: terminal provider-step projections retain the diagnostic ID from their canonical failure event so a restart between step and run terminal commits preserves one causal identity.
 
 ## 6. Append-only meaning
 
@@ -193,7 +193,7 @@ Wi's event history is logically append-only:
 
 SQLite's physical database and WAL files are not required to be physically append-only. Checkpoints, page reuse, and maintenance operations may rewrite database pages.
 
-The guarantee is semantic and enforced by schema, triggers, repositories, and tests.
+The guarantee is semantic and enforced by schema, triggers, repositories, and tests. Event payload compatibility is additive: retained failure payload v1 rows remain canonical and readable, while new safe failure payloads use v2. Browser safety is provided by a deterministic wire projection and never by rewriting legacy event rows.
 
 ## 7. Transaction boundary
 
@@ -279,6 +279,8 @@ Every response carries:
 - optional diagnostic ID
 
 A worker crash, malformed response, or request timeout rejects its in-flight requests, emits a diagnostic, and causes the supervisor to create a clean replacement after the old worker's termination is confirmed. If termination cannot be confirmed within the bounded deadline, that worker slot remains unavailable rather than risking overlapping database owners. Every RPC has a finite timeout and may also be aborted by its caller. A timed-out or aborted write is classified as having an ambiguous outcome: it is not retried automatically, and callers reconcile it by durable `commandId` or `eventId`. Worker close is bounded and settles all pending waiters. The web server remains alive unless storage-wide invariants can no longer be trusted.
+
+Historical browser replay uses a dedicated page RPC rather than the unrestricted internal event-list API. Each page is limited inside the session worker by event count, complete serialized response bytes, and single-event bytes before `postMessage`. The page contract reserves a fixed byte allowance for both the page object and the versioned worker-RPC response envelope, so one event at the advertised single-event maximum always fits in a valid page. Live single-event capacity cannot exceed that historical capacity. The main thread validates and releases one page before requesting the next, and subscriber disconnect aborts the pending read RPC.
 
 ## 11. Session creation state machine
 
@@ -392,7 +394,7 @@ Requirements:
 - a failed session migration quarantines only that session
 - a failed catalog migration prevents normal server startup because session discovery cannot be trusted
 
-The first vertical slice begins at schema version 1 but still implements the migration framework.
+The first vertical slice begins at schema version 1 but still implements the migration framework. The current session schema is version 3; migrations from retained v1/v2 databases add tool-call occurrences and provider-step diagnostic IDs transactionally without rewriting canonical events.
 
 ## 16. Recovery states
 

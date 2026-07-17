@@ -14,6 +14,7 @@ import {
   workerError,
   type WorkerResponse,
 } from "../common/worker-rpc.js";
+import { SessionEventPageInputSchema } from "../types.js";
 import { SessionRepository } from "./repository.js";
 
 const WorkerDataSchema = z.strictObject({
@@ -204,6 +205,8 @@ function execute(operation: string, payloadValue: unknown): unknown {
           ? undefined
           : z.number().int().nonnegative().safe().parse(payload.throughSequence),
       );
+    case "session.getEventPageAfter":
+      return repository.getEventPageAfter(payload.input);
     case "session.getHeadSequence":
       return repository.getHeadSequence();
     case "session.getEventById":
@@ -248,6 +251,8 @@ function execute(operation: string, payloadValue: unknown): unknown {
       return repository.getPendingApprovals();
     case "session.getPendingInputs":
       return repository.getPendingInputs();
+    case "session.getInput":
+      return repository.getInput(z.string().min(1).parse(payload.inputId));
     case "session.getPendingInputCount":
       return repository.getPendingInputCount();
     case "session.recover":
@@ -342,6 +347,17 @@ port.on("message", (message: unknown) => {
     };
   }
   try {
+    if (response.ok && parsed.data.operation === "session.getEventPageAfter") {
+      const pageInput = SessionEventPageInputSchema.parse(
+        (parsed.data.payload as { readonly input?: unknown }).input,
+      );
+      if (Buffer.byteLength(JSON.stringify(response)) > pageInput.maximumBytes) {
+        throw new StorageError(
+          "storage.payload_too_large",
+          "Replay worker response exceeded its serialized byte limit",
+        );
+      }
+    }
     assertWorkerPayloadBounds(response, { maxNodes: 40_000, maxUnits: 2_000_000 });
   } catch (error) {
     response = {

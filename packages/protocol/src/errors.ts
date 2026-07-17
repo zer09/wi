@@ -6,6 +6,15 @@ export const ERROR_CODES = [
   "protocol.unsupported_version",
   "protocol.message_too_large",
   "protocol.command_id_conflict",
+  "replay.cursor_ahead",
+  "replay.unknown_session",
+  "replay.disconnected",
+  "replay.query_failed",
+  "replay.sequence_gap",
+  "replay.sequence_conflict",
+  "replay.subscriber_overflow",
+  "subscription.already_exists",
+  "subscription.not_found",
   "storage.busy",
   "storage.corrupt",
   "storage.migration_failed",
@@ -33,11 +42,33 @@ export const ERROR_CODES = [
 export const ErrorCodeSchema = z.enum(ERROR_CODES);
 export type ErrorCode = z.infer<typeof ErrorCodeSchema>;
 
+export const SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH = 512;
+export const LEGACY_FAILURE_MESSAGE_MAX_BYTES = 8 * 1_024;
+const utf8 = new TextEncoder();
+
+export const LegacyFailureMessageSchema = z.string().refine(
+  (message) => utf8.encode(message).byteLength <= LEGACY_FAILURE_MESSAGE_MAX_BYTES,
+  { message: "Legacy failure message exceeds its UTF-8 byte limit" },
+);
+export const SafeDiagnosticMessageSchema = z
+  .string()
+  .max(SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH);
+
 export const PROTOCOL_ERROR_CODES = [
   "protocol.invalid_json",
   "protocol.invalid_message",
   "protocol.unsupported_version",
   "protocol.message_too_large",
+  "replay.cursor_ahead",
+  "replay.unknown_session",
+  "replay.disconnected",
+  "replay.query_failed",
+  "replay.sequence_gap",
+  "replay.sequence_conflict",
+  "replay.subscriber_overflow",
+  "subscription.already_exists",
+  "subscription.not_found",
+  "storage.corrupt",
 ] as const;
 
 export const ProtocolErrorCodeSchema = z.enum(PROTOCOL_ERROR_CODES);

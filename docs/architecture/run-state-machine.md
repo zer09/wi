@@ -283,7 +283,7 @@ When approval is required:
 
 No browser subscriber is required. The approval remains durable.
 
-Two tabs may attempt resolution. The first valid database transition from `pending` wins. Later attempts receive `approval_already_resolved` and do not alter execution.
+Two tabs may attempt resolution. The first valid database transition from `pending` wins. Later attempts receive `approval_already_resolved` and do not alter execution. If another approval or input for the same run remains pending, resolving this approval does not emit `run.started`, leave `waiting_for_user`, or release the approval waiter. The actor records that durable resolution as deferred. The last pending interaction performs the running transition and, only after its transaction commits, releases every deferred approval/input waiter for the run. A restored task launches only after this final transition commits.
 
 Approval records bind to:
 
@@ -296,6 +296,12 @@ Approval records bind to:
 - presented command/path summary
 
 A changed call cannot reuse an old approval.
+
+### Pending-input continuation
+
+When explicit input is required, the run task commits `input.requested`, its pending-input projection, `run.waiting_for_user`, and the `running -> waiting_for_user` transition before waiting. `input.respond` then performs one command transaction that resolves the input projection with its canonical JSON value and appends `input.resolved`. When no other interaction for that run remains pending, the same transaction also appends `run.started` and transitions the run from `waiting_for_user` to `running`. The transaction always commits before publishing or waking work.
+
+Each waiter receives only its matching input value. When several interactions are pending, a resolved input value remains deferred and cannot wake its waiter while the run is still `waiting_for_user`. The final interaction transaction commits `run.started` first, then releases all deferred waiters with their canonical stored values. An identical duplicate returns the original acceptance and cannot create another transition. A restored run with pending input remains dormant until the last required durable response commits; if restart occurs after acceptance but before the old task consumes the value, the replacement task reads the resolved input projection and continues from canonical storage.
 
 ## 13. Provider continuation after tool result
 
@@ -319,8 +325,10 @@ The provider never receives a tool result that has not committed.
 2. Signal active provider/tool operations through AbortController.
 3. Reject new tool promotions and executions for that run.
 4. Wait for bounded cancellation cleanup.
-5. Commit run.cancelled, or interrupted when safe completion cannot be proven.
+5. Commit run.cancelled, or interrupted only after safe completion/isolation is proven.
 ```
+
+The first slice runs cooperative providers and tools in-process and has no hard sub-process isolation boundary for them. If one ignores cancellation beyond the actor deadline, Wi does not mark the run terminal, release/reuse its scheduler permit, or report synthetic detachment. The production process logs a redacted fatal diagnostic and exits nonzero, allowing restart recovery to conservatively interrupt the still-nonterminal durable run.
 
 Late provider completion after cancellation cannot transition the run to completed.
 

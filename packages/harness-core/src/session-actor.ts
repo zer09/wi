@@ -18,6 +18,7 @@ import type {
   AppendTransactionInput,
   AppendTransactionInspection,
   AppendTransactionResult,
+  InputRecord,
   PendingApprovalRecord,
   PendingInputRecord,
   ProviderStepRecord,
@@ -34,7 +35,8 @@ import {
   EventReconciliationIntegrityError,
   reconcileCommittedEventBatch,
 } from "./event-reconciliation.js";
-import { recoverSession } from "./recovery.js";
+import { safeRunFailureMessage } from "./failure-messages.js";
+import { recoverSession, type RecoveryFailureDiagnostic } from "./recovery.js";
 import { assertCurrentToolEffectClass } from "./run-policy.js";
 import {
   isTerminalRunState,
@@ -85,6 +87,7 @@ export interface SessionActorStorage {
   getNonterminalRuns(): Promise<readonly RunRecord[]>;
   getPendingApprovals(): Promise<readonly PendingApprovalRecord[]>;
   getPendingInputs(): Promise<readonly PendingInputRecord[]>;
+  getInput?(inputId: string): Promise<InputRecord | null>;
   recover(): Promise<SessionRecoveryResult>;
   close?(): Promise<void>;
 }
@@ -95,6 +98,27 @@ export interface SessionActorIds {
   readonly messageId: () => string;
   readonly partId: () => string;
   readonly diagnosticId: () => string;
+}
+
+export interface SessionToolFailureDiagnostic {
+  readonly diagnosticId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly stepId: string;
+  readonly callId: string;
+  readonly toolName: string;
+  readonly state: "failed";
+  readonly code: ErrorCode;
+  readonly error: unknown;
+}
+
+export interface SessionRunFailureDiagnostic {
+  readonly diagnosticId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly state: "failed" | "interrupted";
+  readonly code: ErrorCode;
+  readonly error: unknown;
 }
 
 export interface RunTaskCommitOptions {
@@ -287,6 +311,7 @@ export interface RunTaskContext {
     options?: RunTaskCommitOptions,
   ) => Promise<AppendTransactionResult>;
   readonly waitForApproval: (approvalId: string) => Promise<void>;
+  readonly waitForInput: (inputId: string) => Promise<CanonicalJsonValue>;
 }
 
 export interface RunProviderSnapshot {
@@ -302,18 +327,19 @@ export interface RunTaskResult {
   readonly state: RunTaskTerminalState;
   readonly code?: ErrorCode;
   readonly message?: string;
+  readonly diagnosticId?: string;
+  readonly failureCause?: unknown;
   readonly cancellationFailure?: boolean;
 }
 
 export type RunTask = (context: RunTaskContext) => Promise<RunTaskResult | void>;
 
-// Settling confirms that the underlying operation has stopped, even if its result promise
-// cannot settle. Rejection reports cleanup failure after stop; it must not mean "still running".
-// This keeps permit release tied to real operation termination without poisoning the session.
+// Resolution confirms the underlying operation has stopped. Returning its terminal result keeps
+// causal diagnostics intact; void means the stopper has proof of termination but no task result.
 export type CancelRunTask = (
   context: RunTaskContext,
   reason: unknown,
-) => void | Promise<void>;
+) => void | RunTaskResult | Promise<void | RunTaskResult>;
 
 export interface RunTaskIsolation {
   readonly status: "terminated" | "detached" | "quarantined";
@@ -365,6 +391,18 @@ interface ApprovalWaiter {
   readonly reject: (error: unknown) => void;
   readonly signal: AbortSignal;
   readonly onAbort: () => void;
+}
+
+interface InputWaiter {
+  readonly resolve: (value: CanonicalJsonValue) => void;
+  readonly reject: (error: unknown) => void;
+  readonly signal: AbortSignal;
+  readonly onAbort: () => void;
+}
+
+interface ResolvedInputValue {
+  readonly runId: string;
+  readonly value: CanonicalJsonValue;
 }
 
 interface ActiveRun {
@@ -426,11 +464,24 @@ export class SessionActor {
   private readonly cancellationWait: ShutdownWait;
   private readonly onActivity: (() => void) | undefined;
   private readonly onFault: ((error: unknown) => void) | undefined;
+  private readonly onToolFailureDiagnostic:
+    | ((diagnostic: SessionToolFailureDiagnostic) => void)
+    | undefined;
+  private readonly onRunFailureDiagnostic:
+    | ((diagnostic: SessionRunFailureDiagnostic) => void)
+    | undefined;
+  private readonly onRecoveryFailureDiagnostic:
+    | ((diagnostic: RecoveryFailureDiagnostic) => void)
+    | undefined;
   private readonly shutdownWait: ShutdownWait;
   private readonly queuedRuns: RunRecord[] = [];
   private readonly pendingApprovals = new Map<string, PendingApprovalRecord>();
   private readonly pendingInputs = new Map<string, PendingInputRecord>();
   private readonly approvalWaiters = new Map<string, Set<ApprovalWaiter>>();
+  private readonly inputWaiters = new Map<string, Set<InputWaiter>>();
+  private readonly deferredApprovalRunIds = new Map<string, string>();
+  private readonly deferredInputValues = new Map<string, ResolvedInputValue>();
+  private readonly resolvedInputValues = new Map<string, ResolvedInputValue>();
   private readonly subscribers = new Set<string>();
   // A run may terminalize first, so the actor retains cleanup until shutdown can safely drain it.
   private readonly cancellationCleanups = new Set<Promise<void>>();
@@ -457,6 +508,9 @@ export class SessionActor {
     readonly cancellationWait?: ShutdownWait;
     readonly onActivity?: () => void;
     readonly onFault?: (error: unknown) => void;
+    readonly onToolFailureDiagnostic?: (diagnostic: SessionToolFailureDiagnostic) => void;
+    readonly onRunFailureDiagnostic?: (diagnostic: SessionRunFailureDiagnostic) => void;
+    readonly onRecoveryFailureDiagnostic?: (diagnostic: RecoveryFailureDiagnostic) => void;
     readonly shutdownWait?: ShutdownWait;
   }) {
     this.sessionId = options.storage.sessionId;
@@ -477,6 +531,9 @@ export class SessionActor {
     this.cancellationWait = options.cancellationWait ?? defaultShutdownWait;
     this.onActivity = options.onActivity;
     this.onFault = options.onFault;
+    this.onToolFailureDiagnostic = options.onToolFailureDiagnostic;
+    this.onRunFailureDiagnostic = options.onRunFailureDiagnostic;
+    this.onRecoveryFailureDiagnostic = options.onRecoveryFailureDiagnostic;
     this.shutdownWait = options.shutdownWait ?? defaultShutdownWait;
   }
 
@@ -496,6 +553,9 @@ export class SessionActor {
     readonly cancellationWait?: ShutdownWait;
     readonly onActivity?: () => void;
     readonly onFault?: (error: unknown) => void;
+    readonly onToolFailureDiagnostic?: (diagnostic: SessionToolFailureDiagnostic) => void;
+    readonly onRunFailureDiagnostic?: (diagnostic: SessionRunFailureDiagnostic) => void;
+    readonly onRecoveryFailureDiagnostic?: (diagnostic: RecoveryFailureDiagnostic) => void;
     readonly shutdownWait?: ShutdownWait;
   }): Promise<SessionActor> {
     const actor = new SessionActor(options);
@@ -538,6 +598,22 @@ export class SessionActor {
 
   private touch(): void {
     this.onActivity?.();
+  }
+
+  private reportToolFailure(diagnostic: SessionToolFailureDiagnostic): void {
+    try {
+      this.onToolFailureDiagnostic?.(diagnostic);
+    } catch {
+      // Diagnostics must never replace an already accepted approval outcome.
+    }
+  }
+
+  private reportRunFailure(diagnostic: SessionRunFailureDiagnostic): void {
+    try {
+      this.onRunFailureDiagnostic?.(diagnostic);
+    } catch {
+      // Diagnostics must never replace an already committed run outcome.
+    }
   }
 
   private rejectUnavailable<T>(): Promise<T> | null {
@@ -687,8 +763,13 @@ export class SessionActor {
 
   private waitForApproval(approvalId: string, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
-    // Resolution may commit between the run loop's ledger read and waiter registration.
-    if (!this.pendingApprovals.has(approvalId)) return Promise.resolve();
+    // A resolved approval remains gated until the last interaction commits run.started.
+    if (
+      !this.pendingApprovals.has(approvalId) &&
+      !this.deferredApprovalRunIds.has(approvalId)
+    ) {
+      return Promise.resolve();
+    }
     return new Promise<void>((resolve, reject) => {
       const waiters = this.approvalWaiters.get(approvalId) ?? new Set<ApprovalWaiter>();
       const waiter: ApprovalWaiter = {
@@ -705,6 +786,145 @@ export class SessionActor {
       this.approvalWaiters.set(approvalId, waiters);
       signal.addEventListener("abort", waiter.onAbort, { once: true });
     });
+  }
+
+  private releaseDeferredInteractionWaiters(runId: string): void {
+    for (const [approvalId, deferredRunId] of this.deferredApprovalRunIds) {
+      if (deferredRunId !== runId) continue;
+      this.deferredApprovalRunIds.delete(approvalId);
+      this.settleApprovalWaiters(approvalId);
+    }
+    for (const [inputId, resolved] of this.deferredInputValues) {
+      if (resolved.runId !== runId) continue;
+      this.deferredInputValues.delete(inputId);
+      this.settleInputWaiters(inputId, resolved.runId, resolved.value);
+    }
+  }
+
+  private settleInputWaiters(
+    inputId: string,
+    runId: string,
+    value: CanonicalJsonValue,
+  ): void {
+    const waiters = this.inputWaiters.get(inputId);
+    if (waiters === undefined) {
+      // The command may commit just before the task registers its waiter.
+      this.resolvedInputValues.set(inputId, { runId, value });
+      return;
+    }
+    this.inputWaiters.delete(inputId);
+    for (const waiter of waiters) {
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+      waiter.resolve(value);
+    }
+  }
+
+  private registerInputWaiter(
+    inputId: string,
+    signal: AbortSignal,
+  ): Promise<CanonicalJsonValue> {
+    return new Promise<CanonicalJsonValue>((resolve, reject) => {
+      const waiters = this.inputWaiters.get(inputId) ?? new Set<InputWaiter>();
+      const waiter: InputWaiter = {
+        resolve,
+        reject,
+        signal,
+        onAbort: () => {
+          waiters.delete(waiter);
+          if (waiters.size === 0) this.inputWaiters.delete(inputId);
+          reject(signal.reason ?? new DOMException("Input wait aborted", "AbortError"));
+        },
+      };
+      waiters.add(waiter);
+      this.inputWaiters.set(inputId, waiters);
+      signal.addEventListener("abort", waiter.onAbort, { once: true });
+    });
+  }
+
+  private async waitForInput(
+    inputId: string,
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<CanonicalJsonValue> {
+    signal.throwIfAborted();
+    const resolved = this.resolvedInputValues.get(inputId);
+    if (resolved !== undefined) {
+      this.resolvedInputValues.delete(inputId);
+      if (resolved.runId !== runId) {
+        throw new SessionActorError(
+          "session.invalid_transition",
+          `Input ${inputId} does not belong to run ${runId}`,
+        );
+      }
+      return resolved.value;
+    }
+
+    const deferred = this.deferredInputValues.get(inputId);
+    if (deferred !== undefined) {
+      if (deferred.runId !== runId) {
+        throw new SessionActorError(
+          "session.invalid_transition",
+          `Input ${inputId} does not belong to run ${runId}`,
+        );
+      }
+      return this.registerInputWaiter(inputId, signal);
+    }
+
+    const pending = this.pendingInputs.get(inputId);
+    if (pending !== undefined) {
+      if (pending.runId !== runId) {
+        throw new SessionActorError(
+          "session.invalid_transition",
+          `Input ${inputId} does not belong to run ${runId}`,
+        );
+      }
+      return this.registerInputWaiter(inputId, signal);
+    }
+
+    const stored = await this.storage.getInput?.(inputId);
+    signal.throwIfAborted();
+    const resolvedDuringRead = this.resolvedInputValues.get(inputId);
+    if (resolvedDuringRead !== undefined) {
+      this.resolvedInputValues.delete(inputId);
+      if (resolvedDuringRead.runId !== runId) {
+        throw new SessionActorError(
+          "session.invalid_transition",
+          `Input ${inputId} does not belong to run ${runId}`,
+        );
+      }
+      return resolvedDuringRead.value;
+    }
+    const deferredDuringRead = this.deferredInputValues.get(inputId);
+    if (deferredDuringRead !== undefined) {
+      if (deferredDuringRead.runId !== runId) {
+        throw new SessionActorError(
+          "session.invalid_transition",
+          `Input ${inputId} does not belong to run ${runId}`,
+        );
+      }
+      return this.registerInputWaiter(inputId, signal);
+    }
+    if (stored === undefined || stored === null || stored.runId !== runId) {
+      throw new SessionActorError(
+        "session.invalid_transition",
+        `Input ${inputId} does not belong to run ${runId}`,
+      );
+    }
+    if (stored.state === "resolved") return stored.value;
+    if (stored.state === "pending") {
+      this.pendingInputs.set(inputId, {
+        inputId: stored.inputId,
+        runId: stored.runId,
+        state: "pending",
+        prompt: stored.prompt,
+        requestedAtMs: stored.requestedAtMs,
+      });
+      return this.registerInputWaiter(inputId, signal);
+    }
+    throw new SessionActorError(
+      "session.invalid_transition",
+      `Input ${inputId} cannot continue from state ${stored.state}`,
+    );
   }
 
   private applyProjectionMemory(input: AppendTransactionInput): void {
@@ -846,6 +1066,9 @@ export class SessionActor {
         eventId: this.ids.eventId,
         diagnosticId: this.ids.diagnosticId,
         publishCommitted: (event) => this.publishOrThrow([event]),
+        ...(this.onRecoveryFailureDiagnostic === undefined
+          ? {}
+          : { onFailureDiagnostic: this.onRecoveryFailureDiagnostic }),
         resumeToolLoop: this.resumeRestoredRuns,
         ...(this.currentToolEffectClass === undefined
           ? {}
@@ -889,7 +1112,12 @@ export class SessionActor {
     }
 
     if (this.activeRun !== null && this.resumeRestoredRuns) {
-      this.launchTask(this.activeRun);
+      const waitsForInput =
+        this.activeRun.record.state === "waiting_for_user" &&
+        [...this.pendingInputs.values()].some((input) => input.runId === this.activeRun?.runId);
+      // A restored input wait has no live task to wake. Keep it dormant until the durable
+      // response transitions the run back to running, then launch reconstruction.
+      if (!waitsForInput) this.launchTask(this.activeRun);
     } else if (this.activeRun === null && this.queuedRuns.length > 0) {
       await this.mailbox.enqueue(async () => this.startNextRun());
     }
@@ -1140,6 +1368,8 @@ export class SessionActor {
       commitTransaction: (input, options) =>
         this.commitTaskTransaction(active.runId, active.generation, input, options),
       waitForApproval: (approvalId) => this.waitForApproval(approvalId, active.scope.signal),
+      waitForInput: (inputId) =>
+        this.waitForInput(inputId, active.runId, active.scope.signal),
     };
     let confirmStopped!: (result: RunTaskResult) => void;
     const stopped = new Promise<RunTaskResult>((resolve) => {
@@ -1154,6 +1384,7 @@ export class SessionActor {
       : this.scheduler.withProviderPermit(active.scope.signal, task);
     active.task = scheduled
       .then((result): RunTaskResult => {
+        if (result !== undefined && result.state !== "completed") return result;
         if (active.scope.cancelled && active.record.state === "running") {
           return {
             state: "interrupted",
@@ -1175,7 +1406,7 @@ export class SessionActor {
           this.postTaskOutcome(active.runId, active.generation, {
             state: active.scope.cancelled ? "interrupted" : "failed",
             code: active.scope.cancelled ? "provider.cancelled" : "provider.protocol_error",
-            message: error instanceof Error ? error.message : "Run task failed",
+            failureCause: error,
           });
         },
       )
@@ -1189,12 +1420,25 @@ export class SessionActor {
     }
     const context = active.context;
     const confirmStopped = active.confirmStopped;
-    const gracefulStop = Promise.resolve()
-      .then(() => this.cancelRunTask(context, reason))
-      .then(
-        () => ({ stopped: true as const, cleanupError: null }),
-        (cleanupError: unknown) => ({ stopped: true as const, cleanupError }),
-      );
+    let cancellationRequest: ReturnType<CancelRunTask>;
+    try {
+      // Capture the task's completion promise before an abort can settle and unregister it.
+      cancellationRequest = this.cancelRunTask(context, reason);
+    } catch (error) {
+      cancellationRequest = Promise.reject(error);
+    }
+    const gracefulStop = Promise.resolve(cancellationRequest).then(
+      (terminalResult) => ({
+        stopped: true as const,
+        terminalResult: terminalResult ?? null,
+        cleanupError: null,
+      }),
+      (cleanupError: unknown) => ({
+        stopped: true as const,
+        terminalResult: null,
+        cleanupError,
+      }),
+    );
     const cancellation = this.finishTaskCancellation(
       context,
       reason,
@@ -1209,10 +1453,25 @@ export class SessionActor {
     });
   }
 
+  private isolateRunTask(context: RunTaskContext, reason: unknown): RunTaskIsolation {
+    const isolation: unknown = this.forceStopRunTask(context, reason);
+    assertRunTaskIsolation(isolation);
+    if (isolation.cleanup !== undefined) {
+      void Promise.resolve(isolation.cleanup).catch(() => {
+        // Isolation already succeeded; later best-effort cleanup cannot affect run or permit state.
+      });
+    }
+    return isolation;
+  }
+
   private async finishTaskCancellation(
     context: RunTaskContext,
     reason: unknown,
-    gracefulStop: Promise<{ readonly stopped: true; readonly cleanupError: unknown | null }>,
+    gracefulStop: Promise<{
+      readonly stopped: true;
+      readonly terminalResult: RunTaskResult | null;
+      readonly cleanupError: unknown | null;
+    }>,
     confirmStopped: (result: RunTaskResult) => void,
   ): Promise<void> {
     const stoppedBeforeDeadline = await this.cancellationWait(
@@ -1221,32 +1480,26 @@ export class SessionActor {
     if (stoppedBeforeDeadline) {
       const result = await gracefulStop;
       if (result.cleanupError === null) {
-        confirmStopped({
-          state: "interrupted",
-          code: "provider.cancelled",
-          message: "Run task cancellation completed.",
-        });
+        confirmStopped(
+          result.terminalResult ?? {
+            state: "interrupted",
+            code: "provider.cancelled",
+            message: "Run task cancellation completed.",
+          },
+        );
         return;
       }
+      this.isolateRunTask(context, reason);
       confirmStopped({
         state: "interrupted",
         code: "provider.cancelled",
-        message:
-          result.cleanupError instanceof Error
-            ? `Run task stopped with a cancellation cleanup error: ${result.cleanupError.message}`
-            : "Run task stopped with a cancellation cleanup error.",
+        failureCause: result.cleanupError,
         cancellationFailure: true,
       });
       return;
     }
 
-    const isolation: unknown = this.forceStopRunTask(context, reason);
-    assertRunTaskIsolation(isolation);
-    if (isolation.cleanup !== undefined) {
-      void Promise.resolve(isolation.cleanup).catch(() => {
-        // Isolation already succeeded; later best-effort cleanup cannot affect run or permit state.
-      });
-    }
+    const isolation = this.isolateRunTask(context, reason);
     confirmStopped({
       state: "interrupted",
       code: "provider.cancelled",
@@ -1300,20 +1553,25 @@ export class SessionActor {
         : terminalStateForTask(active.record.state, result.state);
     if (terminal === null) return;
     const atMs = this.now();
-    const errorCode = result.code ?? (terminal === "interrupted" ? "provider.incomplete" : "provider.protocol_error");
-    const message = result.message ?? (terminal === "interrupted" ? "Run was interrupted." : "Run task failed.");
+    const isFailure = terminal === "failed" || terminal === "interrupted";
+    const errorCode =
+      result.code ?? (terminal === "interrupted" ? "provider.incomplete" : "provider.protocol_error");
+    const message = safeRunFailureMessage(errorCode);
+    const diagnosticId = isFailure
+      ? (result.diagnosticId ?? this.ids.diagnosticId())
+      : null;
     const event =
-      terminal === "failed" || terminal === "interrupted"
+      isFailure
         ? {
             eventId: this.ids.eventId(),
             eventType: terminal === "failed" ? ("run.failed" as const) : ("run.interrupted" as const),
             createdAtMs: atMs,
             data: {
-              eventVersion: 1 as const,
+              eventVersion: 2 as const,
               runId,
               code: errorCode,
               message,
-              diagnosticId: this.ids.diagnosticId(),
+              diagnosticId: diagnosticId as string,
             },
           }
         : {
@@ -1376,6 +1634,19 @@ export class SessionActor {
     }
     if (committed === null || terminalRecord === null) throw lastError;
     this.publish(committed.events);
+    if (isFailure && result.diagnosticId === undefined) {
+      this.reportRunFailure({
+        diagnosticId: diagnosticId as string,
+        sessionId: this.sessionId,
+        runId,
+        state: terminal,
+        code: errorCode,
+        error:
+          result.failureCause ??
+          result.message ??
+          new SessionActorError(errorCode, message),
+      });
+    }
     active.record = terminalRecord;
     for (const [approvalId, approval] of this.pendingApprovals) {
       if (approval.runId === runId) {
@@ -1385,6 +1656,15 @@ export class SessionActor {
     }
     for (const [inputId, input] of this.pendingInputs) {
       if (input.runId === runId) this.pendingInputs.delete(inputId);
+    }
+    for (const [approvalId, deferredRunId] of this.deferredApprovalRunIds) {
+      if (deferredRunId === runId) this.deferredApprovalRunIds.delete(approvalId);
+    }
+    for (const [inputId, deferred] of this.deferredInputValues) {
+      if (deferred.runId === runId) this.deferredInputValues.delete(inputId);
+    }
+    for (const [inputId, resolved] of this.resolvedInputValues) {
+      if (resolved.runId === runId) this.resolvedInputValues.delete(inputId);
     }
     this.activeRun = null;
     this.touch();
@@ -1486,8 +1766,14 @@ export class SessionActor {
           const current = await this.storage.getRun(identity.duplicate.runId);
           if (current !== null && this.activeRun?.runId === current.runId) {
             this.activeRun.record = current;
+            this.deferredApprovalRunIds.set(command.params.approvalId, current.runId);
+            if (current.state === "running") {
+              this.releaseDeferredInteractionWaiters(current.runId);
+              if (this.activeRun.task === null && this.resumeRestoredRuns) {
+                this.launchTask(this.activeRun);
+              }
+            }
           }
-          this.settleApprovalWaiters(command.params.approvalId);
         }
         return identity.duplicate;
       }
@@ -1498,16 +1784,21 @@ export class SessionActor {
           `Approval ${command.params.approvalId} is missing or already resolved`,
         );
       }
-      if (
-        this.activeRun?.runId !== approval.runId ||
-        this.activeRun.record.state !== "waiting_for_user"
-      ) {
+      const active = this.activeRun;
+      if (active?.runId !== approval.runId || active.record.state !== "waiting_for_user") {
         throw new SessionActorError(
           "session.invalid_transition",
           `Approval ${approval.approvalId} does not belong to the active waiting run`,
         );
       }
       const atMs = this.now();
+      const hasOtherPendingInteraction =
+        [...this.pendingApprovals.values()].some(
+          (pending) =>
+            pending.runId === approval.runId && pending.approvalId !== approval.approvalId,
+        ) ||
+        [...this.pendingInputs.values()].some((input) => input.runId === approval.runId);
+      const resumesRun = this.runTaskOwnsSchedulerPermits && !hasOtherPendingInteraction;
       const resolvedEvent = {
         eventId: this.ids.eventId(),
         eventType: "tool.approval.resolved" as const,
@@ -1522,6 +1813,7 @@ export class SessionActor {
       };
 
       let transaction: AcceptCommandInput["transaction"];
+      let denialDiagnostic: SessionToolFailureDiagnostic | null = null;
       if (this.runTaskOwnsSchedulerPermits) {
         const tool = await this.storage.getToolExecution?.(approval.callId);
         if (tool === null || tool === undefined || tool.effectClass === null) {
@@ -1542,32 +1834,49 @@ export class SessionActor {
         );
         const denied = command.params.resolution === "denied";
         const denialMessage = "The user denied this tool call.";
+        const denialEvent = denied
+          ? (() => {
+              const diagnosticId = this.ids.diagnosticId();
+              denialDiagnostic = {
+                diagnosticId,
+                sessionId: this.sessionId,
+                runId: approval.runId,
+                stepId: tool.stepId,
+                callId: tool.callId,
+                toolName: tool.toolName,
+                state: "failed",
+                code: "tool.approval_denied",
+                error: new SessionActorError("tool.approval_denied", denialMessage),
+              };
+              return {
+                eventId: this.ids.eventId(),
+                eventType: "tool.execution.failed" as const,
+                createdAtMs: atMs,
+                data: {
+                  eventVersion: 2 as const,
+                  runId: approval.runId,
+                  callId: approval.callId,
+                  code: "tool.approval_denied" as const,
+                  message: denialMessage,
+                  diagnosticId,
+                },
+              };
+            })()
+          : null;
         transaction = {
           events: [
             resolvedEvent,
-            ...(denied
+            ...(denialEvent === null ? [] : [denialEvent]),
+            ...(resumesRun
               ? [
                   {
                     eventId: this.ids.eventId(),
-                    eventType: "tool.execution.failed" as const,
+                    eventType: "run.started" as const,
                     createdAtMs: atMs,
-                    data: {
-                      eventVersion: 1 as const,
-                      runId: approval.runId,
-                      callId: approval.callId,
-                      code: "tool.approval_denied" as const,
-                      message: denialMessage,
-                      diagnosticId: this.ids.diagnosticId(),
-                    },
+                    data: { eventVersion: 1 as const, runId: approval.runId },
                   },
                 ]
               : []),
-            {
-              eventId: this.ids.eventId(),
-              eventType: "run.started",
-              createdAtMs: atMs,
-              data: { eventVersion: 1, runId: approval.runId },
-            },
           ],
           projections: [
             {
@@ -1597,18 +1906,22 @@ export class SessionActor {
                 ? { code: "tool.approval_denied", message: denialMessage }
                 : tool.error,
             },
-            {
-              kind: "run.state",
-              runId: approval.runId,
-              expectedState: "waiting_for_user",
-              nextState: "running",
-              startedAtMs: this.activeRun.record.startedAtMs,
-              completedAtMs: null,
-              cancelledAtMs: null,
-              failureCategory: null,
-              failureMessage: null,
-              activeProviderStepId: this.activeRun.record.activeProviderStepId,
-            },
+            ...(resumesRun
+              ? [
+                  {
+                    kind: "run.state" as const,
+                    runId: approval.runId,
+                    expectedState: "waiting_for_user" as const,
+                    nextState: "running" as const,
+                    startedAtMs: active.record.startedAtMs,
+                    completedAtMs: null,
+                    cancelledAtMs: null,
+                    failureCategory: null,
+                    failureMessage: null,
+                    activeProviderStepId: active.record.activeProviderStepId,
+                  },
+                ]
+              : []),
           ],
         };
       } else {
@@ -1637,8 +1950,15 @@ export class SessionActor {
       });
       this.publish(acceptance.events);
       this.applyProjectionMemory(transaction);
+      if (denialDiagnostic !== null) this.reportToolFailure(denialDiagnostic);
       this.pendingApprovals.delete(approval.approvalId);
-      if (this.runTaskOwnsSchedulerPermits) this.settleApprovalWaiters(approval.approvalId);
+      if (this.runTaskOwnsSchedulerPermits) {
+        this.deferredApprovalRunIds.set(approval.approvalId, approval.runId);
+        if (resumesRun) this.releaseDeferredInteractionWaiters(approval.runId);
+      }
+      if (resumesRun && active.task === null && this.resumeRestoredRuns) {
+        this.launchTask(active);
+      }
       return acceptance;
     });
   }
@@ -1652,6 +1972,29 @@ export class SessionActor {
       const identity = await this.commandIdentity(command);
       if (identity.duplicate !== null) {
         this.pendingInputs.delete(command.params.inputId);
+        const resolved = identity.duplicate.events.find(
+          (
+            event,
+          ): event is Extract<SessionEvent, { readonly eventType: "input.resolved" }> =>
+            event.eventType === "input.resolved" &&
+            event.data.inputId === command.params.inputId,
+        );
+        if (resolved !== undefined) {
+          const current = await this.storage.getRun(resolved.data.runId);
+          if (current !== null && this.activeRun?.runId === current.runId) {
+            this.activeRun.record = current;
+            this.deferredInputValues.set(resolved.data.inputId, {
+              runId: resolved.data.runId,
+              value: resolved.data.value,
+            });
+            if (current.state === "running") {
+              this.releaseDeferredInteractionWaiters(current.runId);
+              if (this.activeRun.task === null && this.resumeRestoredRuns) {
+                this.launchTask(this.activeRun);
+              }
+            }
+          }
+        }
         return identity.duplicate;
       }
       const input = this.pendingInputs.get(command.params.inputId);
@@ -1661,13 +2004,65 @@ export class SessionActor {
           `Input ${command.params.inputId} is missing or already resolved`,
         );
       }
-      if (this.activeRun?.runId !== input.runId || this.activeRun.record.state !== "waiting_for_user") {
+      const active = this.activeRun;
+      if (active?.runId !== input.runId || active.record.state !== "waiting_for_user") {
         throw new SessionActorError(
           "session.invalid_transition",
           `Input ${input.inputId} does not belong to the active waiting run`,
         );
       }
       const atMs = this.now();
+      const resolvedEvent = {
+        eventId: this.ids.eventId(),
+        eventType: "input.resolved" as const,
+        createdAtMs: atMs,
+        data: {
+          eventVersion: 1 as const,
+          runId: input.runId,
+          inputId: input.inputId,
+          value: command.params.value,
+        },
+      };
+      const hasOtherPendingInteraction =
+        [...this.pendingApprovals.values()].some((approval) => approval.runId === input.runId) ||
+        [...this.pendingInputs.values()].some(
+          (pending) => pending.runId === input.runId && pending.inputId !== input.inputId,
+        );
+      const resumesRun = !hasOtherPendingInteraction;
+      const inputResolution = {
+        kind: "input.resolve" as const,
+        inputId: input.inputId,
+        resolvedAtMs: atMs,
+        value: command.params.value,
+      };
+      const transaction: AcceptCommandInput["transaction"] = resumesRun
+        ? {
+            events: [
+              resolvedEvent,
+              {
+                eventId: this.ids.eventId(),
+                eventType: "run.started",
+                createdAtMs: atMs,
+                data: { eventVersion: 1, runId: input.runId },
+              },
+            ],
+            projections: [
+              inputResolution,
+              {
+                kind: "run.state",
+                runId: input.runId,
+                expectedState: "waiting_for_user",
+                nextState: "running",
+                startedAtMs: active.record.startedAtMs,
+                completedAtMs: null,
+                cancelledAtMs: null,
+                failureCategory: null,
+                failureMessage: null,
+                activeProviderStepId: active.record.activeProviderStepId,
+              },
+            ],
+          }
+        : { events: [resolvedEvent], projections: [inputResolution] };
       const acceptance = await this.acceptCommand({
         commandId: command.commandId,
         commandMethod: command.method,
@@ -1675,32 +2070,19 @@ export class SessionActor {
         result: { inputId: input.inputId },
         acceptedAtMs: atMs,
         runId: input.runId,
-        transaction: {
-          events: [
-            {
-              eventId: this.ids.eventId(),
-              eventType: "input.resolved",
-              createdAtMs: atMs,
-              data: {
-                eventVersion: 1,
-                runId: input.runId,
-                inputId: input.inputId,
-                value: command.params.value,
-              },
-            },
-          ],
-          projections: [
-            {
-              kind: "input.resolve",
-              inputId: input.inputId,
-              resolvedAtMs: atMs,
-              value: command.params.value,
-            },
-          ],
-        },
+        transaction,
       });
       this.publish(acceptance.events);
+      this.applyProjectionMemory(transaction);
       this.pendingInputs.delete(input.inputId);
+      this.deferredInputValues.set(input.inputId, {
+        runId: input.runId,
+        value: command.params.value,
+      });
+      if (resumesRun) this.releaseDeferredInteractionWaiters(input.runId);
+      if (resumesRun && active.task === null && this.resumeRestoredRuns) {
+        this.launchTask(active);
+      }
       return acceptance;
     });
   }
@@ -1720,6 +2102,20 @@ export class SessionActor {
     return this.mailbox.enqueue(() => {
       this.subscribers.delete(subscriberId);
       this.touch();
+    });
+  }
+
+  postSubscriberDisconnected(subscriberId: string): Promise<void> {
+    if (this.closed) return Promise.reject(new MailboxClosedError());
+    if (subscriberId.length === 0) return Promise.reject(new TypeError("Subscriber ID is required"));
+    return new Promise<void>((resolve, reject) => {
+      // Publication callbacks inherit this actor's mailbox context, so queue cleanup without
+      // creating a reentrant await cycle. The event publisher never awaits this callback.
+      this.mailbox.post(() => {
+        this.subscribers.delete(subscriberId);
+        this.touch();
+        resolve();
+      }, reject);
     });
   }
 

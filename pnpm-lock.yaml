@@ -17,6 +17,9 @@ importers:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       '@wi/protocol':
         specifier: workspace:*
         version: link:packages/protocol
@@ -47,8 +50,34 @@ importers:
       vitest:
         specifier: 3.2.4
         version: 3.2.4(@types/node@24.10.1)
+      ws:
+        specifier: 8.18.3
+        version: 8.18.3
 
-  apps/server: {}
+  apps/server:
+    dependencies:
+      '@wi/harness-core':
+        specifier: workspace:*
+        version: link:../../packages/harness-core
+      '@wi/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@wi/provider-fake':
+        specifier: workspace:*
+        version: link:../../packages/provider-fake
+      '@wi/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      '@wi/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
+      ws:
+        specifier: 8.18.3
+        version: 8.18.3
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
 
   apps/web: {}
 
@@ -503,6 +532,9 @@ packages:
 
   '@types/node@24.10.1':
     resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@typescript-eslint/eslint-plugin@8.48.0':
     resolution: {integrity: sha512-XxXP5tL1txl13YFtrECECQYeZjBZad4fyd3cFV4a19LkAY/bIp9fev3US4S5fDVV2JaYFiKAZ/GRTOLer+mbyQ==}
@@ -1253,6 +1285,18 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  ws@8.18.3:
+    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
@@ -1501,6 +1545,10 @@ snapshots:
   '@types/node@24.10.1':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 24.10.1
 
   '@typescript-eslint/eslint-plugin@8.48.0(@typescript-eslint/parser@8.48.0(eslint@9.39.1)(typescript@5.9.3))(eslint@9.39.1)(typescript@5.9.3)':
     dependencies:
@@ -2306,6 +2354,8 @@ snapshots:
   word-wrap@1.2.5: {}
 
   wrappy@1.0.2: {}
+
+  ws@8.18.3: {}
 
   yocto-queue@0.1.0: {}
 

@@ -33,6 +33,7 @@ import {
   type ValidatedToolCall,
 } from "@wi/tools";
 
+import { safeRunFailureMessage } from "./failure-messages.js";
 import {
   assertCurrentToolEffectClass,
   canRetryProviderStep,
@@ -82,7 +83,29 @@ interface StepOutcome {
   readonly kind: "final" | "tools" | "retry" | "failed" | "interrupted";
   readonly code?: ErrorCode;
   readonly message?: string;
+  readonly diagnosticId?: string;
 }
+
+interface AgentRunFailureDiagnosticBase {
+  readonly diagnosticId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly stepId: string | null;
+  readonly state: "failed" | "interrupted";
+  readonly code: ErrorCode;
+  readonly error: unknown;
+}
+
+export type AgentRunFailureDiagnostic =
+  | (AgentRunFailureDiagnosticBase & {
+      readonly operation: "provider";
+      readonly providerId: string;
+    })
+  | (AgentRunFailureDiagnosticBase & {
+      readonly operation: "tool";
+      readonly callId: string;
+      readonly toolName: string;
+    });
 
 type AcceptedProviderTerminal =
   | { readonly type: "completed"; readonly responseId: string }
@@ -98,14 +121,11 @@ class RunLoopFailure extends Error {
     readonly code: ErrorCode,
     message: string,
     readonly interrupted: boolean,
+    readonly diagnosticId?: string,
   ) {
     super(message);
     this.name = "RunLoopFailure";
   }
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 function isAborted(signal: AbortSignal): boolean {
@@ -132,7 +152,10 @@ export class AgentRunLoop {
   private readonly textMaxChars: number;
   private readonly textMaxDelayMs: number;
   private readonly retryBudget: number;
-  private readonly stopped = new Map<string, Promise<void>>();
+  private readonly onFailureDiagnostic:
+    | ((diagnostic: AgentRunFailureDiagnostic) => void)
+    | undefined;
+  private readonly stopped = new Map<string, Promise<RunTaskResult | null>>();
 
   constructor(options: {
     readonly storage: AgentRunStorage;
@@ -144,6 +167,7 @@ export class AgentRunLoop {
     readonly textMaxChars?: number;
     readonly textMaxDelayMs?: number;
     readonly retryBudget?: number;
+    readonly onFailureDiagnostic?: (diagnostic: AgentRunFailureDiagnostic) => void;
   }) {
     this.storage = options.storage;
     this.provider = options.provider;
@@ -156,6 +180,7 @@ export class AgentRunLoop {
     this.textMaxChars = options.textMaxChars ?? 256;
     this.textMaxDelayMs = options.textMaxDelayMs ?? 25;
     this.retryBudget = options.retryBudget ?? 1;
+    this.onFailureDiagnostic = options.onFailureDiagnostic;
     if (
       !Number.isSafeInteger(this.retryBudget) ||
       this.retryBudget < 0 ||
@@ -165,20 +190,88 @@ export class AgentRunLoop {
     }
 
     this.task = async (context) => {
-      let resolveStopped = (): void => {};
-      const stopped = new Promise<void>((resolve) => {
+      let resolveStopped: (result: RunTaskResult | null) => void = () => {};
+      const stopped = new Promise<RunTaskResult | null>((resolve) => {
         resolveStopped = resolve;
       });
       this.stopped.set(context.runId, stopped);
       try {
-        return await this.execute(context);
+        const result = await this.execute(context);
+        resolveStopped(result);
+        return result;
       } finally {
-        resolveStopped();
+        resolveStopped(null);
         this.stopped.delete(context.runId);
       }
     };
-    this.cancel = async (context) => {
-      await this.stopped.get(context.runId);
+    this.cancel = async (context) => (await this.stopped.get(context.runId)) ?? undefined;
+  }
+
+  private reportFailure(
+    context: RunTaskContext,
+    state: "failed" | "interrupted",
+    code: ErrorCode,
+    error: unknown,
+    stepId: string | null,
+  ): string {
+    const diagnosticId = this.ids.diagnosticId();
+    try {
+      this.onFailureDiagnostic?.({
+        operation: "provider",
+        diagnosticId,
+        sessionId: context.sessionId,
+        runId: context.runId,
+        stepId,
+        providerId: this.provider.id,
+        state,
+        code,
+        error,
+      });
+    } catch {
+      // Diagnostics must never replace the durable run outcome.
+    }
+    return diagnosticId;
+  }
+
+  private reportToolFailure(
+    context: RunTaskContext,
+    state: "failed" | "interrupted",
+    code: ErrorCode,
+    error: unknown,
+    tool: Pick<ToolExecutionRecord, "stepId" | "callId" | "toolName">,
+  ): string {
+    const diagnosticId = this.ids.diagnosticId();
+    try {
+      this.onFailureDiagnostic?.({
+        operation: "tool",
+        diagnosticId,
+        sessionId: context.sessionId,
+        runId: context.runId,
+        stepId: tool.stepId,
+        callId: tool.callId,
+        toolName: tool.toolName,
+        state,
+        code,
+        error,
+      });
+    } catch {
+      // Diagnostics must never replace the durable tool outcome.
+    }
+    return diagnosticId;
+  }
+
+  private failureResult(
+    context: RunTaskContext,
+    state: "failed" | "interrupted",
+    code: ErrorCode,
+    error: unknown,
+    diagnosticId?: string,
+  ): RunTaskResult {
+    return {
+      state,
+      code,
+      message: safeRunFailureMessage(code),
+      diagnosticId: diagnosticId ?? this.reportFailure(context, state, code, error, null),
     };
   }
 
@@ -232,24 +325,32 @@ export class AgentRunLoop {
               retryAttempt += 1;
             }
             if (retryAttempt > this.retryBudget) {
-              return {
-                state: "failed",
-                code: "provider.transient_before_output",
-                message: latest.errorMessage ?? "Provider retry budget was exhausted.",
-              };
+              return this.failureResult(
+                context,
+                "failed",
+                "provider.transient_before_output",
+                latest.errorMessage,
+                latest.diagnosticId ?? undefined,
+              );
             }
           } else if (latest.state === "failed") {
-            return {
-              state: "failed",
-              code: (latest.errorCategory as ErrorCode | null) ?? "provider.protocol_error",
-              message: latest.errorMessage ?? "Provider step failed.",
-            };
+            const code =
+              (latest.errorCategory as ErrorCode | null) ?? "provider.protocol_error";
+            return this.failureResult(
+              context,
+              "failed",
+              code,
+              latest.errorMessage,
+              latest.diagnosticId ?? undefined,
+            );
           } else if (latest.state === "interrupted" || latest.state === "cancelled") {
-            return {
-              state: "interrupted",
-              code: "provider.incomplete",
-              message: latest.errorMessage ?? "Provider step was interrupted.",
-            };
+            return this.failureResult(
+              context,
+              "interrupted",
+              "provider.incomplete",
+              latest.errorMessage,
+              latest.diagnosticId ?? undefined,
+            );
           } else if (latest.state === "streaming" || latest.state === "created") {
             throw new RunLoopFailure(
               "provider.incomplete",
@@ -272,57 +373,69 @@ export class AgentRunLoop {
           case "tools":
             retryAttempt = 0;
             continue;
-          case "retry":
+          case "retry": {
             retryAttempt += 1;
-            if (retryAttempt > this.retryBudget) {
-              return {
-                state: "failed",
-                code: outcome.code ?? "provider.transient_before_output",
-                message: outcome.message ?? "Provider retry budget was exhausted.",
-              };
-            }
-            continue;
-          case "failed":
-            return {
-              state: "failed",
-              code: outcome.code ?? "provider.protocol_error",
-              message: outcome.message ?? "Provider step failed.",
-            };
-          case "interrupted":
-            return {
-              state: "interrupted",
-              code: outcome.code ?? "provider.incomplete",
-              message: outcome.message ?? "Provider step was interrupted.",
-            };
+            if (retryAttempt <= this.retryBudget) continue;
+            const code = outcome.code ?? "provider.transient_before_output";
+            return this.failureResult(
+              context,
+              "failed",
+              code,
+              outcome.message,
+              outcome.diagnosticId,
+            );
+          }
+          case "failed": {
+            const code = outcome.code ?? "provider.protocol_error";
+            return this.failureResult(
+              context,
+              "failed",
+              code,
+              outcome.message,
+              outcome.diagnosticId,
+            );
+          }
+          case "interrupted": {
+            const code = outcome.code ?? "provider.incomplete";
+            return this.failureResult(
+              context,
+              "interrupted",
+              code,
+              outcome.message,
+              outcome.diagnosticId,
+            );
+          }
         }
       }
     } catch (error) {
       if (error instanceof RunLoopFailure && error.code === "tool.outcome_unknown") {
-        return {
-          state: "interrupted",
-          code: error.code,
-          message: error.message,
-        };
+        return this.failureResult(
+          context,
+          "interrupted",
+          error.code,
+          error,
+          error.diagnosticId,
+        );
       }
       if (isAborted(context.signal)) {
-        return {
-          state: "interrupted",
-          code: "provider.cancelled",
-          message: "Run operation was cancelled.",
-        };
+        return this.failureResult(
+          context,
+          "interrupted",
+          "provider.cancelled",
+          error,
+          error instanceof RunLoopFailure ? error.diagnosticId : undefined,
+        );
       }
       if (error instanceof RunLoopFailure) {
-        return {
-          state: error.interrupted ? "interrupted" : "failed",
-          code: error.code,
-          message: error.message,
-        };
+        return this.failureResult(
+          context,
+          error.interrupted ? "interrupted" : "failed",
+          error.code,
+          error,
+          error.diagnosticId,
+        );
       }
-      return {
-        state: "failed",
-        code: "provider.protocol_error",
-        message: errorMessage(error, "Agent run loop failed."),
-      };
+      return this.failureResult(context, "failed", "provider.protocol_error", error);
     }
   }
 
@@ -499,10 +612,10 @@ export class AgentRunLoop {
             },
             { cancellationCleanup: "provider_text" },
           );
-        } catch (error) {
+        } catch {
           throw new RunLoopFailure(
             "storage.worker_failed",
-            errorMessage(error, "Provider text could not be persisted."),
+            "Provider text could not be persisted.",
             false,
           );
         }
@@ -626,7 +739,8 @@ export class AgentRunLoop {
     } catch (error) {
       await coalescer.flush().catch(() => undefined);
       if (isAborted(context.signal)) {
-        await this.finishInterruptedStep(
+        const code = "provider.cancelled" as const;
+        const diagnosticId = await this.finishInterruptedStep(
           context,
           run.runId,
           stepId,
@@ -634,11 +748,16 @@ export class AgentRunLoop {
           startedAtMs,
           responseId,
           visibleText ? { messageId, partId, fullText } : null,
-          "provider.cancelled",
-          "Provider operation was cancelled.",
+          code,
+          context.signal.reason,
           "interrupted",
         );
-        return { kind: "interrupted", code: "provider.cancelled", message: "Provider cancelled." };
+        return {
+          kind: "interrupted",
+          code,
+          message: safeRunFailureMessage(code),
+          diagnosticId,
+        };
       }
       const adapterError = error instanceof ProviderAdapterError ? error : null;
       const transientBeforeOutput =
@@ -659,12 +778,11 @@ export class AgentRunLoop {
       if (transientBeforeOutput) code = "provider.transient_before_output";
       else if (error instanceof RunLoopFailure) code = error.code;
       else if (semanticOutput || visibleText) code = "provider.transport_after_output";
-      const message = errorMessage(error, "Provider stream failed.");
       const stepState =
         code !== "provider.protocol_error" && (semanticOutput || visibleText)
           ? "interrupted"
           : "failed";
-      await this.finishInterruptedStep(
+      const diagnosticId = await this.finishInterruptedStep(
         context,
         run.runId,
         stepId,
@@ -673,14 +791,16 @@ export class AgentRunLoop {
         responseId,
         visibleText ? { messageId, partId, fullText } : null,
         code,
-        message,
+        error,
         stepState,
       );
-      if (retryable) return { kind: "retry", code, message };
+      const message = safeRunFailureMessage(code);
+      if (retryable) return { kind: "retry", code, message, diagnosticId };
       return {
         kind: stepState === "interrupted" ? "interrupted" : "failed",
         code,
         message,
+        diagnosticId,
       };
     } finally {
       await coalescer.close().catch(() => undefined);
@@ -688,8 +808,9 @@ export class AgentRunLoop {
 
     const acceptedTerminal = terminal as AcceptedProviderTerminal | null;
     if (acceptedTerminal === null) {
-      const message = "Provider stream closed without a terminal event.";
-      await this.finishInterruptedStep(
+      const code = "provider.incomplete" as const;
+      const detail = "Provider stream closed without a terminal event.";
+      const diagnosticId = await this.finishInterruptedStep(
         context,
         run.runId,
         stepId,
@@ -697,11 +818,16 @@ export class AgentRunLoop {
         startedAtMs,
         responseId,
         visibleText ? { messageId, partId, fullText } : null,
-        "provider.incomplete",
-        message,
+        code,
+        detail,
         "interrupted",
       );
-      return { kind: "interrupted", code: "provider.incomplete", message };
+      return {
+        kind: "interrupted",
+        code,
+        message: safeRunFailureMessage(code),
+        diagnosticId,
+      };
     }
 
     if (acceptedTerminal.type === "failed") {
@@ -723,7 +849,7 @@ export class AgentRunLoop {
       if (transientBeforeOutput) code = "provider.transient_before_output";
       else if (semanticOutput) code = "provider.transport_after_output";
       const stepState = semanticOutput ? "interrupted" : "failed";
-      await this.finishInterruptedStep(
+      const diagnosticId = await this.finishInterruptedStep(
         context,
         run.runId,
         stepId,
@@ -735,11 +861,13 @@ export class AgentRunLoop {
         acceptedTerminal.message,
         stepState,
       );
-      if (retryable) return { kind: "retry", code, message: acceptedTerminal.message };
+      const message = safeRunFailureMessage(code);
+      if (retryable) return { kind: "retry", code, message, diagnosticId };
       return {
         kind: semanticOutput ? "interrupted" : "failed",
         code,
-        message: acceptedTerminal.message,
+        message,
+        diagnosticId,
       };
     }
 
@@ -756,8 +884,8 @@ export class AgentRunLoop {
     } catch (error) {
       const cancelled = isAborted(context.signal);
       const code: ErrorCode = cancelled ? "provider.cancelled" : "provider.protocol_error";
-      const message = errorMessage(error, "Provider terminal promotion failed atomically.");
-      await this.finishInterruptedStep(
+      const stepState = cancelled ? "interrupted" : "failed";
+      const diagnosticId = await this.finishInterruptedStep(
         context,
         run.runId,
         stepId,
@@ -766,13 +894,14 @@ export class AgentRunLoop {
         responseId,
         visibleText ? { messageId, partId, fullText } : null,
         code,
-        message,
-        cancelled ? "interrupted" : "failed",
+        error,
+        stepState,
       );
       return {
-        kind: cancelled ? "interrupted" : "failed",
+        kind: stepState,
         code,
-        message,
+        message: safeRunFailureMessage(code),
+        diagnosticId,
       };
     }
   }
@@ -913,10 +1042,18 @@ export class AgentRunLoop {
     responseId: string | null,
     message: { readonly messageId: string; readonly partId: string; readonly fullText: string } | null,
     code: ErrorCode,
-    failureMessage: string,
+    diagnosticError: unknown,
     stepState: "failed" | "interrupted",
-  ): Promise<void> {
+  ): Promise<string> {
     const atMs = context.now();
+    const failureMessage = safeRunFailureMessage(code);
+    const diagnosticId = this.reportFailure(
+      context,
+      stepState,
+      code,
+      diagnosticError,
+      stepId,
+    );
     const staged = (await this.storage.getToolExecutionsForStep(stepId)).filter(
       (tool) => tool.state === "staged",
     );
@@ -929,12 +1066,12 @@ export class AgentRunLoop {
               stepState === "failed" ? "provider.step.failed" : "provider.step.interrupted",
             createdAtMs: atMs,
             data: {
-              eventVersion: 1,
+              eventVersion: 2,
               runId,
               stepId,
               code,
               message: failureMessage,
-              diagnosticId: this.ids.diagnosticId(),
+              diagnosticId,
             },
           },
         ],
@@ -951,6 +1088,7 @@ export class AgentRunLoop {
             responseId,
             errorCategory: code,
             errorMessage: failureMessage,
+            diagnosticId,
           },
           ...staged.map((tool) => ({
             kind: "toolExecution.put" as const,
@@ -1002,6 +1140,7 @@ export class AgentRunLoop {
       },
       { cancellationCleanup: "provider_step" },
     );
+    return diagnosticId;
   }
 
   private async promoteCompletedStep(
@@ -1069,18 +1208,25 @@ export class AgentRunLoop {
           error instanceof ToolRegistryError && error.code === "tool.unknown"
             ? "tool.unknown"
             : "tool.invalid_arguments";
-        const failure = errorMessage(error, "Tool validation failed.");
+        const failure = safeRunFailureMessage(code);
+        const diagnosticId = this.reportToolFailure(
+          context,
+          "failed",
+          code,
+          error,
+          tool,
+        );
         toolEvents.push({
           eventId: this.ids.eventId(),
           eventType: "tool.execution.failed",
           createdAtMs: atMs,
           data: {
-            eventVersion: 1,
+            eventVersion: 2,
             runId,
             callId: tool.callId,
             code,
             message: failure,
-            diagnosticId: this.ids.diagnosticId(),
+            diagnosticId,
           },
         });
         toolProjections.push({
@@ -1441,16 +1587,17 @@ export class AgentRunLoop {
         if (outcomeUnknown) code = "tool.outcome_unknown";
         else if (cancelled) code = "provider.cancelled";
         else if (error instanceof ToolTimeoutError) code = "tool.timeout";
-        let fallbackMessage = "Tool execution failed.";
-        if (outcomeUnknown) {
-          fallbackMessage = "Tool execution stopped after its effect may have occurred.";
-        } else if (cancelled) {
-          fallbackMessage = "Tool execution was cancelled.";
-        }
-        const message = errorMessage(error, fallbackMessage);
+        const message = safeRunFailureMessage(code);
         let failureState: "cancelled" | "failed" | "outcome_unknown" = "failed";
         if (outcomeUnknown) failureState = "outcome_unknown";
         else if (cancelled) failureState = "cancelled";
+        const diagnosticId = this.reportToolFailure(
+          context,
+          outcomeUnknown || cancelled ? "interrupted" : "failed",
+          code,
+          error,
+          tool,
+        );
         const completedAtMs = context.now();
         await context.commitTransaction(
           {
@@ -1461,12 +1608,12 @@ export class AgentRunLoop {
                     eventType: "tool.execution.outcome_unknown",
                     createdAtMs: completedAtMs,
                     data: {
-                      eventVersion: 1,
+                      eventVersion: 2,
                       runId: tool.runId,
                       callId: tool.callId,
                       code: "tool.outcome_unknown",
                       message,
-                      diagnosticId: this.ids.diagnosticId(),
+                      diagnosticId,
                     },
                   }
                 : {
@@ -1474,12 +1621,12 @@ export class AgentRunLoop {
                     eventType: "tool.execution.failed",
                     createdAtMs: completedAtMs,
                     data: {
-                      eventVersion: 1,
+                      eventVersion: 2,
                       runId: tool.runId,
                       callId: tool.callId,
                       code,
                       message,
-                      diagnosticId: this.ids.diagnosticId(),
+                      diagnosticId,
                     },
                   },
             ],
@@ -1507,9 +1654,11 @@ export class AgentRunLoop {
           { cancellationCleanup: "tool_execution" },
         );
         if (outcomeUnknown) {
-          throw new RunLoopFailure("tool.outcome_unknown", message, true);
+          throw new RunLoopFailure("tool.outcome_unknown", message, true, diagnosticId);
         }
-        if (cancelled) throw error;
+        if (cancelled) {
+          throw new RunLoopFailure("provider.cancelled", message, true, diagnosticId);
+        }
       }
     });
   }

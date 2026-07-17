@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { CanonicalJsonValueSchema } from "./canonical-json.js";
-import { ErrorCodeSchema } from "./errors.js";
+import {
+  ErrorCodeSchema,
+  LegacyFailureMessageSchema,
+  SafeDiagnosticMessageSchema,
+} from "./errors.js";
 import { EventSequenceSchema, ProtocolVersionSchema, TimestampMsSchema } from "./envelope.js";
 import {
   ApprovalIdSchema,
@@ -75,6 +79,7 @@ const EventBaseSchema = z.strictObject({
 });
 
 const VersionSchema = z.literal(1);
+const SafeFailureVersionSchema = z.literal(2);
 const runData = { eventVersion: VersionSchema, runId: RunIdSchema } as const;
 const stepData = {
   eventVersion: VersionSchema,
@@ -86,6 +91,79 @@ const toolData = {
   runId: RunIdSchema,
   callId: ToolCallIdSchema,
 } as const;
+
+const runFailureV1 = z.strictObject({
+  eventVersion: VersionSchema,
+  runId: RunIdSchema,
+  code: ErrorCodeSchema,
+  message: LegacyFailureMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const runFailureV2 = z.strictObject({
+  eventVersion: SafeFailureVersionSchema,
+  runId: RunIdSchema,
+  code: ErrorCodeSchema,
+  message: SafeDiagnosticMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const runFailureData = z.discriminatedUnion("eventVersion", [runFailureV1, runFailureV2]);
+
+const stepFailureV1 = z.strictObject({
+  eventVersion: VersionSchema,
+  runId: RunIdSchema,
+  stepId: ProviderStepIdSchema,
+  code: ErrorCodeSchema,
+  message: LegacyFailureMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const stepFailureV2 = z.strictObject({
+  eventVersion: SafeFailureVersionSchema,
+  runId: RunIdSchema,
+  stepId: ProviderStepIdSchema,
+  code: ErrorCodeSchema,
+  message: SafeDiagnosticMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const stepFailureData = z.discriminatedUnion("eventVersion", [stepFailureV1, stepFailureV2]);
+
+const toolFailureV1 = z.strictObject({
+  eventVersion: VersionSchema,
+  runId: RunIdSchema,
+  callId: ToolCallIdSchema,
+  code: ErrorCodeSchema,
+  message: LegacyFailureMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const toolFailureV2 = z.strictObject({
+  eventVersion: SafeFailureVersionSchema,
+  runId: RunIdSchema,
+  callId: ToolCallIdSchema,
+  code: ErrorCodeSchema,
+  message: SafeDiagnosticMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const toolFailureData = z.discriminatedUnion("eventVersion", [toolFailureV1, toolFailureV2]);
+
+const toolOutcomeUnknownV1 = z.strictObject({
+  eventVersion: VersionSchema,
+  runId: RunIdSchema,
+  callId: ToolCallIdSchema,
+  code: z.literal("tool.outcome_unknown"),
+  message: LegacyFailureMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const toolOutcomeUnknownV2 = z.strictObject({
+  eventVersion: SafeFailureVersionSchema,
+  runId: RunIdSchema,
+  callId: ToolCallIdSchema,
+  code: z.literal("tool.outcome_unknown"),
+  message: SafeDiagnosticMessageSchema,
+  diagnosticId: DiagnosticIdSchema,
+});
+const toolOutcomeUnknownData = z.discriminatedUnion("eventVersion", [
+  toolOutcomeUnknownV1,
+  toolOutcomeUnknownV2,
+]);
 
 function eventMessage<TType extends SessionEventType, TData extends z.ZodType>(
   eventType: TType,
@@ -139,24 +217,8 @@ export const RunCancelRequestedEventSchema = eventMessage(
 );
 export const RunCancelledEventSchema = eventMessage("run.cancelled", z.strictObject(runData));
 export const RunCompletedEventSchema = eventMessage("run.completed", z.strictObject(runData));
-export const RunFailedEventSchema = eventMessage(
-  "run.failed",
-  z.strictObject({
-    ...runData,
-    code: ErrorCodeSchema,
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
-);
-export const RunInterruptedEventSchema = eventMessage(
-  "run.interrupted",
-  z.strictObject({
-    ...runData,
-    code: ErrorCodeSchema,
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
-);
+export const RunFailedEventSchema = eventMessage("run.failed", runFailureData);
+export const RunInterruptedEventSchema = eventMessage("run.interrupted", runFailureData);
 
 export const ProviderStepStartedEventSchema = eventMessage(
   "provider.step.started",
@@ -194,21 +256,11 @@ export const ProviderStepCompletedEventSchema = eventMessage(
 );
 export const ProviderStepInterruptedEventSchema = eventMessage(
   "provider.step.interrupted",
-  z.strictObject({
-    ...stepData,
-    code: ErrorCodeSchema,
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
+  stepFailureData,
 );
 export const ProviderStepFailedEventSchema = eventMessage(
   "provider.step.failed",
-  z.strictObject({
-    ...stepData,
-    code: ErrorCodeSchema,
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
+  stepFailureData,
 );
 
 export const AssistantMessageCompletedEventSchema = eventMessage(
@@ -259,21 +311,11 @@ export const ToolExecutionCompletedEventSchema = eventMessage(
 );
 export const ToolExecutionFailedEventSchema = eventMessage(
   "tool.execution.failed",
-  z.strictObject({
-    ...toolData,
-    code: ErrorCodeSchema,
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
+  toolFailureData,
 );
 export const ToolExecutionOutcomeUnknownEventSchema = eventMessage(
   "tool.execution.outcome_unknown",
-  z.strictObject({
-    ...toolData,
-    code: z.literal("tool.outcome_unknown"),
-    message: z.string(),
-    diagnosticId: DiagnosticIdSchema,
-  }),
+  toolOutcomeUnknownData,
 );
 
 export const InputRequestedEventSchema = eventMessage(
@@ -291,6 +333,25 @@ export const InputResolvedEventSchema = eventMessage(
     inputId: InputIdSchema,
     value: CanonicalJsonValueSchema,
   }),
+);
+
+const BrowserRunFailedEventSchema = eventMessage("run.failed", runFailureV2);
+const BrowserRunInterruptedEventSchema = eventMessage("run.interrupted", runFailureV2);
+const BrowserProviderStepInterruptedEventSchema = eventMessage(
+  "provider.step.interrupted",
+  stepFailureV2,
+);
+const BrowserProviderStepFailedEventSchema = eventMessage(
+  "provider.step.failed",
+  stepFailureV2,
+);
+const BrowserToolExecutionFailedEventSchema = eventMessage(
+  "tool.execution.failed",
+  toolFailureV2,
+);
+const BrowserToolExecutionOutcomeUnknownEventSchema = eventMessage(
+  "tool.execution.outcome_unknown",
+  toolOutcomeUnknownV2,
 );
 
 export const SessionEventSchema = z.discriminatedUnion("eventType", [
@@ -324,4 +385,67 @@ export const SessionEventSchema = z.discriminatedUnion("eventType", [
   InputResolvedEventSchema,
 ]);
 
+export const BrowserSessionEventSchema = z.discriminatedUnion("eventType", [
+  SessionCreatedEventSchema,
+  UserMessageAppendedEventSchema,
+  RunCreatedEventSchema,
+  RunStartedEventSchema,
+  RunWaitingForUserEventSchema,
+  RunCancelRequestedEventSchema,
+  RunCancelledEventSchema,
+  RunCompletedEventSchema,
+  BrowserRunFailedEventSchema,
+  BrowserRunInterruptedEventSchema,
+  ProviderStepStartedEventSchema,
+  ProviderTextDeltaEventSchema,
+  ProviderToolCallStagedEventSchema,
+  ProviderToolCallReusedEventSchema,
+  ProviderStepCompletedEventSchema,
+  BrowserProviderStepInterruptedEventSchema,
+  BrowserProviderStepFailedEventSchema,
+  AssistantMessageCompletedEventSchema,
+  ToolCallRequestedEventSchema,
+  ToolApprovalRequestedEventSchema,
+  ToolApprovalResolvedEventSchema,
+  ToolExecutionStartedEventSchema,
+  ToolExecutionRecoveredEventSchema,
+  ToolExecutionCompletedEventSchema,
+  BrowserToolExecutionFailedEventSchema,
+  BrowserToolExecutionOutcomeUnknownEventSchema,
+  InputRequestedEventSchema,
+  InputResolvedEventSchema,
+]);
+
 export type SessionEvent = z.infer<typeof SessionEventSchema>;
+export type BrowserSessionEvent = z.infer<typeof BrowserSessionEventSchema>;
+
+export const LEGACY_FAILURE_BROWSER_MESSAGE =
+  "A failure recorded by an earlier Wi version was hidden for safety. Use the diagnostic ID for details.";
+
+function safeBrowserProjection(event: SessionEvent): unknown {
+  switch (event.eventType) {
+    case "run.failed":
+    case "run.interrupted":
+    case "provider.step.failed":
+    case "provider.step.interrupted":
+    case "tool.execution.failed":
+    case "tool.execution.outcome_unknown":
+      if (event.data.eventVersion === 1) {
+        return {
+          ...event,
+          data: {
+            ...event.data,
+            eventVersion: 2,
+            message: LEGACY_FAILURE_BROWSER_MESSAGE,
+          },
+        };
+      }
+      return event;
+    default:
+      return event;
+  }
+}
+
+export function toBrowserSessionEvent(event: SessionEvent): BrowserSessionEvent {
+  return BrowserSessionEventSchema.parse(safeBrowserProjection(event));
+}

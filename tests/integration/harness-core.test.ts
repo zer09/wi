@@ -23,6 +23,20 @@ import {
 const homes: string[] = [];
 const stores: SessionStoreManager[] = [];
 
+async function within<T>(promise: Promise<T>, label: string, timeoutMs = 5_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function sequence(values: readonly string[]): () => string {
   let index = 0;
   return () => {
@@ -726,17 +740,33 @@ describe("harness-core with real storage workers", () => {
     await first.shutdown();
 
     const reopened = await manager.openSession(session.sessionId);
+    let resumedInput: unknown;
+    let taskStarted = false;
+    let signalTaskCompleted = (): void => {};
+    const taskCompleted = new Promise<void>((resolve) => {
+      signalTaskCompleted = resolve;
+    });
     const second = await SessionActor.create({
       storage: reopened,
       eventHub: new CommittedEventHub(),
       scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
       ids: actorIds("pendingSecond"),
       now: () => 4_000,
-      runTask: async () => undefined,
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+      currentToolEffectClass: () => "pure",
+      runTask: async (context) => {
+        taskStarted = true;
+        await context.waitForApproval("approval_pending");
+        resumedInput = await context.waitForInput("input_pending");
+        signalTaskCompleted();
+        return { state: "completed" };
+      },
       cancelRunTask: async () => undefined,
       forceStopRunTask: () => ({ status: "terminated" }),
     });
     expect(second.snapshot).toMatchObject({ pendingApprovalCount: 1, pendingInputCount: 1 });
+    expect(taskStarted).toBe(false);
     const approvalCommand = {
       v: 1 as const,
       kind: "command" as const,
@@ -745,7 +775,17 @@ describe("harness-core with real storage workers", () => {
       method: "approval.resolve" as const,
       params: { approvalId: "approval_pending", resolution: "approved" as const },
     };
-    await second.resolveApproval(approvalCommand, "client_pending");
+    const approvalAcceptance = await second.resolveApproval(
+      approvalCommand,
+      "client_pending",
+    );
+    expect(approvalAcceptance.events.map((event) => event.eventType)).toEqual([
+      "tool.approval.resolved",
+    ]);
+    await expect(reopened.getRun("run_pending")).resolves.toMatchObject({
+      state: "waiting_for_user",
+    });
+    expect(taskStarted).toBe(false);
     await expect(second.resolveApproval(approvalCommand, "client_pending")).resolves.toMatchObject({
       duplicate: true,
     });
@@ -757,12 +797,668 @@ describe("harness-core with real storage workers", () => {
       method: "input.respond" as const,
       params: { inputId: "input_pending", value: "done" },
     };
-    await second.respondToInput(inputCommand);
+    const inputAcceptance = await second.respondToInput(inputCommand);
+    expect(inputAcceptance.events.map((event) => event.eventType)).toEqual([
+      "input.resolved",
+      "run.started",
+    ]);
+    await within(taskCompleted, "multi-interaction continuation");
+    expect(taskStarted).toBe(true);
+    expect(resumedInput).toBe("done");
     await expect(second.respondToInput(inputCommand)).resolves.toMatchObject({ duplicate: true });
+    await expect(reopened.getRun("run_pending")).resolves.toMatchObject({ state: "completed" });
     await expect(reopened.getPendingApprovals()).resolves.toEqual([]);
     await expect(reopened.getPendingInputs()).resolves.toEqual([]);
     expect(second.snapshot).toMatchObject({ pendingApprovalCount: 0, pendingInputCount: 0 });
     await second.shutdown();
+  });
+
+  it("commits an input response and running transition before waking the matching task", async () => {
+    const manager = await store();
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_createInputContinuation",
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    const monitor = new ActivityMonitor();
+    let requested = (): void => {};
+    const inputRequested = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    let resumed = (): void => {};
+    const inputResumed = new Promise<void>((resolve) => {
+      resumed = resolve;
+    });
+    let resumedValue: unknown;
+    let runStateAtResume: string | null = null;
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: actorIds("inputContinuation"),
+      now: () => 3_000,
+      runTaskOwnsSchedulerPermits: true,
+      runTask: async (context) => {
+        // The task is launched from the start-run mailbox turn; wait until that turn exits
+        // before posting the input request back through the same mailbox.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        await context.commitTransaction({
+          events: [
+            {
+              eventId: "evt_inputContinuationRequested",
+              eventType: "input.requested",
+              createdAtMs: 3_001,
+              data: {
+                eventVersion: 1,
+                runId: context.runId,
+                inputId: "input_continuation",
+                prompt: "Continue?",
+              },
+            },
+            {
+              eventId: "evt_inputContinuationWaiting",
+              eventType: "run.waiting_for_user",
+              createdAtMs: 3_001,
+              data: {
+                eventVersion: 1,
+                runId: context.runId,
+                reason: "input",
+                inputId: "input_continuation",
+              },
+            },
+          ],
+          projections: [
+            {
+              kind: "input.put",
+              inputId: "input_continuation",
+              runId: context.runId,
+              state: "pending",
+              prompt: "Continue?",
+              requestedAtMs: 3_001,
+            },
+            {
+              kind: "run.state",
+              runId: context.runId,
+              expectedState: "running",
+              nextState: "waiting_for_user",
+              startedAtMs: 3_000,
+              completedAtMs: null,
+              cancelledAtMs: null,
+              failureCategory: null,
+              failureMessage: null,
+              activeProviderStepId: null,
+            },
+          ],
+        });
+        requested();
+        resumedValue = await context.waitForInput("input_continuation");
+        runStateAtResume = (await session.getRun(context.runId))?.state ?? null;
+        resumed();
+        return { state: "completed" };
+      },
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      onActivity: () => monitor.signal(),
+    });
+
+    const submitted = await actor.submitMessage(
+      submit(session.sessionId, "cmd_submitInputContinuation"),
+    );
+    try {
+      await within(inputRequested, "input request commit");
+    } catch (error) {
+      throw new Error(
+        `Input task did not request input: ${JSON.stringify({
+          snapshot: actor.snapshot,
+          run: await session.getRun(submitted.runId),
+          events: (await session.getEventsAfter(0)).map((event) => event.eventType),
+        })}`,
+        { cause: error },
+      );
+    }
+    await expect(session.getRun(submitted.runId)).resolves.toMatchObject({
+      state: "waiting_for_user",
+    });
+    const command = {
+      v: 1 as const,
+      kind: "command" as const,
+      commandId: "cmd_respondInputContinuation",
+      sessionId: session.sessionId,
+      method: "input.respond" as const,
+      params: { inputId: "input_continuation", value: { answer: "yes" } },
+    };
+    const acceptance = await actor.respondToInput(command);
+    expect(acceptance.events.map((event) => event.eventType)).toEqual([
+      "input.resolved",
+      "run.started",
+    ]);
+    await within(inputResumed, "live input waiter");
+    expect(resumedValue).toEqual({ answer: "yes" });
+    expect(runStateAtResume).toBe("running");
+    await expect(actor.respondToInput(command)).resolves.toMatchObject({ duplicate: true });
+    await within(
+      monitor.waitFor(() => actor.snapshot.activeRunId === null),
+      "input continuation completion",
+    );
+    await actor.shutdown();
+  });
+
+  it.each([
+    ["A then B", ["input_multiA", "input_multiB"]],
+    ["B then A", ["input_multiB", "input_multiA"]],
+  ] as const)(
+    "keeps a live two-input task gated until the final response: %s",
+    async (label, resolutionOrder) => {
+      const suffix = label.replaceAll(" ", "");
+      const manager = await store();
+      const created = await manager.createSession({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_createMultiInput${suffix}`,
+        method: "session.create",
+        params: {},
+      });
+      const session = await manager.openSession(created.session.sessionId);
+      let signalRequested = (): void => {};
+      const requested = new Promise<void>((resolve) => {
+        signalRequested = resolve;
+      });
+      let signalCompleted = (): void => {};
+      const completed = new Promise<void>((resolve) => {
+        signalCompleted = resolve;
+      });
+      let firstWaitReleased = false;
+      const resumedValues: unknown[] = [];
+      const actor = await SessionActor.create({
+        storage: session,
+        eventHub: new CommittedEventHub(),
+        scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+        ids: actorIds(`multiInput${suffix}`),
+        now: () => 3_000,
+        runTaskOwnsSchedulerPermits: true,
+        runTask: async (context) => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          await context.commitTransaction({
+            events: [
+              {
+                eventId: `evt_multiInputARequested${suffix}`,
+                eventType: "input.requested",
+                createdAtMs: 3_001,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  inputId: "input_multiA",
+                  prompt: "A?",
+                },
+              },
+              {
+                eventId: `evt_multiInputBRequested${suffix}`,
+                eventType: "input.requested",
+                createdAtMs: 3_002,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  inputId: "input_multiB",
+                  prompt: "B?",
+                },
+              },
+              {
+                eventId: `evt_multiInputWaiting${suffix}`,
+                eventType: "run.waiting_for_user",
+                createdAtMs: 3_002,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  reason: "input",
+                  inputId: "input_multiA",
+                },
+              },
+            ],
+            projections: [
+              {
+                kind: "input.put",
+                inputId: "input_multiA",
+                runId: context.runId,
+                state: "pending",
+                prompt: "A?",
+                requestedAtMs: 3_001,
+              },
+              {
+                kind: "input.put",
+                inputId: "input_multiB",
+                runId: context.runId,
+                state: "pending",
+                prompt: "B?",
+                requestedAtMs: 3_002,
+              },
+              {
+                kind: "run.state",
+                runId: context.runId,
+                expectedState: "running",
+                nextState: "waiting_for_user",
+                startedAtMs: 3_000,
+                completedAtMs: null,
+                cancelledAtMs: null,
+                failureCategory: null,
+                failureMessage: null,
+                activeProviderStepId: null,
+              },
+            ],
+          });
+          signalRequested();
+          resumedValues.push(await context.waitForInput("input_multiA"));
+          firstWaitReleased = true;
+          resumedValues.push(await context.waitForInput("input_multiB"));
+          signalCompleted();
+          return { state: "completed" };
+        },
+        cancelRunTask: async () => undefined,
+        forceStopRunTask: () => ({ status: "terminated" }),
+      });
+      const submitted = await actor.submitMessage(
+        submit(session.sessionId, `cmd_submitMultiInput${suffix}`),
+      );
+      await within(requested, `multi-input request ${label}`);
+
+      const [firstInputId, finalInputId] = resolutionOrder;
+      const first = await actor.respondToInput({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_respond${firstInputId}${suffix}`,
+        sessionId: session.sessionId,
+        method: "input.respond",
+        params: { inputId: firstInputId, value: `value:${firstInputId}` },
+      });
+      expect(first.events.map((event) => event.eventType)).toEqual(["input.resolved"]);
+      const headAfterFirst = await session.getHeadSequence();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(firstWaitReleased).toBe(false);
+      await expect(session.getHeadSequence()).resolves.toBe(headAfterFirst);
+      await expect(session.getRun(submitted.runId)).resolves.toMatchObject({
+        state: "waiting_for_user",
+      });
+      await expect(session.getPendingInputs()).resolves.toEqual([
+        expect.objectContaining({ inputId: finalInputId }),
+      ]);
+
+      const final = await actor.respondToInput({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_respond${finalInputId}${suffix}`,
+        sessionId: session.sessionId,
+        method: "input.respond",
+        params: { inputId: finalInputId, value: `value:${finalInputId}` },
+      });
+      expect(final.events.map((event) => event.eventType)).toEqual([
+        "input.resolved",
+        "run.started",
+      ]);
+      await within(completed, `multi-input completion ${label}`);
+      expect(resumedValues).toEqual(["value:input_multiA", "value:input_multiB"]);
+      await within(
+        (async () => {
+          while (actor.snapshot.activeRunId !== null) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        })(),
+        `multi-input terminal ${label}`,
+      );
+      await expect(session.getRun(submitted.runId)).resolves.toMatchObject({ state: "completed" });
+      await actor.shutdown();
+    },
+  );
+
+  it.each([
+    ["approval then input", "approval", "approved"],
+    ["input then approval", "input", "approved"],
+    ["denial then input", "approval", "denied"],
+  ] as const)(
+    "keeps a live approval/input task gated until the final response: %s",
+    async (label, firstInteraction, resolution) => {
+      const suffix = label.replaceAll(" ", "");
+      const manager = await store();
+      const created = await manager.createSession({
+        v: 1,
+        kind: "command",
+        commandId: `cmd_createMixedInteraction${suffix}`,
+        method: "session.create",
+        params: {},
+      });
+      const session = await manager.openSession(created.session.sessionId);
+      let signalRequested = (): void => {};
+      const requested = new Promise<void>((resolve) => {
+        signalRequested = resolve;
+      });
+      let signalCompleted = (): void => {};
+      const completed = new Promise<void>((resolve) => {
+        signalCompleted = resolve;
+      });
+      let firstWaitReleased = false;
+      let resumedInput: unknown;
+      const actor = await SessionActor.create({
+        storage: session,
+        eventHub: new CommittedEventHub(),
+        scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+        ids: actorIds(`mixedInteraction${suffix}`),
+        now: () => 3_000,
+        runTaskOwnsSchedulerPermits: true,
+        currentToolEffectClass: () => "pure",
+        runTask: async (context) => {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          const stepId = `step_mixedInteraction${suffix}`;
+          const callId = `call_mixedInteraction${suffix}`;
+          const approvalId = `approval_mixedInteraction${suffix}`;
+          const inputId = `input_mixedInteraction${suffix}`;
+          await context.commitTransaction({
+            events: [
+              {
+                eventId: `evt_mixedStepStarted${suffix}`,
+                eventType: "provider.step.started",
+                createdAtMs: 3_001,
+                data: { eventVersion: 1, runId: context.runId, stepId, stepIndex: 0 },
+              },
+              {
+                eventId: `evt_mixedStepCompleted${suffix}`,
+                eventType: "provider.step.completed",
+                createdAtMs: 3_002,
+                data: { eventVersion: 1, runId: context.runId, stepId },
+              },
+              {
+                eventId: `evt_mixedApprovalRequested${suffix}`,
+                eventType: "tool.approval.requested",
+                createdAtMs: 3_003,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  callId,
+                  approvalId,
+                  toolName: "guarded_echo",
+                  actionDigest: "a".repeat(64),
+                  summary: "Approve?",
+                },
+              },
+              {
+                eventId: `evt_mixedInputRequested${suffix}`,
+                eventType: "input.requested",
+                createdAtMs: 3_004,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  inputId,
+                  prompt: "Input?",
+                },
+              },
+              {
+                eventId: `evt_mixedWaiting${suffix}`,
+                eventType: "run.waiting_for_user",
+                createdAtMs: 3_004,
+                data: {
+                  eventVersion: 1,
+                  runId: context.runId,
+                  reason: "approval",
+                  approvalId,
+                },
+              },
+            ],
+            projections: [
+              {
+                kind: "providerStep.put",
+                stepId,
+                runId: context.runId,
+                stepIndex: 0,
+                state: "completed",
+                startedAtMs: 3_001,
+                completedAtMs: 3_002,
+                responseId: "response_mixedInteraction",
+                errorCategory: null,
+                errorMessage: null,
+              },
+              {
+                kind: "toolExecution.put",
+                callId,
+                runId: context.runId,
+                stepId,
+                toolName: "guarded_echo",
+                argumentsJson: "{}",
+                argumentsHash: "b".repeat(64),
+                effectClass: "pure",
+                state: "awaiting_approval",
+                attemptCount: 0,
+                requestedAtMs: 3_003,
+                startedAtMs: null,
+                completedAtMs: null,
+                result: null,
+                error: null,
+              },
+              {
+                kind: "toolCallOccurrence.put",
+                runId: context.runId,
+                stepId,
+                callId,
+                occurredAtMs: 3_003,
+              },
+              {
+                kind: "approval.put",
+                approvalId,
+                runId: context.runId,
+                callId,
+                state: "pending",
+                actionDigest: "a".repeat(64),
+                requestedAtMs: 3_003,
+              },
+              {
+                kind: "input.put",
+                inputId,
+                runId: context.runId,
+                state: "pending",
+                prompt: "Input?",
+                requestedAtMs: 3_004,
+              },
+              {
+                kind: "run.state",
+                runId: context.runId,
+                expectedState: "running",
+                nextState: "waiting_for_user",
+                startedAtMs: 3_000,
+                completedAtMs: null,
+                cancelledAtMs: null,
+                failureCategory: null,
+                failureMessage: null,
+                activeProviderStepId: null,
+              },
+            ],
+          });
+          signalRequested();
+          if (firstInteraction === "approval") {
+            await context.waitForApproval(approvalId);
+            firstWaitReleased = true;
+            resumedInput = await context.waitForInput(inputId);
+          } else {
+            resumedInput = await context.waitForInput(inputId);
+            firstWaitReleased = true;
+            await context.waitForApproval(approvalId);
+          }
+          signalCompleted();
+          return { state: "completed" };
+        },
+        cancelRunTask: async () => undefined,
+        forceStopRunTask: () => ({ status: "terminated" }),
+      });
+      const submitted = await actor.submitMessage(
+        submit(session.sessionId, `cmd_submitMixedInteraction${suffix}`),
+      );
+      await within(requested, `mixed interaction request ${label}`);
+      const approvalId = `approval_mixedInteraction${suffix}`;
+      const inputId = `input_mixedInteraction${suffix}`;
+
+      const firstAcceptance =
+        firstInteraction === "approval"
+          ? await actor.resolveApproval(
+              {
+                v: 1,
+                kind: "command",
+                commandId: `cmd_resolveMixedApproval${suffix}`,
+                sessionId: session.sessionId,
+                method: "approval.resolve",
+                params: { approvalId, resolution },
+              },
+              "client_mixedInteraction",
+            )
+          : await actor.respondToInput({
+              v: 1,
+              kind: "command",
+              commandId: `cmd_respondMixedInput${suffix}`,
+              sessionId: session.sessionId,
+              method: "input.respond",
+              params: { inputId, value: `value:${inputId}` },
+            });
+      expect(firstAcceptance.events.some((event) => event.eventType === "run.started")).toBe(false);
+      const headAfterFirst = await session.getHeadSequence();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(firstWaitReleased).toBe(false);
+      await expect(session.getHeadSequence()).resolves.toBe(headAfterFirst);
+      await expect(session.getRun(submitted.runId)).resolves.toMatchObject({
+        state: "waiting_for_user",
+      });
+
+      const finalAcceptance =
+        firstInteraction === "approval"
+          ? await actor.respondToInput({
+              v: 1,
+              kind: "command",
+              commandId: `cmd_respondMixedInput${suffix}`,
+              sessionId: session.sessionId,
+              method: "input.respond",
+              params: { inputId, value: `value:${inputId}` },
+            })
+          : await actor.resolveApproval(
+              {
+                v: 1,
+                kind: "command",
+                commandId: `cmd_resolveMixedApproval${suffix}`,
+                sessionId: session.sessionId,
+                method: "approval.resolve",
+                params: { approvalId, resolution },
+              },
+              "client_mixedInteraction",
+            );
+      expect(finalAcceptance.events.some((event) => event.eventType === "run.started")).toBe(true);
+      await within(completed, `mixed interaction completion ${label}`);
+      expect(resumedInput).toBe(`value:${inputId}`);
+      await within(
+        (async () => {
+          while (actor.snapshot.activeRunId !== null) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+        })(),
+        `mixed interaction terminal ${label}`,
+      );
+      await expect(session.getRun(submitted.runId)).resolves.toMatchObject({ state: "completed" });
+      await expect(
+        session.getToolExecution(`call_mixedInteraction${suffix}`),
+      ).resolves.toMatchObject({ state: resolution === "denied" ? "denied" : "cancelled" });
+      await actor.shutdown();
+    },
+  );
+
+  it("restores a pending input without launching work and resumes after its durable response", async () => {
+    const manager = await store();
+    const created = await manager.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_createRestoredInput",
+      method: "session.create",
+      params: {},
+    });
+    const session = await manager.openSession(created.session.sessionId);
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_restoredInputRun",
+          eventType: "run.created",
+          createdAtMs: 2_000,
+          data: { eventVersion: 1, runId: "run_restoredInput" },
+        },
+        {
+          eventId: "evt_restoredInputRequested",
+          eventType: "input.requested",
+          createdAtMs: 2_001,
+          data: {
+            eventVersion: 1,
+            runId: "run_restoredInput",
+            inputId: "input_restoredInput",
+            prompt: "Restore?",
+          },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.put",
+          runId: "run_restoredInput",
+          state: "waiting_for_user",
+          providerId: "fake",
+          providerConfig: {},
+          createdAtMs: 2_000,
+          startedAtMs: 2_000,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        {
+          kind: "input.put",
+          inputId: "input_restoredInput",
+          runId: "run_restoredInput",
+          state: "pending",
+          prompt: "Restore?",
+          requestedAtMs: 2_001,
+        },
+      ],
+    });
+    let taskStarted = false;
+    let resumedValue: unknown;
+    let resumed = (): void => {};
+    const inputResumed = new Promise<void>((resolve) => {
+      resumed = resolve;
+    });
+    const monitor = new ActivityMonitor();
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: new CommittedEventHub(),
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: actorIds("restoredInput"),
+      now: () => 4_000,
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+      runTask: async (context) => {
+        taskStarted = true;
+        resumedValue = await context.waitForInput("input_restoredInput");
+        resumed();
+        return { state: "completed" };
+      },
+      cancelRunTask: async () => undefined,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      onActivity: () => monitor.signal(),
+    });
+    expect(taskStarted).toBe(false);
+
+    await actor.respondToInput({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_respondRestoredInput",
+      sessionId: session.sessionId,
+      method: "input.respond",
+      params: { inputId: "input_restoredInput", value: "restored-value" },
+    });
+    await inputResumed;
+    expect(taskStarted).toBe(true);
+    expect(resumedValue).toBe("restored-value");
+    await monitor.waitFor(() => actor.snapshot.activeRunId === null);
+    await actor.shutdown();
   });
 
   it("replays actor cancellation without storage/client pending-interaction divergence", async () => {

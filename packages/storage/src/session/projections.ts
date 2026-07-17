@@ -256,7 +256,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           `SELECT run_id AS runId, step_index AS stepIndex, state,
                   started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
                   response_id AS responseId, error_category AS errorCategory,
-                  error_message AS errorMessage
+                  error_message AS errorMessage, diagnostic_id AS diagnosticId
            FROM provider_steps WHERE step_id = ?`,
         )
         .get(mutation.stepId) as
@@ -269,6 +269,7 @@ export function applyProjection(database: Database.Database, mutation: Projectio
             responseId: string | null;
             errorCategory: string | null;
             errorMessage: string | null;
+            diagnosticId: string | null;
           }
         | undefined;
       if (existing === undefined) {
@@ -289,7 +290,8 @@ export function applyProjection(database: Database.Database, mutation: Projectio
           existing.completedAtMs === mutation.completedAtMs &&
           existing.responseId === mutation.responseId &&
           existing.errorCategory === mutation.errorCategory &&
-          existing.errorMessage === mutation.errorMessage;
+          existing.errorMessage === mutation.errorMessage &&
+          existing.diagnosticId === (mutation.diagnosticId ?? null);
         if (unchanged) return;
         if (mutation.expectedState === undefined || existing.state !== mutation.expectedState) {
           throw new StorageError(
@@ -303,18 +305,19 @@ export function applyProjection(database: Database.Database, mutation: Projectio
         .prepare(
           `INSERT INTO provider_steps (
              step_id, run_id, step_index, state, started_at_ms, completed_at_ms,
-             response_id, error_category, error_message
+             response_id, error_category, error_message, diagnostic_id
            ) VALUES (
              @stepId, @runId, @stepIndex, @state, @startedAtMs, @completedAtMs,
-             @responseId, @errorCategory, @errorMessage
+             @responseId, @errorCategory, @errorMessage, @diagnosticId
            ) ON CONFLICT(step_id) DO UPDATE SET
              state = excluded.state,
              completed_at_ms = excluded.completed_at_ms,
              response_id = excluded.response_id,
              error_category = excluded.error_category,
-             error_message = excluded.error_message`,
+             error_message = excluded.error_message,
+             diagnostic_id = excluded.diagnostic_id`,
         )
-        .run(mutation);
+        .run({ ...mutation, diagnosticId: mutation.diagnosticId ?? null });
       return;
     }
     case "toolExecution.put": {
@@ -726,7 +729,7 @@ function projectionApplied(database: Database.Database, mutation: ProjectionMuta
           `SELECT run_id AS runId, step_index AS stepIndex, state,
                   started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
                   response_id AS responseId, error_category AS errorCategory,
-                  error_message AS errorMessage
+                  error_message AS errorMessage, diagnostic_id AS diagnosticId
            FROM provider_steps WHERE step_id = ?`,
         )
         .get(mutation.stepId) as Record<string, unknown> | undefined;
@@ -739,6 +742,7 @@ function projectionApplied(database: Database.Database, mutation: ProjectionMuta
         responseId: mutation.responseId,
         errorCategory: mutation.errorCategory,
         errorMessage: mutation.errorMessage,
+        diagnosticId: mutation.diagnosticId ?? null,
       });
     }
     case "toolExecution.put": {

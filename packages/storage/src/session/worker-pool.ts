@@ -15,6 +15,7 @@ import {
   AppendTransactionInspectionSchema,
   AppendTransactionResultSchema,
   BoundedProviderRequestDataSchema,
+  InputRecordSchema,
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
@@ -23,6 +24,7 @@ import {
   RunRecordSchema,
   ToolExecutionRecordSchema,
   SessionCatalogObservationSchema,
+  SessionEventPageSchema,
   SessionCatalogProjectionSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
@@ -33,6 +35,7 @@ import {
   type AppendTransactionResult,
   type BoundedProviderRequestData,
   type BoundedProviderRequestDataInput,
+  type InputRecord,
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
@@ -40,6 +43,8 @@ import {
   type RunRecord,
   type ToolExecutionRecord,
   type SessionCatalogObservation,
+  type SessionEventPage,
+  type SessionEventPageInput,
   type SessionCatalogProjection,
   type SessionManifest,
   type SessionRecoveryResult,
@@ -67,6 +72,10 @@ export interface InitializeSessionInput {
 export interface SessionWorkerStats {
   readonly workerIndex: number;
   readonly openSessionIds: readonly string[];
+}
+
+export interface SessionWorkerBarrier {
+  readonly release: () => Promise<void>;
 }
 
 export interface SessionSqlitePragmas {
@@ -106,29 +115,38 @@ export class SessionWorkerPool {
     this.allowTestOperations =
       options.allowTestOperations === true && process.env.NODE_ENV === "test";
     this.onSessionError = options.onSessionError;
-    this.workers = Array.from({ length: this.size }, (_, workerIndex) =>
-      new WorkerRpcClient({
-        workerId: `session-${workerIndex}`,
-        entryUrl: new URL("./worker-entry.js", import.meta.url),
-        workerData: {
-          workerId: `session-${workerIndex}`,
-          maxOpenHandles,
-          allowTestOperations: this.allowTestOperations,
-        },
-        ...(options.defaultRequestTimeoutMs === undefined
-          ? {}
-          : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
-        ...(options.closeTimeoutMs === undefined
-          ? {}
-          : { closeTimeoutMs: options.closeTimeoutMs }),
-        ...(options.onWorkerReplacement === undefined
-          ? {}
-          : {
-              onReplacement: (replacementCount) =>
-                options.onWorkerReplacement?.(workerIndex, replacementCount),
-            }),
-      }),
-    );
+    const workers: WorkerRpcClient[] = [];
+    try {
+      for (let workerIndex = 0; workerIndex < this.size; workerIndex += 1) {
+        workers.push(
+          new WorkerRpcClient({
+            workerId: `session-${workerIndex}`,
+            entryUrl: new URL("./worker-entry.js", import.meta.url),
+            workerData: {
+              workerId: `session-${workerIndex}`,
+              maxOpenHandles,
+              allowTestOperations: this.allowTestOperations,
+            },
+            ...(options.defaultRequestTimeoutMs === undefined
+              ? {}
+              : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
+            ...(options.closeTimeoutMs === undefined
+              ? {}
+              : { closeTimeoutMs: options.closeTimeoutMs }),
+            ...(options.onWorkerReplacement === undefined
+              ? {}
+              : {
+                  onReplacement: (replacementCount) =>
+                    options.onWorkerReplacement?.(workerIndex, replacementCount),
+                }),
+          }),
+        );
+      }
+    } catch (error) {
+      for (const worker of workers) void worker.close().catch(() => undefined);
+      throw error;
+    }
+    this.workers = workers;
   }
 
   workerIndexFor(sessionId: string): number {
@@ -175,19 +193,22 @@ export class SessionWorkerPool {
     payload: object,
     resultSchema: z.ZodType<T>,
     outcome: WorkerRequestOutcome = "read",
+    signal?: AbortSignal,
   ): Promise<T> {
     try {
       return await this.worker(sessionId).request(
         operation,
         { ...this.location(sessionId), ...payload },
         resultSchema,
-        { outcome },
+        { outcome, ...(signal === undefined ? {} : { signal }) },
       );
     } catch (error) {
-      try {
-        await this.onSessionError?.(sessionId, error);
-      } catch {
-        // Preserve the operation error even if diagnostic catalog handling fails.
+      if (!(error instanceof StorageError && error.code === "storage.request_aborted")) {
+        try {
+          await this.onSessionError?.(sessionId, error);
+        } catch {
+          // Preserve the operation error even if diagnostic catalog handling fails.
+        }
       }
       throw error;
     }
@@ -295,12 +316,29 @@ export class SessionWorkerPool {
     );
   }
 
-  async getHeadSequence(sessionId: string): Promise<number> {
+  async getEventPageAfter(
+    sessionId: string,
+    input: SessionEventPageInput,
+    signal?: AbortSignal,
+  ): Promise<SessionEventPage> {
+    return this.request(
+      sessionId,
+      "session.getEventPageAfter",
+      { input },
+      SessionEventPageSchema,
+      "read",
+      signal,
+    );
+  }
+
+  async getHeadSequence(sessionId: string, signal?: AbortSignal): Promise<number> {
     return this.request(
       sessionId,
       "session.getHeadSequence",
       {},
       z.number().int().nonnegative().safe(),
+      "read",
+      signal,
     );
   }
 
@@ -495,6 +533,15 @@ export class SessionWorkerPool {
     );
   }
 
+  async getInput(sessionId: string, inputId: string): Promise<InputRecord | null> {
+    return this.request(
+      sessionId,
+      "session.getInput",
+      { inputId },
+      z.union([InputRecordSchema, z.null()]),
+    );
+  }
+
   async getPendingInputCount(sessionId: string): Promise<number> {
     return this.request(
       sessionId,
@@ -570,6 +617,33 @@ export class SessionWorkerPool {
   async malformedResultForTest(sessionId: string): Promise<void> {
     if (!this.allowTestOperations) throw new Error("Test operations are disabled");
     await this.request(sessionId, "session.testMalformedResult", {}, z.null());
+  }
+
+  async blockWorkerForTest(sessionId: string): Promise<SessionWorkerBarrier> {
+    if (!this.allowTestOperations) throw new Error("Test operations are disabled");
+    const barrier = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
+    const view = new Int32Array(barrier);
+    const request = this.request(sessionId, "session.testBarrier", { barrier }, z.null());
+    const deadline = Date.now() + 5_000;
+    while (Atomics.load(view, 0) < 1) {
+      if (Date.now() >= deadline) {
+        Atomics.store(view, 1, 1);
+        Atomics.notify(view, 1);
+        await request.catch(() => undefined);
+        throw new Error("Session worker did not reach the barrier");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    let released = false;
+    return {
+      release: async () => {
+        if (released) return;
+        released = true;
+        Atomics.store(view, 1, 1);
+        Atomics.notify(view, 1);
+        await request;
+      },
+    };
   }
 
   async proveConcurrentWorkersForTest(sessionIds: readonly string[]): Promise<void> {

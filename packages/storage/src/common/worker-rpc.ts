@@ -34,9 +34,11 @@ export const WorkerResponseSchema = z.discriminatedUnion("ok", [
 ]);
 export type WorkerResponse = z.infer<typeof WorkerResponseSchema>;
 
-const MAX_WORKER_PAYLOAD_DEPTH = 64;
-const MAX_WORKER_REQUEST_NODES = 20_000;
-const MAX_WORKER_REQUEST_UNITS = 1_000_000;
+export const WORKER_RPC_PAYLOAD_BOUNDS = {
+  maximumDepth: 64,
+  maximumNodes: 20_000,
+  maximumUnits: 1_000_000,
+} as const;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
 
@@ -102,13 +104,13 @@ export function assertWorkerPayloadBounds(
   value: unknown,
   bounds: WorkerPayloadBounds = {},
 ): void {
-  const maxNodes = bounds.maxNodes ?? MAX_WORKER_REQUEST_NODES;
-  const maxUnits = bounds.maxUnits ?? MAX_WORKER_REQUEST_UNITS;
+  const maxNodes = bounds.maxNodes ?? WORKER_RPC_PAYLOAD_BOUNDS.maximumNodes;
+  const maxUnits = bounds.maxUnits ?? WORKER_RPC_PAYLOAD_BOUNDS.maximumUnits;
   const seen = new WeakSet<object>();
   let nodes = 0;
   let units = 0;
   const visit = (current: unknown, depth: number): void => {
-    if (depth > MAX_WORKER_PAYLOAD_DEPTH) {
+    if (depth > WORKER_RPC_PAYLOAD_BOUNDS.maximumDepth) {
       throw new StorageError("storage.payload_too_large", "Worker payload nesting is too deep");
     }
     nodes += 1;

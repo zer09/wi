@@ -12,6 +12,10 @@ export const sessionMigrations: readonly Migration[] = [
     version: 2,
     sql: readFileSync(new URL("./migration-v2.sql", import.meta.url), "utf8"),
   },
+  {
+    version: 3,
+    sql: readFileSync(new URL("./migration-v3.sql", import.meta.url), "utf8"),
+  },
 ];
 
 export { SESSION_SCHEMA_VERSION };

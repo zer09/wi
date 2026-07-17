@@ -7,6 +7,7 @@ import {
   CommandMethodSchema,
   DiagnosticIdSchema,
   EventIdSchema,
+  InputIdSchema,
   MessageIdSchema,
   PartIdSchema,
   ProjectIdSchema,
@@ -14,6 +15,7 @@ import {
   ProviderStepStateSchema,
   RunIdSchema,
   RunStateSchema,
+  SafeDiagnosticMessageSchema,
   SessionEventSchema,
   SessionEventTypeSchema,
   SessionIdSchema,
@@ -24,11 +26,15 @@ import {
 } from "@wi/protocol";
 
 export const CATALOG_SCHEMA_VERSION = 2;
-export const SESSION_SCHEMA_VERSION = 2;
+export const SESSION_SCHEMA_VERSION = 3;
 export const SESSION_FORMAT_VERSION = 1;
 
 export const HashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const NullableStringSchema = z.union([z.string(), z.null()]);
+export const NullableDiagnosticMessageSchema = z.union([
+  SafeDiagnosticMessageSchema,
+  z.null(),
+]);
 export const NullableTimestampSchema = z.union([TimestampMsSchema, z.null()]);
 export const SessionStatusSchema = z.enum(["ready", "missing", "unavailable"]);
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
@@ -118,6 +124,48 @@ export const SessionManifestSchema = z.strictObject({
 });
 export type SessionManifest = z.infer<typeof SessionManifestSchema>;
 
+export const SESSION_EVENT_PAGE_BOUNDS = {
+  maximumEvents: 256,
+  envelopeReserveBytes: 1_024,
+  minimumBytes: 1_025,
+  maximumBytes: 1_000_000,
+  maximumSingleEventBytes: 1_000_000 - 1_024,
+} as const;
+
+export const SessionEventPageInputSchema = z
+  .strictObject({
+    afterSequence: z.number().int().nonnegative().safe(),
+    throughSequence: z.number().int().nonnegative().safe(),
+    maximumEvents: z.number().int().positive().max(SESSION_EVENT_PAGE_BOUNDS.maximumEvents),
+    maximumBytes: z
+      .number()
+      .int()
+      .min(SESSION_EVENT_PAGE_BOUNDS.minimumBytes)
+      .max(SESSION_EVENT_PAGE_BOUNDS.maximumBytes),
+    maximumSingleEventBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(SESSION_EVENT_PAGE_BOUNDS.maximumSingleEventBytes),
+  })
+  .refine(
+    (input) =>
+      input.maximumSingleEventBytes <=
+      input.maximumBytes - SESSION_EVENT_PAGE_BOUNDS.envelopeReserveBytes,
+    {
+      message: "A replay event and its response envelopes must fit within the page byte limit",
+    },
+  );
+export type SessionEventPageInput = z.infer<typeof SessionEventPageInputSchema>;
+
+export const SessionEventPageSchema = z.strictObject({
+  events: z.array(SessionEventSchema).max(256),
+  nextAfterSequence: z.number().int().nonnegative().safe(),
+  done: z.boolean(),
+  serializedBytes: z.number().int().nonnegative().safe(),
+});
+export type SessionEventPage = z.infer<typeof SessionEventPageSchema>;
+
 export const NewSessionEventSchema = z.strictObject({
   eventId: EventIdSchema,
   eventType: SessionEventTypeSchema,
@@ -138,7 +186,7 @@ export const RunProjectionSchema = z.strictObject({
   completedAtMs: NullableTimestampSchema,
   cancelledAtMs: NullableTimestampSchema,
   failureCategory: NullableStringSchema,
-  failureMessage: NullableStringSchema,
+  failureMessage: NullableDiagnosticMessageSchema,
   activeProviderStepId: NullableStringSchema,
 });
 
@@ -151,7 +199,7 @@ export const RunStateProjectionSchema = z.strictObject({
   completedAtMs: NullableTimestampSchema,
   cancelledAtMs: NullableTimestampSchema,
   failureCategory: NullableStringSchema,
-  failureMessage: NullableStringSchema,
+  failureMessage: NullableDiagnosticMessageSchema,
   activeProviderStepId: NullableStringSchema,
 });
 
@@ -193,7 +241,8 @@ export const ProviderStepProjectionSchema = z.strictObject({
   completedAtMs: NullableTimestampSchema,
   responseId: NullableStringSchema,
   errorCategory: NullableStringSchema,
-  errorMessage: NullableStringSchema,
+  errorMessage: NullableDiagnosticMessageSchema,
+  diagnosticId: z.union([DiagnosticIdSchema, z.null()]).optional(),
 });
 
 export const ProviderStepRecordSchema = z.strictObject({
@@ -206,6 +255,7 @@ export const ProviderStepRecordSchema = z.strictObject({
   responseId: NullableStringSchema,
   errorCategory: NullableStringSchema,
   errorMessage: NullableStringSchema,
+  diagnosticId: z.union([DiagnosticIdSchema, z.null()]),
 });
 export type ProviderStepRecord = z.infer<typeof ProviderStepRecordSchema>;
 
@@ -420,13 +470,24 @@ export const PendingApprovalRecordSchema = z.strictObject({
 export type PendingApprovalRecord = z.infer<typeof PendingApprovalRecordSchema>;
 
 export const PendingInputRecordSchema = z.strictObject({
-  inputId: z.string().min(1),
+  inputId: InputIdSchema,
   runId: RunIdSchema,
   state: z.literal("pending"),
   prompt: z.string(),
   requestedAtMs: TimestampMsSchema,
 });
 export type PendingInputRecord = z.infer<typeof PendingInputRecordSchema>;
+
+export const InputRecordSchema = z.strictObject({
+  inputId: InputIdSchema,
+  runId: RunIdSchema,
+  state: z.enum(["pending", "resolved", "cancelled"]),
+  prompt: z.string(),
+  requestedAtMs: TimestampMsSchema,
+  resolvedAtMs: NullableTimestampSchema,
+  value: CanonicalJsonValueSchema,
+});
+export type InputRecord = z.infer<typeof InputRecordSchema>;
 
 export const RunMessageRecordSchema = z.strictObject({
   messageId: MessageIdSchema,

@@ -12,7 +12,10 @@ export type {
   ReconcileSessionResult,
   SetGlobalCommandQuarantineInput,
 } from "./catalog/repository.js";
-export { StorageError } from "./common/worker-rpc.js";
+export {
+  StorageError,
+  WORKER_RPC_PAYLOAD_BOUNDS,
+} from "./common/worker-rpc.js";
 export type {
   WorkerRequestOptions,
   WorkerRequestOutcome,
@@ -23,8 +26,12 @@ export {
   sessionDatabaseRelativePath,
   stableSessionWorkerIndex,
 } from "./manager/paths.js";
-export { SessionStoreManager } from "./manager/session-store-manager.js";
+export {
+  SessionStoreManager,
+  validateSessionStoreManagerOptions,
+} from "./manager/session-store-manager.js";
 export type {
+  CatalogObservationFailure,
   CreateSessionStorageResult,
   DrainCatalogObservationsOptions,
   ManagedAcceptCommandResult,
@@ -37,13 +44,17 @@ export { SessionWorkerPool } from "./session/worker-pool.js";
 export type {
   InitializeSessionInput,
   SessionSqlitePragmas,
+  SessionWorkerBarrier,
   SessionWorkerPoolOptions,
   SessionWorkerStats,
 } from "./session/worker-pool.js";
 export {
   CATALOG_SCHEMA_VERSION,
+  SESSION_EVENT_PAGE_BOUNDS,
   SESSION_FORMAT_VERSION,
   SESSION_SCHEMA_VERSION,
+  SessionEventPageInputSchema,
+  SessionEventPageSchema,
   SessionStatusSchema,
 } from "./types.js";
 export type {
@@ -56,6 +67,7 @@ export type {
   BoundedProviderRequestDataInput,
   GlobalCommandRecord,
   GlobalCommandReservation,
+  InputRecord,
   NewSessionEvent,
   PendingApprovalRecord,
   PendingInputRecord,
@@ -69,6 +81,8 @@ export type {
   SessionCatalogObservation,
   SessionCatalogProjection,
   SessionCreationRequest,
+  SessionEventPage,
+  SessionEventPageInput,
   SessionManifest,
   SessionRecoveryResult,
   SessionStatus,

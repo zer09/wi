@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { RunState, SessionEvent } from "@wi/protocol";
+import { BrowserSessionEventSchema, type RunState, type SessionEvent } from "@wi/protocol";
 import type {
   AcceptCommandInput,
   AcceptedCommandResult,
@@ -25,6 +25,7 @@ import {
   type RunTaskResult,
   type SessionActorIds,
   type SessionActorStorage,
+  type SessionRunFailureDiagnostic,
 } from "./session-actor.js";
 
 function deferred<T>(): {
@@ -291,6 +292,7 @@ async function actorFixture(
   options: {
     readonly createRunProviderSnapshot?: CreateRunProviderSnapshot;
     readonly onFault?: (error: unknown) => void;
+    readonly onRunFailureDiagnostic?: (diagnostic: SessionRunFailureDiagnostic) => void;
   } = {},
 ) {
   const storage = new FakeActorStorage(`ses_${name}`);
@@ -312,6 +314,9 @@ async function actorFixture(
       ? {}
       : { createRunProviderSnapshot: options.createRunProviderSnapshot }),
     ...(options.onFault === undefined ? {} : { onFault: options.onFault }),
+    ...(options.onRunFailureDiagnostic === undefined
+      ? {}
+      : { onRunFailureDiagnostic: options.onRunFailureDiagnostic }),
   });
   actorMonitors.set(actor, monitor);
   return { actor, storage, tasks, scheduler };
@@ -782,12 +787,61 @@ describe("SessionActor", () => {
     await actor.shutdown();
   });
 
+  it.each([
+    ["thrown exception", "provider.protocol_error", "The provider returned an invalid response."],
+    [
+      "returned failure",
+      "storage.worker_failed",
+      "A storage operation failed while processing the run.",
+    ],
+  ] as const)(
+    "persists only server-authored text for a generic run-task %s",
+    async (outcome, code, expectedMessage) => {
+      const secret = `Bearer AUDIT_RUN_TASK_${outcome.replaceAll(" ", "_").toUpperCase()}`;
+      const suffix = outcome === "thrown exception" ? "Thrown" : "Returned";
+      const diagnostics: SessionRunFailureDiagnostic[] = [];
+      const { actor, storage, tasks } = await actorFixture(`safeRunTask${suffix}`, {
+        onRunFailureDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      });
+      const submitted = await actor.submitMessage(
+        message(actor.sessionId, `cmd_safeRunTask${suffix}`),
+      );
+      const task = await waitForTask(tasks, submitted.runId);
+      if (outcome === "thrown exception") task.reject(new Error(secret));
+      else task.resolve({ state: "failed", code, message: secret });
+      await waitForState(actor, null);
+
+      const terminal = storage.events.find(
+        (event) => event.eventType === "run.failed" && event.data.runId === submitted.runId,
+      );
+      if (terminal?.eventType !== "run.failed") throw new Error("Run failure event is missing");
+      const browserEvent = BrowserSessionEventSchema.parse(terminal);
+      if (browserEvent.eventType !== "run.failed") {
+        throw new Error("Browser run failure projection is missing");
+      }
+      expect(browserEvent.data.message).toBe(expectedMessage);
+      expect(JSON.stringify(storage.events)).not.toContain(secret);
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          diagnosticId: terminal.data.diagnosticId,
+          sessionId: actor.sessionId,
+          runId: submitted.runId,
+          state: "failed",
+          code,
+        }),
+      ]);
+      await actor.shutdown();
+    },
+  );
+
   it("releases its permit and remains usable when cancellation cleanup rejects after stop", async () => {
     const storage = new FakeActorStorage("ses_cancellationCleanupError");
     const scheduler = new RunScheduler({ providerCapacity: 1, toolCapacity: 1 });
     const monitor = new ActivityMonitor();
     const secondTask = deferred<RunTaskResult>();
     const secondTaskStarted = deferred<void>();
+    const diagnostics: SessionRunFailureDiagnostic[] = [];
+    const cleanupSecret = "Bearer AUDIT_CANCELLATION_CLEANUP_SECRET";
     let taskCalls = 0;
     const actor = await SessionActor.create({
       storage,
@@ -802,10 +856,11 @@ describe("SessionActor", () => {
         return secondTask.promise;
       },
       cancelRunTask: async () => {
-        throw new Error("cleanup failed after stop");
+        throw new Error(cleanupSecret);
       },
       forceStopRunTask: () => ({ status: "terminated" }),
       onActivity: () => monitor.signal(),
+      onRunFailureDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
     actorMonitors.set(actor, monitor);
 
@@ -823,6 +878,22 @@ describe("SessionActor", () => {
     await waitForActor(actor, () => actor.snapshot.activeRunId === null);
 
     expect(storage.runs.get(first.runId)?.state).toBe("interrupted");
+    const interrupted = storage.events.find(
+      (event) => event.eventType === "run.interrupted" && event.data.runId === first.runId,
+    );
+    if (interrupted?.eventType !== "run.interrupted") {
+      throw new Error("Cancellation interruption event is missing");
+    }
+    expect(interrupted.data.message).toBe("The provider operation was cancelled.");
+    expect(JSON.stringify(storage.events)).not.toContain(cleanupSecret);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        diagnosticId: interrupted.data.diagnosticId,
+        runId: first.runId,
+        state: "interrupted",
+        code: "provider.cancelled",
+      }),
+    );
     expect(actor.snapshot.faulted).toBe(false);
     expect(scheduler.state.provider).toMatchObject({ active: 0, available: 1 });
 

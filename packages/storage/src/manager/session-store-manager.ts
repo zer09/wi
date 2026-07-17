@@ -15,7 +15,7 @@ import {
 } from "../catalog/client.js";
 import type { UpdateSessionProjectionInput } from "../catalog/repository.js";
 import type { SessionClient } from "../session/client.js";
-import { StorageError } from "../common/worker-rpc.js";
+import { StorageError, toStorageError } from "../common/worker-rpc.js";
 import {
   SessionWorkerPool,
   type SessionWorkerPoolOptions,
@@ -39,6 +39,14 @@ export interface StorageIdGenerators {
   readonly diagnosticId?: () => string;
 }
 
+export interface CatalogObservationFailure {
+  readonly diagnosticId: string;
+  readonly sessionId: string;
+  readonly headSequence: number;
+  readonly code: string;
+  readonly error: StorageError;
+}
+
 export interface SessionStoreManagerOptions {
   readonly homeDirectory: string;
   readonly sessionWorkers?: SessionWorkerPoolOptions;
@@ -50,6 +58,9 @@ export interface SessionStoreManagerOptions {
     update: UpdateSessionProjectionInput,
     signal: AbortSignal,
   ) => Promise<void>;
+  readonly onCatalogObservationError?: (
+    failure: CatalogObservationFailure,
+  ) => void | Promise<void>;
   readonly catalogObservationShutdownTimeoutMs?: number;
 }
 
@@ -85,6 +96,51 @@ function defaultIds(): StorageIdGenerators {
   };
 }
 
+function assertPositiveWorkerTimeout(value: number | undefined, description: string): void {
+  if (
+    value !== undefined &&
+    (!Number.isFinite(value) || value <= 0 || !Number.isSafeInteger(value))
+  ) {
+    throw new RangeError(`${description} must be a positive finite safe integer`);
+  }
+}
+
+export function validateSessionStoreManagerOptions(
+  options: SessionStoreManagerOptions,
+): void {
+  const sessionWorkers = options.sessionWorkers;
+  if (
+    sessionWorkers?.size !== undefined &&
+    (!Number.isSafeInteger(sessionWorkers.size) || sessionWorkers.size < 1)
+  ) {
+    throw new RangeError("Session worker pool size must be a positive safe integer");
+  }
+  if (
+    sessionWorkers?.maxOpenHandlesPerWorker !== undefined &&
+    (!Number.isSafeInteger(sessionWorkers.maxOpenHandlesPerWorker) ||
+      sessionWorkers.maxOpenHandlesPerWorker < 1)
+  ) {
+    throw new RangeError("Session worker handle limit must be a positive safe integer");
+  }
+  assertPositiveWorkerTimeout(
+    sessionWorkers?.defaultRequestTimeoutMs,
+    "Worker request timeout",
+  );
+  assertPositiveWorkerTimeout(sessionWorkers?.closeTimeoutMs, "Worker close timeout");
+  assertPositiveWorkerTimeout(
+    options.catalogWorker?.defaultRequestTimeoutMs,
+    "Worker request timeout",
+  );
+  assertPositiveWorkerTimeout(options.catalogWorker?.closeTimeoutMs, "Worker close timeout");
+  if (
+    options.catalogObservationShutdownTimeoutMs !== undefined &&
+    (!Number.isSafeInteger(options.catalogObservationShutdownTimeoutMs) ||
+      options.catalogObservationShutdownTimeoutMs <= 0)
+  ) {
+    throw new RangeError("Catalog observation shutdown timeout must be a positive safe integer");
+  }
+}
+
 function unavailableStatus(error: unknown): "missing" | "unavailable" | null {
   if (!(error instanceof StorageError)) return null;
   if (error.code === "storage.session_missing") return "missing";
@@ -96,6 +152,16 @@ function unavailableStatus(error: unknown): "missing" | "unavailable" | null {
     return "unavailable";
   }
   return null;
+}
+
+interface CatalogObservationRequest {
+  readonly hasEvents: boolean;
+  readonly headSequence: number;
+}
+
+interface CatalogObservationState {
+  pending: CatalogObservationRequest | null;
+  completion: Promise<void>;
 }
 
 export class SessionStoreManager {
@@ -110,9 +176,12 @@ export class SessionStoreManager {
     update: UpdateSessionProjectionInput,
     signal: AbortSignal,
   ) => Promise<void>;
+  private readonly onCatalogObservationError:
+    | ((failure: CatalogObservationFailure) => void | Promise<void>)
+    | undefined;
   private readonly catalogObservationShutdownTimeoutMs: number;
   private readonly catalogObservationAbort = new AbortController();
-  private readonly catalogObservationTails = new Map<string, Promise<void>>();
+  private readonly catalogObservations = new Map<string, CatalogObservationState>();
   private readonly startupRecovery: Promise<void>;
   private readonly reconciledSessions = new Set<string>();
   private readonly reconciliationInFlight = new Map<string, Promise<boolean>>();
@@ -123,6 +192,7 @@ export class SessionStoreManager {
   private closePromise: Promise<void> | null = null;
 
   constructor(options: SessionStoreManagerOptions) {
+    validateSessionStoreManagerOptions(options);
     this.homeDirectory = options.homeDirectory;
     this.ids = options.ids ?? defaultIds();
     this.now = options.now ?? Date.now;
@@ -131,23 +201,29 @@ export class SessionStoreManager {
       ...options.catalogWorker,
     });
     const configuredSessionError = options.sessionWorkers?.onSessionError;
-    this.sessions = new SessionWorkerPool({
-      ...options.sessionWorkers,
-      onSessionError: async (sessionId, error) => {
-        this.invalidateSessionAfterUncertainWorkerFailure(sessionId, error);
-        try {
-          await configuredSessionError?.(sessionId, error);
-        } catch {
-          // A diagnostic callback cannot replace the storage operation error.
-        }
-        await this.markSessionUnavailable(sessionId, error);
-      },
-    });
+    try {
+      this.sessions = new SessionWorkerPool({
+        ...options.sessionWorkers,
+        onSessionError: async (sessionId, error) => {
+          this.invalidateSessionAfterUncertainWorkerFailure(sessionId, error);
+          try {
+            await configuredSessionError?.(sessionId, error);
+          } catch {
+            // A diagnostic callback cannot replace the storage operation error.
+          }
+          await this.markSessionUnavailable(sessionId, error);
+        },
+      });
+    } catch (error) {
+      void this.catalog.close().catch(() => undefined);
+      throw error;
+    }
     this.catalogProjectionWriter =
       options.catalogProjectionWriter ??
       (async (catalog, update) => {
         await catalog.updateSessionProjection(update);
       });
+    this.onCatalogObservationError = options.onCatalogObservationError;
     this.catalogObservationShutdownTimeoutMs =
       options.catalogObservationShutdownTimeoutMs ?? 2_000;
     if (
@@ -524,25 +600,79 @@ export class SessionStoreManager {
     events: readonly SessionEvent[],
     headSequence: number,
   ): void {
-    const previous = this.catalogObservationTails.get(sessionId) ?? Promise.resolve();
-    const observation = previous
-      .catch(() => undefined)
-      .then(async () => {
-        if (this.catalogObservationAbort.signal.aborted) return;
+    const request = { hasEvents: events.length > 0, headSequence };
+    const existing = this.catalogObservations.get(sessionId);
+    if (existing !== undefined) {
+      const pending = existing.pending;
+      existing.pending =
+        pending === null
+          ? request
+          : {
+              hasEvents: pending.hasEvents || request.hasEvents,
+              headSequence: Math.max(pending.headSequence, request.headSequence),
+            };
+      return;
+    }
+
+    const state: CatalogObservationState = {
+      pending: null,
+      completion: Promise.resolve(),
+    };
+    this.catalogObservations.set(sessionId, state);
+    state.completion = this.runCatalogObservations(sessionId, state, request);
+  }
+
+  private async reportCatalogObservationFailure(
+    sessionId: string,
+    headSequence: number,
+    error: unknown,
+  ): Promise<void> {
+    try {
+      const classified = toStorageError(
+        error,
+        "storage.worker_failed",
+        "Catalog observation failed",
+      );
+      await this.onCatalogObservationError?.({
+        diagnosticId: this.diagnosticId(),
+        sessionId,
+        headSequence,
+        code: classified.code,
+        error: classified,
+      });
+    } catch {
+      // A diagnostic callback cannot affect the already committed session result.
+    }
+  }
+
+  private async runCatalogObservations(
+    sessionId: string,
+    state: CatalogObservationState,
+    initial: CatalogObservationRequest,
+  ): Promise<void> {
+    let request = initial;
+    try {
+      while (!this.catalogObservationAbort.signal.aborted) {
         await this.updateCatalogAfterCommit(
           sessionId,
-          events,
-          headSequence,
+          request.hasEvents,
+          request.headSequence,
           this.catalogObservationAbort.signal,
         );
-      })
-      .catch(() => undefined);
-    this.catalogObservationTails.set(sessionId, observation);
-    void observation.then(() => {
-      if (this.catalogObservationTails.get(sessionId) === observation) {
-        this.catalogObservationTails.delete(sessionId);
+        const pending = state.pending;
+        if (pending === null) return;
+        state.pending = null;
+        request = pending;
       }
-    });
+    } catch (error) {
+      if (!this.catalogObservationAbort.signal.aborted) {
+        await this.reportCatalogObservationFailure(sessionId, request.headSequence, error);
+      }
+    } finally {
+      if (this.catalogObservations.get(sessionId) === state) {
+        this.catalogObservations.delete(sessionId);
+      }
+    }
   }
 
   async drainCatalogObservations(
@@ -565,8 +695,10 @@ export class SessionStoreManager {
       timer.unref();
     });
     const drain = async (): Promise<void> => {
-      while (this.catalogObservationTails.size > 0) {
-        await Promise.all([...this.catalogObservationTails.values()]);
+      while (this.catalogObservations.size > 0) {
+        await Promise.all(
+          [...this.catalogObservations.values()].map((state) => state.completion),
+        );
       }
     };
     try {
@@ -578,25 +710,30 @@ export class SessionStoreManager {
 
   private async updateCatalogAfterCommit(
     sessionId: string,
-    events: readonly SessionEvent[],
+    hasEvents: boolean,
     headSequence: number,
     signal: AbortSignal,
   ): Promise<boolean> {
     if (signal.aborted) return false;
     const faultVersion = this.sessionFaultVersions.get(sessionId) ?? 0;
-    if (events.length === 0) {
+    if (!hasEvents) {
       if (this.reconciledSessions.has(sessionId)) return true;
       try {
         return await this.ensureSessionReconciled(sessionId);
-      } catch {
+      } catch (error) {
+        if (!signal.aborted) {
+          await this.reportCatalogObservationFailure(sessionId, headSequence, error);
+        }
         return false;
       }
     }
     try {
       const current = await this.catalog.getSession(sessionId);
       if (current === null) {
-        this.reconciledSessions.delete(sessionId);
-        return false;
+        throw new StorageError(
+          "storage.corrupt",
+          `Catalog entry for ${sessionId} disappeared after a committed session write`,
+        );
       }
 
       const observation = await this.sessions.getCatalogObservation(sessionId);
@@ -621,8 +758,10 @@ export class SessionStoreManager {
       if (signal.aborted) return false;
       const updated = await this.catalog.getSession(sessionId);
       if (updated === null || updated.lastEventSequence < observation.headSequence) {
-        this.reconciledSessions.delete(sessionId);
-        return false;
+        throw new StorageError(
+          "storage.corrupt",
+          `Catalog projection for ${sessionId} did not reach its observed session head`,
+        );
       }
       if (
         updated.status === "ready" &&
@@ -634,8 +773,11 @@ export class SessionStoreManager {
         this.reconciledSessions.delete(sessionId);
       }
       return true;
-    } catch {
+    } catch (error) {
       this.reconciledSessions.delete(sessionId);
+      if (!signal.aborted) {
+        await this.reportCatalogObservationFailure(sessionId, headSequence, error);
+      }
       return false;
     }
   }
@@ -669,7 +811,7 @@ export class SessionStoreManager {
       timeoutMs: this.catalogObservationShutdownTimeoutMs,
     }).catch(() => undefined);
     this.catalogObservationAbort.abort();
-    this.catalogObservationTails.clear();
+    this.catalogObservations.clear();
     const [sessionsResult] = await Promise.allSettled([this.sessions.close()]);
     const [catalogResult] = await Promise.allSettled([this.catalog.close()]);
     if (startupResult?.status === "rejected") throw startupResult.reason;

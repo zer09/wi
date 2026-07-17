@@ -1,4 +1,5 @@
 import type {
+  ErrorCode,
   RunState,
   SessionEvent,
   ToolEffectClass,
@@ -61,6 +62,17 @@ export interface RecoveryResult {
   readonly outcomeUnknownRunIds: readonly string[];
 }
 
+export interface RecoveryFailureDiagnostic {
+  readonly diagnosticId: string;
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly stepIds: readonly string[];
+  readonly callIds: readonly string[];
+  readonly state: "interrupted";
+  readonly code: ErrorCode;
+  readonly error: unknown;
+}
+
 interface StartedToolDecision {
   readonly tool: ToolExecutionRecord;
   readonly compatible: boolean;
@@ -92,6 +104,17 @@ function publishCommitted(
   for (const event of committed.events) publish(event);
 }
 
+function reportRecoveryFailure(
+  report: ((diagnostic: RecoveryFailureDiagnostic) => void) | undefined,
+  diagnostic: RecoveryFailureDiagnostic,
+): void {
+  try {
+    report?.(diagnostic);
+  } catch {
+    // Recovery is already durable; diagnostics cannot replace its result.
+  }
+}
+
 export async function recoverSession(options: {
   readonly sessionId: string;
   readonly storage: RecoveryStorage;
@@ -99,6 +122,7 @@ export async function recoverSession(options: {
   readonly eventId: () => string;
   readonly diagnosticId: () => string;
   readonly publishCommitted: (event: SessionEvent) => void;
+  readonly onFailureDiagnostic?: (diagnostic: RecoveryFailureDiagnostic) => void;
   readonly resumeToolLoop?: boolean;
   readonly currentToolEffectClass?: (toolName: string) => ToolEffectClass | null;
 }): Promise<RecoveryResult> {
@@ -142,7 +166,11 @@ export async function recoverSession(options: {
     ...new Set([...candidates.interruptedRunIds, ...candidates.outcomeUnknownRunIds]),
   ].sort();
 
-  const stepRecovery = async (step: ProviderStepRecord, atMs: number) => {
+  const stepRecovery = async (
+    step: ProviderStepRecord,
+    atMs: number,
+    diagnosticId: string,
+  ) => {
     const [stepTools, streamingMessages] = await Promise.all([
       options.storage.getToolExecutionsForStep?.(step.stepId),
       options.storage.getStreamingMessagesForStep?.(step.stepId),
@@ -154,12 +182,12 @@ export async function recoverSession(options: {
         eventType: "provider.step.interrupted" as const,
         createdAtMs: atMs,
         data: {
-          eventVersion: 1 as const,
+          eventVersion: 2 as const,
           runId: step.runId,
           stepId: step.stepId,
           code: "provider.incomplete" as const,
           message: "Provider streaming could not be safely resumed after restart.",
-          diagnosticId: options.diagnosticId(),
+          diagnosticId,
         },
       },
       projections: [
@@ -292,7 +320,10 @@ export async function recoverSession(options: {
     }
 
     const atMs = options.now();
-    const recoveredSteps = await Promise.all(runSteps.map((step) => stepRecovery(step, atMs)));
+    const recoveryDiagnosticId = options.diagnosticId();
+    const recoveredSteps = await Promise.all(
+      runSteps.map((step) => stepRecovery(step, atMs, recoveryDiagnosticId)),
+    );
     const incompatibleTool = startedTools.some(({ compatible }) => !compatible);
     const ambiguousEffect =
       hasOutcomeUnknown || startedTools.some(({ tool }) => tool.effectClass !== "pure");
@@ -309,6 +340,16 @@ export async function recoverSession(options: {
       interruptionMessage =
         "A durable tool call no longer matches its registered effect classification.";
     }
+    const failureDiagnostic: RecoveryFailureDiagnostic = {
+      diagnosticId: recoveryDiagnosticId,
+      sessionId: options.sessionId,
+      runId,
+      stepIds: runSteps.map((step) => step.stepId),
+      callIds: startedTools.map(({ tool }) => tool.callId),
+      state: "interrupted",
+      code: interruptionCode,
+      error: new Error(interruptionMessage),
+    };
 
     const toolEvents: AppendTransactionInput["events"] = [];
     const toolProjections: NonNullable<AppendTransactionInput["projections"]> = [];
@@ -338,12 +379,12 @@ export async function recoverSession(options: {
               eventType: "tool.execution.outcome_unknown",
               createdAtMs: atMs,
               data: {
-                eventVersion: 1,
+                eventVersion: 2,
                 runId: tool.runId,
                 callId: tool.callId,
                 code: "tool.outcome_unknown",
                 message,
-                diagnosticId: options.diagnosticId(),
+                diagnosticId: recoveryDiagnosticId,
               },
             }
           : {
@@ -351,12 +392,12 @@ export async function recoverSession(options: {
               eventType: "tool.execution.failed",
               createdAtMs: atMs,
               data: {
-                eventVersion: 1,
+                eventVersion: 2,
                 runId: tool.runId,
                 callId: tool.callId,
                 code,
                 message,
-                diagnosticId: options.diagnosticId(),
+                diagnosticId: recoveryDiagnosticId,
               },
             },
       );
@@ -388,11 +429,11 @@ export async function recoverSession(options: {
         eventType: "run.interrupted",
         createdAtMs: atMs,
         data: {
-          eventVersion: 1,
+          eventVersion: 2,
           runId,
           code: interruptionCode,
           message: interruptionMessage,
-          diagnosticId: options.diagnosticId(),
+          diagnosticId: recoveryDiagnosticId,
         },
       },
     ];
@@ -437,6 +478,7 @@ export async function recoverSession(options: {
     try {
       const committed = await options.storage.appendTransaction(transaction);
       publishCommitted(committed, options.publishCommitted);
+      reportRecoveryFailure(options.onFailureDiagnostic, failureDiagnostic);
       for (const step of runSteps) streamingSteps.delete(step.stepId);
       interruptedRunIds.push(runId);
     } catch (operationError) {
@@ -465,6 +507,7 @@ export async function recoverSession(options: {
           );
         }
         publishCommitted(reconciled, options.publishCommitted);
+        reportRecoveryFailure(options.onFailureDiagnostic, failureDiagnostic);
         for (const step of runSteps) streamingSteps.delete(step.stepId);
         interruptedRunIds.push(runId);
         continue;
@@ -483,7 +526,18 @@ export async function recoverSession(options: {
 
   for (const step of streamingSteps.values()) {
     const atMs = options.now();
-    const recovered = await stepRecovery(step, atMs);
+    const recoveryDiagnosticId = options.diagnosticId();
+    const recovered = await stepRecovery(step, atMs, recoveryDiagnosticId);
+    const failureDiagnostic: RecoveryFailureDiagnostic = {
+      diagnosticId: recoveryDiagnosticId,
+      sessionId: options.sessionId,
+      runId: step.runId,
+      stepIds: [step.stepId],
+      callIds: [],
+      state: "interrupted",
+      code: "provider.incomplete",
+      error: new Error("Provider streaming could not be safely resumed after restart."),
+    };
     const transaction: AppendTransactionInput = {
       events: [recovered.event],
       projections: recovered.projections,
@@ -491,6 +545,7 @@ export async function recoverSession(options: {
     try {
       const committed = await options.storage.appendTransaction(transaction);
       publishCommitted(committed, options.publishCommitted);
+      reportRecoveryFailure(options.onFailureDiagnostic, failureDiagnostic);
     } catch (operationError) {
       const [current, reconciled] = await Promise.all([
         options.storage.getProviderStep(step.stepId),
@@ -502,6 +557,7 @@ export async function recoverSession(options: {
       ]);
       if (reconciled !== null && current !== null && current.state !== "streaming") {
         publishCommitted(reconciled, options.publishCommitted);
+        reportRecoveryFailure(options.onFailureDiagnostic, failureDiagnostic);
         continue;
       }
       if (

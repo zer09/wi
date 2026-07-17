@@ -1,14 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  LEGACY_FAILURE_MESSAGE_MAX_BYTES,
+  SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
+} from "./errors.js";
+import {
+  BrowserSessionEventSchema,
+  LEGACY_FAILURE_BROWSER_MESSAGE,
   SESSION_EVENT_TYPES,
   SessionEventSchema,
+  toBrowserSessionEvent,
   type SessionEventType,
 } from "./events.js";
 
 const run = { eventVersion: 1, runId: "run_A" } as const;
 const step = { ...run, stepId: "step_A" } as const;
 const tool = { ...run, callId: "call_A" } as const;
+const safeRun = { eventVersion: 2, runId: "run_A" } as const;
+const safeStep = { ...safeRun, stepId: "step_A" } as const;
+const safeTool = { ...safeRun, callId: "call_A" } as const;
 const failure = {
   code: "provider.protocol_error",
   message: "Safe failure.",
@@ -25,8 +35,8 @@ const eventData: Record<SessionEventType, unknown> = {
   "run.cancel.requested": run,
   "run.cancelled": run,
   "run.completed": run,
-  "run.failed": { ...run, ...failure },
-  "run.interrupted": { ...run, ...failure },
+  "run.failed": { ...safeRun, ...failure },
+  "run.interrupted": { ...safeRun, ...failure },
   "provider.step.started": { ...step, stepIndex: 0 },
   "provider.text.delta": {
     ...step,
@@ -42,8 +52,8 @@ const eventData: Record<SessionEventType, unknown> = {
   },
   "provider.tool_call.reused": { ...step, callId: "call_A", originalStepId: "step_original" },
   "provider.step.completed": step,
-  "provider.step.interrupted": { ...step, ...failure },
-  "provider.step.failed": { ...step, ...failure },
+  "provider.step.interrupted": { ...safeStep, ...failure },
+  "provider.step.failed": { ...safeStep, ...failure },
   "assistant.message.completed": { ...run, messageId: "msg_assistant" },
   "tool.call.requested": {
     ...step,
@@ -64,9 +74,9 @@ const eventData: Record<SessionEventType, unknown> = {
   "tool.execution.started": tool,
   "tool.execution.recovered": { ...tool, attemptCount: 1 },
   "tool.execution.completed": { ...tool, result: { text: "hello" } },
-  "tool.execution.failed": { ...tool, ...failure, code: "tool.execution_failed" },
+  "tool.execution.failed": { ...safeTool, ...failure, code: "tool.execution_failed" },
   "tool.execution.outcome_unknown": {
-    ...tool,
+    ...safeTool,
     code: "tool.outcome_unknown",
     message: "Outcome cannot be proven.",
     diagnosticId: "err_A",
@@ -89,6 +99,84 @@ describe("durable session events", () => {
         data: eventData[eventType],
       }).success,
     ).toBe(true);
+  });
+
+  it("bounds durable failure messages", () => {
+    const base = {
+      v: 1,
+      kind: "event",
+      sessionId: "ses_A",
+      sequence: 1,
+      eventId: "evt_A",
+      eventType: "run.failed",
+      createdAtMs: 100,
+    } as const;
+    expect(
+      SessionEventSchema.safeParse({
+        ...base,
+        data: {
+          ...safeRun,
+          ...failure,
+          message: "x".repeat(SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH),
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      SessionEventSchema.safeParse({
+        ...base,
+        data: {
+          ...safeRun,
+          ...failure,
+          message: "x".repeat(SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH + 1),
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("decodes bounded legacy v1 failures and projects them safely for the browser", () => {
+    const base = {
+      v: 1,
+      kind: "event",
+      sessionId: "ses_A",
+      sequence: 1,
+      eventId: "evt_legacyFailure",
+      eventType: "run.failed",
+      createdAtMs: 100,
+    } as const;
+    const legacySecret = "Bearer LEGACY_PROVIDER_SECRET";
+    const legacy = SessionEventSchema.parse({
+      ...base,
+      data: {
+        ...run,
+        ...failure,
+        message: legacySecret.padEnd(700, "x"),
+      },
+    });
+
+    expect(BrowserSessionEventSchema.safeParse(legacy).success).toBe(false);
+    const projected = toBrowserSessionEvent(legacy);
+    expect(projected.data).toMatchObject({
+      eventVersion: 2,
+      message: LEGACY_FAILURE_BROWSER_MESSAGE,
+      diagnosticId: "err_A",
+    });
+    expect(JSON.stringify(projected)).not.toContain(legacySecret);
+    expect(
+      SessionEventSchema.safeParse({
+        ...base,
+        data: { ...run, ...failure, message: "x".repeat(LEGACY_FAILURE_MESSAGE_MAX_BYTES) },
+      }).success,
+    ).toBe(true);
+    expect(
+      SessionEventSchema.safeParse({
+        ...base,
+        data: {
+          ...run,
+          ...failure,
+          message: "x".repeat(LEGACY_FAILURE_MESSAGE_MAX_BYTES + 1),
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("decodes input-specific waiting payload", () => {

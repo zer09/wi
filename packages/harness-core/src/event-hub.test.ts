@@ -859,6 +859,41 @@ describe("race-free replay subscription", () => {
     expect(hub.subscriberCount("ses_replay")).toBe(0);
   });
 
+  it("disconnects when replay live bytes overflow below the event-count limit", async () => {
+    const hub = new CommittedEventHub();
+    const queryStarted = deferred();
+    const releaseQuery = deferred();
+    const first = event(1);
+    const eventBytes = Buffer.byteLength(JSON.stringify(first));
+    const subscription = beginReplaySubscription({
+      sessionId: "ses_replay",
+      afterSequence: 0,
+      hub,
+      maxBufferedLiveEvents: 10,
+      maxBufferedLiveBytes: eventBytes * 2 - 1,
+      maxSingleEventBytes: eventBytes,
+      source: {
+        getHeadSequence: async () => 0,
+        getEventsAfter: async () => {
+          queryStarted.resolve();
+          await releaseQuery.promise;
+          return [];
+        },
+      },
+      callbacks: { deliver: vi.fn(), replayComplete: vi.fn() },
+    });
+    await queryStarted.promise;
+
+    hub.publishCommitted(first);
+    hub.publishCommitted(event(2));
+    releaseQuery.resolve();
+
+    await expect(subscription.ready).rejects.toMatchObject({
+      code: "replay.subscriber_overflow",
+    });
+    expect(hub.subscriberCount("ses_replay")).toBe(0);
+  });
+
   it("disconnects when a slow live callback exceeds its bounded backlog", async () => {
     const hub = new CommittedEventHub();
     const deliveryStarted = deferred();

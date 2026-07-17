@@ -31,6 +31,7 @@ import {
   SessionActor,
   recoverSession,
   type AgentRunLoopIds,
+  type RecoveryFailureDiagnostic,
   type SessionActorIds,
 } from "../../packages/harness-core/src/index.js";
 
@@ -863,11 +864,13 @@ async function recoverStartedSet(
   readonly executions: readonly string[];
   readonly registry: ToolRegistry;
   readonly storage: SessionClient;
+  readonly diagnostics: readonly RecoveryFailureDiagnostic[];
 }> {
   const storage = decorateStorage?.(session) ?? session;
   const registry = registryFor(specs);
   const provider = new FakeProviderAdapter();
   const executions: string[] = [];
+  const diagnostics: RecoveryFailureDiagnostic[] = [];
   const ids = generatedIds(`set${fixtureNumber}`);
   const loop = new AgentRunLoop({
     storage,
@@ -906,10 +909,11 @@ async function recoverStartedSet(
     }),
     runTaskOwnsSchedulerPermits: true,
     resumeRestoredRuns: true,
+    onRecoveryFailureDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
   });
   actors.push(actor);
   await terminal;
-  return { actor, provider, executions, registry, storage };
+  return { actor, provider, executions, registry, storage, diagnostics };
 }
 
 async function createRecoveryOnlyActor(
@@ -1190,6 +1194,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       now: () => 5_900,
       commitTransaction: (input) => session.appendTransaction(input),
       waitForApproval: async () => undefined,
+      waitForInput: async () => null,
     });
 
     expect(result).toMatchObject({ state: "interrupted", code: "tool.outcome_unknown" });
@@ -1419,6 +1424,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       now: () => 7_000,
       commitTransaction: (input) => session.appendTransaction(input),
       waitForApproval: async () => undefined,
+      waitForInput: async () => null,
     });
 
     expect(result).toMatchObject({
@@ -1545,6 +1551,7 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       now: () => 9_000,
       commitTransaction: (input) => session.appendTransaction(input),
       waitForApproval: async () => undefined,
+      waitForInput: async () => null,
     });
 
     expect(result).toEqual({ state: "completed" });
@@ -1587,8 +1594,29 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
     const interrupted = events.find(
       (event) => event.eventType === "run.interrupted" && event.data.runId === seeded.runId,
     );
-    expect(unknown?.sequence).toBeDefined();
-    expect(interrupted?.sequence).toBe((unknown?.sequence ?? 0) + 1);
+    if (unknown?.eventType !== "tool.execution.outcome_unknown") {
+      throw new Error("Recovery did not persist an unknown tool outcome");
+    }
+    if (interrupted?.eventType !== "run.interrupted") {
+      throw new Error("Recovery did not persist a run interruption");
+    }
+    expect(interrupted.sequence).toBe(unknown.sequence + 1);
+    expect(unknown.data).toMatchObject({
+      eventVersion: 2,
+      diagnosticId: expect.stringMatching(/^err_/u),
+    });
+    expect(interrupted.data).toMatchObject({
+      eventVersion: 2,
+      diagnosticId: unknown.data.diagnosticId,
+    });
+    expect(recovered.diagnostics).toEqual([
+      expect.objectContaining({
+        diagnosticId: unknown.data.diagnosticId,
+        runId: seeded.runId,
+        callIds: seeded.callIds,
+        code: "tool.outcome_unknown",
+      }),
+    ]);
   });
 
   it("reconciles unsafe started calls across two restarts when resumption is disabled", async () => {
@@ -1898,6 +1926,124 @@ describe("Milestone 4 ledger recovery and atomicity", () => {
       argumentsHash: tool.argumentsHash,
       state: "completed",
     });
+  });
+
+  it("reuses a committed provider-step failure diagnostic when terminalizing its run after restart", async () => {
+    const { session } = await storageFixture();
+    const runId = "run_committedProviderFailure";
+    const stepId = "step_committedProviderFailure";
+    const diagnosticId = "err_originalProviderFailure";
+    await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_committedProviderFailureRunCreated",
+          eventType: "run.created",
+          createdAtMs: 2_000,
+          data: { eventVersion: 1, runId },
+        },
+        {
+          eventId: "evt_committedProviderFailureRunStarted",
+          eventType: "run.started",
+          createdAtMs: 2_001,
+          data: { eventVersion: 1, runId },
+        },
+        {
+          eventId: "evt_committedProviderFailureStepStarted",
+          eventType: "provider.step.started",
+          createdAtMs: 2_002,
+          data: { eventVersion: 1, runId, stepId, stepIndex: 0 },
+        },
+        {
+          eventId: "evt_committedProviderFailureStepFailed",
+          eventType: "provider.step.failed",
+          createdAtMs: 2_003,
+          data: {
+            eventVersion: 2,
+            runId,
+            stepId,
+            code: "provider.protocol_error",
+            message: "The provider returned an invalid response.",
+            diagnosticId,
+          },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.put",
+          runId,
+          state: "running",
+          providerId: "fake",
+          providerConfig: { scenario: "plain-text" },
+          createdAtMs: 2_000,
+          startedAtMs: 2_001,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        {
+          kind: "providerStep.put",
+          stepId,
+          runId,
+          stepIndex: 0,
+          state: "failed",
+          startedAtMs: 2_002,
+          completedAtMs: 2_003,
+          responseId: null,
+          errorCategory: "provider.protocol_error",
+          errorMessage: "The provider returned an invalid response.",
+          diagnosticId,
+        },
+      ],
+    });
+
+    const provider = new FakeProviderAdapter();
+    const ids = generatedIds("committedProviderFailure");
+    const loop = new AgentRunLoop({
+      storage: session,
+      provider,
+      registry: createBuiltinToolRegistry(),
+      executor: new ToolExecutor(),
+      ids: ids.loop,
+    });
+    let resolveTerminal!: (
+      event: Extract<SessionEvent, { eventType: "run.failed" }>,
+    ) => void;
+    const terminal = new Promise<Extract<SessionEvent, { eventType: "run.failed" }>>(
+      (resolve) => {
+        resolveTerminal = resolve;
+      },
+    );
+    const hub = new CommittedEventHub();
+    hub.subscribe(session.sessionId, (event) => {
+      if (event.eventType === "run.failed" && event.data.runId === runId) {
+        resolveTerminal(event);
+      }
+    });
+    const actor = await SessionActor.create({
+      storage: session,
+      eventHub: hub,
+      scheduler: new RunScheduler({ providerCapacity: 1, toolCapacity: 1 }),
+      ids: ids.actor,
+      now: () => 3_000,
+      runTask: loop.task,
+      currentToolEffectClass: loop.currentToolEffectClass,
+      cancelRunTask: loop.cancel,
+      forceStopRunTask: () => ({ status: "terminated" }),
+      runTaskOwnsSchedulerPermits: true,
+      resumeRestoredRuns: true,
+    });
+    actors.push(actor);
+    const runFailed = await terminal;
+
+    expect(runFailed.data.diagnosticId).toBe(diagnosticId);
+    await expect(session.getProviderStep(stepId)).resolves.toMatchObject({ diagnosticId });
+    await expect(session.getRun(runId)).resolves.toMatchObject({
+      state: "failed",
+      failureCategory: "provider.protocol_error",
+    });
+    expect(provider.requests).toEqual([]);
   });
 
   it("rejects provider-step and tool terminal regression through durable CAS", async () => {

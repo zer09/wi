@@ -17,6 +17,7 @@ import {
   AcceptedCommandResultSchema,
   AppendTransactionInputSchema,
   BoundedProviderRequestDataInputSchema,
+  InputRecordSchema,
   PendingApprovalRecordSchema,
   PendingInputRecordSchema,
   ProviderStepRecordSchema,
@@ -24,10 +25,12 @@ import {
   RunRecordSchema,
   ToolExecutionRecordSchema,
   ProjectionMutationSchema,
+  SESSION_EVENT_PAGE_BOUNDS,
   SESSION_FORMAT_VERSION,
   SESSION_SCHEMA_VERSION,
   SessionCatalogObservationSchema,
   SessionCatalogProjectionSchema,
+  SessionEventPageInputSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
   type AcceptCommandInput,
@@ -35,6 +38,7 @@ import {
   type AppendTransactionInput,
   type AppendTransactionInspection,
   type BoundedProviderRequestData,
+  type InputRecord,
   type PendingApprovalRecord,
   type PendingInputRecord,
   type ProviderStepRecord,
@@ -43,6 +47,7 @@ import {
   type ToolExecutionRecord,
   type SessionCatalogObservation,
   type SessionCatalogProjection,
+  type SessionEventPage,
   type SessionManifest,
   type SessionRecoveryResult,
 } from "../types.js";
@@ -206,7 +211,12 @@ export class SessionRepository {
         "eventVersion" in eventInput.data
           ? (eventInput.data as { eventVersion?: unknown }).eventVersion
           : undefined;
-      if (eventVersion !== 1) throw new StorageError("protocol.invalid_message", "Event version must be 1");
+      if (eventVersion !== 1 && eventVersion !== 2) {
+        throw new StorageError(
+          "protocol.invalid_message",
+          "Event version must be 1 or 2",
+        );
+      }
 
       const result = statement.run({
         eventId: eventInput.eventId,
@@ -370,6 +380,21 @@ export class SessionRepository {
     );
   }
 
+  private decodeEventRow(row: EventRow, sessionId: string): SessionEvent {
+    return decodeStoredValue(`session event ${row.sequence}`, () =>
+      SessionEventSchema.parse({
+        v: 1,
+        kind: "event",
+        sessionId,
+        sequence: row.sequence,
+        eventId: row.eventId,
+        eventType: row.eventType,
+        createdAtMs: row.createdAtMs,
+        data: JSON.parse(row.payloadJson) as unknown,
+      }),
+    );
+  }
+
   getEventsAfter(afterSequence: number, throughSequence?: number): readonly SessionEvent[] {
     const after = z.number().int().nonnegative().safe().parse(afterSequence);
     const through =
@@ -386,20 +411,88 @@ export class SessionRepository {
       )
       .all(after, through) as EventRow[];
     const sessionId = this.getManifest().sessionId;
-    return rows.map((row) =>
-      decodeStoredValue(`session event ${row.sequence}`, () =>
-        SessionEventSchema.parse({
-          v: 1,
-          kind: "event",
-          sessionId,
-          sequence: row.sequence,
-          eventId: row.eventId,
-          eventType: row.eventType,
-          createdAtMs: row.createdAtMs,
-          data: JSON.parse(row.payloadJson) as unknown,
-        }),
-      ),
-    );
+    return rows.map((row) => this.decodeEventRow(row, sessionId));
+  }
+
+  getEventPageAfter(inputValue: unknown): SessionEventPage {
+    const input = SessionEventPageInputSchema.parse(inputValue);
+    const sessionId = this.getManifest().sessionId;
+    const rows = this.database
+      .prepare(
+        `SELECT sequence, event_id AS eventId, event_type AS eventType,
+                created_at_ms AS createdAtMs, payload_json AS payloadJson
+         FROM events
+         WHERE sequence > ? AND sequence <= ?
+         ORDER BY sequence
+         LIMIT ?`,
+      )
+      .iterate(
+        input.afterSequence,
+        input.throughSequence,
+        input.maximumEvents + 1,
+      ) as IterableIterator<EventRow>;
+    const events: SessionEvent[] = [];
+    let eventBytesTotal = 0;
+    let stoppedAtBound = false;
+    for (const row of rows) {
+      if (events.length >= input.maximumEvents) {
+        stoppedAtBound = true;
+        break;
+      }
+      if (Buffer.byteLength(row.payloadJson) > input.maximumSingleEventBytes) {
+        throw new StorageError(
+          "storage.payload_too_large",
+          `Stored session event ${row.sequence} exceeds the replay event byte limit`,
+        );
+      }
+      const event = this.decodeEventRow(row, sessionId);
+      const eventBytes = Buffer.byteLength(JSON.stringify(event));
+      if (eventBytes > input.maximumSingleEventBytes) {
+        throw new StorageError(
+          "storage.payload_too_large",
+          `Session event ${row.sequence} exceeds the replay event byte limit`,
+        );
+      }
+      const separatorBytes = events.length === 0 ? 0 : 1;
+      if (
+        eventBytesTotal >
+        input.maximumBytes -
+          SESSION_EVENT_PAGE_BOUNDS.envelopeReserveBytes -
+          separatorBytes -
+          eventBytes
+      ) {
+        if (events.length === 0) {
+          throw new StorageError(
+            "storage.payload_too_large",
+            `Session event ${row.sequence} does not fit within a replay page`,
+          );
+        }
+        stoppedAtBound = true;
+        break;
+      }
+      events.push(event);
+      eventBytesTotal += separatorBytes + eventBytes;
+    }
+    const pageWithoutSize = {
+      events,
+      nextAfterSequence: events.at(-1)?.sequence ?? input.afterSequence,
+      done: !stoppedAtBound,
+    };
+    let serializedBytes = 0;
+    while (true) {
+      const measured = Buffer.byteLength(
+        JSON.stringify({ ...pageWithoutSize, serializedBytes }),
+      );
+      if (measured === serializedBytes) break;
+      serializedBytes = measured;
+    }
+    if (serializedBytes > input.maximumBytes) {
+      throw new StorageError(
+        "storage.payload_too_large",
+        "Replay page response exceeded its serialized byte limit",
+      );
+    }
+    return { ...pageWithoutSize, serializedBytes };
   }
 
   getHeadSequence(): number {
@@ -641,7 +734,7 @@ export class SessionRepository {
         `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
                 started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
                 response_id AS responseId, error_category AS errorCategory,
-                error_message AS errorMessage
+                error_message AS errorMessage, diagnostic_id AS diagnosticId
          FROM provider_steps WHERE step_id = ?`,
       )
       .get(stepId) as unknown;
@@ -655,7 +748,7 @@ export class SessionRepository {
         `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
                 started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
                 response_id AS responseId, error_category AS errorCategory,
-                error_message AS errorMessage
+                error_message AS errorMessage, diagnostic_id AS diagnosticId
          FROM provider_steps WHERE run_id = ? ORDER BY step_index`,
       )
       .all(runId) as unknown[];
@@ -706,7 +799,7 @@ export class SessionRepository {
         `SELECT step_id AS stepId, run_id AS runId, step_index AS stepIndex, state,
                 started_at_ms AS startedAtMs, completed_at_ms AS completedAtMs,
                 response_id AS responseId, error_category AS errorCategory,
-                error_message AS errorMessage
+                error_message AS errorMessage, diagnostic_id AS diagnosticId
          FROM provider_steps WHERE run_id = ? ORDER BY step_index DESC LIMIT ?`,
       )
       .all(runId, limit) as unknown[];
@@ -878,6 +971,35 @@ export class SessionRepository {
     return rows.map((row) =>
       decodeStoredValue("pending input", () => PendingInputRecordSchema.parse(row)),
     );
+  }
+
+  getInput(inputId: string): InputRecord | null {
+    const row = this.database
+      .prepare(
+        `SELECT input_id AS inputId, run_id AS runId, state, prompt,
+                requested_at_ms AS requestedAtMs, resolved_at_ms AS resolvedAtMs,
+                value_json AS valueJson
+         FROM pending_inputs WHERE input_id = ?`,
+      )
+      .get(inputId) as
+      | {
+          inputId: string;
+          runId: string;
+          state: string;
+          prompt: string;
+          requestedAtMs: number;
+          resolvedAtMs: number | null;
+          valueJson: string | null;
+        }
+      | undefined;
+    if (row === undefined) return null;
+    return decodeStoredValue("input", () => {
+      const { valueJson, ...input } = row;
+      return InputRecordSchema.parse({
+        ...input,
+        value: valueJson === null ? null : (JSON.parse(valueJson) as unknown),
+      });
+    });
   }
 
   getPendingInputCount(): number {

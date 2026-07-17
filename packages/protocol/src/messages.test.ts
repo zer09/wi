@@ -147,6 +147,7 @@ describe("v1 server messages", () => {
     {
       v: 1,
       kind: "protocol.error",
+      sessionId,
       code: "protocol.invalid_message",
       message: "Invalid message.",
       diagnosticId: "err_A",

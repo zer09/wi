@@ -140,7 +140,7 @@ describe("storage crash windows", () => {
 
     const storage = restart(homeDirectory);
     const session = await storage.openSession("ses_v1Populated");
-    await expect(session.getManifest()).resolves.toMatchObject({ schemaVersion: 2 });
+    await expect(session.getManifest()).resolves.toMatchObject({ schemaVersion: 3 });
     await expect(session.getToolExecutionsForStep("step_v1Original")).resolves.toEqual([
       expect.objectContaining({ callId: "call_v1Existing", state: "completed" }),
     ]);

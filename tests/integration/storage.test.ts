@@ -11,6 +11,7 @@ import {
   StorageError,
   stableSessionWorkerIndex,
   type AppendTransactionInput,
+  type CatalogObservationFailure,
   type ProjectionMutation,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
@@ -56,6 +57,9 @@ async function manager(
     ...(options.catalogProjectionWriter === undefined
       ? {}
       : { catalogProjectionWriter: options.catalogProjectionWriter }),
+    ...(options.onCatalogObservationError === undefined
+      ? {}
+      : { onCatalogObservationError: options.onCatalogObservationError }),
     ...(options.catalogObservationShutdownTimeoutMs === undefined
       ? {}
       : {
@@ -148,7 +152,7 @@ describe("catalog and per-session storage workers", () => {
       projectId: "project_storageA",
       title: "Storage test",
       lastEventSequence: 1,
-      schemaVersion: 2,
+      schemaVersion: 3,
       formatVersion: 1,
     });
     await expect(
@@ -1203,9 +1207,14 @@ describe("catalog and per-session storage workers", () => {
   });
 
   it("keeps a session commit canonical when catalog projection update fails, then reconciles", async () => {
+    const failures: CatalogObservationFailure[] = [];
     const storage = await manager({
       catalogProjectionWriter: async () => {
         throw new Error("injected catalog failure");
+      },
+      onCatalogObservationError: (failure) => {
+        failures.push(failure);
+        throw new Error("injected diagnostic callback failure");
       },
     });
     const created = await storage.createSession(createCommand());
@@ -1213,6 +1222,18 @@ describe("catalog and per-session storage workers", () => {
 
     expect(committed.catalogObservationScheduled).toBe(true);
     await storage.drainCatalogObservations();
+    expect(failures).toEqual([
+      expect.objectContaining({
+        diagnosticId: expect.stringMatching(/^err_/u),
+        sessionId: created.session.sessionId,
+        headSequence: 2,
+        code: "storage.worker_failed",
+        error: expect.objectContaining({
+          name: "StorageError",
+          code: "storage.worker_failed",
+        }),
+      }),
+    ]);
     expect((await storage.catalog.getSession(created.session.sessionId))?.lastEventSequence).toBe(1);
     await expect(
       (await storage.openSession(created.session.sessionId)).getHeadSequence(),
@@ -1292,7 +1313,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it("serializes same-session catalog observers and rejects stale head updates", async () => {
+  it("coalesces blocked same-session catalog observers and rejects stale head updates", async () => {
     let releaseFirstWriter = (): void => {};
     let markFirstWriterStarted = (): void => {};
     const firstWriterGate = new Promise<void>((resolve) => {
@@ -1331,11 +1352,16 @@ describe("catalog and per-session storage workers", () => {
       lastEventSequence: 1,
     });
 
-    const second = await storage.appendTransaction(
-      created.session.sessionId,
-      runAppend("evt_observerSecond", "run_observerSecond"),
-    );
-    expect(second.headSequence).toBe(3);
+    let latestHead = first.headSequence;
+    for (let index = 2; index <= 64; index += 1) {
+      const committed = await storage.appendTransaction(
+        created.session.sessionId,
+        runAppend(`evt_observer${index}`, `run_observer${index}`),
+      );
+      latestHead = committed.headSequence;
+    }
+    expect(latestHead).toBe(65);
+    // One writer plus one coalesced latest-head record is retained while the writer is blocked.
     expect(writerCalls).toBe(1);
 
     releaseFirstWriter();
@@ -1343,19 +1369,22 @@ describe("catalog and per-session storage workers", () => {
     expect(writerCalls).toBe(2);
     const current = await storage.catalog.getSession(created.session.sessionId);
     if (current === null) throw new Error("Session summary disappeared");
-    expect(current.lastEventSequence).toBe(3);
+    expect(current.lastEventSequence).toBe(latestHead);
     await expect(
       storage.catalog.updateSessionProjection({
         sessionId: current.sessionId,
         updatedAtMs: current.updatedAtMs,
-        lastEventSequence: 2,
+        lastEventSequence: latestHead - 1,
         lastRunState: current.lastRunState,
         lastMessagePreview: current.lastMessagePreview,
         requiresAttention: current.requiresAttention,
         pendingApprovalCount: current.pendingApprovalCount,
         pendingInputCount: current.pendingInputCount,
       }),
-    ).resolves.toMatchObject({ outcome: "stale", summary: { lastEventSequence: 3 } });
+    ).resolves.toMatchObject({
+      outcome: "stale",
+      summary: { lastEventSequence: latestHead },
+    });
   });
 
   it("writes catalog metadata with the atomic session head that produced it", async () => {
@@ -2228,6 +2257,10 @@ describe("catalog and per-session storage workers", () => {
       requiresAttention: true,
       pendingInputCount: 1,
     });
+    await expect(session.getInput("input_storageA")).resolves.toMatchObject({
+      state: "pending",
+      value: null,
+    });
 
     await storage.appendTransaction(created.session.sessionId, {
       events: [
@@ -2256,6 +2289,11 @@ describe("catalog and per-session storage workers", () => {
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       requiresAttention: false,
       pendingInputCount: 0,
+    });
+    await expect(session.getInput("input_storageA")).resolves.toMatchObject({
+      state: "resolved",
+      resolvedAtMs: 1_210,
+      value: "yes",
     });
     await expect(
       session.appendTransaction({

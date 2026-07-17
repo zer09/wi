@@ -22,6 +22,8 @@ import WebSocket, { type RawData } from "ws";
 import type { WiRuntime } from "../composition.js";
 import { nonThrowingLogger, type Logger } from "../logging/logger.js";
 import { malformedPayloadMetadata } from "../logging/redaction.js";
+import { CommandRoutingError } from "./command-router.js";
+import { durableCommandPayloadBytes } from "./durable-command-limits.js";
 import { mapCommandError, mapReplayError } from "./error-mapping.js";
 import {
   decodeClientFrame,
@@ -57,6 +59,7 @@ export interface ConnectionLimits {
   readonly replayPageBytes: number;
   readonly replayPageSingleEventBytes: number;
   readonly replayQueueWaitTimeoutMs: number;
+  readonly maximumDurableCommandPayloadBytes: number;
 }
 
 export interface ConnectionHeartbeatOptions {
@@ -498,6 +501,12 @@ export class BrowserConnection {
     message: Extract<ClientMessage, { readonly kind: "command" }>,
   ): Promise<void> {
     try {
+      if (durableCommandPayloadBytes(message) > this.limits.maximumDurableCommandPayloadBytes) {
+        throw new CommandRoutingError(
+          "protocol.message_too_large",
+          "The durable command payload exceeds the configured byte limit.",
+        );
+      }
       await this.runCommandHook("before_route", () => this.commandHooks.beforeRoute?.(message));
       const accepted = await this.runtime.commandRouter.route(message, this.clientId ?? "unknown");
       await this.runCommandHook("after_route_before_send", () =>

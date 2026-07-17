@@ -12,7 +12,10 @@ export type {
   ReconcileSessionResult,
   SetGlobalCommandQuarantineInput,
 } from "./catalog/repository.js";
-export { StorageError } from "./common/worker-rpc.js";
+export {
+  StorageError,
+  WORKER_RPC_PAYLOAD_BOUNDS,
+} from "./common/worker-rpc.js";
 export type {
   WorkerRequestOptions,
   WorkerRequestOutcome,

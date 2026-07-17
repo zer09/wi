@@ -364,6 +364,20 @@ Both the transport queue and one connection-wide replay budget enforce this poli
 
 A slow browser must not block the SessionActor, database worker, provider stream, or other subscribers.
 
+Before command routing, the gateway also bounds every browser value that is copied into a canonical durable event: `session.create.title`, `message.submit.text`, and the complete canonical JSON encoding of `input.respond.value`. The maximum is computed as:
+
+```text
+min(
+  outbound single-message bytes,
+  live replay single-event bytes,
+  historical replay single-event bytes,
+  storage single-event bytes,
+  floor(worker RPC payload units / 2)
+) - 4096-byte worst-case event/RPC envelope reserve
+```
+
+The factor of two covers the maximum number of worker-RPC fields that carry one command value. Limits that cannot leave the fixed reserve are rejected during server construction. Values are measured as complete canonical JSON in UTF-8, so quoting, escaping, and multibyte characters count toward the limit. One-byte-over commands return `protocol.message_too_large` without entering the command router or changing session/catalog state; input is never truncated.
+
 ## 12. Heartbeats and liveness
 
 The server library may use protocol-level Ping/Pong to detect dead connections. The application may also send a Wi heartbeat.

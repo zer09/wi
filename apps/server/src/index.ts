@@ -16,6 +16,12 @@ export type {
   ConnectionReplayHooks,
   ConnectionSnapshot,
 } from "./websocket/connection.js";
+export {
+  DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
+  durableCommandPayloadBytes,
+  maximumDurableCommandPayloadBytes,
+} from "./websocket/durable-command-limits.js";
+export type { DurableCommandCapacities } from "./websocket/durable-command-limits.js";
 export { decodeClientFrame, FrameDecodeError } from "./websocket/frame-decoder.js";
 export type { FrameLimits } from "./websocket/frame-decoder.js";
 export { WEBSOCKET_LIMIT_CAPS, WebSocketGateway } from "./websocket/gateway.js";

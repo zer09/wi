@@ -47,12 +47,17 @@ import {
   type ConnectionCommandHooks,
   type ConnectionReplayHooks,
 } from "../../apps/server/src/websocket/connection.js";
+import {
+  DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
+  maximumDurableCommandPayloadBytes,
+} from "../../apps/server/src/websocket/durable-command-limits.js";
 import { WEBSOCKET_LIMIT_CAPS } from "../../apps/server/src/websocket/gateway.js";
 import { LoopbackRequestPolicy } from "../../apps/server/src/websocket/origin-policy.js";
 import { SLOW_CONSUMER_CLOSE_CODE } from "../../apps/server/src/websocket/outbound-queue.js";
 
 type EventFrame = Extract<ServerMessage, { readonly kind: "event" }>;
 type CommandAcceptedFrame = Extract<ServerMessage, { readonly kind: "command.accepted" }>;
+type CommandRejectedFrame = Extract<ServerMessage, { readonly kind: "command.rejected" }>;
 type ProtocolErrorFrame = Extract<ServerMessage, { readonly kind: "protocol.error" }>;
 type ReplayCompleteFrame = Extract<ServerMessage, { readonly kind: "replay.complete" }>;
 type WelcomeFrame = Extract<ServerMessage, { readonly kind: "welcome" }>;
@@ -565,6 +570,11 @@ function replayInputEventAtBytes(
     createdAtMs: event.createdAtMs,
     data: { ...data, prompt: "x".repeat(targetBytes - emptyBytes) },
   };
+}
+
+function jsonStringWithCanonicalBytes(targetBytes: number): string {
+  if (targetBytes < 2) throw new RangeError("Canonical JSON string target is too small");
+  return "x".repeat(targetBytes - 2);
 }
 
 async function seedReplayEvents(
@@ -1512,6 +1522,20 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
             },
           }),
       ).toThrow(/bounded storage contract/u);
+      expect(
+        () =>
+          new WiServer({
+            runtime,
+            port: 0,
+            gateway: {
+              limits: {
+                outbound: {
+                  maximumSingleMessageBytes: DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
+                },
+              },
+            },
+          }),
+      ).toThrow(/event envelope reserve/u);
     } finally {
       const unexpectedServer = constructed[0];
       if (unexpectedServer === undefined) await runtime.close();
@@ -2932,6 +2956,372 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     await client.close();
   }, 30_000);
 
+  it("rejects a durable command that the accepted gateway configuration cannot replay", async () => {
+    const fixture = await startFixture({
+      gateway: { limits: { frame: { maximumBytes: 512 * 1_024 } } },
+    });
+    const { cookie } = await bootstrap(fixture.server);
+    const live = await connect(fixture.server, cookie);
+    await hello(live, "oversizedDurableCommandLive");
+    const created = await createSession(live, "oversizedDurableCommand");
+    const sessionId = created.sessionId;
+    if (sessionId === undefined) throw new Error("Session creation failed");
+    await subscribe(live, sessionId, "oversizedDurableCommandLive");
+
+    const session = await fixture.runtime.storage.openSession(sessionId);
+    const headBefore = await session.getHeadSequence();
+    const catalogBefore = await fixture.runtime.storage.catalog.getSession(sessionId);
+    const route = vi.spyOn(fixture.runtime.commandRouter, "route");
+    route.mockClear();
+    live.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_submit_oversizedDurableCommand",
+      sessionId,
+      method: "message.submit",
+      params: { text: "x".repeat(270 * 1_024) },
+    });
+
+    const rejected = await live.take(
+      (message): message is CommandRejectedFrame =>
+        message.kind === "command.rejected" &&
+        message.commandId === "cmd_submit_oversizedDurableCommand",
+      2_000,
+    );
+    expect(rejected).toMatchObject({ code: "protocol.message_too_large", recoverable: false });
+    expect(route).not.toHaveBeenCalled();
+    expect(await session.getHeadSequence()).toBe(headBefore);
+    expect(await fixture.runtime.storage.catalog.getSession(sessionId)).toMatchObject({
+      lastEventSequence: catalogBefore?.lastEventSequence,
+    });
+    expect(fixture.server.gateway.connectionSnapshots).toEqual([
+      expect.objectContaining({
+        closed: false,
+        replayBacklogEvents: 0,
+        replayBacklogBytes: 0,
+        replayHistoricalPages: 0,
+      }),
+    ]);
+    await live.close();
+
+    const replay = await connect(fixture.server, cookie);
+    await hello(replay, "oversizedDurableCommandReplay");
+    const complete = await subscribe(
+      replay,
+      sessionId,
+      "oversizedDurableCommandReplay",
+      headBefore,
+    );
+    expect(complete.throughSequence).toBe(headBefore);
+    expect(replay.all.filter(eventFor(sessionId))).toEqual([]);
+    await replay.close();
+  });
+
+  it("accepts the exact message payload limit and rejects one byte over across frame overrides", async () => {
+    const cases = [
+      {
+        suffix: "defaultFrame",
+        singleEventBytes: 20 * 1_024,
+        gateway: {
+          limits: {
+            outbound: { maximumSingleMessageBytes: 20 * 1_024 },
+            replaySingleEventBytes: 20 * 1_024,
+            replayPageBytes: 20 * 1_024 + SESSION_EVENT_PAGE_BOUNDS.envelopeReserveBytes,
+            replayPageSingleEventBytes: 20 * 1_024,
+          },
+        },
+      },
+      {
+        suffix: "largeFrame",
+        singleEventBytes: 256 * 1_024,
+        gateway: { limits: { frame: { maximumBytes: 1_024 * 1_024 } } },
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const maximumPayloadBytes = maximumDurableCommandPayloadBytes({
+        outboundSingleMessageBytes: testCase.singleEventBytes,
+        replayLiveSingleEventBytes: testCase.singleEventBytes,
+        replayPageSingleEventBytes: testCase.singleEventBytes,
+      });
+      const fixture = await startFixture({ gateway: testCase.gateway });
+      const { cookie } = await bootstrap(fixture.server);
+      const live = await connect(fixture.server, cookie);
+      await hello(live, `exactMessage_${testCase.suffix}`);
+      const created = await createSession(live, `exactMessage_${testCase.suffix}`);
+      const sessionId = created.sessionId;
+      if (sessionId === undefined) throw new Error("Session creation failed");
+      await subscribe(live, sessionId, `exactMessage_${testCase.suffix}`);
+      const session = await fixture.runtime.storage.openSession(sessionId);
+      const headBeforeExact = await session.getHeadSequence();
+      const exactText = jsonStringWithCanonicalBytes(maximumPayloadBytes);
+
+      const exactCommandId = `cmd_exactMessage_${testCase.suffix}`;
+      live.send({
+        v: 1,
+        kind: "command",
+        commandId: exactCommandId,
+        sessionId,
+        method: "message.submit",
+        params: { text: exactText },
+      });
+      const accepted = await live.take(
+        (message): message is CommandAcceptedFrame =>
+          message.kind === "command.accepted" && message.commandId === exactCommandId,
+      );
+      expect(accepted.duplicate).toBe(false);
+      const liveEvent = await live.take(eventFor(sessionId, "user.message.appended"));
+      expect(liveEvent.data.text).toBe(exactText);
+      await live.close();
+
+      const replay = await connect(fixture.server, cookie);
+      await hello(replay, `exactMessageReplay_${testCase.suffix}`);
+      await subscribe(
+        replay,
+        sessionId,
+        `exactMessageReplay_${testCase.suffix}`,
+        headBeforeExact,
+      );
+      const replayed = await replay.take(eventFor(sessionId, "user.message.appended"));
+      expect(replayed).toMatchObject({ eventId: liveEvent.eventId, data: { text: exactText } });
+      if (accepted.runId === undefined) throw new Error("Exact message returned no run ID");
+      await eventually(async () => {
+        expect((await session.getRun(accepted.runId as string))?.state).toMatch(
+          /^(?:completed|failed|cancelled|interrupted)$/u,
+        );
+      });
+
+      const route = vi.spyOn(fixture.runtime.commandRouter, "route");
+      route.mockClear();
+      const headBeforeRejected = await session.getHeadSequence();
+      const overCommandId = `cmd_overMessage_${testCase.suffix}`;
+      replay.send({
+        v: 1,
+        kind: "command",
+        commandId: overCommandId,
+        sessionId,
+        method: "message.submit",
+        params: { text: jsonStringWithCanonicalBytes(maximumPayloadBytes + 1) },
+      });
+      const rejected = await replay.take(
+        (message): message is CommandRejectedFrame =>
+          message.kind === "command.rejected" && message.commandId === overCommandId,
+      );
+      expect(rejected).toMatchObject({ code: "protocol.message_too_large", recoverable: false });
+      expect(rejected.message.length).toBeLessThanOrEqual(SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH);
+      expect(route).not.toHaveBeenCalled();
+      expect(await session.getHeadSequence()).toBe(headBeforeRejected);
+      expect(fixture.records).toContainEqual(
+        expect.objectContaining({
+          event: "websocket_command_rejected",
+          diagnosticId: rejected.diagnosticId,
+          commandId: overCommandId,
+          code: "protocol.message_too_large",
+        }),
+      );
+      expect(JSON.stringify(fixture.records)).not.toContain("x".repeat(1_024));
+      expect(fixture.server.gateway.connectionSnapshots).toEqual([
+        expect.objectContaining({
+          closed: false,
+          replayBacklogEvents: 0,
+          replayBacklogBytes: 0,
+          replayHistoricalPages: 0,
+        }),
+      ]);
+      await replay.close();
+    }
+  }, 30_000);
+
+  it("bounds session titles and complete input JSON before durable acceptance", async () => {
+    const singleEventBytes = 20 * 1_024;
+    const maximumPayloadBytes = maximumDurableCommandPayloadBytes({
+      outboundSingleMessageBytes: singleEventBytes,
+      replayLiveSingleEventBytes: singleEventBytes,
+      replayPageSingleEventBytes: singleEventBytes,
+    });
+    const fixture = await startFixture({
+      gateway: {
+        limits: {
+          frame: { maximumBytes: 1_024 * 1_024 },
+          outbound: { maximumSingleMessageBytes: singleEventBytes },
+          replaySingleEventBytes: singleEventBytes,
+          replayPageBytes: singleEventBytes + SESSION_EVENT_PAGE_BOUNDS.envelopeReserveBytes,
+          replayPageSingleEventBytes: singleEventBytes,
+        },
+      },
+    });
+    const { cookie } = await bootstrap(fixture.server);
+    const client = await connect(fixture.server, cookie);
+    await hello(client, "durablePayloadVariants");
+
+    const exactTitle = jsonStringWithCanonicalBytes(maximumPayloadBytes);
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_exactTitle",
+      method: "session.create",
+      params: { title: exactTitle },
+    });
+    const exactTitleAccepted = await client.take(
+      (message): message is CommandAcceptedFrame =>
+        message.kind === "command.accepted" && message.commandId === "cmd_exactTitle",
+    );
+    const titleSessionId = exactTitleAccepted.sessionId;
+    if (titleSessionId === undefined) throw new Error("Exact-limit title returned no session ID");
+    await subscribe(client, titleSessionId, "exactTitle");
+    const titleEvent = await client.take(eventFor(titleSessionId, "session.created"));
+    expect(titleEvent.data.title).toBe(exactTitle);
+
+    const catalogCountBeforeRejectedTitle = (await fixture.runtime.storage.catalog.listSessions())
+      .length;
+    const route = vi.spyOn(fixture.runtime.commandRouter, "route");
+    route.mockClear();
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_overTitle",
+      method: "session.create",
+      params: { title: jsonStringWithCanonicalBytes(maximumPayloadBytes + 1) },
+    });
+    const titleRejected = await client.take(
+      (message): message is CommandRejectedFrame =>
+        message.kind === "command.rejected" && message.commandId === "cmd_overTitle",
+    );
+    expect(titleRejected.code).toBe("protocol.message_too_large");
+    expect(route).not.toHaveBeenCalled();
+    expect(await fixture.runtime.storage.catalog.getGlobalCommand("cmd_overTitle")).toBeNull();
+    expect(await fixture.runtime.storage.catalog.listSessions()).toHaveLength(
+      catalogCountBeforeRejectedTitle,
+    );
+
+    const pending = await createSession(client, "boundedInputValue");
+    const inputSessionId = pending.sessionId;
+    if (inputSessionId === undefined) throw new Error("Input session creation failed");
+    const inputSession = await fixture.runtime.storage.openSession(inputSessionId);
+    const seededInput = await inputSession.appendTransaction({
+      events: [
+        {
+          eventId: "evt_boundedInputRun",
+          eventType: "run.created",
+          createdAtMs: 3_000,
+          data: { eventVersion: 1, runId: "run_boundedInput" },
+        },
+        {
+          eventId: "evt_boundedInputRequestedA",
+          eventType: "input.requested",
+          createdAtMs: 3_001,
+          data: {
+            eventVersion: 1,
+            runId: "run_boundedInput",
+            inputId: "input_boundedInputA",
+            prompt: "First?",
+          },
+        },
+        {
+          eventId: "evt_boundedInputRequestedB",
+          eventType: "input.requested",
+          createdAtMs: 3_002,
+          data: {
+            eventVersion: 1,
+            runId: "run_boundedInput",
+            inputId: "input_boundedInputB",
+            prompt: "Second?",
+          },
+        },
+      ],
+      projections: [
+        {
+          kind: "run.put",
+          runId: "run_boundedInput",
+          state: "waiting_for_user",
+          providerId: "fake",
+          providerConfig: { scenario: "plain-text" },
+          createdAtMs: 3_000,
+          startedAtMs: 3_000,
+          completedAtMs: null,
+          cancelledAtMs: null,
+          failureCategory: null,
+          failureMessage: null,
+          activeProviderStepId: null,
+        },
+        {
+          kind: "input.put",
+          inputId: "input_boundedInputA",
+          runId: "run_boundedInput",
+          state: "pending",
+          prompt: "First?",
+          requestedAtMs: 3_001,
+        },
+        {
+          kind: "input.put",
+          inputId: "input_boundedInputB",
+          runId: "run_boundedInput",
+          state: "pending",
+          prompt: "Second?",
+          requestedAtMs: 3_002,
+        },
+      ],
+    });
+    for (const event of seededInput.events) fixture.runtime.eventHub.publishCommitted(event);
+    await subscribe(client, inputSessionId, "boundedInputValue");
+    const headBeforeInput = await inputSession.getHeadSequence();
+
+    route.mockClear();
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_overInputValue",
+      sessionId: inputSessionId,
+      method: "input.respond",
+      params: {
+        inputId: "input_boundedInputA",
+        value: jsonStringWithCanonicalBytes(maximumPayloadBytes + 1),
+      },
+    });
+    const inputRejected = await client.take(
+      (message): message is CommandRejectedFrame =>
+        message.kind === "command.rejected" && message.commandId === "cmd_overInputValue",
+    );
+    expect(inputRejected.code).toBe("protocol.message_too_large");
+    expect(route).not.toHaveBeenCalled();
+    expect(await inputSession.getHeadSequence()).toBe(headBeforeInput);
+    expect(await inputSession.getAcceptedCommand("cmd_overInputValue")).toBeNull();
+
+    const exactValue = jsonStringWithCanonicalBytes(maximumPayloadBytes);
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_exactInputValue",
+      sessionId: inputSessionId,
+      method: "input.respond",
+      params: { inputId: "input_boundedInputA", value: exactValue },
+    });
+    await client.take(
+      (message): message is CommandAcceptedFrame =>
+        message.kind === "command.accepted" && message.commandId === "cmd_exactInputValue",
+    );
+    const resolved = await client.take(eventFor(inputSessionId, "input.resolved"));
+    expect(resolved.data.value).toBe(exactValue);
+    expect(await inputSession.getHeadSequence()).toBe(headBeforeInput + 1);
+    await client.close();
+
+    const replay = await connect(fixture.server, cookie);
+    await hello(replay, "boundedInputValueReplay");
+    const complete = await subscribe(
+      replay,
+      inputSessionId,
+      "boundedInputValueReplay",
+      headBeforeInput,
+    );
+    expect(complete.throughSequence).toBe(headBeforeInput + 1);
+    const replayedResolved = await replay.take(eventFor(inputSessionId, "input.resolved"));
+    expect(replayedResolved).toMatchObject({
+      eventId: resolved.eventId,
+      data: { value: exactValue },
+    });
+    await replay.close();
+  }, 30_000);
+
   it("delivers and replays an event at the exact live single-event limit", async () => {
     const singleEventBytes = 256 * 1_024;
     const fixture = await startFixture();
@@ -3290,8 +3680,8 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       gateway: {
         limits: {
           replayLiveEvents: 4,
-          replayLiveBytes: 1_500,
-          replaySingleEventBytes: 1_000,
+          replayLiveBytes: 7_500,
+          replaySingleEventBytes: 5_000,
         },
         replayHooks: {
           afterHeadCaptured: async (sessionId) => {
@@ -3332,7 +3722,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     for (const [index, sessionId] of sessions.entries()) {
       const session = await fixture.runtime.storage.openSession(sessionId);
       const committed = await session.appendTransaction({
-        events: [replayInputEventAtBytes(sessionId, 900, `aggregateReplay${index}`)],
+        events: [replayInputEventAtBytes(sessionId, 4_500, `aggregateReplay${index}`)],
         projections: [],
       });
       const event = committed.events[0];

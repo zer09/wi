@@ -14,6 +14,9 @@ import {
   type ConnectionReplayHooks,
   type ConnectionSnapshot,
 } from "./connection.js";
+import {
+  maximumDurableCommandPayloadBytes,
+} from "./durable-command-limits.js";
 import type { LoopbackRequestPolicy, UpgradeRejection } from "./origin-policy.js";
 
 export interface WebSocketGatewayOptions {
@@ -21,7 +24,10 @@ export interface WebSocketGatewayOptions {
   readonly auth: LocalBrowserAuth;
   readonly requestPolicy: LoopbackRequestPolicy;
   readonly logger: Logger;
-  readonly limits?: Omit<Partial<ConnectionLimits>, "frame" | "outbound"> & {
+  readonly limits?: Omit<
+    Partial<ConnectionLimits>,
+    "frame" | "outbound" | "maximumDurableCommandPayloadBytes"
+  > & {
     readonly frame?: Partial<ConnectionLimits["frame"]>;
     readonly outbound?: Partial<ConnectionLimits["outbound"]>;
   };
@@ -60,7 +66,7 @@ export const WEBSOCKET_LIMIT_CAPS = {
 
 const REJECTED_UPGRADE_DRAIN_TIMEOUT_MS = 2_000;
 
-const DEFAULT_LIMITS: ConnectionLimits = {
+const DEFAULT_LIMITS: Omit<ConnectionLimits, "maximumDurableCommandPayloadBytes"> = {
   frame: { maximumBytes: 64 * 1_024, maximumDepth: 32 },
   outbound: {
     maximumMessages: 256,
@@ -134,6 +140,8 @@ export class WebSocketGateway {
       replayPageSingleEventBytes:
         options.limits?.replayPageSingleEventBytes ??
         Math.min(DEFAULT_LIMITS.replayPageSingleEventBytes, outbound.maximumSingleMessageBytes),
+      // Replaced after all caller-configurable capacity relationships are validated below.
+      maximumDurableCommandPayloadBytes: 1,
     };
     const boundedLimits: ReadonlyArray<readonly [string, number, number]> = [
       ["frame byte", this.limits.frame.maximumBytes, WEBSOCKET_LIMIT_CAPS.frame.maximumBytes],
@@ -226,6 +234,14 @@ export class WebSocketGateway {
         "WebSocket replay live event limit must not exceed historical replay capacity",
       );
     }
+    this.limits = {
+      ...this.limits,
+      maximumDurableCommandPayloadBytes: maximumDurableCommandPayloadBytes({
+        outboundSingleMessageBytes: this.limits.outbound.maximumSingleMessageBytes,
+        replayLiveSingleEventBytes: this.limits.replaySingleEventBytes,
+        replayPageSingleEventBytes: this.limits.replayPageSingleEventBytes,
+      }),
+    };
     this.heartbeat = {
       intervalMs: options.heartbeat?.intervalMs ?? 15_000,
       helloTimeoutMs: options.heartbeat?.helloTimeoutMs ?? 10_000,

@@ -257,7 +257,20 @@ export class WiRuntime {
           resumeRestoredRuns: true,
           currentToolEffectClass: runLoop.currentToolEffectClass,
           cancelRunTask: runLoop.cancel,
-          forceStopRunTask: () => ({ status: "detached" }),
+          forceStopRunTask: (context) => {
+            const diagnosticId = this.diagnosticId();
+            this.logger.error(
+              "run_task_isolation_unavailable",
+              new Error("An in-process run task exceeded its cancellation deadline"),
+              {
+                diagnosticId,
+                sessionId: context.sessionId,
+                runId: context.runId,
+              },
+            );
+            // In-process work has no smaller hard isolation boundary in v0.1.
+            process.exit(1);
+          },
           onActivity,
           onRecoveryFailureDiagnostic: (diagnostic) => {
             const { error, ...fields } = diagnostic;

@@ -325,8 +325,10 @@ The provider never receives a tool result that has not committed.
 2. Signal active provider/tool operations through AbortController.
 3. Reject new tool promotions and executions for that run.
 4. Wait for bounded cancellation cleanup.
-5. Commit run.cancelled, or interrupted when safe completion cannot be proven.
+5. Commit run.cancelled, or interrupted only after safe completion/isolation is proven.
 ```
+
+The first slice runs cooperative providers and tools in-process and has no hard sub-process isolation boundary for them. If one ignores cancellation beyond the actor deadline, Wi does not mark the run terminal, release/reuse its scheduler permit, or report synthetic detachment. The production process logs a redacted fatal diagnostic and exits nonzero, allowing restart recovery to conservatively interrupt the still-nonterminal durable run.
 
 Late provider completion after cancellation cannot transition the run to completed.
 

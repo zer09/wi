@@ -226,6 +226,9 @@ The entire process should terminate only for conditions such as:
 - core event-store invariants are violated across unknown scope
 - credential/storage initialization fails in a way that would risk exposure or corruption
 - unrecoverable main-thread exception where continued state cannot be trusted
+- an in-process provider or tool that exceeds its cancellation deadline, because abort is not proof of termination and v0.1 has no smaller hard isolation boundary
+
+An in-process cancellation deadline failure terminates the production process nonzero immediately after a redacted fatal diagnostic. Wi does not first claim that the resource was detached, terminalize the run, or release its scheduler permit. Restart recovery conservatively handles the still-nonterminal durable state.
 
 Before graceful termination, Wi attempts to:
 

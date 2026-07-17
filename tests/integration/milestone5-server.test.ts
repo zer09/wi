@@ -1671,16 +1671,16 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     client.send({
       v: 1,
       kind: "subscribe",
-      requestId: "req_duplicateProtocolCorrelation",
+      requestId: "req_cursorAheadProtocolCorrelation",
       sessionId: created.sessionId,
-      afterSequence: 0,
+      afterSequence: 99,
     });
-    const duplicate = await client.take(
+    const cursorAhead = await client.take(
       (message): message is ProtocolErrorFrame =>
         message.kind === "protocol.error" &&
-        message.requestId === "req_duplicateProtocolCorrelation",
+        message.requestId === "req_cursorAheadProtocolCorrelation",
     );
-    assertLogged(duplicate);
+    assertLogged(cursorAhead);
 
     client.send({
       v: 1,
@@ -1696,18 +1696,6 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     );
     assertLogged(unknown);
 
-    client.send({
-      v: 1,
-      kind: "unsubscribe",
-      requestId: "req_missingProtocolCorrelation",
-      sessionId: "ses_missingProtocolCorrelation",
-    });
-    const missing = await client.take(
-      (message): message is ProtocolErrorFrame =>
-        message.kind === "protocol.error" &&
-        message.requestId === "req_missingProtocolCorrelation",
-    );
-    assertLogged(missing);
     await client.close();
   });
 
@@ -1763,11 +1751,13 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     await client.close();
   });
 
-  it("returns typed subscription outcomes for unknown, ahead, duplicate, and missing state", async () => {
-    const fixture = await startFixture();
+  it("keeps strict subscription errors while subscribe and unsubscribe retries are idempotent", async () => {
+    const fixture = await startFixture({
+      gateway: { limits: { maximumSubscriptions: 1 } },
+    });
     const { cookie } = await bootstrap(fixture.server);
     const client = await connect(fixture.server, cookie);
-    await hello(client, "subscriptionErrors");
+    await hello(client, "subscriptionRetries");
 
     client.send({
       v: 1,
@@ -1782,13 +1772,14 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     );
     expect(unknown.code).toBe("replay.unknown_session");
 
-    const created = await createSession(client, "subscriptionErrors");
-    if (created.sessionId === undefined) throw new Error("Session creation failed");
+    const created = await createSession(client, "subscriptionRetries");
+    const sessionId = created.sessionId;
+    if (sessionId === undefined) throw new Error("Session creation failed");
     client.send({
       v: 1,
       kind: "subscribe",
       requestId: "req_cursorAhead",
-      sessionId: created.sessionId,
+      sessionId,
       afterSequence: 99,
     });
     const ahead = await client.take(
@@ -1796,38 +1787,316 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         message.kind === "protocol.error" && message.requestId === "req_cursorAhead",
     );
     expect(ahead.code).toBe("replay.cursor_ahead");
+    client.send({
+      v: 1,
+      kind: "unsubscribe",
+      requestId: "req_unsubscribeAfterReplayFailure",
+      sessionId,
+    });
+    client.send({ v: 1, kind: "heartbeat", clientTimeMs: 0 });
+    await client.takeKind("heartbeat");
+    expect(
+      client.all.some(
+        (message) =>
+          message.kind === "protocol.error" &&
+          message.requestId === "req_unsubscribeAfterReplayFailure",
+      ),
+    ).toBe(false);
+    expect(fixture.runtime.eventHub.subscriberCount(sessionId)).toBe(0);
+    const failedActorLease = await fixture.runtime.actors.acquire(sessionId);
+    try {
+      expect(failedActorLease.actor.snapshot.subscriberCount).toBe(0);
+    } finally {
+      failedActorLease.release();
+    }
 
-    await subscribe(client, created.sessionId, "typedSubscription");
+    const subscribeRetry = {
+      v: 1,
+      kind: "subscribe",
+      requestId: "req_subscriptionRetry",
+      sessionId,
+      afterSequence: 0,
+    } as const;
+    client.send(subscribeRetry);
+    await eventually(() => {
+      expect(
+        client.all.filter(
+          (message) =>
+            message.kind === "replay.complete" &&
+            message.requestId === subscribeRetry.requestId,
+        ),
+      ).toHaveLength(1);
+    });
+    // Simulate losing the first successful boundary: retry without consuming it.
+    client.send(subscribeRetry);
+    await eventually(() => {
+      expect(
+        client.all.filter(
+          (message) =>
+            message.kind === "replay.complete" &&
+            message.requestId === subscribeRetry.requestId,
+        ),
+      ).toHaveLength(2);
+    });
+    const completedRetries = client.all.filter(
+      (message): message is ReplayCompleteFrame =>
+        message.kind === "replay.complete" && message.requestId === subscribeRetry.requestId,
+    );
+    expect(completedRetries[1]).toEqual(completedRetries[0]);
+    expect(fixture.runtime.eventHub.subscriberCount(sessionId)).toBe(1);
+    const actorLease = await fixture.runtime.actors.acquire(sessionId);
+    try {
+      expect(actorLease.actor.snapshot.subscriberCount).toBe(1);
+    } finally {
+      actorLease.release();
+    }
+    expect(fixture.server.gateway.connectionSnapshots).toEqual([
+      expect.objectContaining({
+        subscriptions: 1,
+        protocolViolations: 0,
+        replayBacklogEvents: 0,
+        replayBacklogBytes: 0,
+        closed: false,
+      }),
+    ]);
+
+    const overflowSession = await createSession(client, "subscriptionOverflow");
+    if (overflowSession.sessionId === undefined) throw new Error("Session creation failed");
     client.send({
       v: 1,
       kind: "subscribe",
-      requestId: "req_duplicateSubscription",
-      sessionId: created.sessionId,
-      afterSequence: 1,
+      requestId: "req_subscriptionOverflow",
+      sessionId: overflowSession.sessionId,
+      afterSequence: 0,
     });
-    const duplicate = await client.take(
+    const overflow = await client.take(
       (message): message is ProtocolErrorFrame =>
-        message.kind === "protocol.error" && message.requestId === "req_duplicateSubscription",
+        message.kind === "protocol.error" && message.requestId === "req_subscriptionOverflow",
     );
-    expect(duplicate.code).toBe("subscription.already_exists");
+    expect(overflow.code).toBe("replay.subscriber_overflow");
+
+    const unsubscribeRetry = {
+      v: 1,
+      kind: "unsubscribe",
+      requestId: "req_unsubscribeRetry",
+      sessionId,
+    } as const;
+    client.send(unsubscribeRetry);
+    client.send({ v: 1, kind: "heartbeat", clientTimeMs: 1 });
+    await client.takeKind("heartbeat");
+    await eventually(() => {
+      expect(fixture.server.gateway.connectionSnapshots).toEqual([
+        expect.objectContaining({ pendingInboundMessages: 0 }),
+      ]);
+    });
+    const snapshotAfterUnsubscribe = fixture.server.gateway.connectionSnapshots[0];
+    if (snapshotAfterUnsubscribe === undefined) throw new Error("Connection snapshot missing");
+
+    client.send(unsubscribeRetry);
+    client.send({ v: 1, kind: "heartbeat", clientTimeMs: 2 });
+    await client.takeKind("heartbeat");
+    await eventually(() => {
+      expect(fixture.server.gateway.connectionSnapshots).toEqual([snapshotAfterUnsubscribe]);
+    });
+    expect(
+      client.all.some(
+        (message) =>
+          message.kind === "protocol.error" && message.requestId === unsubscribeRetry.requestId,
+      ),
+    ).toBe(false);
+    expect(fixture.runtime.eventHub.subscriberCount(sessionId)).toBe(0);
+    const unsubscribedActorLease = await fixture.runtime.actors.acquire(sessionId);
+    try {
+      expect(unsubscribedActorLease.actor.snapshot.subscriberCount).toBe(0);
+    } finally {
+      unsubscribedActorLease.release();
+    }
+    expect(snapshotAfterUnsubscribe).toEqual(
+      expect.objectContaining({
+        subscriptions: 0,
+        protocolViolations: 0,
+        replayBacklogEvents: 0,
+        replayBacklogBytes: 0,
+        closed: false,
+      }),
+    );
+
+    const resubscribed = await subscribe(client, sessionId, "afterUnsubscribe");
+    expect(resubscribed.throughSequence).toBe(1);
+    await client.close();
+  });
+
+  it("replaces an in-progress subscribe without overlapping replay or leaking budget", async () => {
+    let signalFirstCapture!: () => void;
+    const firstCapture = new Promise<void>((resolve) => {
+      signalFirstCapture = resolve;
+    });
+    let signalSecondCapture!: () => void;
+    const secondCapture = new Promise<void>((resolve) => {
+      signalSecondCapture = resolve;
+    });
+    let releaseFirstCapture!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirstCapture = resolve;
+    });
+    let releaseSecondCapture!: () => void;
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecondCapture = resolve;
+    });
+    let captures = 0;
+    let maximumHubSubscribers = 0;
+    const fixture = await startFixture({
+      gateway: {
+        replayHooks: {
+          afterHeadCaptured: async (sessionId) => {
+            captures += 1;
+            maximumHubSubscribers = Math.max(
+              maximumHubSubscribers,
+              fixture.runtime.eventHub.subscriberCount(sessionId),
+            );
+            if (captures === 1) {
+              signalFirstCapture();
+              await firstGate;
+              return;
+            }
+            if (captures === 2) {
+              signalSecondCapture();
+              await secondGate;
+            }
+          },
+        },
+      },
+    });
+    const { cookie } = await bootstrap(fixture.server);
+    const client = await connect(fixture.server, cookie);
+    await hello(client, "inProgressSubscribeRetry");
+    const created = await createSession(client, "inProgressSubscribeRetry");
+    const sessionId = created.sessionId;
+    if (sessionId === undefined) throw new Error("Session creation failed");
+    const session = await fixture.runtime.storage.openSession(sessionId);
 
     client.send({
       v: 1,
-      kind: "unsubscribe",
-      requestId: "req_unsubscribe",
-      sessionId: created.sessionId,
+      kind: "subscribe",
+      requestId: "req_inProgressOriginal",
+      sessionId,
+      afterSequence: 0,
     });
+    await firstCapture;
+
+    const duringOriginal = await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_inProgressOriginal",
+          eventType: "input.requested",
+          createdAtMs: 2_000,
+          data: {
+            eventVersion: 1,
+            runId: "run_inProgressSubscribeRetry",
+            inputId: "input_inProgressOriginal",
+            prompt: "Original replay?",
+          },
+        },
+      ],
+      projections: [],
+    });
+    const originalLive = duringOriginal.events[0];
+    if (originalLive === undefined) throw new Error("Original live event did not commit");
+    fixture.runtime.eventHub.publishCommitted(originalLive);
+    await eventually(() => {
+      expect(fixture.server.gateway.connectionSnapshots).toEqual([
+        expect.objectContaining({ replayBacklogEvents: 1 }),
+      ]);
+    });
+
     client.send({
       v: 1,
-      kind: "unsubscribe",
-      requestId: "req_unsubscribeAgain",
-      sessionId: created.sessionId,
+      kind: "subscribe",
+      requestId: "req_inProgressReplacement",
+      sessionId,
+      afterSequence: 1,
     });
-    const missing = await client.take(
-      (message): message is ProtocolErrorFrame =>
-        message.kind === "protocol.error" && message.requestId === "req_unsubscribeAgain",
+    await secondCapture;
+    expect(fixture.runtime.eventHub.subscriberCount(sessionId)).toBe(1);
+    expect(fixture.server.gateway.connectionSnapshots).toEqual([
+      expect.objectContaining({
+        subscriptions: 1,
+        protocolViolations: 0,
+        replayBacklogEvents: 0,
+        replayBacklogBytes: 0,
+        replayHistoricalPages: 0,
+        closed: false,
+      }),
+    ]);
+    releaseFirstCapture();
+
+    const duringReplacement = await session.appendTransaction({
+      events: [
+        {
+          eventId: "evt_inProgressReplacement",
+          eventType: "input.requested",
+          createdAtMs: 2_001,
+          data: {
+            eventVersion: 1,
+            runId: "run_inProgressSubscribeRetry",
+            inputId: "input_inProgressReplacement",
+            prompt: "Replacement replay?",
+          },
+        },
+      ],
+      projections: [],
+    });
+    const replacementLive = duringReplacement.events[0];
+    if (replacementLive === undefined) throw new Error("Replacement live event did not commit");
+    fixture.runtime.eventHub.publishCommitted(replacementLive);
+    await eventually(() => {
+      expect(fixture.server.gateway.connectionSnapshots).toEqual([
+        expect.objectContaining({ replayBacklogEvents: 1 }),
+      ]);
+    });
+    releaseSecondCapture();
+
+    const complete = await client.take(
+      (message): message is ReplayCompleteFrame =>
+        message.kind === "replay.complete" &&
+        message.requestId === "req_inProgressReplacement",
     );
-    expect(missing.code).toBe("subscription.not_found");
+    expect(complete.throughSequence).toBe(2);
+    await client.take(
+      (message): message is EventFrame =>
+        message.kind === "event" &&
+        message.sessionId === sessionId &&
+        message.sequence === 3,
+    );
+    const delivered = client.all
+      .filter(eventFor(sessionId))
+      .map((message) => message.sequence);
+    expect(delivered).toEqual([2, 3]);
+    expect(
+      client.all.some(
+        (message) =>
+          message.kind === "replay.complete" &&
+          message.requestId === "req_inProgressOriginal",
+      ),
+    ).toBe(false);
+    expect(maximumHubSubscribers).toBe(1);
+    expect(fixture.runtime.eventHub.subscriberCount(sessionId)).toBe(1);
+    const actorLease = await fixture.runtime.actors.acquire(sessionId);
+    try {
+      expect(actorLease.actor.snapshot.subscriberCount).toBe(1);
+    } finally {
+      actorLease.release();
+    }
+    expect(fixture.server.gateway.connectionSnapshots).toEqual([
+      expect.objectContaining({
+        subscriptions: 1,
+        protocolViolations: 0,
+        replayBacklogEvents: 0,
+        replayBacklogBytes: 0,
+        replayHistoricalPages: 0,
+        closed: false,
+      }),
+    ]);
     await client.close();
   });
 

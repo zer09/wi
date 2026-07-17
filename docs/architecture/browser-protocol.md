@@ -115,6 +115,8 @@ Runtime schemas define whether unknown optional fields are tolerated. State-chan
 }
 ```
 
+Subscribe and unsubscribe are connection-local, non-durable operations. Retrying a subscribe for a session already active on the same socket replaces that session's replay generation, including when the retry uses a different cursor: the old replay is cancelled and drained before the replacement registers, its replay reservations are released once, and the existing actor subscriber is retained. The replacement returns its own correlated `replay.complete`; old and replacement historical/live handoffs never overlap. If the replacement cursor is invalid, the replacement fails with the normal typed replay error and leaves no active subscription. Unsubscribing an absent session is a successful no-op with no response. Neither retry is a protocol violation.
+
 ### Command
 
 ```json
@@ -285,7 +287,7 @@ same commandId + different canonical content
 
 This handles the ambiguity where the server commits a command but the acknowledgement is lost before the browser receives it.
 
-`requestId` is only for non-state-changing request correlation and may be retried freely.
+`requestId` is only for non-state-changing request correlation and may be retried freely. It is not a durable idempotency key: each subscribe retry starts one serialized replacement replay and receives a fresh `replay.complete` carrying that request ID.
 
 ## 8. Multiplexing
 
@@ -503,9 +505,9 @@ replay.query_failed
 replay.sequence_gap
 replay.sequence_conflict
 replay.subscriber_overflow
-subscription.already_exists
-subscription.not_found
 ```
+
+An already-active subscribe and an already-absent unsubscribe are successful retry states, not subscription failures.
 
 ## 17. Protocol tests
 
@@ -519,6 +521,9 @@ Required tests include:
 - command-ID conflict
 - one socket multiplexing two sessions
 - two sockets subscribing to one session
+- lost subscribe result followed by an identical retry
+- subscribe replacement during replay with simultaneous publication and no budget leak
+- duplicate unsubscribe and resubscribe after cleanup
 - disconnect during an active run
 - replay/live race with no loss
 - duplicate event tolerance

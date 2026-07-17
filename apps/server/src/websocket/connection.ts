@@ -102,6 +102,7 @@ export interface ConnectionSnapshot {
   readonly connectionId: string;
   readonly clientId: string | null;
   readonly subscriptions: number;
+  readonly protocolViolations: number;
   readonly pendingInboundMessages: number;
   readonly pendingInboundBytes: number;
   readonly replayBacklogEvents: number;
@@ -258,6 +259,7 @@ export class BrowserConnection {
   private readonly logger: Logger;
   private readonly replayBudget: ConnectionReplayBudget;
   private readonly subscriptions = new Map<string, ActiveSubscription>();
+  private readonly subscriptionCleanups = new Map<string, Promise<void>>();
   private clientId: string | null = null;
   private welcomed = false;
   private alive = true;
@@ -354,6 +356,7 @@ export class BrowserConnection {
       connectionId: this.connectionId,
       clientId: this.clientId,
       subscriptions: this.subscriptions.size,
+      protocolViolations: this.protocolViolations,
       pendingInboundMessages: this.pendingInboundMessages,
       pendingInboundBytes: this.pendingInboundBytes,
       replayBacklogEvents: replay.liveEvents,
@@ -428,7 +431,7 @@ export class BrowserConnection {
         await this.safeSubscribe(message);
         return;
       case "unsubscribe":
-        await this.unsubscribe(message.sessionId, message.requestId, true);
+        await this.unsubscribe(message.sessionId);
         return;
       case "command":
         await this.command(message);
@@ -564,17 +567,10 @@ export class BrowserConnection {
   }
 
   private async subscribe(message: SubscribeMessage): Promise<void> {
-    if (this.subscriptions.has(message.sessionId)) {
-      this.protocolError(
-        "subscription.already_exists",
-        "This connection is already subscribed to the session.",
-        this.runtime.diagnosticId(),
-        true,
-        { requestId: message.requestId, sessionId: message.sessionId },
-      );
-      return;
-    }
-    if (this.subscriptions.size >= this.limits.maximumSubscriptions) {
+    await this.waitForSubscriptionCleanup(message.sessionId);
+    if (this.closed) return;
+    const previous = this.subscriptions.get(message.sessionId);
+    if (previous === undefined && this.subscriptions.size >= this.limits.maximumSubscriptions) {
       this.protocolError(
         "replay.subscriber_overflow",
         "This connection has reached its session subscription limit.",
@@ -607,6 +603,37 @@ export class BrowserConnection {
       return;
     }
 
+    if (previous !== undefined) {
+      const source = await this.runtime.storage.openSession(message.sessionId);
+      if (this.closed) return;
+      if (this.subscriptions.get(message.sessionId) !== previous) {
+        await this.waitForSubscriptionCleanup(message.sessionId);
+        await this.subscribe(message);
+        return;
+      }
+
+      // A retry replaces the replay generation, but retains the one actor subscriber.
+      this.subscriptions.delete(message.sessionId);
+      previous.intentional = true;
+      previous.replay.unsubscribe();
+      await previous.replay.drain();
+      if (this.closed) {
+        await previous.actor
+          .postSubscriberDisconnected(previous.subscriberId)
+          .catch(() => undefined);
+        return;
+      }
+      try {
+        this.startReplay(message, source, previous.actor, previous.subscriberId);
+      } catch (error) {
+        await previous.actor
+          .postSubscriberDisconnected(previous.subscriberId)
+          .catch(() => undefined);
+        throw error;
+      }
+      return;
+    }
+
     const subscriberId = `${this.connectionId}:${message.sessionId}`;
     const lease = await this.runtime.actors.acquire(message.sessionId);
     const actor = lease.actor;
@@ -632,6 +659,20 @@ export class BrowserConnection {
       return;
     }
 
+    try {
+      this.startReplay(message, source, actor, subscriberId);
+    } catch (error) {
+      await actor.postSubscriberDisconnected(subscriberId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private startReplay(
+    message: SubscribeMessage,
+    source: SessionClient,
+    actor: SessionActor,
+    subscriberId: string,
+  ): void {
     let active: ActiveSubscription | null = null;
     const replay = beginReplaySubscription({
       sessionId: message.sessionId,
@@ -736,63 +777,63 @@ export class BrowserConnection {
     if (this.subscriptions.get(sessionId) !== active) return;
     this.subscriptions.delete(sessionId);
     active.replay.unsubscribe();
-    await active.replay.drain().catch(() => undefined);
     const diagnosticId = this.runtime.diagnosticId();
+    const cleanup = (async (): Promise<void> => {
+      await active.replay.drain().catch(() => undefined);
+      try {
+        await active.actor.postSubscriberDisconnected(active.subscriberId);
+      } catch (disconnectError) {
+        this.logger.error("websocket_subscriber_cleanup_failed", disconnectError, {
+          diagnosticId,
+          connectionId: this.connectionId,
+          clientId: this.clientId,
+          requestId: active.requestId,
+          sessionId,
+        });
+      }
+    })();
+    this.subscriptionCleanups.set(sessionId, cleanup);
     try {
-      await active.actor.postSubscriberDisconnected(active.subscriberId);
-    } catch (disconnectError) {
-      this.logger.error("websocket_subscriber_cleanup_failed", disconnectError, {
+      await cleanup;
+      if (active.intentional || this.closed) return;
+      const safe = mapReplayError(error);
+      this.logger.error("websocket_replay_failed", error, {
         diagnosticId,
         connectionId: this.connectionId,
         clientId: this.clientId,
         requestId: active.requestId,
         sessionId,
       });
+      if (
+        error instanceof ReplaySubscriptionError &&
+        error.code === "replay.subscriber_overflow"
+      ) {
+        this.socket.close(SLOW_CONSUMER_CLOSE_CODE, "slow consumer");
+        void this.cleanup();
+        return;
+      }
+      this.protocolError(
+        safe.code,
+        safe.message,
+        diagnosticId,
+        safe.recoverable,
+        { requestId: active.requestId, sessionId },
+      );
+    } finally {
+      if (this.subscriptionCleanups.get(sessionId) === cleanup) {
+        this.subscriptionCleanups.delete(sessionId);
+      }
     }
-    if (active.intentional || this.closed) return;
-    const safe = mapReplayError(error);
-    this.logger.error("websocket_replay_failed", error, {
-      diagnosticId,
-      connectionId: this.connectionId,
-      clientId: this.clientId,
-      requestId: active.requestId,
-      sessionId,
-    });
-    if (
-      error instanceof ReplaySubscriptionError &&
-      error.code === "replay.subscriber_overflow"
-    ) {
-      this.socket.close(SLOW_CONSUMER_CLOSE_CODE, "slow consumer");
-      void this.cleanup();
-      return;
-    }
-    this.protocolError(
-      safe.code,
-      safe.message,
-      diagnosticId,
-      safe.recoverable,
-      { requestId: active.requestId, sessionId },
-    );
   }
 
-  private async unsubscribe(
-    sessionId: string,
-    requestId: string,
-    reportMissing: boolean,
-  ): Promise<void> {
+  private async waitForSubscriptionCleanup(sessionId: string): Promise<void> {
+    await this.subscriptionCleanups.get(sessionId);
+  }
+
+  private async unsubscribe(sessionId: string): Promise<void> {
+    await this.waitForSubscriptionCleanup(sessionId);
     const active = this.subscriptions.get(sessionId);
-    if (active === undefined) {
-      if (reportMissing) {
-        this.protocolError(
-          "subscription.not_found",
-          "This connection is not subscribed to the session.",
-          this.runtime.diagnosticId(),
-          true,
-          { requestId, sessionId },
-        );
-      }
-      return;
-    }
+    if (active === undefined) return;
     this.subscriptions.delete(sessionId);
     active.intentional = true;
     active.replay.unsubscribe();
@@ -911,9 +952,10 @@ export class BrowserConnection {
     }
     this.outbound.stop();
     const subscriptions = [...this.subscriptions.entries()];
+    const pendingSubscriptionCleanups = [...this.subscriptionCleanups.values()];
     this.subscriptions.clear();
-    this.cleanupPromise = Promise.all(
-      subscriptions.map(async ([sessionId, active]) => {
+    this.cleanupPromise = Promise.all([
+      ...subscriptions.map(async ([sessionId, active]) => {
         active.intentional = true;
         active.replay.unsubscribe();
         await active.replay.drain();
@@ -928,7 +970,8 @@ export class BrowserConnection {
           // A custom logger cannot prevent transport and subscription cleanup.
         }
       }),
-    ).then(async () => {
+      ...pendingSubscriptionCleanups,
+    ]).then(async () => {
       // Commands already dispatched before transport loss may still be committing. Drain only the
       // bounded per-connection chain; this never owns or waits for the backend run it may start.
       await this.inboundTail.catch(() => undefined);

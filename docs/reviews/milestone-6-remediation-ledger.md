@@ -1,6 +1,6 @@
 # Milestone 6 release-gate remediation ledger
 
-Status: R1–R4 fixes and the R5 PASS sign-off are verified and staged as one complete Milestone 6 patch. Milestone 6 remains uncommitted.
+Status: R1–R4 fixes and the R5 PASS sign-off are verified and committed on `milestone-6-browser-gui`; PR #12 is open against `master`.
 
 This record validates and remediates the release-gate review performed against `68e95d293f6a1d9c224570b026eba49d0a5c5e1d`. Reviewers should use the named regression tests below before reopening an item. A fixed item should be reopened only with a new reproducer against the current worktree.
 

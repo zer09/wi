@@ -7,9 +7,9 @@ import {
   type BrowserSessionState,
 } from "@wi/client-state";
 import {
-  SessionIdSchema,
   createId,
   type ApprovalResolution,
+  type BrowserCommandLimits,
   type BrowserSessionSummary,
   type CanonicalJsonValue,
   type CommandMessage,
@@ -25,7 +25,23 @@ import { RunStatus } from "./components/RunStatus.js";
 import { SessionList } from "./components/SessionList.js";
 import { Timeline } from "./components/Timeline.js";
 import { replayRecoveryAction } from "./state/replay-recovery.js";
-import { BrowserCommandTooLargeError } from "./socket/command-size.js";
+import {
+  BrowserCommandJournalError,
+  createBrowserCommandJournal,
+  inputDraftKey,
+  messageDraftKey,
+  sessionTitleDraftKey,
+  type JournalDraftKey,
+  type JournalDraftReference,
+} from "./state/command-journal.js";
+import {
+  createBrowserSessionIndex,
+  initialSessionIdFromLocation,
+  projectSessionSummary,
+  upsertSessionSummary,
+  type BrowserSessionIndex,
+} from "./state/session-index.js";
+import { BrowserCommandLimitError } from "./socket/command-size.js";
 import {
   WiSocketClient,
   type ConnectionSnapshot,
@@ -43,6 +59,7 @@ interface FocusRecovery {
   readonly sessionId: string;
   readonly kind: "approval" | "cancel" | "input";
   readonly targetId: string;
+  readonly initiatingElement: HTMLElement | null;
 }
 
 const INITIAL_CONNECTION: ConnectionSnapshot = {
@@ -58,46 +75,25 @@ function idSource(): string {
   return globalThis.crypto.randomUUID().replaceAll("-", "");
 }
 
-function selectedSessionFromLocation(sessions: readonly BrowserSessionSummary[]): string | null {
-  const candidate = new URL(globalThis.location.href).searchParams.get("session");
-  if (candidate !== null && SessionIdSchema.safeParse(candidate).success) {
-    if (
-      sessions.some((session) => session.sessionId === candidate && session.status === "ready")
-    ) {
-      return candidate;
-    }
-  }
-  return sessions.find((session) => session.status === "ready")?.sessionId ?? null;
-}
-
 function updateLocationSession(sessionId: string): void {
   const url = new URL(globalThis.location.href);
   url.searchParams.set("session", sessionId);
   globalThis.history.replaceState(null, "", url);
 }
 
-function summaryForState(
-  previous: BrowserSessionSummary | undefined,
-  state: BrowserSessionState,
-  updatedAtMs: number,
-): BrowserSessionSummary {
-  return {
-    sessionId: state.sessionId,
-    title: state.title || previous?.title || "Untitled session",
-    status: previous?.status ?? "ready",
-    createdAtMs: previous?.createdAtMs ?? updatedAtMs,
-    updatedAtMs,
-    lastEventSequence: state.lastAppliedSequence,
-    lastRunState: state.activeRun?.state ?? previous?.lastRunState ?? null,
-    lastMessagePreview: state.lastMessagePreview ?? previous?.lastMessagePreview ?? null,
-    requiresAttention:
-      Object.keys(state.pendingApprovals).length > 0 || Object.keys(state.pendingInputs).length > 0,
-    pendingApprovalCount: Object.keys(state.pendingApprovals).length,
-    pendingInputCount: Object.keys(state.pendingInputs).length,
-  };
+function restoredDrafts(
+  drafts: Readonly<Record<JournalDraftKey, string>>,
+  prefix: "input:" | "message:",
+): Readonly<Record<string, string>> {
+  const restored: Record<string, string> = {};
+  for (const [key, value] of Object.entries(drafts)) {
+    if (key.startsWith(prefix)) restored[key.slice(prefix.length)] = value;
+  }
+  return restored;
 }
 
 export function App() {
+  const [commandJournal] = useState(() => createBrowserCommandJournal());
   const socket = useRef<WiSocketClient | null>(null);
   const sessionStates = useRef<Readonly<Record<string, BrowserSessionState>>>({});
   const noticeId = useRef(0);
@@ -108,15 +104,24 @@ export function App() {
   const [bootstrapState, setBootstrapState] = useState<"loading" | "ready" | "error">("loading");
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [connection, setConnection] = useState(INITIAL_CONNECTION);
-  const [summaries, setSummaries] = useState<readonly BrowserSessionSummary[]>([]);
-  const [sessionListTruncated, setSessionListTruncated] = useState(false);
+  const [commandLimits, setCommandLimits] = useState<BrowserCommandLimits | null>(null);
+  const [sessionIndex, setSessionIndex] = useState<BrowserSessionIndex>(() =>
+    createBrowserSessionIndex([], false),
+  );
   const [sessions, setSessions] = useState<Readonly<Record<string, BrowserSessionState>>>({});
   const [sessionProtocolErrors, setSessionProtocolErrors] = useState<
     Readonly<Record<string, string>>
   >({});
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [sessionTitleDraft, setSessionTitleDraft] = useState("");
-  const [messageDrafts, setMessageDrafts] = useState<Readonly<Record<string, string>>>({});
+  const [sessionTitleDraft, setSessionTitleDraft] = useState(
+    () => commandJournal.drafts()[sessionTitleDraftKey()] ?? "",
+  );
+  const [messageDrafts, setMessageDrafts] = useState<Readonly<Record<string, string>>>(() =>
+    restoredDrafts(commandJournal.drafts(), "message:"),
+  );
+  const [inputDrafts, setInputDrafts] = useState<Readonly<Record<string, string>>>(() =>
+    restoredDrafts(commandJournal.drafts(), "input:"),
+  );
   const [pendingCommands, setPendingCommands] = useState<readonly PendingCommand[]>([]);
   const [notices, setNotices] = useState<readonly Notice[]>([]);
 
@@ -135,15 +140,18 @@ export function App() {
     setNotices((current) => [...current.slice(-4), notice]);
   }
 
-  function storeSession(next: BrowserSessionState, updatedAtMs = Date.now()): void {
+  function storeSession(next: BrowserSessionState, durableEventTimestampMs?: number): void {
     const nextSessions = { ...sessionStates.current, [next.sessionId]: next };
     sessionStates.current = nextSessions;
     setSessions(nextSessions);
-    setSummaries((current) => {
-      const previous = current.find((summary) => summary.sessionId === next.sessionId);
-      const replacement = summaryForState(previous, next, updatedAtMs);
-      const remaining = current.filter((summary) => summary.sessionId !== next.sessionId);
-      return [replacement, ...remaining].sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+    setSessionIndex((current) => {
+      const previous = current.summaries.find(
+        (summary) => summary.sessionId === next.sessionId,
+      );
+      const replacement = projectSessionSummary(previous, next, durableEventTimestampMs);
+      return replacement === null
+        ? current
+        : upsertSessionSummary(current, replacement, selectedSessionIdRef.current);
     });
   }
 
@@ -193,15 +201,32 @@ export function App() {
     void fetchBootstrap(abort.signal).then(
       (bootstrap) => {
         if (!active) return;
-        setSummaries(bootstrap.sessions);
-        setSessionListTruncated(bootstrap.sessionsTruncated);
-        const initialSessionId = selectedSessionFromLocation(bootstrap.sessions);
+        setSessionIndex(
+          createBrowserSessionIndex(bootstrap.sessions, bootstrap.sessionsTruncated),
+        );
+        setCommandLimits(bootstrap.commandLimits);
+        const initialSessionId = initialSessionIdFromLocation(
+          globalThis.location.href,
+          bootstrap.sessions,
+        );
 
         socketClient = new WiSocketClient({
           url: websocketUrl(bootstrap.websocketPath),
           protocol: bootstrap.websocketProtocol,
+          commandLimits: bootstrap.commandLimits,
+          journal: commandJournal,
+          refreshConnection: async (signal) => {
+            const refreshed = await fetchBootstrap(signal);
+            if (active) setCommandLimits(refreshed.commandLimits);
+            return {
+              url: websocketUrl(refreshed.websocketPath),
+              protocol: refreshed.websocketProtocol,
+              commandLimits: refreshed.commandLimits,
+            };
+          },
           onConnectionChange: (next) => {
             if (!active) return;
+            if (TERMINAL_CONNECTION_STATES.has(next.status)) focusRecovery.current = null;
             setConnection(next);
             if (next.status === "handshaking") {
               resyncingSessions.current.clear();
@@ -212,6 +237,9 @@ export function App() {
           },
           onPendingCommandsChange: (commands) => {
             if (active) setPendingCommands(commands);
+          },
+          onLocalCommandError: (_commandId, message) => {
+            if (active) addNotice(message, "error");
           },
           onMessage: (message) => {
             if (!active || socketClient === null) return;
@@ -275,27 +303,16 @@ export function App() {
         return;
       }
       if (message.kind === "command.accepted") {
-        const command = client.getPendingCommand(message.commandId);
-        if (command?.method === "session.create") {
-          setSessionTitleDraft((current) =>
-            current.trim() === (command.params.title ?? "") ? "" : current,
-          );
-        }
-        if (command?.method === "message.submit") {
-          setMessageDrafts((current) => {
-            if ((current[command.sessionId] ?? "").trim() !== command.params.text) return current;
-            const next = { ...current };
-            delete next[command.sessionId];
-            return next;
-          });
-        }
+        const pending = client.getPending(message.commandId);
+        const command = pending?.command;
+        if (pending?.draft !== undefined) clearAcceptedDraft(pending.draft);
         if (command?.method === "session.create" && message.sessionId !== undefined) {
           const created: BrowserSessionSummary = {
             sessionId: message.sessionId,
             title: command.params.title ?? "Untitled session",
             status: "ready",
-            createdAtMs: Date.now(),
-            updatedAtMs: Date.now(),
+            createdAtMs: 0,
+            updatedAtMs: 0,
             lastEventSequence: 0,
             lastRunState: null,
             lastMessagePreview: null,
@@ -303,13 +320,28 @@ export function App() {
             pendingApprovalCount: 0,
             pendingInputCount: 0,
           };
-          setSummaries((current) => [created, ...current]);
+          setSessionIndex((current) =>
+            upsertSessionSummary(
+              current,
+              created,
+              message.sessionId ?? null,
+              !current.summaries.some((summary) => summary.sessionId === message.sessionId),
+            ),
+          );
           openSession(message.sessionId);
         }
         addNotice(message.duplicate ? "Command reconciled after reconnect." : "Command accepted.");
         return;
       }
       if (message.kind === "command.rejected") {
+        const rejected = client.getPending(message.commandId)?.command;
+        if (
+          rejected?.method === "approval.resolve" ||
+          rejected?.method === "input.respond" ||
+          rejected?.method === "run.cancel"
+        ) {
+          focusRecovery.current = null;
+        }
         addNotice(
           `${message.message} Diagnostic: ${message.diagnosticId}`,
           "error",
@@ -352,9 +384,33 @@ export function App() {
       socket.current = null;
       socketClient?.stop();
     };
-  }, []);
+  }, [commandJournal]);
 
   const selectedSession = selectedSessionId === null ? null : sessions[selectedSessionId] ?? null;
+  const selectedSummary =
+    selectedSessionId === null
+      ? undefined
+      : sessionIndex.summaries.find((summary) => summary.sessionId === selectedSessionId);
+
+  useEffect(() => {
+    const clearOnNewFocus = (event: FocusEvent): void => {
+      const recovery = focusRecovery.current;
+      const target = event.target;
+      if (
+        recovery !== null &&
+        target instanceof HTMLElement &&
+        target.isConnected &&
+        target !== recovery.initiatingElement
+      ) {
+        focusRecovery.current = null;
+      }
+    };
+    globalThis.document.addEventListener("focusin", clearOnNewFocus);
+    return () => {
+      focusRecovery.current = null;
+      globalThis.document.removeEventListener("focusin", clearOnNewFocus);
+    };
+  }, []);
 
   useEffect(() => {
     const recovery = focusRecovery.current;
@@ -377,6 +433,13 @@ export function App() {
           )));
     if (!controlRemoved) return;
     focusRecovery.current = null;
+    const activeElement = globalThis.document.activeElement;
+    const focusStayedOnInitiator = activeElement === recovery.initiatingElement;
+    const focusFellToDocument =
+      activeElement === null ||
+      activeElement === globalThis.document.body ||
+      activeElement === globalThis.document.documentElement;
+    if (!focusStayedOnInitiator && !focusFellToDocument) return;
     for (const selector of [
       '[data-focus-target="approval"]:not([disabled])',
       '[data-focus-target="input"]:not([disabled])',
@@ -431,15 +494,62 @@ export function App() {
     [selectedPendingCommands],
   );
 
-  function send(command: CommandMessage): string | null {
+  function updateDraft(key: JournalDraftKey, value: string): string | null {
+    try {
+      commandJournal.setDraft(key, value);
+      if (key === "session-title") setSessionTitleDraft(value);
+      else if (key.startsWith("message:")) {
+        const sessionId = key.slice("message:".length);
+        setMessageDrafts((current) => ({ ...current, [sessionId]: value }));
+      } else {
+        const inputId = key.slice("input:".length);
+        setInputDrafts((current) => ({ ...current, [inputId]: value }));
+      }
+      return null;
+    } catch (error) {
+      return error instanceof BrowserCommandJournalError
+        ? error.message
+        : "The draft could not be saved in this browser tab.";
+    }
+  }
+
+  function clearAcceptedDraft(reference: JournalDraftReference): void {
+    try {
+      if (!commandJournal.clearDraftIfUnchanged(reference)) return;
+    } catch {
+      addNotice("The accepted draft could not be removed from temporary browser storage.", "error");
+      return;
+    }
+    if (reference.key === "session-title") {
+      setSessionTitleDraft((current) => (current === reference.value ? "" : current));
+    } else if (reference.key.startsWith("message:")) {
+      const sessionId = reference.key.slice("message:".length);
+      setMessageDrafts((current) => {
+        if (current[sessionId] !== reference.value) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
+    } else {
+      const inputId = reference.key.slice("input:".length);
+      setInputDrafts((current) => {
+        if (current[inputId] !== reference.value) return current;
+        const next = { ...current };
+        delete next[inputId];
+        return next;
+      });
+    }
+  }
+
+  function send(command: CommandMessage, draft?: JournalDraftReference): string | null {
     const client = socket.current;
     if (client === null) return "The browser connection is not initialized.";
     try {
-      client.sendCommand(command);
+      client.sendCommand(command, draft);
       return null;
     } catch (error) {
       const message =
-        error instanceof BrowserCommandTooLargeError
+        error instanceof BrowserCommandLimitError || error instanceof BrowserCommandJournalError
           ? error.message
           : "The command could not be validated for sending.";
       return message;
@@ -453,7 +563,7 @@ export function App() {
       commandId: createId("command", idSource),
       method: "session.create",
       params: { title },
-    });
+    }, { key: sessionTitleDraftKey(), value: sessionTitleDraft });
   }
 
   function submitMessage(text: string): string | null {
@@ -465,12 +575,29 @@ export function App() {
       sessionId: selectedSessionId,
       method: "message.submit",
       params: { text },
+    }, {
+      key: messageDraftKey(selectedSessionId),
+      value: messageDrafts[selectedSessionId] ?? "",
     });
+  }
+
+  function armFocusRecovery(
+    sessionId: string,
+    kind: FocusRecovery["kind"],
+    targetId: string,
+  ): void {
+    const activeElement = globalThis.document.activeElement;
+    focusRecovery.current = {
+      sessionId,
+      kind,
+      targetId,
+      initiatingElement: activeElement instanceof HTMLElement ? activeElement : null,
+    };
   }
 
   function cancelRun(runId: string): void {
     if (selectedSessionId === null) return;
-    focusRecovery.current = { sessionId: selectedSessionId, kind: "cancel", targetId: runId };
+    armFocusRecovery(selectedSessionId, "cancel", runId);
     const error = send({
       v: 1,
       kind: "command",
@@ -479,16 +606,15 @@ export function App() {
       method: "run.cancel",
       params: { runId },
     });
-    if (error !== null) addNotice(error, "error");
+    if (error !== null) {
+      focusRecovery.current = null;
+      addNotice(error, "error");
+    }
   }
 
   function resolveApproval(approvalId: string, resolution: ApprovalResolution): void {
     if (selectedSessionId === null) return;
-    focusRecovery.current = {
-      sessionId: selectedSessionId,
-      kind: "approval",
-      targetId: approvalId,
-    };
+    armFocusRecovery(selectedSessionId, "approval", approvalId);
     const error = send({
       v: 1,
       kind: "command",
@@ -497,20 +623,28 @@ export function App() {
       method: "approval.resolve",
       params: { approvalId, resolution },
     });
-    if (error !== null) addNotice(error, "error");
+    if (error !== null) {
+      focusRecovery.current = null;
+      addNotice(error, "error");
+    }
   }
 
   function respondToInput(inputId: string, value: CanonicalJsonValue): string | null {
     if (selectedSessionId === null) return "Select a session before responding.";
-    focusRecovery.current = { sessionId: selectedSessionId, kind: "input", targetId: inputId };
-    return send({
+    armFocusRecovery(selectedSessionId, "input", inputId);
+    const error = send({
       v: 1,
       kind: "command",
       commandId: createId("command", idSource),
       sessionId: selectedSessionId,
       method: "input.respond",
       params: { inputId, value },
+    }, {
+      key: inputDraftKey(inputId),
+      value: inputDrafts[inputId] ?? "",
     });
+    if (error !== null) focusRecovery.current = null;
+    return error;
   }
 
   if (bootstrapState === "loading") {
@@ -518,6 +652,9 @@ export function App() {
   }
   if (bootstrapState === "error") {
     return <main className="boot" role="alert">{bootstrapError}</main>;
+  }
+  if (commandLimits === null) {
+    return <main className="boot" role="alert">Bootstrap command limits are unavailable.</main>;
   }
 
   const terminalConnection = TERMINAL_CONNECTION_STATES.has(connection.status);
@@ -532,22 +669,28 @@ export function App() {
   return (
     <div className="app-shell">
       <SessionList
-        sessions={summaries}
-        sessionsTruncated={sessionListTruncated}
+        sessions={sessionIndex.summaries}
+        sessionsTruncated={sessionIndex.truncated}
         selectedSessionId={selectedSessionId}
         title={sessionTitleDraft}
+        commandLimits={commandLimits}
         createPending={pendingCommands.some(
           (pending) => pending.command.method === "session.create",
         )}
         createDisabled={terminalConnection}
-        onTitleChange={setSessionTitleDraft}
+        onTitleChange={(title) => updateDraft(sessionTitleDraftKey(), title)}
         onCreate={createSession}
         onSelect={openSession}
       />
       <main className="workspace">
         <header className="workspace__header">
           <div>
-            <h2>{selectedSession?.title.slice(0, 512) || "Select a session"}</h2>
+            <h2>
+              {selectedSession?.title.slice(0, 512) ||
+                selectedSummary?.title ||
+                selectedSessionId ||
+                "Select a session"}
+            </h2>
             {selectedSession === null ? null : (
               <p className={`replay-state replay-state--${selectedSession.status}`} role="status">
                 Session state: {selectedSession.status} · sequence {selectedSession.lastAppliedSequence}
@@ -556,6 +699,19 @@ export function App() {
           </div>
           <ConnectionStatus connection={connection} />
         </header>
+
+        {selectedSessionId !== null && selectedSummary === undefined ? (
+          <p className="session-target-status" role="status">
+            Requested session {selectedSessionId} is outside the bounded session list. Verifying
+            that exact session from durable storage.
+          </p>
+        ) : null}
+        {selectedSummary?.status === "unavailable" ? (
+          <p className="session-target-status" role="alert">
+            Requested session {selectedSummary.sessionId} is marked unavailable. No fallback
+            session was selected.
+          </p>
+        ) : null}
 
         {terminalConnection ? (
           <div className="integrity-error" role="alert">
@@ -617,18 +773,22 @@ export function App() {
             />
             <PendingInputPanel
               inputs={Object.values(selectedSession.pendingInputs)}
+              commandLimits={commandLimits}
               pendingInputIds={pendingInputIds}
+              drafts={inputDrafts}
               disabled={sessionMutationsDisabled}
+              onDraftChange={(inputId, value) => updateDraft(inputDraftKey(inputId), value)}
               onRespond={respondToInput}
             />
             <Timeline session={selectedSession} />
             <Composer
               sessionId={selectedSession.sessionId}
               text={messageDrafts[selectedSession.sessionId] ?? ""}
+              commandLimits={commandLimits}
               disabled={sessionMutationsDisabled}
               pending={(pendingByMethod.get("message.submit") ?? 0) > 0}
               onTextChange={(text) =>
-                setMessageDrafts((current) => ({ ...current, [selectedSession.sessionId]: text }))
+                updateDraft(messageDraftKey(selectedSession.sessionId), text)
               }
               onSubmit={submitMessage}
             />

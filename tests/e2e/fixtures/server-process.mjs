@@ -1,8 +1,21 @@
 import { WiRuntime, WiServer } from "../../../apps/server/dist/index.js";
 import { FakeProviderAdapter, fakeProviderGateLabel } from "../../../packages/provider-fake/dist/index.js";
+import { MAXIMUM_BOOTSTRAP_SESSIONS } from "../../../packages/protocol/dist/index.js";
 
-const [homeDirectory] = process.argv.slice(2);
+const [homeDirectory, frameMaximumBytesArgument, fixedPortArgument] = process.argv.slice(2);
 if (homeDirectory === undefined || typeof process.send !== "function") process.exit(64);
+const frameMaximumBytes =
+  frameMaximumBytesArgument === undefined || frameMaximumBytesArgument === "-"
+    ? undefined
+    : Number(frameMaximumBytesArgument);
+const fixedPort = fixedPortArgument === undefined ? undefined : Number(fixedPortArgument);
+if (
+  (frameMaximumBytes !== undefined &&
+    (!Number.isSafeInteger(frameMaximumBytes) || frameMaximumBytes < 1)) ||
+  (fixedPort !== undefined && (!Number.isSafeInteger(fixedPort) || fixedPort < 1))
+) {
+  process.exit(65);
+}
 
 const send = (message) => process.send?.(message);
 const providerRequests = [];
@@ -16,6 +29,7 @@ const approvalAcknowledgementGates = new Map();
 const approvalRaceGates = new Map();
 let approvalAcknowledgementArmed = false;
 let approvalRaceArmed = false;
+let routedCommandCount = 0;
 
 class E2EProvider extends FakeProviderAdapter {
   async *stream(request, context, signal) {
@@ -71,10 +85,14 @@ const runtime = new WiRuntime({
 });
 const server = new WiServer({
   runtime,
-  port: 0,
+  port: fixedPort ?? 0,
   gateway: {
+    ...(frameMaximumBytes === undefined
+      ? {}
+      : { limits: { frame: { maximumBytes: frameMaximumBytes } } }),
     commandHooks: {
       beforeRoute: async (command) => {
+        routedCommandCount += 1;
         if (
           command.method === "message.submit" &&
           command.params.text.startsWith("[before-route]")
@@ -213,6 +231,87 @@ process.on("message", (message) => {
           provider.controller.release(label);
         }
         send({ type: "provider-released", requestId: message.requestId });
+        return;
+      case "seed-bounded-session-index": {
+        const title = "Omitted durable target";
+        const omitted = await runtime.storage.createSession({
+          v: 1,
+          kind: "command",
+          commandId: "cmd_e2eOmittedTarget",
+          method: "session.create",
+          params: { title },
+        });
+        const futureBase = Date.now() + 100_000;
+        for (let index = 0; index < MAXIMUM_BOOTSTRAP_SESSIONS; index += 1) {
+          await runtime.storage.catalog.createSessionIndex({
+            sessionId: `ses_e2eBoundedVisible${index}`,
+            projectId: null,
+            dbRelativePath: `sessions/e2e-bounded-${index}/session.sqlite3`,
+            title: `Visible bounded ${index}`,
+            status: "ready",
+            createdAtMs: futureBase + index,
+            updatedAtMs: futureBase + index,
+            lastEventSequence: 1,
+            lastRunState: null,
+            lastMessagePreview: null,
+            requiresAttention: false,
+            pendingApprovalCount: 0,
+            pendingInputCount: 0,
+            sessionSchemaVersion: 1,
+          });
+        }
+        send({
+          type: "bounded-session-index-seeded",
+          requestId: message.requestId,
+          omittedSessionId: omitted.session.sessionId,
+          title,
+        });
+        return;
+      }
+      case "seed-unavailable-session": {
+        const fallbackTitle = "Ready fallback must not open";
+        const fallback = await runtime.storage.createSession({
+          v: 1,
+          kind: "command",
+          commandId: "cmd_e2eUnavailableFallback",
+          method: "session.create",
+          params: { title: fallbackTitle },
+        });
+        const sessionId = "ses_e2eUnavailableTarget";
+        const title = "Unavailable exact target";
+        const now = Date.now() + 1;
+        await runtime.storage.catalog.createSessionIndex({
+          sessionId,
+          projectId: null,
+          dbRelativePath: "sessions/e2e-unavailable/session.sqlite3",
+          title,
+          status: "unavailable",
+          createdAtMs: now,
+          updatedAtMs: now,
+          lastEventSequence: 0,
+          lastRunState: null,
+          lastMessagePreview: null,
+          requiresAttention: false,
+          pendingApprovalCount: 0,
+          pendingInputCount: 0,
+          sessionSchemaVersion: 1,
+        });
+        send({
+          type: "unavailable-session-seeded",
+          requestId: message.requestId,
+          sessionId,
+          title,
+          fallbackSessionId: fallback.session.sessionId,
+          fallbackTitle,
+        });
+        return;
+      }
+      case "command-route-count":
+        send({
+          type: "command-route-count",
+          requestId: message.requestId,
+          count: routedCommandCount,
+        });
         return;
       case "session-head": {
         const session = await runtime.storage.openSession(message.sessionId);

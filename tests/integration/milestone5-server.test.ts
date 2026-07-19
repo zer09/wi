@@ -778,6 +778,25 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     });
   });
 
+  it("advertises browser command limits from the actual gateway configuration", async () => {
+    const fixture = await startFixture({
+      gateway: { limits: { frame: { maximumBytes: 32 * 1_024, maximumDepth: 20 } } },
+    });
+    const response = await bootstrap(fixture.server);
+    const parsed = BootstrapResponseSchema.parse(response.body);
+
+    expect(parsed.commandLimits).toMatchObject({
+      v: 1,
+      maximumFrameBytes: 32 * 1_024,
+      maximumRawInputCodeUnits: 32 * 1_024,
+      maximumRawInputUtf8Bytes: 32 * 1_024,
+      maximumJsonDepth: 18,
+    });
+    expect(parsed.commandLimits.maximumDurablePayloadBytes).toBeGreaterThan(
+      parsed.commandLimits.maximumFrameBytes,
+    );
+  });
+
   it("serves bounded application assets with strict content types and caching", async () => {
     const webRoot = await mkdtemp(join(tmpdir(), "wi-web-assets-"));
     homes.add(webRoot);

@@ -1,44 +1,55 @@
 import { useState, type FormEvent } from "react";
 import type { BrowserPendingInput } from "@wi/client-state";
-import { CanonicalJsonValueSchema, type CanonicalJsonValue } from "@wi/protocol";
+import type { BrowserCommandLimits, CanonicalJsonValue } from "@wi/protocol";
+
+import {
+  assertRawInputSize,
+  BrowserCommandLimitError,
+  parseCanonicalJsonInput,
+} from "../socket/command-size.js";
 
 interface PendingInputPanelProps {
   readonly inputs: readonly BrowserPendingInput[];
+  readonly commandLimits: BrowserCommandLimits;
   readonly pendingInputIds: ReadonlySet<string>;
+  readonly drafts: Readonly<Record<string, string>>;
   readonly disabled: boolean;
+  readonly onDraftChange: (inputId: string, value: string) => string | null;
   readonly onRespond: (inputId: string, value: CanonicalJsonValue) => string | null;
 }
 
 function InputResponse({
   input,
+  commandLimits,
+  value,
   pending,
   disabled,
+  onDraftChange,
   onRespond,
 }: {
   readonly input: BrowserPendingInput;
+  readonly commandLimits: BrowserCommandLimits;
+  readonly value: string;
   readonly pending: boolean;
   readonly disabled: boolean;
+  readonly onDraftChange: PendingInputPanelProps["onDraftChange"];
   readonly onRespond: PendingInputPanelProps["onRespond"];
 }) {
-  const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (disabled) return;
-    let parsed: unknown;
+    if (disabled || pending) return;
     try {
-      parsed = JSON.parse(value);
-    } catch {
-      setError("Enter a valid JSON value, such as a string, number, object, or array.");
-      return;
+      const canonical = parseCanonicalJsonInput(value, commandLimits);
+      setError(onRespond(input.inputId, canonical));
+    } catch (parseError) {
+      setError(
+        parseError instanceof BrowserCommandLimitError
+          ? parseError.message
+          : "Enter a valid finite JSON value, such as a string, number, object, or array.",
+      );
     }
-    const canonical = CanonicalJsonValueSchema.safeParse(parsed);
-    if (!canonical.success) {
-      setError("The response must be a finite JSON value.");
-      return;
-    }
-    setError(onRespond(input.inputId, canonical.data));
   }
 
   return (
@@ -51,7 +62,18 @@ function InputResponse({
         rows={3}
         value={value}
         disabled={disabled || pending}
-        onChange={(event) => setValue(event.currentTarget.value)}
+        onChange={(event) => {
+          try {
+            assertRawInputSize(event.currentTarget.value, commandLimits, "JSON response");
+            setError(onDraftChange(input.inputId, event.currentTarget.value));
+          } catch (changeError) {
+            setError(
+              changeError instanceof BrowserCommandLimitError
+                ? changeError.message
+                : "The JSON response could not be validated.",
+            );
+          }
+        }}
       />
       {error === null ? null : <p role="alert">{error}</p>}
       <button type="submit" disabled={disabled || pending || value.trim() === ""}>
@@ -63,8 +85,11 @@ function InputResponse({
 
 export function PendingInputPanel({
   inputs,
+  commandLimits,
   pendingInputIds,
+  drafts,
   disabled,
+  onDraftChange,
   onRespond,
 }: PendingInputPanelProps) {
   if (inputs.length === 0) return null;
@@ -75,8 +100,11 @@ export function PendingInputPanel({
         <InputResponse
           key={input.inputId}
           input={input}
+          commandLimits={commandLimits}
+          value={drafts[input.inputId] ?? ""}
           pending={pendingInputIds.has(input.inputId)}
           disabled={disabled}
+          onDraftChange={onDraftChange}
           onRespond={onRespond}
         />
       ))}

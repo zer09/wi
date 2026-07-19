@@ -1,17 +1,25 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { BrowserCommandLimits } from "@wi/protocol";
+
+import {
+  assertRawInputSize,
+  BrowserCommandLimitError,
+} from "../socket/command-size.js";
 
 interface ComposerProps {
   readonly sessionId: string;
   readonly text: string;
+  readonly commandLimits: BrowserCommandLimits;
   readonly disabled: boolean;
   readonly pending: boolean;
-  readonly onTextChange: (text: string) => void;
+  readonly onTextChange: (text: string) => string | null;
   readonly onSubmit: (text: string) => string | null;
 }
 
 export function Composer({
   sessionId,
   text,
+  commandLimits,
   disabled,
   pending,
   onTextChange,
@@ -42,8 +50,16 @@ export function Composer({
         data-focus-target="composer"
         value={text}
         onChange={(event) => {
-          setError(null);
-          onTextChange(event.currentTarget.value);
+          try {
+            assertRawInputSize(event.currentTarget.value, commandLimits, "Message");
+            setError(onTextChange(event.currentTarget.value));
+          } catch (changeError) {
+            setError(
+              changeError instanceof BrowserCommandLimitError
+                ? changeError.message
+                : "The message could not be validated.",
+            );
+          }
         }}
         disabled={disabled || pending}
         rows={3}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
+  browserCommandLimits,
   durableCommandPayloadBytes,
   maximumDurableCommandPayloadBytes,
 } from "./durable-command-limits.js";
@@ -92,6 +93,26 @@ describe("durable command limits", () => {
         replayPageSingleEventBytes: 1_000_000,
       }),
     ).toBe(500_000 - DURABLE_EVENT_ENVELOPE_RESERVE_BYTES);
+  });
+
+  it("derives the browser contract from actual frame and durable capacities", () => {
+    const limits = browserCommandLimits({
+      frameMaximumBytes: 32 * 1_024,
+      frameMaximumDepth: 20,
+      outboundSingleMessageBytes: 40 * 1_024,
+      replayLiveSingleEventBytes: 36 * 1_024,
+      replayPageSingleEventBytes: 34 * 1_024,
+    });
+
+    expect(limits).toMatchObject({
+      v: 1,
+      maximumFrameBytes: 32 * 1_024,
+      maximumDurablePayloadBytes: 30 * 1_024,
+      maximumRawInputCodeUnits: 30 * 1_024,
+      maximumRawInputUtf8Bytes: 30 * 1_024,
+      maximumJsonDepth: 18,
+    });
+    expect(limits.maximumJsonNodes).toBeGreaterThan(1_000);
   });
 
   it("measures complete canonical UTF-8 JSON for every durable variable payload", () => {

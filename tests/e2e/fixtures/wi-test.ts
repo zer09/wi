@@ -29,6 +29,14 @@ export interface WiTestServer {
   armApprovalRace(): Promise<void>;
   waitForApprovalRace(count?: number): Promise<readonly string[]>;
   releaseApprovalRace(): void;
+  seedBoundedSessionIndex(): Promise<{ readonly omittedSessionId: string; readonly title: string }>;
+  commandRouteCount(): Promise<number>;
+  seedUnavailableSession(): Promise<{
+    readonly sessionId: string;
+    readonly title: string;
+    readonly fallbackSessionId: string;
+    readonly fallbackTitle: string;
+  }>;
   sessionHead(sessionId: string): Promise<number>;
 }
 
@@ -271,6 +279,57 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     },
     releaseApprovalRace() {
       child.send({ type: "release-approval-race" });
+    },
+    async seedBoundedSessionIndex() {
+      requestId += 1;
+      const currentRequestId = `bounded-index-${requestId}`;
+      child.send({ type: "seed-bounded-session-index", requestId: currentRequestId });
+      const message = await waitFor(
+        (candidate) =>
+          candidate.type === "bounded-session-index-seeded" &&
+          candidate.requestId === currentRequestId,
+      );
+      if (typeof message.omittedSessionId !== "string" || typeof message.title !== "string") {
+        throw new Error("Bounded session-index fixture returned invalid session data");
+      }
+      return { omittedSessionId: message.omittedSessionId, title: message.title };
+    },
+    async commandRouteCount() {
+      requestId += 1;
+      const currentRequestId = `command-route-count-${requestId}`;
+      child.send({ type: "command-route-count", requestId: currentRequestId });
+      const message = await waitFor(
+        (candidate) =>
+          candidate.type === "command-route-count" && candidate.requestId === currentRequestId,
+      );
+      if (typeof message.count !== "number") {
+        throw new Error("Command route-count fixture returned invalid data");
+      }
+      return message.count;
+    },
+    async seedUnavailableSession() {
+      requestId += 1;
+      const currentRequestId = `unavailable-index-${requestId}`;
+      child.send({ type: "seed-unavailable-session", requestId: currentRequestId });
+      const message = await waitFor(
+        (candidate) =>
+          candidate.type === "unavailable-session-seeded" &&
+          candidate.requestId === currentRequestId,
+      );
+      if (
+        typeof message.sessionId !== "string" ||
+        typeof message.title !== "string" ||
+        typeof message.fallbackSessionId !== "string" ||
+        typeof message.fallbackTitle !== "string"
+      ) {
+        throw new Error("Unavailable session fixture returned invalid session data");
+      }
+      return {
+        sessionId: message.sessionId,
+        title: message.title,
+        fallbackSessionId: message.fallbackSessionId,
+        fallbackTitle: message.fallbackTitle,
+      };
     },
     async sessionHead(sessionId) {
       requestId += 1;

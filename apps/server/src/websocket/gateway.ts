@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import type { BrowserCommandLimits } from "@wi/protocol";
 import { SESSION_EVENT_PAGE_BOUNDS } from "@wi/storage";
 import { WebSocketServer } from "ws";
 import type { WiRuntime } from "../composition.js";
@@ -15,6 +16,7 @@ import {
   type ConnectionSnapshot,
 } from "./connection.js";
 import {
+  browserCommandLimits as deriveBrowserCommandLimits,
   maximumDurableCommandPayloadBytes,
 } from "./durable-command-limits.js";
 import type { LoopbackRequestPolicy, UpgradeRejection } from "./origin-policy.js";
@@ -284,6 +286,16 @@ export class WebSocketGateway {
 
   get connectionSnapshots(): readonly ConnectionSnapshot[] {
     return [...this.connections].map((connection) => connection.snapshot);
+  }
+
+  get browserCommandLimits(): BrowserCommandLimits {
+    return deriveBrowserCommandLimits({
+      frameMaximumBytes: this.limits.frame.maximumBytes,
+      frameMaximumDepth: this.limits.frame.maximumDepth,
+      outboundSingleMessageBytes: this.limits.outbound.maximumSingleMessageBytes,
+      replayLiveSingleEventBytes: this.limits.replaySingleEventBytes,
+      replayPageSingleEventBytes: this.limits.replayPageSingleEventBytes,
+    });
   }
 
   disconnectActiveConnections(code = 1012, reason = "server reconnect requested"): number {

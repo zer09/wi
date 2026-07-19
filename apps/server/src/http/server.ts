@@ -355,6 +355,7 @@ export class WiServer {
         this.auth,
         catalogSessions.slice(0, MAXIMUM_BOOTSTRAP_SESSIONS),
         sessionsTruncated,
+        this.gateway.browserCommandLimits,
       );
     } catch (error) {
       this.internalHttpFailure(response, error, "bootstrap");

@@ -1,14 +1,20 @@
 import { useState, type FormEvent } from "react";
-import type { BrowserSessionSummary } from "@wi/protocol";
+import type { BrowserCommandLimits, BrowserSessionSummary } from "@wi/protocol";
+
+import {
+  assertRawInputSize,
+  BrowserCommandLimitError,
+} from "../socket/command-size.js";
 
 interface SessionListProps {
   readonly sessions: readonly BrowserSessionSummary[];
   readonly sessionsTruncated: boolean;
   readonly selectedSessionId: string | null;
   readonly title: string;
+  readonly commandLimits: BrowserCommandLimits;
   readonly createPending: boolean;
   readonly createDisabled: boolean;
-  readonly onTitleChange: (title: string) => void;
+  readonly onTitleChange: (title: string) => string | null;
   readonly onCreate: (title: string) => string | null;
   readonly onSelect: (sessionId: string) => void;
 }
@@ -18,6 +24,7 @@ export function SessionList({
   sessionsTruncated,
   selectedSessionId,
   title,
+  commandLimits,
   createPending,
   createDisabled,
   onTitleChange,
@@ -46,8 +53,16 @@ export function SessionList({
             id="new-session-title"
             value={title}
             onChange={(event) => {
-              setError(null);
-              onTitleChange(event.currentTarget.value);
+              try {
+                assertRawInputSize(event.currentTarget.value, commandLimits, "Session title");
+                setError(onTitleChange(event.currentTarget.value));
+              } catch (changeError) {
+                setError(
+                  changeError instanceof BrowserCommandLimitError
+                    ? changeError.message
+                    : "The session title could not be validated.",
+                );
+              }
             }}
             disabled={createPending || createDisabled}
             maxLength={200}

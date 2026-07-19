@@ -1,11 +1,17 @@
 import {
+  BrowserCommandLimitsSchema,
   ClientMessageSchema,
   ServerMessageSchema,
   createId,
+  type BrowserCommandLimits,
   type CommandMessage,
   type ServerMessage,
 } from "@wi/protocol";
 
+import {
+  type BrowserCommandJournal,
+  type JournalDraftReference,
+} from "../state/command-journal.js";
 import { assertBrowserCommandSize } from "./command-size.js";
 import { ReconnectPolicy, type ReconnectPolicyOptions } from "./reconnect.js";
 
@@ -28,6 +34,7 @@ export interface ConnectionSnapshot {
 export interface PendingCommand {
   readonly command: CommandMessage;
   readonly phase: "queued" | "sent";
+  readonly draft?: JournalDraftReference;
 }
 
 export interface WebSocketLike {
@@ -42,7 +49,16 @@ export interface WebSocketLike {
 
 export type WebSocketFactory = (url: string, protocol: string) => WebSocketLike;
 
+export interface RefreshedConnection {
+  readonly url: string;
+  readonly protocol: string;
+  readonly commandLimits: BrowserCommandLimits;
+}
+
 type TimerHandle = unknown;
+
+const PRE_WELCOME_FAILURES_BEFORE_REFRESH = 2;
+const MAXIMUM_AUTHENTICATION_REFRESH_ATTEMPTS = 2;
 
 interface SessionReplayRetry {
   readonly policy: ReconnectPolicy;
@@ -53,13 +69,17 @@ interface SessionReplayRetry {
 export interface WiSocketClientOptions {
   readonly url: string;
   readonly protocol: string;
+  readonly commandLimits: BrowserCommandLimits;
+  readonly journal: BrowserCommandJournal;
   readonly clientId?: string;
   readonly socketFactory?: WebSocketFactory;
   readonly reconnect?: ReconnectPolicyOptions;
   readonly setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   readonly clearTimer?: (handle: TimerHandle) => void;
   readonly idSource?: () => string;
+  readonly refreshConnection?: (signal: AbortSignal) => Promise<RefreshedConnection>;
   readonly onMessage: (message: ServerMessage) => void;
+  readonly onLocalCommandError?: (commandId: string, message: string) => void;
   readonly onConnectionChange: (snapshot: ConnectionSnapshot) => void;
   readonly onPendingCommandsChange: (commands: readonly PendingCommand[]) => void;
 }
@@ -85,12 +105,20 @@ export class WiSocketClient {
   private readonly setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   private readonly clearTimer: (handle: TimerHandle) => void;
   private readonly idSource: () => string;
+  private commandLimits: BrowserCommandLimits;
+  private url: string;
+  private protocol: string;
   private readonly sessions = new Map<string, number>();
   private readonly helloSessions = new Map<string, number>();
   private readonly sessionReplayRetries = new Map<string, SessionReplayRetry>();
   private readonly pending = new Map<string, PendingCommand>();
+  private readonly locallyBlockedCommands = new Set<string>();
   private socket: WebSocketLike | null = null;
   private reconnectTimer: TimerHandle | null = null;
+  private refreshAbort: AbortController | null = null;
+  private refreshPromise: Promise<void> | null = null;
+  private preWelcomeFailures = 0;
+  private authenticationRefreshAttempts = 0;
   private welcomed = false;
   private stopped = false;
   private snapshotValue: ConnectionSnapshot = {
@@ -109,7 +137,18 @@ export class WiSocketClient {
       options.clearTimer ??
       ((handle) => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>));
     this.idSource = options.idSource ?? defaultIdSource;
+    this.commandLimits = BrowserCommandLimitsSchema.parse(options.commandLimits);
+    this.url = validatedWebSocketUrl(options.url);
+    this.protocol = validatedWebSocketProtocol(options.protocol);
     this.clientId = options.clientId ?? createId("client", this.idSource);
+    for (const restored of options.journal.commands()) {
+      this.pending.set(restored.command.commandId, {
+        command: restored.command,
+        phase: "queued",
+        ...(restored.draft === undefined ? {} : { draft: restored.draft }),
+      });
+    }
+    this.notifyPending();
   }
 
   get snapshot(): ConnectionSnapshot {
@@ -118,6 +157,16 @@ export class WiSocketClient {
 
   getPendingCommand(commandId: string): CommandMessage | undefined {
     return this.pending.get(commandId)?.command;
+  }
+
+  getPending(commandId: string): PendingCommand | undefined {
+    return this.pending.get(commandId);
+  }
+
+  updateCommandLimits(limits: BrowserCommandLimits): void {
+    this.commandLimits = BrowserCommandLimitsSchema.parse(limits);
+    this.locallyBlockedCommands.clear();
+    this.sendPendingCommands();
   }
 
   hasOpenSession(sessionId: string): boolean {
@@ -180,18 +229,24 @@ export class WiSocketClient {
     this.sendUnsubscribe(sessionId);
   }
 
-  sendCommand(command: CommandMessage): void {
-    const parsed = ClientMessageSchema.parse(command);
-    if (parsed.kind !== "command") throw new TypeError("Expected a command message");
-    assertBrowserCommandSize(parsed);
+  sendCommand(command: CommandMessage, draft?: JournalDraftReference): void {
+    const parsed = assertBrowserCommandSize(command, this.commandLimits);
     const existing = this.pending.get(parsed.commandId);
     if (existing !== undefined) {
-      if (JSON.stringify(existing.command) !== JSON.stringify(parsed)) {
+      if (
+        JSON.stringify(existing.command) !== JSON.stringify(parsed) ||
+        JSON.stringify(existing.draft) !== JSON.stringify(draft)
+      ) {
         throw new Error("A pending command ID cannot be reused with different content");
       }
       return;
     }
-    this.pending.set(parsed.commandId, { command: parsed, phase: "queued" });
+    this.options.journal.addCommand(parsed, draft);
+    this.pending.set(parsed.commandId, {
+      command: parsed,
+      phase: "queued",
+      ...(draft === undefined ? {} : { draft }),
+    });
     this.notifyPending();
     this.sendPendingCommands();
   }
@@ -206,6 +261,9 @@ export class WiSocketClient {
       this.reconnectTimer = null;
     }
     this.clearSessionReplayRetries();
+    this.refreshAbort?.abort();
+    this.refreshAbort = null;
+    this.refreshPromise = null;
     const socket = this.socket;
     this.socket = null;
     if (socket !== null) {
@@ -227,7 +285,7 @@ export class WiSocketClient {
     this.updateConnection({ status, reconnectDelayMs: null, closeCode: null, detail: null });
     let socket: WebSocketLike;
     try {
-      socket = this.socketFactory(this.options.url, this.options.protocol);
+      socket = this.socketFactory(this.url, this.protocol);
     } catch (error) {
       this.scheduleReconnect(error instanceof Error ? error.message : "Connection failed");
       return;
@@ -260,12 +318,13 @@ export class WiSocketClient {
     };
     socket.onclose = (event) => {
       if (this.socket !== socket || this.stopped) return;
+      const closedBeforeWelcome = !this.welcomed;
       this.socket = null;
       this.welcomed = false;
       this.helloSessions.clear();
       this.clearSessionReplayRetries();
       for (const [commandId, pending] of this.pending) {
-        this.pending.set(commandId, { command: pending.command, phase: "queued" });
+        this.pending.set(commandId, { ...pending, phase: "queued" });
       }
       this.notifyPending();
       if ([1002, 1003, 1007, 1008, 1009].includes(event.code)) {
@@ -276,6 +335,16 @@ export class WiSocketClient {
           detail: event.reason || "The server rejected the connection.",
         });
         return;
+      }
+      if (closedBeforeWelcome && this.options.refreshConnection !== undefined) {
+        this.preWelcomeFailures += 1;
+        if (this.preWelcomeFailures >= PRE_WELCOME_FAILURES_BEFORE_REFRESH) {
+          this.beginAuthenticationRefresh(event.code);
+          return;
+        }
+      } else if (!closedBeforeWelcome) {
+        this.preWelcomeFailures = 0;
+        this.authenticationRefreshAttempts = 0;
       }
       this.scheduleReconnect(event.reason || "Connection lost", event.code);
     };
@@ -309,6 +378,8 @@ export class WiSocketClient {
 
     if (message.kind === "welcome") {
       this.welcomed = true;
+      this.preWelcomeFailures = 0;
+      this.authenticationRefreshAttempts = 0;
       for (const sessionId of this.helloSessions.keys()) {
         if (!this.sessions.has(sessionId)) this.sendUnsubscribe(sessionId);
       }
@@ -332,6 +403,12 @@ export class WiSocketClient {
 
     this.options.onMessage(message);
     if (message.kind === "command.accepted" || message.kind === "command.rejected") {
+      try {
+        this.options.journal.removeCommand(message.commandId);
+      } catch {
+        // The in-memory command can still settle; a stale stored retry remains idempotent.
+      }
+      this.locallyBlockedCommands.delete(message.commandId);
       this.pending.delete(message.commandId);
       this.notifyPending();
     }
@@ -341,8 +418,27 @@ export class WiSocketClient {
     if (!this.welcomed) return;
     for (const [commandId, pending] of this.pending) {
       if (pending.phase === "sent") continue;
+      try {
+        assertBrowserCommandSize(pending.command, this.commandLimits);
+      } catch (error) {
+        if (!this.locallyBlockedCommands.has(commandId)) {
+          this.locallyBlockedCommands.add(commandId);
+          this.options.onLocalCommandError?.(
+            commandId,
+            error instanceof Error
+              ? error.message
+              : "The restored command exceeds the current server limits.",
+          );
+        }
+        continue;
+      }
       if (!this.send(pending.command)) return;
-      this.pending.set(commandId, { command: pending.command, phase: "sent" });
+      try {
+        this.options.journal.markCommandSent(commandId);
+      } catch {
+        // Keeping the stored phase queued causes a safe same-ID retry after reload.
+      }
+      this.pending.set(commandId, { ...pending, phase: "sent" });
     }
     this.notifyPending();
   }
@@ -384,6 +480,62 @@ export class WiSocketClient {
     return true;
   }
 
+  private beginAuthenticationRefresh(closeCode: number): void {
+    if (this.stopped || this.refreshPromise !== null) return;
+    const refreshConnection = this.options.refreshConnection;
+    if (refreshConnection === undefined) {
+      this.scheduleReconnect("Connection lost", closeCode);
+      return;
+    }
+    if (this.authenticationRefreshAttempts >= MAXIMUM_AUTHENTICATION_REFRESH_ATTEMPTS) {
+      this.updateConnection({
+        status: "error",
+        reconnectDelayMs: null,
+        closeCode,
+        detail: "The browser session could not be refreshed. Reload Wi to reconnect.",
+      });
+      return;
+    }
+    this.authenticationRefreshAttempts += 1;
+    this.preWelcomeFailures = 0;
+    const abort = new AbortController();
+    this.refreshAbort = abort;
+    this.updateConnection({
+      status: "reconnecting",
+      reconnectDelayMs: 0,
+      closeCode,
+      detail: "Refreshing the local browser session.",
+    });
+    this.refreshPromise = (async () => {
+      try {
+        const connection = await refreshConnection(abort.signal);
+        if (this.stopped || abort.signal.aborted || this.refreshAbort !== abort) return;
+        this.url = validatedWebSocketUrl(connection.url);
+        this.protocol = validatedWebSocketProtocol(connection.protocol);
+        this.commandLimits = BrowserCommandLimitsSchema.parse(connection.commandLimits);
+        this.locallyBlockedCommands.clear();
+        this.refreshAbort = null;
+        this.refreshPromise = null;
+        this.openSocket("reconnecting");
+      } catch (error) {
+        if (this.stopped || abort.signal.aborted || this.refreshAbort !== abort) return;
+        this.refreshAbort = null;
+        this.refreshPromise = null;
+        const detail = error instanceof Error ? error.message : "Browser session refresh failed";
+        if (this.authenticationRefreshAttempts >= MAXIMUM_AUTHENTICATION_REFRESH_ATTEMPTS) {
+          this.updateConnection({
+            status: "error",
+            reconnectDelayMs: null,
+            closeCode,
+            detail: `${detail} Reload Wi to reconnect.`,
+          });
+        } else {
+          this.scheduleReconnect(detail, closeCode);
+        }
+      }
+    })();
+  }
+
   private scheduleReconnect(detail: string, closeCode: number | null = null): void {
     if (this.stopped || this.reconnectTimer !== null) return;
     const delay = this.reconnectPolicy.nextDelayMs();
@@ -407,4 +559,17 @@ export class WiSocketClient {
     this.snapshotValue = snapshot;
     this.options.onConnectionChange(snapshot);
   }
+}
+
+function validatedWebSocketUrl(value: string): string {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new TypeError("The refreshed WebSocket URL must use ws or wss");
+  }
+  return parsed.toString();
+}
+
+function validatedWebSocketProtocol(value: string): string {
+  if (value !== "wi.v1") throw new TypeError("The refreshed WebSocket protocol is unsupported");
+  return value;
 }

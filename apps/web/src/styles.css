@@ -222,6 +222,14 @@ label {
   padding: 0.75rem;
 }
 
+.session-target-status {
+  margin: 1rem 1.5rem 0;
+  border-left: 3px solid #d9a441;
+  padding: 0.75rem;
+  background: #302714;
+  color: #f3d58b;
+}
+
 .run-status {
   display: flex;
   align-items: center;

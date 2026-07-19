@@ -1,6 +1,6 @@
 # Milestone 6 release-gate remediation ledger
 
-Status: R1–R4 fixes and the R5 PASS sign-off are verified and committed on `milestone-6-browser-gui`; PR #12 is open against `master`.
+Status: Independent remote review of PR #12 at `d295db7` requested changes. Stages 1–5 (`WI-M6-H2`, `WI-M6-M1`, `WI-M6-H1`, `WI-M6-H3`, `WI-M6-M2`) are fixed. Stage 6 independent local review passed against remediation fingerprint `8194ad2cf9a7f8632e7a07846272c73802ca53080730b25125136564b8ff7f1e`; no finding was reopened. The remediation is ready to commit and push for fresh CI and independent remote re-review.
 
 This record validates and remediates the release-gate review performed against `68e95d293f6a1d9c224570b026eba49d0a5c5e1d`. Reviewers should use the named regression tests below before reopening an item. A fixed item should be reopened only with a new reproducer against the current worktree.
 
@@ -54,6 +54,110 @@ Independent validation against the current R1–R4 worktree confirmed:
 - the review's ten timing-sensitive scenarios passed five consecutive repetitions (50/50) with no leaked E2E child, Playwright process, or temporary runtime home.
 
 The review's remaining items are accepted as non-blocking hardening opportunities. They do not require speculative Milestone 6 code changes and should be reopened only with a concrete invariant violation, accessibility requirement, or reproducible unsafe rendering/backpressure behavior.
+
+## Independent remote remediation — Stage 1 (`WI-M6-H2`)
+
+The remote review correctly reopened bounded session-index identity and ordering. The browser previously treated a bounded bootstrap page as authoritative: a valid omitted, unknown, or unavailable `?session=` target fell back to the first ready row, local accepted sessions could grow summaries beyond 1,000, and replay-only transitions could assign `Date.now()` and reorder history without a durable event.
+
+Resolution:
+
+- `apps/web/src/state/session-index.ts` now owns pure initial-target selection, summary projection, ordering, truncation, and bounded upsert;
+- every syntactically valid explicit target remains authoritative and is subscribed exactly, whether included, omitted, unknown, or unavailable;
+- omitted and unavailable targets are displayed explicitly while canonical replay or typed errors decide availability;
+- summaries remain capped at `MAXIMUM_BOOTSTRAP_SESSIONS`, preserve the selected target during eviction, and keep truncation sticky once partial;
+- replay-only state changes preserve catalog ordering, while newly applied events use the maximum durable `createdAtMs` observed;
+- a newly accepted local session uses a zero-time selected placeholder until its durable `session.created` event supplies authoritative ordering.
+
+Regression evidence:
+
+- pure session-index unit tests: valid omitted/unknown/unavailable targets, invalid/empty fallback, replay-stable ordering, durable-event reordering, no invented summary, bounded local create, and selected-target retention;
+- real-browser E2E seeds 1,001 catalog rows, opens the omitted durable session, verifies exact URL/hello cursor/heading/command target, and completes its run;
+- real-browser E2E proves valid unknown and unavailable targets do not open an available fallback;
+- focused Stage 1 E2E passed 9/9 under `--repeat-each=3`; the full browser suite passed 24/24.
+
+## Independent remote remediation — Stage 2 (`WI-M6-M1`)
+
+The remote review correctly found that the browser's fixed 60 KiB boundary could exceed a valid lower gateway frame configuration and that raw/deep input reached expensive parsing and recursive validation before a meaningful bound.
+
+Resolution:
+
+- bootstrap now carries a strict versioned `commandLimits` contract derived from the constructed gateway's actual frame bytes/depth and durable outbound/replay/storage capacities;
+- the contract separately bounds complete frame bytes, canonical durable payload bytes, raw code units/UTF-8 bytes, and canonical JSON depth/nodes;
+- forms refuse oversized changes without truncating or retaining them, and pending-input JSON receives iterative text preflight before `JSON.parse`;
+- direct socket commands receive iterative structure/raw-value preflight before Zod recursion, canonical JSON, stringify, or UTF-8 encoding;
+- `WiSocketClient` can atomically replace its validated limits after a later re-bootstrap, which Stage 4 authentication recovery can use;
+- non-browser `wi.v1` clients remain wire-compatible and are still enforced by the authoritative server decoder/router.
+
+Regression evidence:
+
+- protocol and server unit tests validate strict contract versioning, actual-capacity derivation, exact payload bytes, escaping, Unicode, raw byte/code-unit limits, and pre-parse depth/node failure;
+- `WiSocketClient` tests accept the exact complete frame limit, reject one byte over before pending insertion, and use refreshed limits for later commands;
+- Milestone 5 integration advertises a configured 32 KiB frame contract and retains existing exact durable-payload/one-over server tests (82/82 focused integration tests passed);
+- real-browser E2E against a 32 KiB gateway accepts an exact 32,768-byte command, rejects 32,769 bytes inline before routing, retains the draft, and keeps the connection connected;
+- lower-limit and raw oversized-input E2E passed 6/6 under `--repeat-each=3`.
+
+## Independent remote remediation — Stage 3 (`WI-M6-H1`)
+
+The remote review correctly found that unresolved commands existed only in `WiSocketClient.pending` and drafts only in React state, so refresh discarded queued-before-welcome commands, sent/unknown commands, their exact IDs, and recoverable draft text.
+
+Resolution:
+
+- a strict version-1 tab journal records canonical commands before in-memory enqueue, including queued versus sent/unknown phase and the submitted draft revision link;
+- the journal restores commands and drafts before WebSocket creation and retries every unresolved method with the original `commandId` and payload;
+- matching acceptance or rejection removes only its command; acceptance clears only an unchanged linked draft, while rejection and newer edits retain draft text;
+- title, message, and pending-input controls are journal-backed and controlled by App state;
+- hard limits are 64 combined items, 256 KiB per item, and 1 MiB aggregate, with visible local rejection and no partial mutation when full;
+- strict load validation rejects old versions, malformed/noncanonical commands, bad IDs/methods, duplicate items, and byte-bound violations without crashing startup;
+- a tab owner in `window.name` preserves reload identity but clears opener-cloned `sessionStorage`, so two tabs cannot retry the same hidden journal;
+- the empty journal removes its storage key and its schema has no place for cookies, authorization headers, provider configuration, OAuth material, events, or backend state.
+
+Regression evidence:
+
+- journal, socket, and command-size focused unit coverage passed 26/26, including all five command methods, exact count/item/aggregate limits, sent phase, draft revision safety, corrupt/old/oversized/cloned data, current-limit revalidation, and empty-key cleanup;
+- real-browser queued-before-welcome session creation reloads with one exact-ID route and one durable session;
+- real-browser committed/lost-ack message reload retries the exact ID twice on the wire but produces one durable event/run and duplicate acceptance;
+- an opener-cloned tab starts with an independent empty journal while the original draft remains intact;
+- the three journal browser cases passed 9/9 under `--repeat-each=3` after correcting a case-sensitive status assertion in the new test.
+
+## Independent remote remediation — Stage 4 (`WI-M6-H3`)
+
+The required deterministic Chromium probe classified the finding as **NOT RESOLVED** before production changes. Server A and server B used the same fixed loopback origin/port and temporary `WI_HOME`, the page was never reloaded, and server B minted a new HttpOnly credential. The unchanged page made repeated failed WebSocket attempts, issued no second `/bootstrap`, and reached the 10-second reconnect ceiling while still displaying `reconnecting`.
+
+Narrow resolution:
+
+- after two abnormal pre-`welcome` failures, `WiSocketClient` serializes one abortable bootstrap refresh instead of scheduling another blind WebSocket attempt;
+- the runtime-validated response rotates the HttpOnly cookie and atomically replaces WebSocket URL, subprotocol, and negotiated command limits;
+- pending commands and journal-backed drafts remain intact across the refresh generation;
+- one disconnected episode permits two refresh attempts; exhaustion or repeated refresh failure stops with a visible terminal Reload Wi path;
+- successful `welcome` resets failure/refresh counters, while stop aborts and invalidates in-flight refresh work.
+
+The exact same no-reload probe then classified the finding as **RESOLVED**: bootstrap count advanced from one to exactly two, Chromium recorded the original close plus two stale-auth pre-welcome failures and at least four WebSocket generations, and the page returned to Connected. The unchanged probe passed 3/3. Socket unit tests cover serialized success and bounded two-refresh terminalization (21/21 with journal tests).
+
+## Independent remote remediation — Stage 5 (`WI-M6-M2`)
+
+The remote review correctly found that the prior focus intent recorded only a target ID and unconditionally focused the first fallback after delayed durable removal. A user could move to another field while approval/input/cancel resolution was gated and then have that later focus stolen; local send failure also left stale intent armed.
+
+Resolution:
+
+- focus intent now captures the actual initiating DOM element along with session/action identity;
+- a `focusin` listener consumes intent as soon as another connected element receives focus;
+- after durable removal, fallback focus runs only when focus remained on the initiator or fell to body/document; initiator disconnection alone never overrides another active target;
+- local validation/journal/send failure, command rejection, session change, terminal connection, explicit focus movement, and component unmount clear intent;
+- unchanged positive handoff still prioritizes the next approval, input, run status, then composer.
+
+Regression evidence:
+
+- retained positive approval/cancel/input keyboard handoff plus new delayed no-steal approval, cancel, and pending-input cases passed 15/15 under `--repeat-each=3`;
+- a constrained second tab forces local cancel envelope rejection, then a different tab durably cancels the run; the newer title-field focus remains unchanged;
+- web/root typecheck and lint passed, and the strict Stage 4 restart probe remained green 3/3 after the focus change.
+
+## Stage 6 independent local review
+
+**Verdict: PASS — safe to push/update PR for CI and remote re-review.**
+
+A fresh review-only agent inspected all 27 intended remediation paths against base `68e95d293f6a1d9c224570b026eba49d0a5c5e1d` and committed PR head `d295db7e1ab072ff7b5693c0719f86394e9cfbfc`. The reviewed implementation fingerprint was `8194ad2cf9a7f8632e7a07846272c73802ca53080730b25125136564b8ff7f1e`. It independently reproduced both H1 pre-fix failures from an isolated archive, re-opened H1/H2/M1/H3/M2 against current behavior, and found no critical, high, medium, or low findings.
+
+Independent gates passed: lint, typecheck, build, 415 unit tests, 239 integration tests, 35 property tests, 47 process tests, 32 Playwright tests, 736 tests through `pnpm check`, and 39/39 focused remediation repetitions. Cleanup found no child process, listener, or temporary-home leak. `prompts/` and the handoff package remain local workflow artifacts and are excluded from the remediation commit.
 
 ## Implementation boundaries
 
@@ -164,6 +268,14 @@ The browser history cap is not a scalable history protocol. It is a safety bound
 | `pnpm test:e2e` | 21/21 passed |
 | Full Milestone 6 Playwright stress, `--repeat-each=3` | 63/63 passed |
 | R5 timing-sensitive matrix, `--repeat-each=5` | 50/50 passed |
+| PR #12 remediation focused unit matrix | 6 files, 41 tests passed |
+| H2 deep-link E2E, `--repeat-each=3` | 9/9 passed |
+| M1 lower-limit/raw-input E2E, `--repeat-each=3` | 6/6 passed |
+| H1 refresh-journal E2E, `--repeat-each=3` | 9/9 passed |
+| H3 unchanged same-origin restart probe, `--repeat-each=3` | 3/3 passed after pre-fix NOT RESOLVED reproduction |
+| M2 positive/no-steal/local-failure focus E2E, `--repeat-each=3` | 15/15 passed |
+| Final implementation-agent `pnpm check` | 58 files, 736 tests passed; lint, typecheck, build, and package-export verification passed |
+| Final implementation-agent `pnpm test:e2e` | 32/32 passed |
 | `pnpm dlx yaml-lint@1.7.0 .github/workflows/ci.yml` | Passed |
 | `git diff --check` | Passed |
 | Process leak check | No Playwright or E2E server processes remained |

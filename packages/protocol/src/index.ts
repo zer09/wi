@@ -1,3 +1,4 @@
+export * from "./bootstrap.js";
 export * from "./canonical-json.js";
 export * from "./commands.js";
 export * from "./envelope.js";

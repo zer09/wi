@@ -286,6 +286,18 @@ export class WebSocketGateway {
     return [...this.connections].map((connection) => connection.snapshot);
   }
 
+  disconnectActiveConnections(code = 1012, reason = "server reconnect requested"): number {
+    if (code !== 1012 && (!Number.isSafeInteger(code) || code < 4_000 || code > 4_999)) {
+      throw new RangeError("WebSocket disconnect code must be 1012 or an application close code");
+    }
+    if (Buffer.byteLength(reason) > 123) {
+      throw new RangeError("WebSocket disconnect reason exceeds the protocol limit");
+    }
+    const connections = [...this.connections];
+    for (const connection of connections) connection.disconnect(code, reason);
+    return connections.length;
+  }
+
   private trackUpgradeSocket(socket: Duplex): void {
     if (socket.destroyed || this.upgradeSockets.has(socket)) return;
     this.upgradeSockets.add(socket);

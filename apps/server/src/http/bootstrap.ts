@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { ServerResponse } from "node:http";
+import { BootstrapResponseSchema, type BrowserSessionSummary } from "@wi/protocol";
 
 export const BROWSER_SESSION_COOKIE = "wi_browser_session";
 
@@ -34,12 +35,21 @@ export class LocalBrowserAuth {
   }
 }
 
-export function handleBootstrap(response: ServerResponse, auth: LocalBrowserAuth): void {
-  const body = JSON.stringify({
-    v: 1,
-    websocketPath: "/ws",
-    websocketProtocol: "wi.v1",
-  });
+export function handleBootstrap(
+  response: ServerResponse,
+  auth: LocalBrowserAuth,
+  sessions: readonly BrowserSessionSummary[],
+  sessionsTruncated: boolean,
+): void {
+  const body = JSON.stringify(
+    BootstrapResponseSchema.parse({
+      v: 1,
+      websocketPath: "/ws",
+      websocketProtocol: "wi.v1",
+      sessions,
+      sessionsTruncated,
+    }),
+  );
   response.writeHead(200, {
     "cache-control": "no-store",
     "content-length": Buffer.byteLength(body),

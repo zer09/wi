@@ -23,6 +23,8 @@ export const ERROR_CODES = [
   "session.not_found",
   "session.run_already_active",
   "session.invalid_transition",
+  "approval.already_resolved",
+  "input.already_resolved",
   "provider.transient_before_output",
   "provider.transport_after_output",
   "provider.protocol_error",

@@ -50,6 +50,8 @@ HTTP bootstrap/auth
 
 A WebSocket close removes subscriptions for that connection. It does not issue `run.cancel` and does not modify run state.
 
+Bootstrap session discovery is bounded at the catalog query, not after worker RPC. The catalog worker selects at most 1,001 non-missing rows, truncates title and preview columns in SQL, and returns that bounded result. HTTP publishes at most 1,000 browser summaries and sets `sessionsTruncated` when the extra row exists. Large or numerous catalog rows therefore cannot make bootstrap depend on materializing the full catalog.
+
 ## 4. General envelope
 
 Every message is a JSON object with:
@@ -144,6 +146,8 @@ input.respond
 
 `session.create` has no pre-existing `sessionId`; the server reserves one durably.
 
+The v0.1 browser refuses to enqueue a command whose complete serialized JSON envelope exceeds 60 KiB in UTF-8. This leaves 4 KiB below the default 64 KiB inbound WebSocket frame ceiling for browser-generated commands. Measurement includes command IDs, session IDs, JSON escaping, and multibyte text; values are never truncated. An oversized message or input response stays in its control with an inline error, creates no pending command, and does not close the connection. The socket client enforces the same boundary even when called outside a form.
+
 ### Client heartbeat
 
 An application-level heartbeat carries the client timestamp and is not a durable event.
@@ -206,6 +210,9 @@ For an identical retry, `duplicate` is `true` and the original result is returne
 ```
 
 A terminally failed global command, including `session.create`, returns its original durable safe code, message, and diagnostic ID on every identical retry. Gateway logs for those retries reuse that same ID rather than creating unrelated correlation records.
+
+A competing resolution after an approval or input has already resolved returns the typed
+`approval.already_resolved` or `input.already_resolved` code and does not mutate durable state.
 
 A rejection distinguishes:
 
@@ -344,6 +351,10 @@ A sequence gap or incomplete replay is recoverable by replaying from the last tr
 
 The reducer does not decide backend actions. It renders the durable backend state represented by events.
 
+When a keyboard-activated approval, input response, or cancel control disappears after its durable event, focus moves after the React commit to the next enabled interaction, then run status, then the composer. Focus restoration is tied to the initiating session/action and is cleared when session selection changes.
+
+The v0.1 browser projection retains at most 2,000 events and 8 Mi code units of canonical event text per open session. These limits bound the immutable arrays and identity maps required for exact duplicate, event-ID reuse, and transition-integrity checks. Reaching either limit fails the browser session projection visibly with `history_limit_exceeded`, preserves the last trusted sequence, and disables session mutations. Wi does not silently discard integrity evidence or claim that a partial projection is current. A future snapshot/pagination protocol may replace this fail-closed boundary.
+
 ## 11. Backpressure
 
 Each WebSocket connection has bounded:
@@ -443,7 +454,13 @@ After reconnect:
 3. replay missing committed events
 4. reconcile command acknowledgements by retrying unresolved command IDs
 
-A pending command is not treated as failed merely because its acknowledgement was lost.
+The minimal GUI keeps only the selected session subscribed and releases the previous selection before opening another. This bounds browser projection memory and prevents the connection's 256-subscription limit from being reached through ordinary navigation; the socket and protocol remain multiplex-capable for future multi-pane clients.
+
+A recoverable session replay error schedules a bounded jittered retry from the last trusted cursor rather than leaving the projection marked live or replaying without a server subscription. A `replay.complete` head mismatch explicitly returns the projection to `replaying` before requesting the missing suffix, so the first recovered contiguous event can advance the trusted cursor. `replay.cursor_ahead` discards the in-memory projection and retries from sequence zero because an ahead projection cannot be reconciled incrementally. Fatal replay conflicts remain sticky until a trusted reload.
+
+The socket records the exact cursor map sent in `hello`. When `welcome` arrives it reconciles that snapshot with the current open-session map: sessions added during handshaking receive `subscribe`, removed sessions receive `unsubscribe`, and changed cursors receive a replacement subscribe. The browser ignores event, replay-complete, and subscription-error frames for sessions no longer present in that open-session map. A buffered frame therefore cannot resurrect an intentionally closed subscription.
+
+A pending command is not treated as failed merely because its acknowledgement was lost. Pending indicators are scoped by session so one session's uncertain command does not disable or annotate another session's controls. Message and session-title drafts remain browser-local and are cleared only when the matching `command.accepted` arrives; `command.rejected` leaves the original value available for correction or retry. Draft controls are disabled while that form's command is pending, preventing a later edit or duplicate submit from being mistaken for the accepted draft.
 
 ## 16. Schema policy and v1 payload examples
 

@@ -67,6 +67,8 @@ function execute(operation: string, payload: unknown): unknown {
       return repository.createSessionIndex(payload);
     case "catalog.listSessions":
       return repository.listSessions();
+    case "catalog.listBrowserSessionsBounded":
+      return repository.listBrowserSessionsBounded(payload);
     case "catalog.getSession": {
       const input = z.strictObject({ sessionId: z.string().min(1) }).parse(payload);
       return repository.getSession(input.sessionId);

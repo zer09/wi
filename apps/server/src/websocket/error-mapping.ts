@@ -30,6 +30,8 @@ const SAFE_MESSAGES: Partial<Record<ErrorCode, string>> = {
   "session.not_found": "The requested session or run was not found.",
   "session.run_already_active": "This session already has an active run.",
   "session.invalid_transition": "The command is not valid in the current session state.",
+  "approval.already_resolved": "This approval was already resolved.",
+  "input.already_resolved": "This input request was already resolved.",
   "provider.cancelled": "The run operation was cancelled.",
   "websocket.slow_consumer": "The connection could not keep up with event delivery.",
 };
@@ -53,11 +55,7 @@ export function mapCommandError(
   const sourceCode = trustedErrorCode(error);
   const parsed = ErrorCodeSchema.safeParse(sourceCode);
   let code: ErrorCode = parsed.success ? parsed.data : "storage.worker_failed";
-  if (sourceCode === "approval.already_resolved" || sourceCode === "input.already_resolved") {
-    code = "session.invalid_transition";
-  } else if (sourceCode === "session.unavailable") {
-    code = "storage.corrupt";
-  }
+  if (sourceCode === "session.unavailable") code = "storage.corrupt";
   const routingError = error instanceof CommandRoutingError ? error : null;
   const safeMessage = SafeDiagnosticMessageSchema.safeParse(routingError?.safeMessage);
   const durableDiagnosticId = DiagnosticIdSchema.safeParse(routingError?.diagnosticId);

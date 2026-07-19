@@ -4,6 +4,8 @@ import {
   type ProtocolErrorCode,
 } from "@wi/protocol";
 
+export const MINIMUM_WI_V1_CLIENT_FRAME_DEPTH = 3;
+
 export interface FrameLimits {
   readonly maximumBytes: number;
   readonly maximumDepth: number;

@@ -50,6 +50,12 @@ HTTP bootstrap/auth
 
 A WebSocket close removes subscriptions for that connection. It does not issue `run.cancel` and does not modify run state.
 
+Because the HttpOnly browser credential is server-process scoped, a same-origin backend restart can rotate it while an already loaded page retains an unresolved-command journal. After two abnormal failures before `welcome`, the socket client serializes one validated `/bootstrap` refresh, allowing the response to rotate the cookie, then replaces the WebSocket path/protocol/command limits and reconnects under the refreshed generation. Pending command IDs and drafts remain unchanged. At most two refresh attempts are permitted for one disconnected episode; failed bounded recovery terminalizes visibly with the existing Reload Wi action rather than reconnecting forever. A successful `welcome` resets the counters. Stop/unmount aborts in-flight refresh and invalidates its result.
+
+Bootstrap session discovery is bounded at the catalog query, not after worker RPC. The catalog worker selects at most 1,001 non-missing rows, truncates title and preview columns in SQL, and returns that bounded result. HTTP publishes at most 1,000 browser summaries and sets `sessionsTruncated` when the extra row exists. Large or numerous catalog rows therefore cannot make bootstrap depend on materializing the full catalog.
+
+A syntactically valid explicit `?session=` target is authoritative even when that bounded page omits it or marks it unavailable. The browser subscribes to that exact ID and displays its omitted/unavailable state until canonical replay returns either durable events or a typed error; it never rewrites the URL to a different ready session. The browser summary projection remains capped at 1,000 entries, keeps the selected target when eviction is necessary, and preserves `sessionsTruncated` once the list is known to be partial. Summary ordering uses catalog timestamps or the maximum timestamp of newly applied durable events. Selection, replay state changes, and `replay.complete` do not invent update time from the browser clock.
+
 ## 4. General envelope
 
 Every message is a JSON object with:
@@ -73,6 +79,8 @@ Reject:
 - non-finite numbers
 
 Runtime schemas define whether unknown optional fields are tolerated. State-changing commands should be strict by default.
+
+The minimum valid public `wi.v1` client-frame depth is 3: the hello root object is depth 1, its resume array is depth 2, and one resume-cursor object is depth 3. Gateway configurations below that minimum fail during construction rather than opening a listener that cannot carry the mandatory handshake. JSON command values use the same container-depth convention in raw text, direct structured preflight, and server decoding: primitives have depth 0, a root object/array has depth 1, and each nested object/array adds one. The command root and `params` object consume two frame levels, so bootstrap advertises `maximumJsonDepth = frameMaximumDepth - 2` only after validating the protocol minimum.
 
 ## 5. Client messages
 
@@ -144,6 +152,14 @@ input.respond
 
 `session.create` has no pre-existing `sessionId`; the server reserves one durably.
 
+Bootstrap advertises a strict version-1 browser command contract derived from the gateway's actual frame/depth configuration and the durable event/storage capacities. It includes complete command-frame bytes, method-specific durable payload bytes, raw input code-unit/UTF-8 bytes, and canonical JSON depth/node limits. The browser runtime-validates this contract and applies it in every form and in `WiSocketClient.sendCommand()`; headless `wi.v1` WebSocket clients remain governed directly by the server protocol limits.
+
+Raw controls refuse over-limit changes without truncating or retaining them. Pending-input JSON receives an iterative text depth/node scan before `JSON.parse`, and direct socket values receive an iterative structural preflight before recursive protocol validation or canonical serialization. Only bounded values reach full schema traversal, stringify, and UTF-8 encoding. Complete envelope measurement includes command IDs, session IDs, escaping, and multibyte text; method payload measurement uses canonical JSON exactly as the server does. Exact-limit commands are allowed, while one-byte/node/depth over produces an inline error, creates no pending command, reaches no command router, and leaves the connection usable.
+
+Each browser tab also owns a version-1 unresolved-command and draft journal in `sessionStorage`. It stores only validated canonical command envelopes, queued versus sent/unknown phase, and message/session-title/pending-input draft text with the submitted draft revision link. The journal is capped at 64 combined items, 256 KiB per item, and 1 MiB aggregate. Commands are written before entering the in-memory pending map, restored before the WebSocket opens, and retried with the same `commandId` until a matching `command.accepted` or `command.rejected` removes them. Acceptance clears only the exact submitted draft revision; rejection and later edits retain the draft. Empty journals remove their storage key.
+
+A per-tab owner identity kept outside `sessionStorage` detects opener-cloned storage: the new tab discards the cloned journal rather than sharing hidden command authority, while reload in the original tab preserves it. Corrupt, unsupported, duplicate, invalid-ID, noncanonical, or over-budget entries are removed without blocking startup. The journal never contains the HttpOnly browser credential, provider/OAuth credentials, replay events, or canonical backend state; committed session events remain authoritative.
+
 ### Client heartbeat
 
 An application-level heartbeat carries the client timestamp and is not a durable event.
@@ -206,6 +222,9 @@ For an identical retry, `duplicate` is `true` and the original result is returne
 ```
 
 A terminally failed global command, including `session.create`, returns its original durable safe code, message, and diagnostic ID on every identical retry. Gateway logs for those retries reuse that same ID rather than creating unrelated correlation records.
+
+A competing resolution after an approval or input has already resolved returns the typed
+`approval.already_resolved` or `input.already_resolved` code and does not mutate durable state.
 
 A rejection distinguishes:
 
@@ -344,6 +363,10 @@ A sequence gap or incomplete replay is recoverable by replaying from the last tr
 
 The reducer does not decide backend actions. It renders the durable backend state represented by events.
 
+When a keyboard-activated approval, input response, or cancel control disappears after its durable event, the browser may move focus after the React commit to the next enabled interaction, then run status, then the composer. The intent records the initiating DOM element and restores only when focus remained there or fell to body/document; disconnection of that element never overrides a newer connected focus target. Explicit focus movement consumes the intent. Session change, terminal connection, local send/validation failure, command rejection, and unmount also clear it, so delayed durable removal cannot steal later user focus.
+
+The v0.1 browser projection retains at most 2,000 events and 8 Mi code units of canonical event text per open session. These limits bound the immutable arrays and identity maps required for exact duplicate, event-ID reuse, and transition-integrity checks. Reaching either limit fails the browser session projection visibly with `history_limit_exceeded`, preserves the last trusted sequence, and disables session mutations. Wi does not silently discard integrity evidence or claim that a partial projection is current. A future snapshot/pagination protocol may replace this fail-closed boundary.
+
 ## 11. Backpressure
 
 Each WebSocket connection has bounded:
@@ -443,7 +466,13 @@ After reconnect:
 3. replay missing committed events
 4. reconcile command acknowledgements by retrying unresolved command IDs
 
-A pending command is not treated as failed merely because its acknowledgement was lost.
+The minimal GUI keeps only the selected session subscribed and releases the previous selection before opening another. This bounds browser projection memory and prevents the connection's 256-subscription limit from being reached through ordinary navigation; the socket and protocol remain multiplex-capable for future multi-pane clients.
+
+A recoverable session replay error schedules a bounded jittered retry from the last trusted cursor rather than leaving the projection marked live or replaying without a server subscription. A `replay.complete` head mismatch explicitly returns the projection to `replaying` before requesting the missing suffix, so the first recovered contiguous event can advance the trusted cursor. `replay.cursor_ahead` discards the in-memory projection and retries from sequence zero because an ahead projection cannot be reconciled incrementally. Fatal replay conflicts remain sticky until a trusted reload.
+
+The socket records the exact cursor map sent in `hello`. When `welcome` arrives it reconciles that snapshot with the current open-session map: sessions added during handshaking receive `subscribe`, removed sessions receive `unsubscribe`, and changed cursors receive a replacement subscribe. The browser ignores event, replay-complete, and subscription-error frames for sessions no longer present in that open-session map. A buffered frame therefore cannot resurrect an intentionally closed subscription.
+
+A pending command is not treated as failed merely because its acknowledgement was lost. Pending indicators are scoped by session so one session's uncertain command does not disable or annotate another session's controls. Message and session-title drafts remain browser-local and are cleared only when the matching `command.accepted` arrives; `command.rejected` leaves the original value available for correction or retry. Draft controls are disabled while that form's command is pending, preventing a later edit or duplicate submit from being mistaken for the accepted draft.
 
 ## 16. Schema policy and v1 payload examples
 

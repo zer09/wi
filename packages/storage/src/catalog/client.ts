@@ -2,6 +2,11 @@ import { resolve } from "node:path";
 
 import { z } from "zod";
 
+import {
+  BrowserSessionSummarySchema,
+  type BrowserSessionSummary,
+} from "@wi/protocol";
+
 import { WorkerRpcClient } from "../common/worker-rpc.js";
 import {
   GlobalCommandRecordSchema,
@@ -16,7 +21,9 @@ import {
   type SessionSummary,
 } from "../types.js";
 import {
+  BoundedSessionListInputSchema,
   CatalogProjectionUpdateResultSchema,
+  MAXIMUM_BOUNDED_SESSION_LIST_LIMIT,
   ReconcileSessionResultSchema,
   type CatalogProjectionUpdateResult,
   type FailGlobalCommandInput,
@@ -152,6 +159,17 @@ export class CatalogClient {
 
   async listSessions(): Promise<readonly SessionSummary[]> {
     return this.rpc.request("catalog.listSessions", {}, z.array(SessionSummarySchema));
+  }
+
+  async listBrowserSessionsBounded(
+    limit: number,
+  ): Promise<readonly BrowserSessionSummary[]> {
+    const input = BoundedSessionListInputSchema.parse({ limit });
+    return this.rpc.request(
+      "catalog.listBrowserSessionsBounded",
+      input,
+      z.array(BrowserSessionSummarySchema).max(MAXIMUM_BOUNDED_SESSION_LIST_LIMIT),
+    );
   }
 
   async getSession(sessionId: string): Promise<SessionSummary | null> {

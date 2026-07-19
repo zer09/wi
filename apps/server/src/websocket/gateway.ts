@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import type { BrowserCommandLimits } from "@wi/protocol";
 import { SESSION_EVENT_PAGE_BOUNDS } from "@wi/storage";
 import { WebSocketServer } from "ws";
 import type { WiRuntime } from "../composition.js";
@@ -15,8 +16,10 @@ import {
   type ConnectionSnapshot,
 } from "./connection.js";
 import {
+  browserCommandLimits as deriveBrowserCommandLimits,
   maximumDurableCommandPayloadBytes,
 } from "./durable-command-limits.js";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "./frame-decoder.js";
 import type { LoopbackRequestPolicy, UpgradeRejection } from "./origin-policy.js";
 
 export interface WebSocketGatewayOptions {
@@ -204,6 +207,11 @@ export class WebSocketGateway {
         );
       }
     }
+    if (this.limits.frame.maximumDepth < MINIMUM_WI_V1_CLIENT_FRAME_DEPTH) {
+      throw new RangeError(
+        `WebSocket frame depth limit must be at least ${MINIMUM_WI_V1_CLIENT_FRAME_DEPTH}`,
+      );
+    }
     if (
       this.limits.outbound.maximumSingleMessageBytes > this.limits.outbound.maximumBytes
     ) {
@@ -284,6 +292,28 @@ export class WebSocketGateway {
 
   get connectionSnapshots(): readonly ConnectionSnapshot[] {
     return [...this.connections].map((connection) => connection.snapshot);
+  }
+
+  get browserCommandLimits(): BrowserCommandLimits {
+    return deriveBrowserCommandLimits({
+      frameMaximumBytes: this.limits.frame.maximumBytes,
+      frameMaximumDepth: this.limits.frame.maximumDepth,
+      outboundSingleMessageBytes: this.limits.outbound.maximumSingleMessageBytes,
+      replayLiveSingleEventBytes: this.limits.replaySingleEventBytes,
+      replayPageSingleEventBytes: this.limits.replayPageSingleEventBytes,
+    });
+  }
+
+  disconnectActiveConnections(code = 1012, reason = "server reconnect requested"): number {
+    if (code !== 1012 && (!Number.isSafeInteger(code) || code < 4_000 || code > 4_999)) {
+      throw new RangeError("WebSocket disconnect code must be 1012 or an application close code");
+    }
+    if (Buffer.byteLength(reason) > 123) {
+      throw new RangeError("WebSocket disconnect reason exceeds the protocol limit");
+    }
+    const connections = [...this.connections];
+    for (const connection of connections) connection.disconnect(code, reason);
+    return connections.length;
   }
 
   private trackUpgradeSocket(socket: Duplex): void {

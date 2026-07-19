@@ -64,11 +64,38 @@ jobs:
       - name: Build
         run: pnpm build
 
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
+      - name: Install pinned pnpm
+        run: npm install --global pnpm@11.11.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser end-to-end tests
+        run: pnpm test:e2e
+
   required:
     name: required
     if: ${{ always() }}
     needs:
       - checks
+      - e2e
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -77,6 +104,9 @@ jobs:
       - name: Verify required jobs
         env:
           CHECKS_RESULT: ${{ needs.checks.result }}
+          E2E_RESULT: ${{ needs.e2e.result }}
         run: |
           echo "checks=$CHECKS_RESULT"
+          echo "e2e=$E2E_RESULT"
           test "$CHECKS_RESULT" = "success"
+          test "$E2E_RESULT" = "success"

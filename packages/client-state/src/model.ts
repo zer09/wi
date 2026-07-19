@@ -23,16 +23,21 @@ export interface BrowserPendingInput {
 
 export type TimelineItem = SessionEvent;
 
+export const MAXIMUM_BROWSER_SESSION_EVENTS = 2_000;
+export const MAXIMUM_BROWSER_SESSION_EVENT_CODE_UNITS = 8 * 1_024 * 1_024;
+
 export type BrowserSessionIntegrityError =
   | "event_conflict"
   | "event_id_conflict"
   | "session_mismatch"
   | "impossible_run_transition"
-  | "second_active_run";
+  | "second_active_run"
+  | "history_limit_exceeded";
 
 export interface BrowserSessionState {
   readonly sessionId: string;
   readonly title: string;
+  readonly lastMessagePreview: string | null;
   readonly lastAppliedSequence: number;
   readonly status: BrowserSessionStatus;
   readonly timeline: readonly TimelineItem[];
@@ -42,6 +47,7 @@ export interface BrowserSessionState {
   readonly pendingInputs: Readonly<Record<string, BrowserPendingInput>>;
   readonly appliedEvents: Readonly<Record<number, SessionEvent>>;
   readonly appliedEventSequencesById: Readonly<Record<string, number>>;
+  readonly retainedEventCodeUnits: number;
   readonly errorCode: BrowserSessionIntegrityError | null;
 }
 
@@ -49,6 +55,7 @@ export function createBrowserSessionState(sessionId: string): BrowserSessionStat
   return {
     sessionId,
     title: "",
+    lastMessagePreview: null,
     lastAppliedSequence: 0,
     status: "loading",
     timeline: [],
@@ -58,6 +65,7 @@ export function createBrowserSessionState(sessionId: string): BrowserSessionStat
     pendingInputs: {},
     appliedEvents: {},
     appliedEventSequencesById: {},
+    retainedEventCodeUnits: 0,
     errorCode: null,
   };
 }

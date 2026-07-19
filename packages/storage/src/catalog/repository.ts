@@ -2,11 +2,13 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 
 import {
+  BrowserSessionSummarySchema,
   canonicalJson,
   CommandIdSchema,
   DiagnosticIdSchema,
   EventIdSchema,
   SessionIdSchema,
+  type BrowserSessionSummary,
 } from "@wi/protocol";
 
 import { applyMigrations } from "../common/migrations.js";
@@ -27,6 +29,13 @@ import {
   type SessionSummary,
 } from "../types.js";
 import { catalogMigrations } from "./migrations.js";
+
+export const MAXIMUM_BOUNDED_SESSION_LIST_LIMIT = 1_001;
+const BOUNDED_SESSION_LIST_TEXT_CODE_POINTS = 256;
+
+export const BoundedSessionListInputSchema = z.strictObject({
+  limit: z.number().int().positive().max(MAXIMUM_BOUNDED_SESSION_LIST_LIMIT),
+});
 
 export const ReserveGlobalCommandInputSchema = z.strictObject({
   commandId: CommandIdSchema,
@@ -158,6 +167,15 @@ function globalCommandFromRow(row: GlobalCommandRow): GlobalCommandRecord {
 function sessionFromRow(row: Record<string, unknown>): SessionSummary {
   return decodeCatalogValue("session summary", () =>
     SessionSummarySchema.parse({
+      ...row,
+      requiresAttention: row.requiresAttention === 1,
+    }),
+  );
+}
+
+function browserSessionFromRow(row: Record<string, unknown>): BrowserSessionSummary {
+  return decodeCatalogValue("browser session summary", () =>
+    BrowserSessionSummarySchema.parse({
       ...row,
       requiresAttention: row.requiresAttention === 1,
     }),
@@ -420,6 +438,28 @@ export class CatalogRepository {
       )
       .all() as Record<string, unknown>[];
     return rows.map(sessionFromRow);
+  }
+
+  listBrowserSessionsBounded(inputValue: unknown): readonly BrowserSessionSummary[] {
+    const input = BoundedSessionListInputSchema.parse(inputValue);
+    const rows = this.database
+      .prepare(
+        `SELECT session_id AS sessionId,
+                substr(title, 1, ${BOUNDED_SESSION_LIST_TEXT_CODE_POINTS}) AS title, status,
+                created_at_ms AS createdAtMs, updated_at_ms AS updatedAtMs,
+                last_event_sequence AS lastEventSequence, last_run_state AS lastRunState,
+                substr(last_message_preview, 1, ${BOUNDED_SESSION_LIST_TEXT_CODE_POINTS})
+                  AS lastMessagePreview,
+                requires_attention AS requiresAttention,
+                pending_approval_count AS pendingApprovalCount,
+                pending_input_count AS pendingInputCount
+         FROM sessions
+         WHERE status <> 'missing'
+         ORDER BY updated_at_ms DESC, session_id
+         LIMIT @limit`,
+      )
+      .all(input) as Record<string, unknown>[];
+    return rows.map(browserSessionFromRow);
   }
 
   getSession(sessionId: string): SessionSummary | null {

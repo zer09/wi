@@ -5,12 +5,15 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { MAXIMUM_BOOTSTRAP_SESSIONS } from "@wi/protocol";
 import type { WiRuntime } from "../composition.js";
 import { nonThrowingLogger, type Logger } from "../logging/logger.js";
 import { LocalBrowserAuth, handleBootstrap } from "./bootstrap.js";
 import { handleHealth } from "./health.js";
 import { correlatedHttpError, endRawHttpError } from "./rejection.js";
-import { assetFoundationRejection } from "./static.js";
+import { assetFoundationRejection, serveStaticAsset } from "./static.js";
 import {
   WebSocketGateway,
   type WebSocketGatewayOptions,
@@ -25,6 +28,9 @@ const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'none'",
   "form-action 'none'",
   "object-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src 'self' ws://127.0.0.1:* ws://localhost:*",
 ].join("; ");
 
 type ServerLifecycleState = "idle" | "starting" | "started" | "closing" | "closed";
@@ -58,6 +64,7 @@ export interface WiServerOptions {
   readonly host?: "127.0.0.1";
   readonly port?: number;
   readonly httpShutdownTimeoutMs?: number;
+  readonly webRoot?: string;
   readonly gateway?: WiServerGatewayOptions;
 }
 
@@ -85,6 +92,7 @@ export class WiServer {
   private readonly host: "127.0.0.1";
   private readonly port: number;
   private readonly httpShutdownTimeoutMs: number;
+  private readonly webRoot: string;
   private readonly auth = new LocalBrowserAuth();
   private readonly requestPolicy: LoopbackRequestPolicy;
   private readonly httpServer: NodeHttpServer;
@@ -117,6 +125,13 @@ export class WiServer {
         `HTTP shutdown timeout must be a positive safe integer no greater than ${MAX_HTTP_SHUTDOWN_TIMEOUT_MS}`,
       );
     }
+    const configuredWebRoot: unknown = options.webRoot;
+    if (configuredWebRoot !== undefined && typeof configuredWebRoot !== "string") {
+      throw new TypeError("Wi server web root must be a string");
+    }
+    this.webRoot = resolve(
+      configuredWebRoot ?? fileURLToPath(new URL("../../../web/dist", import.meta.url)),
+    );
     const gatewayOptions = parseGatewayOptions(options.gateway);
     this.requestPolicy = new LoopbackRequestPolicy();
     this.gateway = new WebSocketGateway({
@@ -317,6 +332,56 @@ export class WiServer {
     writeJson(response, statusCode, { code, message, diagnosticId });
   }
 
+  private internalHttpFailure(response: ServerResponse, error: unknown, operation: string): void {
+    if (response.headersSent || response.writableEnded) return;
+    const diagnosticId = this.runtime.diagnosticId();
+    this.logger.error("http_request_failed", error, { diagnosticId, operation });
+    response.setHeader("x-wi-diagnostic-id", diagnosticId);
+    writeJson(response, 500, {
+      code: "http.internal_error",
+      message: "The request could not be completed.",
+      diagnosticId,
+    });
+  }
+
+  private async serveBootstrap(response: ServerResponse): Promise<void> {
+    try {
+      const catalogSessions = await this.runtime.storage.catalog.listBrowserSessionsBounded(
+        MAXIMUM_BOOTSTRAP_SESSIONS + 1,
+      );
+      const sessionsTruncated = catalogSessions.length > MAXIMUM_BOOTSTRAP_SESSIONS;
+      handleBootstrap(
+        response,
+        this.auth,
+        catalogSessions.slice(0, MAXIMUM_BOOTSTRAP_SESSIONS),
+        sessionsTruncated,
+        this.gateway.browserCommandLimits,
+      );
+    } catch (error) {
+      this.internalHttpFailure(response, error, "bootstrap");
+    }
+  }
+
+  private async serveApplication(response: ServerResponse, pathname: string): Promise<void> {
+    try {
+      if ((await serveStaticAsset(response, pathname, this.webRoot)) === "served") return;
+      const assetRejection = assetFoundationRejection(pathname);
+      if (assetRejection !== null) {
+        this.rejectHttp(
+          response,
+          assetRejection.statusCode,
+          assetRejection.code,
+          assetRejection.message,
+          assetRejection.reason,
+        );
+        return;
+      }
+      this.rejectHttp(response, 404, "http.not_found", "Route not found.", "route_not_found");
+    } catch (error) {
+      this.internalHttpFailure(response, error, "static_asset");
+    }
+  }
+
   private handleRequest(request: IncomingMessage, response: ServerResponse): void {
     securityHeaders(response);
     if (!this.requestPolicy.validateHttpHost(request)) {
@@ -374,7 +439,7 @@ export class WiServer {
       return;
     }
     if (pathname === "/bootstrap") {
-      handleBootstrap(response, this.auth);
+      void this.serveBootstrap(response);
       return;
     }
     if (pathname === "/ws") {
@@ -400,18 +465,7 @@ export class WiServer {
       );
       return;
     }
-    const assetRejection = assetFoundationRejection(pathname);
-    if (assetRejection !== null) {
-      this.rejectHttp(
-        response,
-        assetRejection.statusCode,
-        assetRejection.code,
-        assetRejection.message,
-        assetRejection.reason,
-      );
-      return;
-    }
-    this.rejectHttp(response, 404, "http.not_found", "Route not found.", "route_not_found");
+    void this.serveApplication(response, pathname);
   }
 
   close(): Promise<void> {

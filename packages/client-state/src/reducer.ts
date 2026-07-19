@@ -1,9 +1,11 @@
 import { canonicalJson, type RunState, type SessionEvent } from "@wi/protocol";
 
-import type {
-  BrowserRunState,
-  BrowserSessionIntegrityError,
-  BrowserSessionState,
+import {
+  MAXIMUM_BROWSER_SESSION_EVENT_CODE_UNITS,
+  MAXIMUM_BROWSER_SESSION_EVENTS,
+  type BrowserRunState,
+  type BrowserSessionIntegrityError,
+  type BrowserSessionState,
 } from "./model.js";
 
 const terminalRunStates = new Set<RunState>([
@@ -123,12 +125,16 @@ function applyEventData(state: BrowserSessionState, event: SessionEvent): Browse
   if (transitioned.errorCode !== null) return transitioned;
 
   let title = transitioned.title;
+  let lastMessagePreview = transitioned.lastMessagePreview;
   let pendingApprovals = transitioned.pendingApprovals;
   let pendingInputs = transitioned.pendingInputs;
 
   switch (event.eventType) {
     case "session.created":
       title = event.data.title;
+      break;
+    case "user.message.appended":
+      lastMessagePreview = event.data.text.slice(0, 200);
       break;
     case "tool.approval.requested":
       pendingApprovals = {
@@ -173,7 +179,7 @@ function applyEventData(state: BrowserSessionState, event: SessionEvent): Browse
       break;
   }
 
-  return { ...transitioned, title, pendingApprovals, pendingInputs };
+  return { ...transitioned, title, lastMessagePreview, pendingApprovals, pendingInputs };
 }
 
 export function reduceSessionEvent(
@@ -196,6 +202,16 @@ export function reduceSessionEvent(
     return { ...state, status: "gap" };
   }
 
+  const eventCodeUnits = canonicalJson(event).length;
+  if (
+    state.timeline.length >= MAXIMUM_BROWSER_SESSION_EVENTS ||
+    eventCodeUnits > MAXIMUM_BROWSER_SESSION_EVENT_CODE_UNITS - state.retainedEventCodeUnits
+  ) {
+    // Exact duplicate and event-ID checks need retained history. Fail visibly instead of
+    // silently discarding integrity evidence or allowing an unbounded browser projection.
+    return fatal(state, "history_limit_exceeded");
+  }
+
   const next = applyEventData(state, event);
   if (next.errorCode !== null) return next;
   return {
@@ -207,5 +223,6 @@ export function reduceSessionEvent(
       ...state.appliedEventSequencesById,
       [event.eventId]: event.sequence,
     },
+    retainedEventCodeUnits: state.retainedEventCodeUnits + eventCodeUnits,
   };
 }

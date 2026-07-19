@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { SessionEventSchema, type SessionEventType } from "@wi/protocol";
-import { createBrowserSessionState } from "./model.js";
+import {
+  MAXIMUM_BROWSER_SESSION_EVENT_CODE_UNITS,
+  MAXIMUM_BROWSER_SESSION_EVENTS,
+  createBrowserSessionState,
+} from "./model.js";
 import { reduceSessionEvent } from "./reducer.js";
 import {
   beginReplay,
@@ -104,6 +108,54 @@ describe("browser session reducer", () => {
     expect(state.lastAppliedSequence).toBe(2);
     expect(state.timeline).toEqual([created, started]);
     expect(state.activeRun).toEqual({ runId: "run_A", state: "running" });
+  });
+
+  it("tracks the latest user-message preview without rescanning history", () => {
+    const message = event(1, "user.message.appended", {
+      eventVersion: 1,
+      messageId: "msg_preview",
+      runId: "run_preview",
+      text: "preview text",
+    });
+    const state = reduceSessionEvent(createBrowserSessionState("ses_A"), message);
+
+    expect(state.lastMessagePreview).toBe("preview text");
+    expect(state.retainedEventCodeUnits).toBeGreaterThan(0);
+  });
+
+  it("fails visibly at the bounded browser history limits", () => {
+    const initial = createBrowserSessionState("ses_A");
+    const atEventLimit = {
+      ...initial,
+      lastAppliedSequence: MAXIMUM_BROWSER_SESSION_EVENTS,
+      timeline: Array.from({ length: MAXIMUM_BROWSER_SESSION_EVENTS }, () => created),
+    };
+    const nextEvent = event(MAXIMUM_BROWSER_SESSION_EVENTS + 1, "user.message.appended", {
+      eventVersion: 1,
+      messageId: "msg_limit",
+      runId: "run_limit",
+      text: "bounded",
+    });
+    expect(reduceSessionEvent(atEventLimit, nextEvent)).toMatchObject({
+      status: "error",
+      errorCode: "history_limit_exceeded",
+      lastAppliedSequence: MAXIMUM_BROWSER_SESSION_EVENTS,
+    });
+
+    const atCharacterLimit = {
+      ...initial,
+      retainedEventCodeUnits: MAXIMUM_BROWSER_SESSION_EVENT_CODE_UNITS,
+    };
+    expect(reduceSessionEvent(atCharacterLimit, event(1, "user.message.appended", {
+      eventVersion: 1,
+      messageId: "msg_characterLimit",
+      runId: "run_characterLimit",
+      text: "bounded",
+    }))).toMatchObject({
+      status: "error",
+      errorCode: "history_limit_exceeded",
+      lastAppliedSequence: 0,
+    });
   });
 
   it("ignores separately decoded exact duplicate content", () => {
@@ -474,6 +526,18 @@ describe("browser session reducer", () => {
 });
 
 describe("replay helpers", () => {
+  it("can restart replay after a replay-complete head mismatch", () => {
+    const atOne = reduceSessionEvent(createBrowserSessionState("ses_A"), created);
+    const mismatch = completeReplay(beginReplay(atOne), 2);
+    const replaying = beginReplay(mismatch);
+    const recovered = reduceSessionEvent(replaying, started);
+
+    expect(mismatch.status).toBe("gap");
+    expect(replaying.status).toBe("replaying");
+    expect(recovered).toMatchObject({ status: "replaying", lastAppliedSequence: 2 });
+    expect(completeReplay(recovered, 2).status).toBe("live");
+  });
+
   it("produces the same state for chunks and one complete replay", () => {
     const initial = beginReplay(createBrowserSessionState("ses_A"));
     const complete = replaySessionEvents(initial, [created, started, completed]);

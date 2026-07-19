@@ -934,6 +934,12 @@ export class BrowserConnection {
     await this.socketClosed;
   }
 
+  disconnect(code: number, reason: string): void {
+    if (this.closed) return;
+    this.socket.close(code, reason);
+    void this.cleanup();
+  }
+
   terminate(): void {
     this.socket.terminate();
     void this.cleanup();

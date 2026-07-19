@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { SessionRegistryUnavailableError } from "../../packages/harness-core/dist/session-registry.js";
 import type { ProviderContext, ProviderEvent, ProviderRequest } from "@wi/provider-contract";
 import {
+  BootstrapResponseSchema,
+  MAXIMUM_BOOTSTRAP_SESSIONS,
   hashCommandContent,
   SAFE_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
   ServerMessageSchema,
@@ -51,6 +53,7 @@ import {
   DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
   maximumDurableCommandPayloadBytes,
 } from "../../apps/server/src/websocket/durable-command-limits.js";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "../../apps/server/src/websocket/frame-decoder.js";
 import { WEBSOCKET_LIMIT_CAPS } from "../../apps/server/src/websocket/gateway.js";
 import { LoopbackRequestPolicy } from "../../apps/server/src/websocket/origin-policy.js";
 import { SLOW_CONSUMER_CLOSE_CODE } from "../../apps/server/src/websocket/outbound-queue.js";
@@ -144,6 +147,7 @@ async function startFixture(options: {
   readonly runtime?: Omit<WiRuntimeOptions, "homeDirectory" | "logger" | "providerConfiguration">;
   readonly gateway?: WiServerOptions["gateway"];
   readonly httpShutdownTimeoutMs?: number;
+  readonly webRoot?: string;
 } = {}): Promise<Fixture> {
   const homeDirectory =
     options.homeDirectory ?? (await mkdtemp(join(tmpdir(), "wi-milestone5-")));
@@ -165,6 +169,7 @@ async function startFixture(options: {
     ...(options.httpShutdownTimeoutMs === undefined
       ? {}
       : { httpShutdownTimeoutMs: options.httpShutdownTimeoutMs }),
+    ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot }),
   });
   servers.add(server);
   await server.start();
@@ -634,6 +639,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     expect(bootstrapped.response.status).toBe(200);
     expect(bootstrapped.response.headers.get("set-cookie")).toContain("HttpOnly");
     expect(bootstrapped.response.headers.get("set-cookie")).toContain("SameSite=Strict");
+    expect(BootstrapResponseSchema.parse(bootstrapped.body).sessions).toEqual([]);
     expect(JSON.stringify(bootstrapped.body)).not.toContain(bootstrapped.cookie.split("=")[1]);
     const unsafeHttp = await fetch(`${fixture.server.origin}/bootstrap`, { method: "POST" });
     expect(unsafeHttp.status).toBe(405);
@@ -714,6 +720,104 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     await authenticated.close();
     const serializedLogs = JSON.stringify(fixture.records);
     expect(serializedLogs).not.toContain(bootstrapped.cookie.split("=")[1]);
+  });
+
+  it("lists browser-safe session summaries in bootstrap", async () => {
+    const fixture = await startFixture();
+    const first = await bootstrap(fixture.server);
+    const client = await connect(fixture.server, first.cookie);
+    await hello(client, "bootstrapSummary");
+    const created = await createSession(client, "bootstrapSummary");
+    await client.close();
+
+    const second = await bootstrap(fixture.server);
+    const parsed = BootstrapResponseSchema.parse(second.body);
+    expect(parsed.sessions).toEqual([
+      expect.objectContaining({
+        sessionId: created.sessionId,
+        title: "Session bootstrapSummary",
+        status: "ready",
+        lastEventSequence: 1,
+      }),
+    ]);
+    expect(JSON.stringify(parsed)).not.toContain("dbRelativePath");
+    expect(JSON.stringify(parsed)).not.toContain("sqlite");
+  });
+
+  it("bounds bootstrap rows and text inside the catalog worker query", async () => {
+    const fixture = await startFixture();
+    const oversizedTitle = "😀".repeat(1_000);
+    const oversizedPreview = "p".repeat(300_000);
+    for (let index = 0; index < MAXIMUM_BOOTSTRAP_SESSIONS + 2; index += 1) {
+      await fixture.runtime.storage.catalog.createSessionIndex({
+        sessionId: `ses_boundedBootstrap${index}`,
+        projectId: null,
+        dbRelativePath: `sessions/bounded-${index}.sqlite3`,
+        title: index === 0 ? oversizedTitle : `Bounded ${index}`,
+        status: "ready",
+        createdAtMs: index + 1,
+        updatedAtMs: index === 0 ? 2_000_000 : index + 1,
+        lastEventSequence: index,
+        lastRunState: null,
+        lastMessagePreview: index === 0 ? oversizedPreview : null,
+        requiresAttention: false,
+        pendingApprovalCount: 0,
+        pendingInputCount: 0,
+        sessionSchemaVersion: 1,
+      });
+    }
+
+    const response = await bootstrap(fixture.server);
+    expect(response.response.status).toBe(200);
+    const parsed = BootstrapResponseSchema.parse(response.body);
+    expect(parsed.sessions).toHaveLength(MAXIMUM_BOOTSTRAP_SESSIONS);
+    expect(parsed.sessionsTruncated).toBe(true);
+    expect(parsed.sessions[0]).toMatchObject({
+      sessionId: "ses_boundedBootstrap0",
+      title: oversizedTitle.slice(0, 512),
+      lastMessagePreview: oversizedPreview.slice(0, 256),
+    });
+  });
+
+  it("advertises browser command limits from the actual gateway configuration", async () => {
+    const fixture = await startFixture({
+      gateway: { limits: { frame: { maximumBytes: 32 * 1_024, maximumDepth: 20 } } },
+    });
+    const response = await bootstrap(fixture.server);
+    const parsed = BootstrapResponseSchema.parse(response.body);
+
+    expect(parsed.commandLimits).toMatchObject({
+      v: 1,
+      maximumFrameBytes: 32 * 1_024,
+      maximumRawInputCodeUnits: 32 * 1_024,
+      maximumRawInputUtf8Bytes: 32 * 1_024,
+      maximumJsonDepth: 18,
+    });
+    expect(parsed.commandLimits.maximumDurablePayloadBytes).toBeGreaterThan(
+      parsed.commandLimits.maximumFrameBytes,
+    );
+  });
+
+  it("serves bounded application assets with strict content types and caching", async () => {
+    const webRoot = await mkdtemp(join(tmpdir(), "wi-web-assets-"));
+    homes.add(webRoot);
+    await mkdir(join(webRoot, "assets"));
+    await writeFile(join(webRoot, "index.html"), "<!doctype html><title>Wi test</title>");
+    await writeFile(join(webRoot, "assets", "app-test.js"), "globalThis.__wiLoaded = true;");
+    const fixture = await startFixture({ webRoot });
+
+    const index = await fetch(`${fixture.server.origin}/`);
+    expect(index.status).toBe(200);
+    expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(index.headers.get("cache-control")).toBe("no-store");
+    expect(index.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(await index.text()).toContain("Wi test");
+
+    const asset = await fetch(`${fixture.server.origin}/assets/app-test.js`);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(asset.headers.get("cache-control")).toContain("immutable");
+    expect((await fetch(`${fixture.server.origin}/assets/../catalog.sqlite3`)).status).toBe(404);
   });
 
   it("correlates direct HTTP rejections without logging credentials or request targets", async () => {
@@ -1541,6 +1645,48 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       if (unexpectedServer === undefined) await runtime.close();
       else await unexpectedServer.close();
     }
+  });
+
+  it.each([1, 2])(
+    "rejects frame depth %i before listener startup because wi.v1 requires depth 3",
+    async (maximumDepth) => {
+      const fixture = await startFixture();
+      expect(
+        () =>
+          new WiServer({
+            runtime: fixture.runtime,
+            port: 0,
+            gateway: { limits: { frame: { maximumDepth } } },
+          }),
+      ).toThrow(
+        new RegExp(`frame depth.*at least ${MINIMUM_WI_V1_CLIENT_FRAME_DEPTH}`, "u"),
+      );
+    },
+  );
+
+  it("completes hello with one resume cursor at the minimum frame depth", async () => {
+    const fixture = await startFixture({
+      gateway: {
+        limits: { frame: { maximumDepth: MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } },
+      },
+    });
+    const { cookie } = await bootstrap(fixture.server);
+    const first = await connect(fixture.server, cookie);
+    await hello(first, "minimumDepthCreate");
+    const created = await createSession(first, "minimumDepth");
+    if (created.sessionId === undefined) throw new Error("Created session ID is missing");
+    await first.close();
+
+    const resumed = await connect(fixture.server, cookie);
+    await expect(
+      hello(resumed, "minimumDepthResume", [
+        { sessionId: created.sessionId, afterSequence: 0 },
+      ]),
+    ).resolves.toMatchObject({ kind: "welcome" });
+    await expect(resumed.takeKind("replay.complete")).resolves.toMatchObject({
+      sessionId: created.sessionId,
+    });
+    await resumed.close();
   });
 
   it("rejects every public gateway and HTTP scalar above its server-owned cap", async () => {

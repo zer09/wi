@@ -38,6 +38,31 @@ describe("mapCommandError", () => {
     });
   });
 
+  it("preserves typed already-resolved interaction results", () => {
+    expect(
+      mapCommandError(
+        new SessionActorError("approval.already_resolved", "untrusted approval detail"),
+        () => "err_approvalResolved",
+      ),
+    ).toEqual({
+      code: "approval.already_resolved",
+      message: "This approval was already resolved.",
+      recoverable: false,
+      diagnosticId: "err_approvalResolved",
+    });
+    expect(
+      mapCommandError(
+        new SessionActorError("input.already_resolved", "untrusted input detail"),
+        () => "err_inputResolved",
+      ),
+    ).toEqual({
+      code: "input.already_resolved",
+      message: "This input request was already resolved.",
+      recoverable: false,
+      diagnosticId: "err_inputResolved",
+    });
+  });
+
   it("rejects invalid embedded metadata and uses safe fallbacks", () => {
     const error = new CommandRoutingError(
       "storage.corrupt",

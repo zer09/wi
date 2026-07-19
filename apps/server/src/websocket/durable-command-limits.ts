@@ -7,6 +7,7 @@ import {
   SESSION_EVENT_PAGE_BOUNDS,
   WORKER_RPC_PAYLOAD_BOUNDS,
 } from "@wi/storage";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "./frame-decoder.js";
 
 /**
  * Leaves room for the largest bounded event identity/timestamp envelope and worker-RPC fields.
@@ -55,6 +56,11 @@ export function maximumDurableCommandPayloadBytes(
 export function browserCommandLimits(
   capacities: BrowserCommandCapacities,
 ): BrowserCommandLimits {
+  if (capacities.frameMaximumDepth < MINIMUM_WI_V1_CLIENT_FRAME_DEPTH) {
+    throw new RangeError(
+      `WebSocket frame depth limit must be at least ${MINIMUM_WI_V1_CLIENT_FRAME_DEPTH}`,
+    );
+  }
   const maximumDurablePayloadBytes = maximumDurableCommandPayloadBytes(capacities);
   const maximumRawInput = Math.min(
     capacities.frameMaximumBytes,

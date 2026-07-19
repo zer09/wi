@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeClientFrame, FrameDecodeError } from "./frame-decoder.js";
+import {
+  decodeClientFrame,
+  FrameDecodeError,
+  MINIMUM_WI_V1_CLIENT_FRAME_DEPTH,
+} from "./frame-decoder.js";
 
 const limits = { maximumBytes: 1_024, maximumDepth: 8 };
 
@@ -52,6 +56,40 @@ describe("decodeClientFrame", () => {
     expect(() => decodeClientFrame(bytes("{}"), true, limits)).toThrowError(
       expect.objectContaining({ code: "protocol.invalid_message", fatal: true }),
     );
+  });
+
+  it("counts the root container at depth one for resumed hello and input values", () => {
+    const minimumProtocolLimits = {
+      maximumBytes: 1_024,
+      maximumDepth: MINIMUM_WI_V1_CLIENT_FRAME_DEPTH,
+    };
+    expect(
+      decodeClientFrame(
+        bytes(
+          '{"v":1,"kind":"hello","clientId":"client_minimumDepth","resume":[{"sessionId":"ses_minimumDepth","afterSequence":0}]}',
+        ),
+        false,
+        minimumProtocolLimits,
+      ),
+    ).toMatchObject({ kind: "hello", resume: [{ sessionId: "ses_minimumDepth" }] });
+    expect(() =>
+      decodeClientFrame(
+        bytes(
+          '{"v":1,"kind":"command","commandId":"cmd_exactDepth","sessionId":"ses_minimumDepth","method":"input.respond","params":{"inputId":"input_minimumDepth","value":[]}}',
+        ),
+        false,
+        minimumProtocolLimits,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      decodeClientFrame(
+        bytes(
+          '{"v":1,"kind":"command","commandId":"cmd_overDepth","sessionId":"ses_minimumDepth","method":"input.respond","params":{"inputId":"input_minimumDepth","value":[[]]}}',
+        ),
+        false,
+        minimumProtocolLimits,
+      ),
+    ).toThrow(FrameDecodeError);
   });
 
   it("rejects excessive nesting before JSON.parse", () => {

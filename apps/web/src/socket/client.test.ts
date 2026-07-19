@@ -220,6 +220,56 @@ describe("WiSocketClient", () => {
     expect(pendingSnapshots.at(-1)).toHaveLength(1);
   });
 
+  it("rejects one container over negotiated depth before journal, pending state, or send", () => {
+    const socket = new FakeSocket();
+    const commandJournal = journal();
+    const pendingSnapshots: (readonly PendingCommand[])[] = [];
+    const client = new WiSocketClient({
+      url: "ws://127.0.0.1:4317/ws",
+      protocol: "wi.v1",
+      commandLimits: { ...TEST_COMMAND_LIMITS, maximumJsonDepth: 1 },
+      journal: commandJournal,
+      clientId: "client_depthBoundary",
+      socketFactory: () => socket,
+      onMessage: () => undefined,
+      onConnectionChange: () => undefined,
+      onPendingCommandsChange: (commands) => pendingSnapshots.push(commands),
+    });
+    const exact: CommandMessage = {
+      v: 1,
+      kind: "command",
+      commandId: "cmd_exactDepthBoundary",
+      sessionId: "ses_depthBoundary",
+      method: "input.respond",
+      params: { inputId: "input_depthBoundary", value: [] },
+    };
+    const oneOver: CommandMessage = {
+      ...exact,
+      commandId: "cmd_overDepthBoundary",
+      params: { ...exact.params, value: [[]] },
+    };
+
+    client.connect();
+    socket.open();
+    socket.receive(welcome());
+    client.sendCommand(exact);
+    const sentAfterExact = socket.sent.length;
+    expect(socket.messages()).toContainEqual(exact);
+    expect(commandJournal.commands().map((entry) => entry.command.commandId)).toEqual([
+      exact.commandId,
+    ]);
+
+    expect(() => client.sendCommand(oneOver)).toThrow(/nesting/u);
+    expect(client.getPendingCommand(oneOver.commandId)).toBeUndefined();
+    expect(commandJournal.commands().map((entry) => entry.command.commandId)).toEqual([
+      exact.commandId,
+    ]);
+    expect(socket.sent).toHaveLength(sentAfterExact);
+    expect(pendingSnapshots.at(-1)?.map((pending) => pending.command.commandId)).toEqual([
+      exact.commandId,
+    ]);
+  });
+
   it("retains a restored command that exceeds current limits until limits permit retry", () => {
     const storage = new MemoryStorage();
     const persisted = new BrowserCommandJournal(storage, "test-owner");

@@ -7,6 +7,7 @@ import {
   durableCommandPayloadBytes,
   maximumDurableCommandPayloadBytes,
 } from "./durable-command-limits.js";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "./frame-decoder.js";
 
 describe("durable command limits", () => {
   it("subtracts one fixed envelope reserve from the smallest durable capacity", () => {
@@ -113,6 +114,23 @@ describe("durable command limits", () => {
       maximumJsonDepth: 18,
     });
     expect(limits.maximumJsonNodes).toBeGreaterThan(1_000);
+  });
+
+  it("derives payload depth only from a viable protocol frame depth", () => {
+    const capacities = {
+      frameMaximumBytes: 32 * 1_024,
+      frameMaximumDepth: MINIMUM_WI_V1_CLIENT_FRAME_DEPTH,
+      outboundSingleMessageBytes: 40 * 1_024,
+      replayLiveSingleEventBytes: 36 * 1_024,
+      replayPageSingleEventBytes: 34 * 1_024,
+    };
+    expect(browserCommandLimits(capacities).maximumJsonDepth).toBe(1);
+    expect(() =>
+      browserCommandLimits({
+        ...capacities,
+        frameMaximumDepth: MINIMUM_WI_V1_CLIENT_FRAME_DEPTH - 1,
+      }),
+    ).toThrow(/frame depth.*at least 3/u);
   });
 
   it("measures complete canonical UTF-8 JSON for every durable variable payload", () => {

@@ -2,17 +2,24 @@ import { WiRuntime, WiServer } from "../../../apps/server/dist/index.js";
 import { FakeProviderAdapter, fakeProviderGateLabel } from "../../../packages/provider-fake/dist/index.js";
 import { MAXIMUM_BOOTSTRAP_SESSIONS } from "../../../packages/protocol/dist/index.js";
 
-const [homeDirectory, frameMaximumBytesArgument, fixedPortArgument] = process.argv.slice(2);
+const [
+  homeDirectory,
+  frameMaximumBytesArgument,
+  fixedPortArgument,
+  frameMaximumDepthArgument,
+] = process.argv.slice(2);
 if (homeDirectory === undefined || typeof process.send !== "function") process.exit(64);
-const frameMaximumBytes =
-  frameMaximumBytesArgument === undefined || frameMaximumBytesArgument === "-"
-    ? undefined
-    : Number(frameMaximumBytesArgument);
-const fixedPort = fixedPortArgument === undefined ? undefined : Number(fixedPortArgument);
+const optionalNumber = (value) =>
+  value === undefined || value === "-" ? undefined : Number(value);
+const frameMaximumBytes = optionalNumber(frameMaximumBytesArgument);
+const fixedPort = optionalNumber(fixedPortArgument);
+const frameMaximumDepth = optionalNumber(frameMaximumDepthArgument);
 if (
   (frameMaximumBytes !== undefined &&
     (!Number.isSafeInteger(frameMaximumBytes) || frameMaximumBytes < 1)) ||
-  (fixedPort !== undefined && (!Number.isSafeInteger(fixedPort) || fixedPort < 1))
+  (fixedPort !== undefined && (!Number.isSafeInteger(fixedPort) || fixedPort < 1)) ||
+  (frameMaximumDepth !== undefined &&
+    (!Number.isSafeInteger(frameMaximumDepth) || frameMaximumDepth < 1))
 ) {
   process.exit(65);
 }
@@ -87,9 +94,20 @@ const server = new WiServer({
   runtime,
   port: fixedPort ?? 0,
   gateway: {
-    ...(frameMaximumBytes === undefined
+    ...(frameMaximumBytes === undefined && frameMaximumDepth === undefined
       ? {}
-      : { limits: { frame: { maximumBytes: frameMaximumBytes } } }),
+      : {
+          limits: {
+            frame: {
+              ...(frameMaximumBytes === undefined
+                ? {}
+                : { maximumBytes: frameMaximumBytes }),
+              ...(frameMaximumDepth === undefined
+                ? {}
+                : { maximumDepth: frameMaximumDepth }),
+            },
+          },
+        }),
     commandHooks: {
       beforeRoute: async (command) => {
         routedCommandCount += 1;

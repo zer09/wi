@@ -57,6 +57,29 @@ async function expectRunState(page: Page, state: string): Promise<void> {
   await expect(page.getByLabel("Current run status").getByText(state, { exact: true })).toBeVisible();
 }
 
+function maximumJsonContainerDepth(text: string): number {
+  let depth = 0;
+  let maximumDepth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of text) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{" || character === "[") {
+      depth += 1;
+      maximumDepth = Math.max(maximumDepth, depth);
+    } else if (character === "}" || character === "]") {
+      depth -= 1;
+    }
+  }
+  return maximumDepth;
+}
+
 test("cleans child processes and temporary homes when fixture startup fails", async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "wi-e2e-startup-test-"));
   const childScript = new URL("./fixtures/startup-failure-process.mjs", import.meta.url);
@@ -495,6 +518,97 @@ test("uses lower server command limits without a terminal frame close", async ({
     );
     await expect(composer).toHaveValue(oneByteOver);
     expect(await running.api.commandRouteCount()).toBe(routedBeforeMessage + 1);
+    await expect(page.locator(".connection")).toContainText("Connected");
+  } finally {
+    await page.close();
+    await running.close();
+  }
+});
+
+test("composes raw input depth with the minimum real server frame depth", async ({ browser }) => {
+  const running = await startServer({ childArguments: ["-", "-", "3"] });
+  const page = await browser.newPage();
+  const helloFrames: string[] = [];
+  const inputFrames: string[] = [];
+  let sendToBrowser: ((message: string) => void) | null = null;
+  try {
+    await page.routeWebSocket(/\/ws$/u, (browserSocket) => {
+      const serverSocket = browserSocket.connectToServer();
+      sendToBrowser = (message) => browserSocket.send(message);
+      browserSocket.onMessage((frame) => {
+        const text = typeof frame === "string" ? frame : frame.toString("utf8");
+        const message = JSON.parse(text) as { readonly kind?: string; readonly method?: string };
+        if (message.kind === "hello") helloFrames.push(text);
+        if (message.kind === "command" && message.method === "input.respond") {
+          inputFrames.push(text);
+        }
+        serverSocket.send(frame);
+      });
+      serverSocket.onMessage((frame) => browserSocket.send(frame));
+    });
+
+    const bootstrap = BootstrapResponseSchema.parse(
+      await (await fetch(`${running.api.origin}/bootstrap`)).json(),
+    );
+    expect(bootstrap.commandLimits.maximumJsonDepth).toBe(1);
+    await openWi(page, running.api);
+    const sessionId = await createSession(page, "Minimum depth input");
+    await page.reload();
+    await expect(page.locator(".connection")).toContainText("Connected");
+    await expect(page.getByText("Session state: live")).toBeVisible();
+    await expect.poll(() => helloFrames.length).toBe(2);
+    expect(maximumJsonContainerDepth(helloFrames[1] as string)).toBe(3);
+
+    if (sendToBrowser === null) throw new Error("WebSocket route was not established");
+    (sendToBrowser as (message: string) => void)(
+      JSON.stringify({
+        v: 1,
+        kind: "event",
+        sessionId,
+        sequence: 2,
+        eventId: "evt_minimumDepthInputRequested",
+        eventType: "input.requested",
+        createdAtMs: 2,
+        data: {
+          eventVersion: 1,
+          runId: "run_minimumDepthInput",
+          inputId: "input_minimumDepthInput",
+          prompt: "Provide a depth-one JSON value.",
+        },
+      }),
+    );
+
+    const input = page.getByLabel("Response as JSON");
+    const respond = page.getByRole("button", { name: "Respond", exact: true });
+    const routedBefore = await running.api.commandRouteCount();
+    await input.fill("[]");
+    await respond.click();
+    await expect.poll(() => running.api.commandRouteCount()).toBe(routedBefore + 1);
+    await expect(respond).toBeEnabled();
+    expect(inputFrames).toHaveLength(1);
+    expect(maximumJsonContainerDepth(inputFrames[0] as string)).toBe(3);
+
+    await input.fill("[[]]");
+    await respond.click();
+    await expect(page.getByTestId("pending-input-panel").locator('p[role="alert"]')).toContainText(
+      "nesting limit of 1",
+    );
+    await expect(input).toHaveValue("[[]]");
+    expect(await running.api.commandRouteCount()).toBe(routedBefore + 1);
+    expect(inputFrames).toHaveLength(1);
+    expect(
+      await page.evaluate(() => {
+        const browser = globalThis as unknown as {
+          readonly sessionStorage: { getItem(key: string): string | null };
+        };
+        const serialized = browser.sessionStorage.getItem("wi:v1:tab-command-journal");
+        if (serialized === null) return 0;
+        const journal = JSON.parse(serialized) as {
+          readonly items: readonly { readonly type?: string }[];
+        };
+        return journal.items.filter((item) => item.type === "command").length;
+      }),
+    ).toBe(0);
     await expect(page.locator(".connection")).toContainText("Connected");
   } finally {
     await page.close();

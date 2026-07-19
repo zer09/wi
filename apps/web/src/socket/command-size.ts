@@ -7,7 +7,7 @@ import {
   type CommandMessage,
 } from "@wi/protocol";
 
-const COMMAND_STRUCTURE_DEPTH_RESERVE = 4;
+const COMMAND_ENVELOPE_JSON_DEPTH = 2;
 const COMMAND_STRUCTURE_NODE_RESERVE = 64;
 
 export class BrowserCommandLimitError extends Error {
@@ -84,11 +84,6 @@ function assertStructuredValue(
     if (nodes > maximumNodes) {
       throw new BrowserInputLimitError(`JSON input exceeds the server limit of ${maximumNodes} nodes.`);
     }
-    if (current.depth > maximumDepth) {
-      throw new BrowserInputLimitError(
-        `JSON input exceeds the server nesting limit of ${maximumDepth}.`,
-      );
-    }
     if (typeof current.value === "string") {
       if (limits !== undefined) {
         stringCodeUnits += current.value.length;
@@ -121,6 +116,12 @@ function assertStructuredValue(
     if (active.has(current.value)) {
       throw new BrowserInputLimitError("JSON input cannot contain a cycle.");
     }
+    const containerDepth = current.depth + 1;
+    if (containerDepth > maximumDepth) {
+      throw new BrowserInputLimitError(
+        `JSON input exceeds the server nesting limit of ${maximumDepth}.`,
+      );
+    }
     active.add(current.value);
     stack.push({ ...current, leaving: true });
 
@@ -129,7 +130,7 @@ function assertStructuredValue(
         if (!(index in current.value)) {
           throw new BrowserInputLimitError("JSON arrays cannot be sparse.");
         }
-        stack.push({ value: current.value[index], depth: current.depth + 1 });
+        stack.push({ value: current.value[index], depth: containerDepth });
       }
       continue;
     }
@@ -158,7 +159,7 @@ function assertStructuredValue(
           throw new BrowserInputLimitError("JSON object keys exceed the server input limit.");
         }
       }
-      stack.push({ value: entry[1], depth: current.depth + 1 });
+      stack.push({ value: entry[1], depth: containerDepth });
     }
   }
 }
@@ -263,7 +264,7 @@ export function assertBrowserCommandSize(
 ): CommandMessage {
   assertStructuredValue(
     command,
-    limits.maximumJsonDepth + COMMAND_STRUCTURE_DEPTH_RESERVE,
+    limits.maximumJsonDepth + COMMAND_ENVELOPE_JSON_DEPTH,
     limits.maximumJsonNodes + COMMAND_STRUCTURE_NODE_RESERVE,
   );
   if (command.method === "session.create" && command.params.title !== undefined) {

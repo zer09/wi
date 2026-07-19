@@ -1,6 +1,6 @@
 # Milestone 6 release-gate remediation ledger
 
-Status: Independent remote review of PR #12 at `d295db7` requested changes. Stages 1–5 (`WI-M6-H2`, `WI-M6-M1`, `WI-M6-H1`, `WI-M6-H3`, `WI-M6-M2`) are fixed. Stage 6 independent local review passed against remediation fingerprint `8194ad2cf9a7f8632e7a07846272c73802ca53080730b25125136564b8ff7f1e`; no finding was reopened. The remediation is ready to commit and push for fresh CI and independent remote re-review.
+Status: The independent remote re-review of PR #12 at `e120062` confirmed H1/H2/M1/H3/M2 resolved but requested changes for new Medium finding `WI-M6-M3`. M3 is fixed and the complete implementation-agent gate is green. Changes remain unstaged and uncommitted pending a fresh independent local review.
 
 This record validates and remediates the release-gate review performed against `68e95d293f6a1d9c224570b026eba49d0a5c5e1d`. Reviewers should use the named regression tests below before reopening an item. A fixed item should be reopened only with a new reproducer against the current worktree.
 
@@ -159,6 +159,25 @@ A fresh review-only agent inspected all 27 intended remediation paths against ba
 
 Independent gates passed: lint, typecheck, build, 415 unit tests, 239 integration tests, 35 property tests, 47 process tests, 32 Playwright tests, 736 tests through `pnpm check`, and 39/39 focused remediation repetitions. Cleanup found no child process, listener, or temporary-home leak. `prompts/` and the handoff package remain local workflow artifacts and are excluded from the remediation commit.
 
+## Independent remote re-review — `WI-M6-M3`
+
+**Remote verdict at `e120062`: REQUEST CHANGES.** The gateway accepted client-frame depths 1 and 2 even though `wi.v1` needs depth 3 for hello with one resume cursor. Bootstrap correctly reserved two command-envelope levels, but raw JSON counted a root value container at depth 1 while direct structured preflight counted it at depth 0. At configured frame depth 3, direct `[[]]` therefore passed browser preflight even though its complete command frame reached depth 4 and the unchanged server decoder rejected it.
+
+Pre-fix deterministic evidence preserved four expected failures: gateway construction did not reject depths 1 or 2, command-size preflight did not reject `[[]]` at advertised value depth 1, and `WiSocketClient` inserted/sent that over-depth command. The depth-3 decoder and resumed-hello controls already passed, isolating the defect to public configuration validation and the browser's structured-value convention.
+
+Narrow resolution:
+
+- `MINIMUM_WI_V1_CLIENT_FRAME_DEPTH` is the exported server-owned minimum, fixed at 3;
+- gateway construction and browser-limit derivation reject lower depths without clamping or opening a listener;
+- strict server frame decoding is unchanged;
+- raw and structured browser checks now define primitive depth 0, root container depth 1, and each nested container as one additional level;
+- complete command structural preflight reserves exactly the command root plus `params` object;
+- depth-3 integration completes welcome/replay from a hello containing one resume cursor;
+- direct socket preflight accepts `[]` and rejects `[[]]` before journal, pending state, or transport send;
+- real browser/server coverage routes raw `[]` through the depth-3 decoder, rejects raw `[[]]` before routing, retains the draft, and keeps the connection connected.
+
+Focused post-fix evidence: 34/34 unit tests, 3/3 minimum-depth integration tests, and 3/3 repeated real-browser depth-composition tests passed. The prior lower-byte, authentication restart, refresh journal, deep-link, and focus regression matrix remains required by the final gate.
+
 ## Implementation boundaries
 
 ### Recoverable replay
@@ -173,7 +192,7 @@ Independent gates passed: lint, typecheck, build, 415 unit tests, 239 integratio
 
 ### Browser command-size boundary
 
-`apps/web/src/socket/command-size.ts` owns the browser's complete-envelope UTF-8 measurement. The 60 KiB cap is intentionally below the default 64 KiB inbound frame cap and is enforced in `WiSocketClient.sendCommand()`, not only by UI controls. The browser does not truncate payloads or enqueue an over-limit command. Server-side frame and durable-payload validation remain authoritative for non-browser or differently configured clients.
+`apps/web/src/socket/command-size.ts` owns complete-envelope UTF-8 measurement and raw/structured JSON preflight under the strict bootstrap-advertised contract. The browser uses the server's actual frame bytes, durable payload, raw input, node, and depth bounds; it does not truncate payloads or enqueue an over-limit command. Root-container depth semantics now match the unchanged server decoder, while server-side validation remains authoritative for headless `wi.v1` clients.
 
 ### Durable draft clearing
 
@@ -279,6 +298,18 @@ The browser history cap is not a scalable history protocol. It is a safety bound
 | `pnpm dlx yaml-lint@1.7.0 .github/workflows/ci.yml` | Passed |
 | `git diff --check` | Passed |
 | Process leak check | No Playwright or E2E server processes remained |
+| M3 pre-fix deterministic matrix | 4 expected failures: gateway depths 1 and 2, direct `[[]]` command preflight, and socket preflight before journal/pending/send |
+| M3 focused frame/limit/client unit matrix | 4 files, 34/34 passed |
+| M3 minimum-depth integration | Depths 1 and 2 rejected before startup; depth 3 hello/resume/welcome completed; 3/3 passed |
+| M3 depth-composition E2E, `--repeat-each=3` | Raw `[]` routed and completed; raw `[[]]` rejected locally with retained draft and connected socket; 3/3 passed |
+| M3 prior-remediation browser matrix | Lower byte limit, auth restart, refresh journal, deep links, and focus: 13/13 passed |
+| M3 full `pnpm test:unit` | 36 files, 419/419 passed |
+| M3 full `pnpm test:integration` | 6 files, 242/242 passed |
+| M3 full `pnpm test:property` | 9 files, 35/35 passed |
+| M3 full `pnpm test:process` | 5 files, 26/26 passed |
+| M3 full `pnpm test:e2e` | 33/33 passed |
+| M3 final `pnpm check` | 58 files, 743/743 passed; lint, typecheck, build, and package-export verification passed |
+| M3 `git diff --check` and cleanup | Passed; no Playwright/E2E server processes or `wi-e2e-*` homes remained |
 
 ## Remaining non-blocking boundaries
 

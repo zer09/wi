@@ -77,6 +77,28 @@ describe("browser command preflight", () => {
     ).toThrow(/durable command payload/u);
   });
 
+  it("uses the raw-input depth convention for direct structured values", () => {
+    const limits = { ...LIMITS, maximumJsonDepth: 1 };
+    const exact = {
+      v: 1,
+      kind: "command",
+      commandId: "cmd_exactDirectDepth",
+      sessionId: "ses_directDepth",
+      method: "input.respond",
+      params: { inputId: "input_directDepth", value: [] },
+    } as const;
+    const oneOver = {
+      ...exact,
+      commandId: "cmd_overDirectDepth",
+      params: { ...exact.params, value: [[]] },
+    } as const;
+
+    expect(parseCanonicalJsonInput("[]", limits)).toEqual([]);
+    expect(() => assertBrowserCommandSize(exact, limits)).not.toThrow();
+    expect(() => parseCanonicalJsonInput("[[]]", limits)).toThrow(/nesting/u);
+    expect(() => assertBrowserCommandSize(oneOver, limits)).toThrow(/nesting/u);
+  });
+
   it("preflights direct socket values before recursive protocol validation", () => {
     const command = {
       v: 1,

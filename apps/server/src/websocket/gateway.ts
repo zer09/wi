@@ -19,6 +19,7 @@ import {
   browserCommandLimits as deriveBrowserCommandLimits,
   maximumDurableCommandPayloadBytes,
 } from "./durable-command-limits.js";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "./frame-decoder.js";
 import type { LoopbackRequestPolicy, UpgradeRejection } from "./origin-policy.js";
 
 export interface WebSocketGatewayOptions {
@@ -205,6 +206,11 @@ export class WebSocketGateway {
           `WebSocket ${description} limit must be a positive safe integer no greater than ${maximum}`,
         );
       }
+    }
+    if (this.limits.frame.maximumDepth < MINIMUM_WI_V1_CLIENT_FRAME_DEPTH) {
+      throw new RangeError(
+        `WebSocket frame depth limit must be at least ${MINIMUM_WI_V1_CLIENT_FRAME_DEPTH}`,
+      );
     }
     if (
       this.limits.outbound.maximumSingleMessageBytes > this.limits.outbound.maximumBytes

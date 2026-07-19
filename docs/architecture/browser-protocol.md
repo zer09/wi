@@ -80,6 +80,8 @@ Reject:
 
 Runtime schemas define whether unknown optional fields are tolerated. State-changing commands should be strict by default.
 
+The minimum valid public `wi.v1` client-frame depth is 3: the hello root object is depth 1, its resume array is depth 2, and one resume-cursor object is depth 3. Gateway configurations below that minimum fail during construction rather than opening a listener that cannot carry the mandatory handshake. JSON command values use the same container-depth convention in raw text, direct structured preflight, and server decoding: primitives have depth 0, a root object/array has depth 1, and each nested object/array adds one. The command root and `params` object consume two frame levels, so bootstrap advertises `maximumJsonDepth = frameMaximumDepth - 2` only after validating the protocol minimum.
+
 ## 5. Client messages
 
 ### Hello

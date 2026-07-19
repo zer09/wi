@@ -53,6 +53,7 @@ import {
   DURABLE_EVENT_ENVELOPE_RESERVE_BYTES,
   maximumDurableCommandPayloadBytes,
 } from "../../apps/server/src/websocket/durable-command-limits.js";
+import { MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } from "../../apps/server/src/websocket/frame-decoder.js";
 import { WEBSOCKET_LIMIT_CAPS } from "../../apps/server/src/websocket/gateway.js";
 import { LoopbackRequestPolicy } from "../../apps/server/src/websocket/origin-policy.js";
 import { SLOW_CONSUMER_CLOSE_CODE } from "../../apps/server/src/websocket/outbound-queue.js";
@@ -1644,6 +1645,48 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       if (unexpectedServer === undefined) await runtime.close();
       else await unexpectedServer.close();
     }
+  });
+
+  it.each([1, 2])(
+    "rejects frame depth %i before listener startup because wi.v1 requires depth 3",
+    async (maximumDepth) => {
+      const fixture = await startFixture();
+      expect(
+        () =>
+          new WiServer({
+            runtime: fixture.runtime,
+            port: 0,
+            gateway: { limits: { frame: { maximumDepth } } },
+          }),
+      ).toThrow(
+        new RegExp(`frame depth.*at least ${MINIMUM_WI_V1_CLIENT_FRAME_DEPTH}`, "u"),
+      );
+    },
+  );
+
+  it("completes hello with one resume cursor at the minimum frame depth", async () => {
+    const fixture = await startFixture({
+      gateway: {
+        limits: { frame: { maximumDepth: MINIMUM_WI_V1_CLIENT_FRAME_DEPTH } },
+      },
+    });
+    const { cookie } = await bootstrap(fixture.server);
+    const first = await connect(fixture.server, cookie);
+    await hello(first, "minimumDepthCreate");
+    const created = await createSession(first, "minimumDepth");
+    if (created.sessionId === undefined) throw new Error("Created session ID is missing");
+    await first.close();
+
+    const resumed = await connect(fixture.server, cookie);
+    await expect(
+      hello(resumed, "minimumDepthResume", [
+        { sessionId: created.sessionId, afterSequence: 0 },
+      ]),
+    ).resolves.toMatchObject({ kind: "welcome" });
+    await expect(resumed.takeKind("replay.complete")).resolves.toMatchObject({
+      sessionId: created.sessionId,
+    });
+    await resumed.close();
   });
 
   it("rejects every public gateway and HTTP scalar above its server-owned cap", async () => {

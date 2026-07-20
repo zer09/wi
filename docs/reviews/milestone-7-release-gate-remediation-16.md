@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 16
 
-Status: **REMEDIATED LOCALLY — Windows CI rerun pending**
+Status: **RESOLVED — all required local and hosted CI gates passed**
 
 PR: [#13 — Milestone 7: crash recovery and release gate](https://github.com/zer09/wi/pull/13)
 
@@ -39,7 +39,7 @@ No architecture policy or ADR changed. This is an FFI module-lifecycle correctio
 | Full `pnpm check` | Passed: 64 files; 816 passed and 2 Windows-only skipped; lint, typecheck, tests, build, and package-export verification passed in 142.88s |
 | `git diff --check` | Passed |
 | Cleanup inspection | Passed; no matching fixture/server/browser process, temporary process home, or port 4317 listener |
-| Required `windows-process` CI | Pending after explicit commit/push |
+| Required `windows-process` CI | Passed on the code-bearing follow-up commit `b6a8fa1` in run 29785900563 |
 
 ## First Windows rerun follow-up
 
@@ -52,4 +52,13 @@ Commit `9469190eb6caeb46e18be140240e0f614a743567` removed the duplicate-type fai
 
 The timeout callback could complete `terminateProcessTree`, remove successful Job Object ownership, and delete the child from the runner before `run()` reached its unconditional `finally` cleanup. The second cleanup then treated the already-clean tree as an ownership failure. `FixtureProcessRunner.terminate` now returns immediately when a child has already been removed after successful cleanup, while retaining children after failed cleanup so `terminateAll` can still retry them.
 
-The follow-up remains unstaged and uncommitted. `prompts/` remains untracked and excluded.
+## Final Windows validation
+
+Commit `b6a8fa17c87320a583786a73c853b19e52af01fe` passed CI run [29785900563](https://github.com/zer09/wi/actions/runs/29785900563):
+
+- `windows-process` passed in 4m08s, including the reload, timeout cleanup, descendant, owner-death, junction, signal, and recovery probes;
+- Linux `checks` passed in 5m01s;
+- browser `e2e` passed in 1m26s;
+- the aggregate `required` gate passed.
+
+The duplicate Koffi registration and idempotent cleanup failures are resolved. `prompts/` remains untracked and excluded.

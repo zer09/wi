@@ -1,13 +1,27 @@
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { hashCommandContent, type SessionCreateCommand } from "@wi/protocol";
 import {
   resolveStoragePath,
   SessionStoreManager,
+  SESSION_SCHEMA_VERSION,
   StorageError,
   stableSessionWorkerIndex,
   type AppendTransactionInput,
@@ -18,6 +32,16 @@ import {
 
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
+const originalFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+
+beforeAll(() => {
+  process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+});
+
+afterAll(() => {
+  if (originalFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+  else process.env.WI_ALLOW_TEST_FAILPOINTS = originalFailpointGate;
+});
 
 async function temporaryHome(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "wi-storage-"));
@@ -66,6 +90,9 @@ async function manager(
           catalogObservationShutdownTimeoutMs:
             options.catalogObservationShutdownTimeoutMs,
         }),
+    ...(options.sessionDiscoveryLimit === undefined
+      ? {}
+      : { sessionDiscoveryLimit: options.sessionDiscoveryLimit }),
   });
   managers.push(storage);
   return storage;
@@ -152,7 +179,7 @@ describe("catalog and per-session storage workers", () => {
       projectId: "project_storageA",
       title: "Storage test",
       lastEventSequence: 1,
-      schemaVersion: 3,
+      schemaVersion: SESSION_SCHEMA_VERSION,
       formatVersion: 1,
     });
     await expect(
@@ -164,6 +191,23 @@ describe("catalog and per-session storage workers", () => {
     expect((await storage.catalog.listSessions()).map((item) => item.sessionId)).toEqual([
       created.session.sessionId,
     ]);
+  });
+
+  it("enforces the configured recoverable session count while preserving duplicates", async () => {
+    const storage = await manager(
+      { sessionDiscoveryLimit: 1 },
+      ["ses_capacityA", "ses_capacityDuplicate", "ses_capacityB"],
+    );
+    const firstCommand = createCommand("cmd_capacityA", "Capacity A");
+    const first = await storage.createSession(firstCommand);
+    await expect(storage.createSession(firstCommand)).resolves.toMatchObject({
+      duplicate: true,
+      session: { sessionId: first.session.sessionId },
+    });
+    await expect(
+      storage.createSession(createCommand("cmd_capacityB", "Capacity B")),
+    ).rejects.toMatchObject({ code: "storage.resource_limit" });
+    await expect(storage.catalog.countSessions()).resolves.toBe(1);
   });
 
   it("rejects unsupported catalog session lifecycle status", async () => {
@@ -916,6 +960,27 @@ describe("catalog and per-session storage workers", () => {
     expect(await storage.catalog.listSessions()).toHaveLength(1);
   });
 
+  it("rejects contradictory accepted global-create provenance", async () => {
+    const storage = await manager({}, ["ses_provenanceA"]);
+    const created = await storage.createSession(createCommand("cmd_provenanceA", "Provenance"));
+    await expect(
+      storage.catalog.completeGlobalCommand({
+        commandId: created.command.commandId,
+        payloadHash: created.command.payloadHash,
+        result: { sessionId: "ses_conflictingResult" },
+        acceptedAtMs: created.command.acceptedAtMs ?? 0,
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(
+      storage.catalog.completeGlobalCommand({
+        commandId: created.command.commandId,
+        payloadHash: created.command.payloadHash,
+        result: created.command.result,
+        acceptedAtMs: (created.command.acceptedAtMs ?? 0) + 1,
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+  });
+
   it("resumes an incomplete global session reservation without changing its session identity", async () => {
     const storage = await manager({}, ["ses_unusedA"]);
     await storage.ready();
@@ -1574,7 +1639,9 @@ describe("catalog and per-session storage workers", () => {
       ),
     ).resolves.toMatchObject({ headSequence: 2, catalogObservationScheduled: true });
     await writerStarted;
-    await expect(storage.close()).resolves.toBeUndefined();
+    await expect(storage.close()).rejects.toMatchObject({
+      message: "Storage shutdown failed",
+    });
   });
 
   it("drains an accepted session creation before shutdown closes workers", async () => {
@@ -2542,6 +2609,269 @@ describe("catalog and per-session storage workers", () => {
     await expect(
       (await storage.openSession(created.session.sessionId)).getHeadSequence(),
     ).resolves.toBe(1);
+  });
+
+  it("fails closed when a durable incomplete repair is restarted with repair disabled", async () => {
+    const homeDirectory = await temporaryHome();
+    const first = new SessionStoreManager({ homeDirectory, catalogRepair: "off" });
+    managers.push(first);
+    await first.ready();
+    await first.catalog.beginRepair("catalog_new");
+    await first.close();
+    managers.splice(managers.indexOf(first), 1);
+
+    const restarted = new SessionStoreManager({ homeDirectory, catalogRepair: "off" });
+    managers.push(restarted);
+    await expect(restarted.ready()).rejects.toMatchObject({ code: "storage.corrupt" });
+  });
+
+  it("reconciles a healthy catalog in place without losing catalog-only state", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      now: () => 1_000,
+      ids: {
+        sessionId: () => "ses_forceHealthy",
+        eventId: () => "evt_forceHealthyCreated",
+      },
+    });
+    managers.push(original);
+    await original.createProject({
+      projectId: "project_forceHealthy",
+      name: "Force repair project",
+      rootPath: "/tmp/force-repair-project",
+      rootRealpath: "/tmp/force-repair-project",
+      createdAtMs: 900,
+      updatedAtMs: 900,
+      config: { retained: true },
+    });
+    const created = await original.createSession(
+      createCommand("cmd_forceHealthy", "Force repair", "project_forceHealthy"),
+    );
+    await original.catalog.createSessionIndex({
+      sessionId: "ses_forceUnavailable",
+      projectId: null,
+      dbRelativePath: "sessions/fo/ses_forceUnavailable/session.sqlite3",
+      title: "Unavailable before repair",
+      status: "unavailable",
+      createdAtMs: 950,
+      updatedAtMs: 950,
+      lastEventSequence: 0,
+      lastRunState: null,
+      lastMessagePreview: null,
+      requiresAttention: true,
+      pendingApprovalCount: 0,
+      pendingInputCount: 0,
+      sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+      recoveryCandidate: false,
+      unavailableReason: "quarantined",
+    });
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    const catalogIdentity = await stat(join(homeDirectory, "catalog.sqlite3"));
+
+    const forced = new SessionStoreManager({ homeDirectory, catalogRepair: "force" });
+    managers.push(forced);
+    await forced.ready();
+
+    expect(forced.catalogRepairStatus()).toMatchObject({
+      triggered: true,
+      reason: "explicit",
+      repaired: 1,
+    });
+    expect((await stat(join(homeDirectory, "catalog.sqlite3"))).ino).toBe(catalogIdentity.ino);
+    await expect(forced.catalog.getGlobalCommand("cmd_forceHealthy")).resolves.toMatchObject({
+      state: "accepted",
+      reservedSessionId: created.session.sessionId,
+    });
+    await expect(forced.catalog.getSession("ses_forceUnavailable")).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Unavailable before repair",
+    });
+    expect((await readdir(homeDirectory)).some((name) => name.includes("quarantine"))).toBe(false);
+  });
+
+  it("rejects a noncanonical path for an existing catalog session", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+
+    await expect(
+      storage.catalog.createSessionIndex({
+        ...created.session,
+        dbRelativePath: "sessions/zz/ses_storageA/session.sqlite3",
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      dbRelativePath: created.session.dbRelativePath,
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a healthy-catalog lazy open through a symlink outside WI_HOME",
+    async () => {
+      const homeDirectory = await temporaryHome();
+      const original = new SessionStoreManager({
+        homeDirectory,
+        ids: {
+          sessionId: () => "ses_lazySymlink",
+          eventId: () => "evt_lazySymlinkCreated",
+        },
+      });
+      managers.push(original);
+      const created = await original.createSession(
+        createCommand("cmd_lazySymlink", "Lazy symlink"),
+      );
+      await original.close();
+      managers.splice(managers.indexOf(original), 1);
+
+      const sessionDirectory = resolveStoragePath(
+        homeDirectory,
+        created.session.dbRelativePath.slice(0, -"/session.sqlite3".length),
+      );
+      const externalHome = await mkdtemp(join(tmpdir(), "wi-storage-external-"));
+      homes.push(externalHome);
+      const externalDirectory = join(externalHome, "moved-session");
+      await rename(sessionDirectory, externalDirectory);
+      await symlink(externalDirectory, sessionDirectory, "dir");
+      const externalSize = (await stat(join(externalDirectory, "session.sqlite3"))).size;
+
+      const restarted = new SessionStoreManager({ homeDirectory });
+      managers.push(restarted);
+      await restarted.ready();
+      expect(restarted.catalogRepairStatus()).toMatchObject({ triggered: false, reason: "none" });
+      const session = await restarted.openSession(created.session.sessionId);
+      await expect(session.getManifest()).rejects.toMatchObject({ code: "storage.corrupt" });
+      expect((await lstat(sessionDirectory)).isSymbolicLink()).toBe(true);
+      expect((await stat(join(externalDirectory, "session.sqlite3"))).size).toBe(externalSize);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "retains repair intent and canonical files after an operational discovery failure",
+    async () => {
+      const homeDirectory = await temporaryHome();
+      const original = new SessionStoreManager({
+        homeDirectory,
+        ids: {
+          sessionId: () => "ses_operationalDiscovery",
+          eventId: () => "evt_operationalDiscoveryCreated",
+        },
+      });
+      managers.push(original);
+      const created = await original.createSession(
+        createCommand("cmd_operationalDiscovery", "Operational discovery"),
+      );
+      await original.close();
+      managers.splice(managers.indexOf(original), 1);
+      const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+      for (const suffix of ["", "-wal", "-shm"]) {
+        await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+      }
+      await chmod(databasePath, 0);
+
+      const blocked = new SessionStoreManager({ homeDirectory });
+      managers.push(blocked);
+      await expect(blocked.ready()).rejects.toMatchObject({ code: "storage.busy" });
+      expect((await stat(databasePath)).isFile()).toBe(true);
+      await expect(blocked.catalog.getSession(created.session.sessionId)).resolves.toBeNull();
+      await blocked.close().catch(() => undefined);
+      managers.splice(managers.indexOf(blocked), 1);
+
+      await chmod(databasePath, 0o600);
+      const retried = new SessionStoreManager({ homeDirectory });
+      managers.push(retried);
+      await retried.ready();
+      await expect(retried.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+    },
+  );
+
+  it("bounds database-derived discovery data before parsing or quarantine", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      ids: {
+        sessionId: () => "ses_oversizedDiscovery",
+        eventId: () => "evt_oversizedDiscoveryCreated",
+      },
+    });
+    managers.push(original);
+    const created = await original.createSession(
+      createCommand("cmd_oversizedDiscovery", "x".repeat(999_000)),
+    );
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+    }
+
+    const repairing = new SessionStoreManager({ homeDirectory });
+    managers.push(repairing);
+    await expect(repairing.ready()).rejects.toMatchObject({ code: "storage.busy" });
+    const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+    expect((await stat(databasePath)).isFile()).toBe(true);
+    await expect(repairing.catalog.getSession(created.session.sessionId)).resolves.toBeNull();
+  });
+
+  it("isolates an oversized session database without retaining installation repair", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      ids: {
+        sessionId: () => "ses_oversizedDatabase",
+        eventId: () => "evt_oversizedDatabaseCreated",
+      },
+    });
+    managers.push(original);
+    const created = await original.createSession(
+      createCommand("cmd_oversizedDatabase", "Oversized database"),
+    );
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+    await truncate(databasePath, 256 * 1_024 * 1_024 + 1);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+    }
+
+    const repairing = new SessionStoreManager({ homeDirectory });
+    managers.push(repairing);
+    await repairing.ready();
+    expect(repairing.catalogRepairStatus()).toMatchObject({
+      triggered: true,
+      repaired: 0,
+      quarantined: 0,
+    });
+    await expect(repairing.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Oversized recovered session",
+      dbRelativePath: created.session.dbRelativePath,
+    });
+    expect((await stat(databasePath)).size).toBe(256 * 1_024 * 1_024 + 1);
+    await expect(repairing.catalog.getStartupState()).resolves.toMatchObject({
+      repairReason: null,
+    });
+  });
+
+  it("bounds discovery work even when every session-directory entry is invalid", async () => {
+    const homeDirectory = await temporaryHome();
+    const prefixDirectory = join(homeDirectory, "sessions", "aa");
+    await mkdir(prefixDirectory, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        mkdir(join(prefixDirectory, `invalid-${String(index).padStart(3, "0")}`)),
+      ),
+    );
+    const storage = new SessionStoreManager({
+      homeDirectory,
+      catalogRepair: "force",
+      sessionDiscoveryLimit: 1,
+      sessionWorkers: { size: 1 },
+    });
+    managers.push(storage);
+
+    await expect(storage.ready()).rejects.toMatchObject({ code: "storage.resource_limit" });
   });
 
   it("fails an affected RPC on worker crash and reopens the session on its replacement", async () => {

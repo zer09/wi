@@ -100,6 +100,23 @@ export interface SessionActorIds {
   readonly diagnosticId: () => string;
 }
 
+export type SessionActorTestFailpoint =
+  | "after_command_event_insert_before_commit"
+  | "after_event_commit_before_publish"
+  | "after_tool_requested_commit"
+  | "after_tool_started_commit"
+  | "after_tool_result_commit_before_provider_continue"
+  | "after_provider_text_commit"
+  | "after_run_terminal_commit";
+
+export interface SessionActorTestFailpoints {
+  readonly is: (name: SessionActorTestFailpoint) => boolean;
+  readonly hit: (
+    name: SessionActorTestFailpoint,
+    fields?: Readonly<Record<string, unknown>>,
+  ) => void;
+}
+
 export interface SessionToolFailureDiagnostic {
   readonly diagnosticId: string;
   readonly sessionId: string;
@@ -473,6 +490,7 @@ export class SessionActor {
   private readonly onRecoveryFailureDiagnostic:
     | ((diagnostic: RecoveryFailureDiagnostic) => void)
     | undefined;
+  private readonly testFailpoints: SessionActorTestFailpoints | undefined;
   private readonly shutdownWait: ShutdownWait;
   private readonly queuedRuns: RunRecord[] = [];
   private readonly pendingApprovals = new Map<string, PendingApprovalRecord>();
@@ -511,6 +529,7 @@ export class SessionActor {
     readonly onToolFailureDiagnostic?: (diagnostic: SessionToolFailureDiagnostic) => void;
     readonly onRunFailureDiagnostic?: (diagnostic: SessionRunFailureDiagnostic) => void;
     readonly onRecoveryFailureDiagnostic?: (diagnostic: RecoveryFailureDiagnostic) => void;
+    readonly testFailpoints?: SessionActorTestFailpoints;
     readonly shutdownWait?: ShutdownWait;
   }) {
     this.sessionId = options.storage.sessionId;
@@ -534,6 +553,7 @@ export class SessionActor {
     this.onToolFailureDiagnostic = options.onToolFailureDiagnostic;
     this.onRunFailureDiagnostic = options.onRunFailureDiagnostic;
     this.onRecoveryFailureDiagnostic = options.onRecoveryFailureDiagnostic;
+    this.testFailpoints = options.testFailpoints;
     this.shutdownWait = options.shutdownWait ?? defaultShutdownWait;
   }
 
@@ -556,6 +576,7 @@ export class SessionActor {
     readonly onToolFailureDiagnostic?: (diagnostic: SessionToolFailureDiagnostic) => void;
     readonly onRunFailureDiagnostic?: (diagnostic: SessionRunFailureDiagnostic) => void;
     readonly onRecoveryFailureDiagnostic?: (diagnostic: RecoveryFailureDiagnostic) => void;
+    readonly testFailpoints?: SessionActorTestFailpoints;
     readonly shutdownWait?: ShutdownWait;
   }): Promise<SessionActor> {
     const actor = new SessionActor(options);
@@ -572,6 +593,31 @@ export class SessionActor {
         );
       }
       throw error;
+    }
+  }
+
+  private hitCommittedFailpoints(events: readonly SessionEvent[]): void {
+    if (events.length === 0) return;
+    const fields = { sessionId: this.sessionId, headSequence: events.at(-1)?.sequence };
+    this.testFailpoints?.hit("after_event_commit_before_publish", fields);
+    if (events.some((event) => event.eventType === "provider.text.delta")) {
+      this.testFailpoints?.hit("after_provider_text_commit", fields);
+    }
+    if (events.some((event) => event.eventType === "tool.call.requested")) {
+      this.testFailpoints?.hit("after_tool_requested_commit", fields);
+    }
+    if (events.some((event) => event.eventType === "tool.execution.started")) {
+      this.testFailpoints?.hit("after_tool_started_commit", fields);
+    }
+    if (
+      events.some(
+        (event) =>
+          event.eventType === "tool.execution.completed" ||
+          event.eventType === "tool.execution.failed" ||
+          event.eventType === "tool.execution.outcome_unknown",
+      )
+    ) {
+      this.testFailpoints?.hit("after_tool_result_commit_before_provider_continue", fields);
     }
   }
 
@@ -1050,6 +1096,7 @@ export class SessionActor {
         }
         active.record = current;
       }
+      this.hitCommittedFailpoints(committed.events);
       this.publishOrThrow(committed.events);
       this.applyProjectionMemory(input);
       this.touch();
@@ -1189,6 +1236,9 @@ export class SessionActor {
         acceptedAtMs: createdAtMs,
         runId,
         transaction: {
+          ...(this.testFailpoints?.is("after_command_event_insert_before_commit") === true
+            ? { testFailpoint: "after_command_event_insert_before_commit" as const }
+            : {}),
           events: [
             {
               eventId: this.ids.eventId(),
@@ -1240,6 +1290,7 @@ export class SessionActor {
         },
       };
       const acceptance = await this.acceptCommand(input);
+      this.hitCommittedFailpoints(acceptance.events);
       this.publish(acceptance.events);
       const acceptedRunId = acceptance.runId;
       if (acceptedRunId === null) {
@@ -1633,6 +1684,11 @@ export class SessionActor {
       }
     }
     if (committed === null || terminalRecord === null) throw lastError;
+    this.testFailpoints?.hit("after_run_terminal_commit", {
+      sessionId: this.sessionId,
+      runId,
+      headSequence: committed.events.at(-1)?.sequence,
+    });
     this.publish(committed.events);
     if (isFailure && result.diagnosticId === undefined) {
       this.reportRunFailure({

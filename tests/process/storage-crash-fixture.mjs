@@ -120,6 +120,15 @@ const input = {
 
 try {
   const session = await storage.openSession(sessionId);
+  if (mode === "failpoint_gate_probe") {
+    try {
+      await session.appendTransaction({ ...input, testFailpoint: "crash_before_commit" });
+      process.exit(87);
+    } catch (error) {
+      const stored = await session.getEventById(input.events[0].eventId);
+      process.exit(error?.code === "storage.worker_failed" && stored === null ? 0 : 88);
+    }
+  }
   if (mode === "after_session_commit_before_catalog") {
     await session.appendTransaction(input);
     await storage.drainCatalogObservations();

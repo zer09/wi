@@ -106,16 +106,17 @@ process.once("SIGTERM", () => {
         runState: run?.state ?? null,
       };
       process.stdout.write(`${JSON.stringify(summary)}\n`);
-      process.exitCode =
+      process.exit(
         summary.address === null &&
         summary.socketClosed &&
         summary.runState === "interrupted"
           ? 0
-          : 7;
+          : 7,
+      );
     } catch (error) {
       globalThis.clearTimeout(timeout);
       process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
-      process.exitCode = 8;
+      process.exit(8);
     }
   })();
 });

@@ -11,7 +11,7 @@
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
     "build": "pnpm -r build && node scripts/check-package-exports.mjs",
-    "build:test-deps": "pnpm --filter @wi/protocol build && pnpm --filter @wi/client-state build && pnpm --filter @wi/provider-contract build && pnpm --filter @wi/tools build && pnpm --filter @wi/provider-fake build && pnpm --filter @wi/storage build && pnpm --filter @wi/harness-core build && pnpm --filter @wi/server build",
+    "build:test-deps": "pnpm --filter @wi/test-support build && pnpm --filter @wi/protocol build && pnpm --filter @wi/client-state build && pnpm --filter @wi/provider-contract build && pnpm --filter @wi/tools build && pnpm --filter @wi/provider-fake build && pnpm --filter @wi/storage build && pnpm --filter @wi/harness-core build && pnpm --filter @wi/server build",
     "typecheck": "pnpm build:test-deps && tsc -p tsconfig.json && pnpm -r typecheck",
     "lint": "eslint .",
     "test": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts",
@@ -31,6 +31,7 @@
     "@wi/provider-contract": "workspace:*",
     "@wi/provider-fake": "workspace:*",
     "@wi/storage": "workspace:*",
+    "@wi/test-support": "workspace:*",
     "@wi/tools": "workspace:*",
     "eslint": "9.39.1",
     "fast-check": "4.9.0",

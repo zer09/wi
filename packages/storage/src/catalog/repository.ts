@@ -31,11 +31,43 @@ import {
 import { catalogMigrations } from "./migrations.js";
 
 export const MAXIMUM_BOUNDED_SESSION_LIST_LIMIT = 1_001;
+export const MAXIMUM_CATALOG_REPAIR_PAGE_SIZE = 1_000;
 const BOUNDED_SESSION_LIST_TEXT_CODE_POINTS = 256;
 
 export const BoundedSessionListInputSchema = z.strictObject({
   limit: z.number().int().positive().max(MAXIMUM_BOUNDED_SESSION_LIST_LIMIT),
 });
+
+export const UnavailableReasonSchema = z.enum(["quarantined"]);
+export type UnavailableReason = z.infer<typeof UnavailableReasonSchema>;
+
+export const CatalogRepairPageInputSchema = z.strictObject({
+  afterSessionId: z.union([SessionIdSchema, z.null()]),
+  limit: z.number().int().positive().max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
+});
+export const CatalogRepairPageSchema = z.strictObject({
+  records: z.array(z.strictObject({
+    sessionId: SessionIdSchema,
+    status: SessionStatusSchema,
+    unavailableReason: z.union([UnavailableReasonSchema, z.null()]),
+  })).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
+  nextCursor: z.union([SessionIdSchema, z.null()]),
+});
+export type CatalogRepairPage = z.infer<typeof CatalogRepairPageSchema>;
+
+export const MarkSessionsMissingInputSchema = z.strictObject({
+  sessions: z.array(z.strictObject({
+    sessionId: SessionIdSchema,
+    dbRelativePath: z.string().min(1),
+  })).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
+});
+
+export const CatalogRepairReasonSchema = z.enum([
+  "catalog_new",
+  "catalog_corrupt",
+  "explicit",
+]);
+export type CatalogRepairReason = z.infer<typeof CatalogRepairReasonSchema>;
 
 export const ReserveGlobalCommandInputSchema = z.strictObject({
   commandId: CommandIdSchema,
@@ -74,7 +106,18 @@ export type SetGlobalCommandQuarantineInput = z.infer<
   typeof SetGlobalCommandQuarantineInputSchema
 >;
 
-export const CreateSessionIndexInputSchema = SessionSummarySchema;
+export const CreateSessionIndexInputSchema = SessionSummarySchema.extend({
+  unavailableReason: z.union([UnavailableReasonSchema, z.null()]).default(null),
+}).superRefine((input, context) => {
+  if (input.status !== "unavailable" && input.unavailableReason !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["unavailableReason"],
+      message: "Only an unavailable session can retain unavailable provenance",
+    });
+  }
+});
+export type CreateSessionIndexInput = z.input<typeof CreateSessionIndexInputSchema>;
 
 export const UpdateSessionProjectionInputSchema = z.strictObject({
   sessionId: SessionIdSchema,
@@ -85,8 +128,9 @@ export const UpdateSessionProjectionInputSchema = z.strictObject({
   requiresAttention: z.boolean(),
   pendingApprovalCount: z.number().int().nonnegative().safe(),
   pendingInputCount: z.number().int().nonnegative().safe(),
+  recoveryNeeded: z.boolean().default(false),
 });
-export type UpdateSessionProjectionInput = z.infer<typeof UpdateSessionProjectionInputSchema>;
+export type UpdateSessionProjectionInput = z.input<typeof UpdateSessionProjectionInputSchema>;
 
 export const CatalogProjectionUpdateResultSchema = z.strictObject({
   summary: SessionSummarySchema,
@@ -100,6 +144,25 @@ export const MarkSessionStatusInputSchema = z.strictObject({
 });
 export type MarkSessionStatusInput = z.infer<typeof MarkSessionStatusInputSchema>;
 
+export const RepairSessionClassificationInputSchema = z.strictObject({
+  sessionId: SessionIdSchema,
+  dbRelativePath: z.string().min(1),
+  status: SessionStatusSchema.exclude(["ready"]),
+  sessionSchemaVersion: z.number().int().positive().safe().nullable(),
+  unavailableReason: z.union([UnavailableReasonSchema, z.null()]),
+}).superRefine((input, context) => {
+  if (input.status !== "unavailable" && input.unavailableReason !== null) {
+    context.addIssue({
+      code: "custom",
+      path: ["unavailableReason"],
+      message: "Only an unavailable session can retain unavailable provenance",
+    });
+  }
+});
+export type RepairSessionClassificationInput = z.infer<
+  typeof RepairSessionClassificationInputSchema
+>;
+
 export const ReconcileSessionInputSchema = z.strictObject({
   manifest: SessionManifestSchema,
   dbRelativePath: z.string().min(1),
@@ -110,6 +173,7 @@ export const ReconcileSessionInputSchema = z.strictObject({
   lastMessagePreview: SessionSummarySchema.shape.lastMessagePreview,
   pendingApprovalCount: z.number().int().nonnegative().safe(),
   pendingInputCount: z.number().int().nonnegative().safe(),
+  recoveryNeeded: z.boolean().default(false),
 });
 
 export const ReconcileSessionResultSchema = z.strictObject({
@@ -169,6 +233,7 @@ function sessionFromRow(row: Record<string, unknown>): SessionSummary {
     SessionSummarySchema.parse({
       ...row,
       requiresAttention: row.requiresAttention === 1,
+      recoveryCandidate: row.recoveryCandidate === 1,
     }),
   );
 }
@@ -184,7 +249,50 @@ function browserSessionFromRow(row: Record<string, unknown>): BrowserSessionSumm
 
 export class CatalogRepository {
   constructor(private readonly database: Database.Database) {
-    applyMigrations(database, catalogMigrations, CATALOG_SCHEMA_VERSION);
+    applyMigrations(database, catalogMigrations, CATALOG_SCHEMA_VERSION, {
+      onFreshDatabase: () => {
+        database
+          .prepare("INSERT INTO catalog_repair_state (singleton, reason) VALUES (1, 'catalog_new')")
+          .run();
+      },
+    });
+  }
+
+  getRepairReason(): CatalogRepairReason | null {
+    const row = this.database
+      .prepare("SELECT reason FROM catalog_repair_state WHERE singleton = 1")
+      .get() as { reason: unknown } | undefined;
+    return row === undefined
+      ? null
+      : decodeCatalogValue("catalog repair state", () =>
+          CatalogRepairReasonSchema.parse(row.reason),
+        );
+  }
+
+  beginRepair(reasonValue: unknown): CatalogRepairReason {
+    const reason = CatalogRepairReasonSchema.parse(reasonValue);
+    this.database
+      .prepare(
+        `INSERT INTO catalog_repair_state (singleton, reason) VALUES (1, ?)
+         ON CONFLICT(singleton) DO UPDATE SET reason = excluded.reason`,
+      )
+      .run(reason);
+    return reason;
+  }
+
+  completeRepair(): void {
+    this.database.transaction(() => {
+      this.database.prepare("DELETE FROM catalog_repair_state WHERE singleton = 1").run();
+      this.database
+        .prepare("INSERT INTO catalog_meta (key, value) VALUES ('repair_completed', '1') ON CONFLICT(key) DO UPDATE SET value = '1'")
+        .run();
+    })();
+  }
+
+  hasCompletedRepair(): boolean {
+    return this.database
+      .prepare("SELECT 1 AS present FROM catalog_meta WHERE key = 'repair_completed'")
+      .get() !== undefined;
   }
 
   createProject(project: ProjectRecord): ProjectRecord {
@@ -248,7 +356,22 @@ export class CatalogRepository {
           `Command ${input.commandId} was reused with different content`,
         );
       }
-      if (existing.state === "accepted") return existing;
+      if (existing.state === "accepted") {
+        // Recovery provenance is canonical.  A duplicate completion must agree
+        // with every immutable accepted field instead of silently preserving a
+        // contradictory catalog result.
+        if (
+          existing.commandMethod !== "session.create" ||
+          canonicalJson(existing.result) !== canonicalJson(input.result) ||
+          existing.acceptedAtMs !== input.acceptedAtMs
+        ) {
+          throw new StorageError(
+            "storage.corrupt",
+            `Accepted global command ${input.commandId} conflicts with canonical provenance`,
+          );
+        }
+        return existing;
+      }
       if (existing.state === "failed") {
         throw new StorageError(
           "session.invalid_transition",
@@ -292,7 +415,10 @@ export class CatalogRepository {
       }
       if (existing.state === "failed") return existing;
 
-      this.createSessionIndex(input.session);
+      this.createSessionIndex({
+        ...input.session,
+        unavailableReason: input.quarantinedRelativePath === null ? null : "quarantined",
+      });
       const result = {
         sessionId: input.session.sessionId,
         failed: true,
@@ -329,23 +455,30 @@ export class CatalogRepository {
           "Only the matching failed session creation can record quarantine",
         );
       }
-      if (existing.quarantinedRelativePath !== null) {
-        if (existing.quarantinedRelativePath !== input.quarantinedRelativePath) {
-          throw new StorageError(
-            "session.invalid_transition",
-            "Failed session creation already recorded a different quarantine path",
-          );
-        }
-        return existing;
+      if (
+        existing.quarantinedRelativePath !== null &&
+        existing.quarantinedRelativePath !== input.quarantinedRelativePath
+      ) {
+        throw new StorageError(
+          "session.invalid_transition",
+          "Failed session creation already recorded a different quarantine path",
+        );
       }
-
+      if (existing.quarantinedRelativePath === null) {
+        this.database
+          .prepare(
+            `UPDATE catalog_commands SET quarantined_relative_path = @quarantinedRelativePath
+             WHERE command_id = @commandId AND state = 'failed' AND diagnostic_id = @diagnosticId
+               AND quarantined_relative_path IS NULL`,
+          )
+          .run(input);
+      }
       this.database
         .prepare(
-          `UPDATE catalog_commands SET quarantined_relative_path = @quarantinedRelativePath
-           WHERE command_id = @commandId AND state = 'failed' AND diagnostic_id = @diagnosticId
-             AND quarantined_relative_path IS NULL`,
+          `UPDATE sessions SET unavailable_reason = 'quarantined'
+           WHERE session_id = ? AND status = 'unavailable'`,
         )
-        .run(input);
+        .run(existing.reservedSessionId);
       const updated = this.getGlobalCommand(input.commandId);
       if (updated === null) throw new Error("Failed global command disappeared");
       return updated;
@@ -386,11 +519,15 @@ export class CatalogRepository {
     return row === undefined ? null : globalCommandFromRow(row);
   }
 
-  createSessionIndex(inputValue: unknown): SessionSummary {
+  createSessionIndex(inputValue: unknown, allowPathRepair = false): SessionSummary {
     const input = CreateSessionIndexInputSchema.parse(inputValue);
     this.database.transaction(() => {
       const existing = this.getSession(input.sessionId);
-      if (existing !== null && existing.dbRelativePath !== input.dbRelativePath) {
+      if (
+        !allowPathRepair &&
+        existing !== null &&
+        existing.dbRelativePath !== input.dbRelativePath
+      ) {
         throw new StorageError("storage.corrupt", "Session path changed for an existing session");
       }
       this.database
@@ -398,15 +535,19 @@ export class CatalogRepository {
           `INSERT INTO sessions (
              session_id, project_id, db_relative_path, title, status, created_at_ms, updated_at_ms,
              last_event_sequence, last_run_state, last_message_preview, requires_attention,
-             pending_approval_count, pending_input_count, session_schema_version
+             pending_approval_count, pending_input_count, session_schema_version, recovery_candidate,
+             unavailable_reason
            ) VALUES (
              @sessionId, @projectId, @dbRelativePath, @title, @status, @createdAtMs, @updatedAtMs,
              @lastEventSequence, @lastRunState, @lastMessagePreview, @requiresAttention,
-             @pendingApprovalCount, @pendingInputCount, @sessionSchemaVersion
+             @pendingApprovalCount, @pendingInputCount, @sessionSchemaVersion, @recoveryCandidate,
+             @unavailableReason
            ) ON CONFLICT(session_id) DO UPDATE SET
              project_id = excluded.project_id,
+             db_relative_path = excluded.db_relative_path,
              title = excluded.title,
              status = excluded.status,
+             created_at_ms = excluded.created_at_ms,
              updated_at_ms = excluded.updated_at_ms,
              last_event_sequence = excluded.last_event_sequence,
              last_run_state = excluded.last_run_state,
@@ -414,13 +555,33 @@ export class CatalogRepository {
              requires_attention = excluded.requires_attention,
              pending_approval_count = excluded.pending_approval_count,
              pending_input_count = excluded.pending_input_count,
-             session_schema_version = excluded.session_schema_version`,
+             session_schema_version = excluded.session_schema_version,
+             unavailable_reason = excluded.unavailable_reason,
+             recovery_candidate = CASE
+               WHEN sessions.recovery_candidate = 1 AND excluded.recovery_candidate = 0 THEN 0
+               WHEN excluded.recovery_candidate = 1 THEN 1
+               ELSE sessions.recovery_candidate
+             END`,
         )
-        .run({ ...input, requiresAttention: input.requiresAttention ? 1 : 0 });
+        .run({
+          ...input,
+          requiresAttention: input.requiresAttention ? 1 : 0,
+          recoveryCandidate: input.recoveryCandidate ? 1 : 0,
+        });
     })();
     const created = this.getSession(input.sessionId);
     if (created === null) throw new Error("Session index disappeared");
     return created;
+  }
+
+  countSessions(): number {
+    const row = this.database.prepare("SELECT COUNT(*) AS count FROM sessions").get() as {
+      count: number;
+    };
+    if (!Number.isSafeInteger(row.count) || row.count < 0) {
+      throw new StorageError("storage.corrupt", "Catalog session count is invalid");
+    }
+    return row.count;
   }
 
   listSessions(): readonly SessionSummary[] {
@@ -433,11 +594,55 @@ export class CatalogRepository {
                 last_message_preview AS lastMessagePreview, requires_attention AS requiresAttention,
                 pending_approval_count AS pendingApprovalCount,
                 pending_input_count AS pendingInputCount,
-                session_schema_version AS sessionSchemaVersion
+                session_schema_version AS sessionSchemaVersion,
+                recovery_candidate AS recoveryCandidate
          FROM sessions ORDER BY updated_at_ms DESC, session_id`,
       )
       .all() as Record<string, unknown>[];
     return rows.map(sessionFromRow);
+  }
+
+  listCatalogRepairPage(inputValue: unknown): CatalogRepairPage {
+    const input = CatalogRepairPageInputSchema.parse(inputValue);
+    const rows = this.database
+      .prepare(
+        `SELECT session_id AS sessionId, status,
+                unavailable_reason AS unavailableReason
+         FROM sessions
+         WHERE @afterSessionId IS NULL OR session_id > @afterSessionId
+         ORDER BY session_id
+         LIMIT @rowLimit`,
+      )
+      .all({
+        afterSessionId: input.afterSessionId,
+        rowLimit: input.limit + 1,
+      }) as Record<string, unknown>[];
+    const hasMore = rows.length > input.limit;
+    const records = CatalogRepairPageSchema.shape.records.parse(rows.slice(0, input.limit));
+    return {
+      records,
+      nextCursor: hasMore ? (records.at(-1)?.sessionId ?? null) : null,
+    };
+  }
+
+  markSessionsMissing(inputValue: unknown): readonly string[] {
+    const input = MarkSessionsMissingInputSchema.parse(inputValue);
+    return this.database.transaction(() => {
+      const updated: string[] = [];
+      const statement = this.database.prepare(
+        `UPDATE sessions SET
+           db_relative_path = @dbRelativePath,
+           status = 'missing',
+           unavailable_reason = NULL,
+           recovery_candidate = 0
+         WHERE session_id = @sessionId
+           AND (status <> 'unavailable' OR unavailable_reason IS NULL)`,
+      );
+      for (const session of input.sessions) {
+        if (statement.run(session).changes === 1) updated.push(session.sessionId);
+      }
+      return updated;
+    })();
   }
 
   listBrowserSessionsBounded(inputValue: unknown): readonly BrowserSessionSummary[] {
@@ -472,7 +677,8 @@ export class CatalogRepository {
                 last_message_preview AS lastMessagePreview, requires_attention AS requiresAttention,
                 pending_approval_count AS pendingApprovalCount,
                 pending_input_count AS pendingInputCount,
-                session_schema_version AS sessionSchemaVersion
+                session_schema_version AS sessionSchemaVersion,
+                recovery_candidate AS recoveryCandidate
          FROM sessions WHERE session_id = ?`,
       )
       .get(sessionId) as Record<string, unknown> | undefined;
@@ -512,10 +718,15 @@ export class CatalogRepository {
            last_message_preview = @lastMessagePreview,
            requires_attention = @requiresAttention,
            pending_approval_count = @pendingApprovalCount,
-           pending_input_count = @pendingInputCount
+           pending_input_count = @pendingInputCount,
+           recovery_candidate = CASE WHEN @recoveryNeeded = 0 THEN 0 ELSE 1 END
          WHERE session_id = @sessionId AND last_event_sequence < @lastEventSequence`,
       )
-      .run({ ...input, requiresAttention: input.requiresAttention ? 1 : 0 });
+      .run({
+        ...input,
+        requiresAttention: input.requiresAttention ? 1 : 0,
+        recoveryNeeded: input.recoveryNeeded ? 1 : 0,
+      });
     if (result.changes !== 1) {
       throw new StorageError("storage.catalog_projection_conflict", "Catalog projection lost its head CAS");
     }
@@ -524,14 +735,77 @@ export class CatalogRepository {
     return { summary: updated, outcome: "applied" };
   }
 
+  listRecoveryCandidates(inputValue: unknown = {}): {
+    readonly sessionIds: readonly string[];
+    readonly nextCursor: { readonly updatedAtMs: number; readonly sessionId: string } | null;
+  } {
+    const input = z
+      .strictObject({
+        afterUpdatedAtMs: z.number().int().nonnegative().safe().nullable().default(null),
+        afterSessionId: SessionIdSchema.nullable().default(null),
+        limit: z.number().int().positive().max(1_000).default(1_000),
+      })
+      .parse(inputValue);
+    if ((input.afterUpdatedAtMs === null) !== (input.afterSessionId === null)) {
+      throw new StorageError("storage.corrupt", "Recovery candidate cursor is incomplete");
+    }
+    const rows = this.database
+      .prepare(
+        `SELECT session_id AS sessionId, updated_at_ms AS updatedAtMs FROM sessions
+         WHERE status = 'ready' AND recovery_candidate = 1
+           AND (
+             @afterUpdatedAtMs IS NULL
+             OR updated_at_ms > @afterUpdatedAtMs
+             OR (updated_at_ms = @afterUpdatedAtMs AND session_id > @afterSessionId)
+           )
+         ORDER BY updated_at_ms, session_id LIMIT @limit`,
+      )
+      .all(input) as readonly { sessionId: string; updatedAtMs: number }[];
+    const last = rows.at(-1);
+    return {
+      sessionIds: rows.map((row) => SessionIdSchema.parse(row.sessionId)),
+      nextCursor: last === undefined ? null : { updatedAtMs: last.updatedAtMs, sessionId: SessionIdSchema.parse(last.sessionId) },
+    };
+  }
+
+  markRecoveryCandidate(sessionIdValue: unknown): void {
+    const sessionId = SessionIdSchema.parse(sessionIdValue);
+    const result = this.database
+      .prepare("UPDATE sessions SET recovery_candidate = 1 WHERE session_id = ?")
+      .run(sessionId);
+    if (result.changes !== 1) throw new StorageError("session.not_found", "Session index not found");
+  }
+
   markSessionStatus(inputValue: unknown): SessionSummary {
     const input = MarkSessionStatusInputSchema.parse(inputValue);
     const result = this.database
-      .prepare("UPDATE sessions SET status = @status WHERE session_id = @sessionId")
+      .prepare(
+        `UPDATE sessions SET status = @status, unavailable_reason = NULL
+         WHERE session_id = @sessionId`,
+      )
       .run(input);
     if (result.changes !== 1) throw new StorageError("session.not_found", "Session index not found");
     const updated = this.getSession(input.sessionId);
     if (updated === null) throw new Error("Updated session index disappeared");
+    return updated;
+  }
+
+  repairSessionClassification(inputValue: unknown): SessionSummary {
+    const input = RepairSessionClassificationInputSchema.parse(inputValue);
+    const result = this.database
+      .prepare(
+        `UPDATE sessions SET
+           db_relative_path = @dbRelativePath,
+           status = @status,
+           session_schema_version = COALESCE(@sessionSchemaVersion, session_schema_version),
+           unavailable_reason = @unavailableReason,
+           recovery_candidate = 0
+         WHERE session_id = @sessionId`,
+      )
+      .run(input);
+    if (result.changes !== 1) throw new StorageError("session.not_found", "Session index not found");
+    const updated = this.getSession(input.sessionId);
+    if (updated === null) throw new Error("Repaired session index disappeared");
     return updated;
   }
 
@@ -564,7 +838,9 @@ export class CatalogRepository {
       pendingApprovalCount: input.pendingApprovalCount,
       pendingInputCount: input.pendingInputCount,
       sessionSchemaVersion: manifest.schemaVersion,
-    });
+      // Only an observation of canonical terminal/no-active state clears a candidate.
+      recoveryCandidate: input.recoveryNeeded,
+    }, true);
     return { summary, applied: true };
   }
 }

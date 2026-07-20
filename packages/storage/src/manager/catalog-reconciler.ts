@@ -34,6 +34,7 @@ export class CatalogReconciler {
       lastMessagePreview: projection.lastMessagePreview,
       pendingApprovalCount: pendingApprovals.length,
       pendingInputCount,
+      recoveryNeeded: (await session.getNonterminalRuns()).length > 0,
     };
   }
 

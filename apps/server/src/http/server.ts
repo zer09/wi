@@ -474,28 +474,46 @@ export class WiServer {
     this.gateway.stopAccepting();
     this.runtime.stopAcceptingCommands();
     const httpClose = this.httpServer.listening ? this.closeHttpListener() : null;
-    this.closePromise = this.finishClose(httpClose);
+    const deadlineAtMs = Date.now() + this.runtime.getShutdownDeadlineMs();
+    this.closePromise = this.finishClose(httpClose, deadlineAtMs);
     return this.closePromise;
   }
 
-  private async finishClose(initialHttpClose: Promise<void> | null): Promise<void> {
+  private async finishClose(initialHttpClose: Promise<void> | null, deadlineAtMs: number): Promise<void> {
     const errors: unknown[] = [];
-    // If listen is already in flight, wait until its callback settles before checking
-    // httpServer.listening. A startup failure is reported to start() and does not prevent cleanup.
-    await this.startPromise?.catch(() => undefined);
+    const withinDeadline = async (component: string, operation: Promise<void>): Promise<void> => {
+      const remaining = deadlineAtMs - Date.now();
+      if (remaining <= 0) throw new Error(`Shutdown deadline elapsed before ${component}`);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          operation,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error(`${component} exceeded shutdown deadline`)), remaining);
+            timer.unref();
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
+    // Startup can itself be blocked on storage recovery. close() has already
+    // changed lifecycleState, so a later startup completion cannot open the
+    // listener; cleanup must not wait for that blocked promise.
     const httpClose = initialHttpClose ?? this.closeHttpListener();
     try {
-      await this.gateway.shutdown();
+      await withinDeadline("gateway", this.gateway.shutdown());
     } catch (error) {
       errors.push(error);
     }
     try {
-      await httpClose;
+      await withinDeadline("http", httpClose);
     } catch (error) {
       errors.push(error);
     }
     try {
-      await this.runtime.close();
+      // Runtime receives the same server-owned absolute deadline, not a fresh budget.
+      await this.runtime.close(deadlineAtMs);
     } catch (error) {
       errors.push(error);
     }

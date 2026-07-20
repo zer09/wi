@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { rename } from "node:fs/promises";
 
 import {
+  canonicalJson,
   createId,
   hashCommandContent,
   type SessionCreateCommand,
@@ -12,12 +13,18 @@ import {
   CatalogClient,
   type CatalogClientOptions,
   type ReconcileSessionInput,
+  type RecoveryCandidateCursor,
+  type RecoveryCandidatePage,
 } from "../catalog/client.js";
-import type { UpdateSessionProjectionInput } from "../catalog/repository.js";
+import type {
+  CatalogRepairReason,
+  UpdateSessionProjectionInput,
+} from "../catalog/repository.js";
 import type { SessionClient } from "../session/client.js";
 import { StorageError, toStorageError } from "../common/worker-rpc.js";
 import {
   SessionWorkerPool,
+  type DiscoveredSession,
   type SessionWorkerPoolOptions,
 } from "../session/worker-pool.js";
 import {
@@ -26,8 +33,10 @@ import {
   type AcceptedCommandResult,
   type AppendTransactionInput,
   type AppendTransactionResult,
+  type CreationProvenance,
   type GlobalCommandRecord,
   type ProjectRecord,
+  type SessionManifest,
   type SessionSummary,
 } from "../types.js";
 import { CatalogReconciler } from "./catalog-reconciler.js";
@@ -47,6 +56,16 @@ export interface CatalogObservationFailure {
   readonly error: StorageError;
 }
 
+export interface StorageTestFailpoints {
+  readonly hit: (
+    name:
+      | "after_session_create_before_catalog_ready"
+      | "after_catalog_session_repair"
+      | "after_catalog_replacement_before_repair",
+    fields?: Readonly<Record<string, unknown>>,
+  ) => void;
+}
+
 export interface SessionStoreManagerOptions {
   readonly homeDirectory: string;
   readonly sessionWorkers?: SessionWorkerPoolOptions;
@@ -62,6 +81,18 @@ export interface SessionStoreManagerOptions {
     failure: CatalogObservationFailure,
   ) => void | Promise<void>;
   readonly catalogObservationShutdownTimeoutMs?: number;
+  readonly testFailpoints?: StorageTestFailpoints;
+  readonly catalogRepair?: "auto" | "force" | "off";
+  readonly sessionDiscoveryLimit?: number;
+}
+
+export interface CatalogRepairReport {
+  readonly triggered: boolean;
+  readonly reason: "none" | CatalogRepairReason;
+  readonly discovered: number;
+  readonly repaired: number;
+  readonly quarantined: number;
+  readonly ignored: number;
 }
 
 export interface CreateSessionStorageResult {
@@ -108,6 +139,14 @@ function assertPositiveWorkerTimeout(value: number | undefined, description: str
 export function validateSessionStoreManagerOptions(
   options: SessionStoreManagerOptions,
 ): void {
+  if (
+    options.testFailpoints !== undefined &&
+    (process.env.NODE_ENV !== "test" || process.env.WI_ALLOW_TEST_FAILPOINTS !== "1")
+  ) {
+    throw new Error(
+      "Storage test failpoints require NODE_ENV=test and WI_ALLOW_TEST_FAILPOINTS=1",
+    );
+  }
   const sessionWorkers = options.sessionWorkers;
   if (
     sessionWorkers?.size !== undefined &&
@@ -133,6 +172,22 @@ export function validateSessionStoreManagerOptions(
   );
   assertPositiveWorkerTimeout(options.catalogWorker?.closeTimeoutMs, "Worker close timeout");
   if (
+    options.catalogRepair !== undefined &&
+    options.catalogRepair !== "auto" &&
+    options.catalogRepair !== "force" &&
+    options.catalogRepair !== "off"
+  ) {
+    throw new RangeError("Catalog repair mode must be auto, force, or off");
+  }
+  if (
+    options.sessionDiscoveryLimit !== undefined &&
+    (!Number.isSafeInteger(options.sessionDiscoveryLimit) ||
+      options.sessionDiscoveryLimit < 1 ||
+      options.sessionDiscoveryLimit > 10_000)
+  ) {
+    throw new RangeError("Session discovery limit must be between 1 and 10000");
+  }
+  if (
     options.catalogObservationShutdownTimeoutMs !== undefined &&
     (!Number.isSafeInteger(options.catalogObservationShutdownTimeoutMs) ||
       options.catalogObservationShutdownTimeoutMs <= 0)
@@ -152,6 +207,45 @@ function unavailableStatus(error: unknown): "missing" | "unavailable" | null {
     return "unavailable";
   }
   return null;
+}
+
+type NonValidDiscoveredSession = Exclude<DiscoveredSession, { readonly kind: "valid" }>;
+
+type RetainedDiscoveryClassification =
+  | { readonly kind: "corrupt" | "transient" | "missing" | "oversized" }
+  | { readonly kind: "unsupported"; readonly schemaVersion: number };
+
+export function retainNonValidDiscoveryClassification(
+  record: NonValidDiscoveredSession,
+): RetainedDiscoveryClassification {
+  if (record.kind === "unsupported") {
+    return { kind: record.kind, schemaVersion: record.schemaVersion };
+  }
+  return { kind: record.kind };
+}
+
+function catalogCommandConflictsWithProvenance(
+  command: GlobalCommandRecord,
+  sessionId: string,
+  manifest: SessionManifest,
+  provenance: CreationProvenance,
+): boolean {
+  if (
+    command.commandMethod !== "session.create" ||
+    command.payloadHash !== provenance.payloadHash ||
+    command.reservedSessionId !== sessionId ||
+    command.reservedEventId !== provenance.eventId ||
+    command.request.title !== manifest.title ||
+    command.request.projectId !== manifest.projectId ||
+    command.updatedAtMs !== provenance.acceptedAtMs ||
+    command.state === "failed"
+  ) {
+    return true;
+  }
+  return command.state === "accepted" && (
+    canonicalJson(command.result) !== canonicalJson(provenance.result) ||
+    command.acceptedAtMs !== provenance.acceptedAtMs
+  );
 }
 
 interface CatalogObservationRequest {
@@ -180,14 +274,25 @@ export class SessionStoreManager {
     | ((failure: CatalogObservationFailure) => void | Promise<void>)
     | undefined;
   private readonly catalogObservationShutdownTimeoutMs: number;
+  private readonly testFailpoints: StorageTestFailpoints | undefined;
+  private readonly sessionDiscoveryLimit: number;
   private readonly catalogObservationAbort = new AbortController();
   private readonly catalogObservations = new Map<string, CatalogObservationState>();
   private readonly startupRecovery: Promise<void>;
+  private startupRepairReport: CatalogRepairReport = {
+    triggered: false,
+    reason: "none",
+    discovered: 0,
+    repaired: 0,
+    quarantined: 0,
+    ignored: 0,
+  };
   private readonly reconciledSessions = new Set<string>();
   private readonly reconciliationInFlight = new Map<string, Promise<boolean>>();
   private readonly sessionFaultVersions = new Map<string, number>();
   private readonly sessionFaultStatuses = new Map<string, "missing" | "unavailable">();
   private readonly activeOperations = new Set<Promise<void>>();
+  private sessionCreationTail: Promise<void> = Promise.resolve();
   private acceptingOperations = true;
   private closePromise: Promise<void> | null = null;
 
@@ -196,9 +301,11 @@ export class SessionStoreManager {
     this.homeDirectory = options.homeDirectory;
     this.ids = options.ids ?? defaultIds();
     this.now = options.now ?? Date.now;
+    const catalogRepair = options.catalogRepair ?? "auto";
     this.catalog = new CatalogClient({
       homeDirectory: options.homeDirectory,
       ...options.catalogWorker,
+      allowRepair: catalogRepair !== "off",
     });
     const configuredSessionError = options.sessionWorkers?.onSessionError;
     try {
@@ -224,6 +331,8 @@ export class SessionStoreManager {
         await catalog.updateSessionProjection(update);
       });
     this.onCatalogObservationError = options.onCatalogObservationError;
+    this.testFailpoints = options.testFailpoints;
+    this.sessionDiscoveryLimit = options.sessionDiscoveryLimit ?? 1_000;
     this.catalogObservationShutdownTimeoutMs =
       options.catalogObservationShutdownTimeoutMs ?? 2_000;
     if (
@@ -237,7 +346,7 @@ export class SessionStoreManager {
       this.catalog,
       this.sessions,
     );
-    this.startupRecovery = this.recoverIncompleteSessionCreations();
+    this.startupRecovery = this.runStartupRecovery(catalogRepair);
   }
 
   private diagnosticId(): string {
@@ -274,6 +383,7 @@ export class SessionStoreManager {
       pendingApprovalCount: 0,
       pendingInputCount: 0,
       sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+      recoveryCandidate: false,
     };
     let failedCommand = await this.catalog.failGlobalCommand({
       commandId: command.commandId,
@@ -304,6 +414,339 @@ export class SessionStoreManager {
     return { command: failedCommand, session };
   }
 
+  private async visitDiscoveredSessions(
+    sessionIds: readonly string[],
+    visitor: (record: DiscoveredSession) => void | Promise<void>,
+  ): Promise<void> {
+    let startIndex = 0;
+    while (startIndex < sessionIds.length) {
+      const page = await this.sessions.discoverSessionPage(
+        this.homeDirectory,
+        sessionIds,
+        startIndex,
+      );
+      if (page.records.length !== page.processedCount) {
+        throw new StorageError("storage.corrupt", "Session discovery page count is inconsistent");
+      }
+      for (const record of page.records) await visitor(record);
+      startIndex += page.processedCount;
+    }
+  }
+
+  private async discoverAndRepairCatalog(
+    reason: Exclude<CatalogRepairReport["reason"], "none">,
+  ): Promise<void> {
+    const discovery = await this.sessions.discoverSessionInventory(
+      this.homeDirectory,
+      this.sessionDiscoveryLimit,
+    );
+    const observedSessionIds = new Set(discovery.sessionIds);
+    let repaired = 0;
+    let quarantined = 0;
+    let transientFailure = false;
+    const provenanceOwners = new Map<string, string>();
+    const conflictingProvenanceSessions = new Set<string>();
+    const retainedClassifications = new Map<string, RetainedDiscoveryClassification>();
+    await this.visitDiscoveredSessions(discovery.sessionIds, async (record) => {
+      if (record.kind !== "valid") {
+        retainedClassifications.set(
+          record.sessionId,
+          retainNonValidDiscoveryClassification(record),
+        );
+        return;
+      }
+      if (record.creationProvenance === null) return;
+      const previous = provenanceOwners.get(record.creationProvenance.commandId);
+      if (previous !== undefined && previous !== record.sessionId) {
+        // Neither claimant can be trusted. Isolate both sessions while allowing
+        // independent discoveries to finish rebuilding the installation index.
+        conflictingProvenanceSessions.add(previous);
+        conflictingProvenanceSessions.add(record.sessionId);
+      } else {
+        provenanceOwners.set(record.creationProvenance.commandId, record.sessionId);
+      }
+      const catalogCommand = await this.catalog.getGlobalCommand(
+        record.creationProvenance.commandId,
+      );
+      if (
+        catalogCommand !== null &&
+        catalogCommandConflictsWithProvenance(
+          catalogCommand,
+          record.sessionId,
+          record.manifest,
+          record.creationProvenance,
+        )
+      ) {
+        conflictingProvenanceSessions.add(record.sessionId);
+      }
+    });
+    await this.visitDiscoveredSessions(discovery.sessionIds, async (record) => {
+      // A non-valid first-pass classification cannot become a newly trusted
+      // provenance claimant merely because the second read observes different state.
+      const retained = retainedClassifications.get(record.sessionId);
+      const classification = retained ?? (
+        record.kind === "valid" ? null : retainNonValidDiscoveryClassification(record)
+      );
+      const dbRelativePath = sessionDatabaseRelativePath(record.sessionId);
+      if (classification === null && record.kind === "valid" &&
+        !conflictingProvenanceSessions.has(record.sessionId)) {
+        const observation = record.observation;
+        const expectedCatalog = await this.catalog.getSession(record.sessionId);
+        const reconciliation = await this.catalog.reconcileSessionWithStatus({
+          manifest: record.manifest,
+          dbRelativePath,
+          expectedCatalogSequence: expectedCatalog?.lastEventSequence ?? null,
+          expectedCatalogStatus: expectedCatalog?.status ?? null,
+          updatedAtMs: observation.projection.updatedAtMs,
+          lastRunState: observation.projection.lastRunState,
+          lastMessagePreview: observation.projection.lastMessagePreview,
+          pendingApprovalCount: observation.pendingApprovalCount,
+          pendingInputCount: observation.pendingInputCount,
+          recoveryNeeded: observation.recoveryNeeded,
+        });
+        if (!reconciliation.applied) {
+          transientFailure = true;
+          return;
+        }
+        if (record.creationProvenance !== null) {
+          const provenance = record.creationProvenance;
+          const reservation = await this.catalog.reserveGlobalCommand({
+            commandId: provenance.commandId,
+            payloadHash: provenance.payloadHash,
+            reservedSessionId: record.sessionId,
+            reservedEventId: provenance.eventId,
+            request: { title: record.manifest.title, projectId: record.manifest.projectId },
+            updatedAtMs: provenance.acceptedAtMs,
+          });
+          if (
+            reservation.command.reservedSessionId !== record.sessionId ||
+            reservation.command.reservedEventId !== provenance.eventId
+          ) {
+            throw new StorageError("storage.corrupt", "Recovered creation command conflicts with canonical provenance");
+          }
+          await this.catalog.completeGlobalCommand({
+            commandId: provenance.commandId,
+            payloadHash: provenance.payloadHash,
+            result: provenance.result,
+            acceptedAtMs: provenance.acceptedAtMs,
+          });
+        }
+        repaired += 1;
+        this.testFailpoints?.hit("after_catalog_session_repair", {
+          sessionId: record.sessionId,
+          repaired,
+        });
+        return;
+      }
+      if (classification?.kind === "transient") {
+        transientFailure = true;
+        return;
+      }
+      if (classification?.kind === "missing") {
+        const existing = await this.catalog.getSession(record.sessionId);
+        if (existing === null) {
+          const atMs = this.now();
+          await this.catalog.createSessionIndex({
+            sessionId: record.sessionId,
+            projectId: null,
+            dbRelativePath,
+            title: "Missing recovered session",
+            status: "missing",
+            createdAtMs: atMs,
+            updatedAtMs: atMs,
+            lastEventSequence: 0,
+            lastRunState: null,
+            lastMessagePreview: null,
+            requiresAttention: true,
+            pendingApprovalCount: 0,
+            pendingInputCount: 0,
+            sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+            recoveryCandidate: false,
+          });
+        } else {
+          await this.catalog.repairSessionClassification({
+            sessionId: record.sessionId,
+            dbRelativePath,
+            status: "missing",
+            sessionSchemaVersion: null,
+            unavailableReason: null,
+          });
+        }
+        this.sessionFaultStatuses.set(record.sessionId, "missing");
+        this.reconciledSessions.delete(record.sessionId);
+        return;
+      }
+
+      const atMs = this.now();
+      const preserveUnsupported = classification?.kind === "unsupported";
+      const preserveInPlace = preserveUnsupported || classification?.kind === "oversized";
+      let recoveredTitle = "Unavailable recovered session";
+      if (preserveUnsupported) recoveredTitle = "Unsupported recovered session";
+      if (classification?.kind === "oversized") recoveredTitle = "Oversized recovered session";
+      const existing = await this.catalog.getSession(record.sessionId);
+      if (existing === null) {
+        await this.catalog.createSessionIndex({
+          sessionId: record.sessionId,
+          projectId: null,
+          dbRelativePath,
+          title: recoveredTitle,
+          status: "unavailable",
+          createdAtMs: atMs,
+          updatedAtMs: atMs,
+          lastEventSequence: 0,
+          lastRunState: null,
+          lastMessagePreview: null,
+          requiresAttention: true,
+          pendingApprovalCount: 0,
+          pendingInputCount: 0,
+          sessionSchemaVersion: preserveUnsupported
+            ? classification.schemaVersion
+            : SESSION_SCHEMA_VERSION,
+          recoveryCandidate: false,
+          unavailableReason: preserveInPlace ? null : "quarantined",
+        });
+      } else {
+        await this.catalog.repairSessionClassification({
+          sessionId: record.sessionId,
+          dbRelativePath,
+          status: "unavailable",
+          sessionSchemaVersion: preserveUnsupported ? classification.schemaVersion : null,
+          unavailableReason: preserveInPlace ? null : "quarantined",
+        });
+      }
+      if (!preserveInPlace) {
+        const sessionDirectoryRelativePath = dbRelativePath.slice(
+          0,
+          -"/session.sqlite3".length,
+        );
+        const quarantineRelativePath = `${sessionDirectoryRelativePath}.quarantine-${this.diagnosticId()}`;
+        try {
+          await rename(
+            resolveStoragePath(this.homeDirectory, sessionDirectoryRelativePath),
+            resolveStoragePath(this.homeDirectory, quarantineRelativePath),
+          );
+          quarantined += 1;
+        } catch {
+          // A failed rename is unavailable but not durably quarantined. A later
+          // absent canonical path must therefore be allowed to become missing.
+          await this.catalog.repairSessionClassification({
+            sessionId: record.sessionId,
+            dbRelativePath,
+            status: "unavailable",
+            sessionSchemaVersion: null,
+            unavailableReason: null,
+          });
+        }
+      }
+      this.sessionFaultStatuses.set(record.sessionId, "unavailable");
+    });
+
+    const catalogSessionCount = await this.catalog.countSessions();
+    if (catalogSessionCount > this.sessionDiscoveryLimit) {
+      throw new StorageError(
+        "storage.resource_limit",
+        "Catalog session count exceeds the repair limit",
+        true,
+      );
+    }
+    let repairCursor: string | null = null;
+    do {
+      const page = await this.catalog.listCatalogRepairPage(repairCursor);
+      const missing = page.records.flatMap((record) => {
+        if (observedSessionIds.has(record.sessionId)) return [];
+        if (record.status === "unavailable" && record.unavailableReason === "quarantined") {
+          return [];
+        }
+        return [{
+          sessionId: record.sessionId,
+          dbRelativePath: sessionDatabaseRelativePath(record.sessionId),
+        }];
+      });
+      const markedSessionIds = await this.catalog.markSessionsMissing(missing);
+      for (const sessionId of markedSessionIds) {
+        this.sessionFaultStatuses.set(sessionId, "missing");
+        this.reconciledSessions.delete(sessionId);
+      }
+      repairCursor = page.nextCursor;
+    } while (repairCursor !== null);
+
+    this.startupRepairReport = {
+      triggered: true,
+      reason,
+      discovered: discovery.sessionIds.length,
+      repaired,
+      quarantined,
+      ignored: discovery.ignoredEntries,
+    };
+    if (transientFailure) {
+      // Retain the marker; an operational failure is not proof that a canonical
+      // database is corrupt and must be retried without quarantine.
+      throw new StorageError("storage.busy", "Catalog repair retained for an operational discovery failure", true);
+    }
+  }
+
+  private async runStartupRecovery(
+    mode: NonNullable<SessionStoreManagerOptions["catalogRepair"]>,
+  ): Promise<void> {
+    let repairReason: CatalogRepairReason | null = null;
+    let repairMarked = false;
+    if (mode === "force") {
+      // A healthy catalog is reconciled in place so catalog-only projects and
+      // global command outcomes are not silently destroyed by maintenance.
+      try {
+        const state = await this.catalog.getStartupState();
+        repairReason = state.repairReason ?? "explicit";
+        if (state.repairReason === null) await this.catalog.beginRepair("explicit");
+        repairMarked = true;
+      } catch (error) {
+        if (!(error instanceof StorageError) || error.code !== "storage.corrupt") throw error;
+        await this.catalog.repair();
+        repairReason = "catalog_corrupt";
+        repairMarked = true;
+      }
+    } else {
+      try {
+        const state = await this.catalog.getStartupState();
+        if (state.repairReason !== null) {
+          if (mode === "off") {
+            // A brand-new empty installation has no canonical work to protect;
+            // clear its atomic bootstrap marker without enabling repair for a
+            // previously populated incomplete catalog.
+            if (state.repairReason === "catalog_new" && !state.hasCompletedRepair) {
+              repairReason = "catalog_new";
+              repairMarked = true;
+            } else {
+              throw new StorageError(
+                "storage.corrupt",
+                "Catalog repair is incomplete and automatic repair is disabled",
+              );
+            }
+          } else {
+            repairReason = state.repairReason;
+            repairMarked = true;
+          }
+        }
+      } catch (error) {
+        if (!(error instanceof StorageError) || error.code !== "storage.corrupt" || mode === "off") {
+          throw error;
+        }
+        await this.catalog.repair();
+        repairReason = "catalog_corrupt";
+      }
+    }
+    if (repairReason !== null) {
+      if (!repairMarked) await this.catalog.beginRepair(repairReason);
+      this.testFailpoints?.hit("after_catalog_replacement_before_repair", { repairReason });
+      await this.discoverAndRepairCatalog(repairReason);
+      await this.catalog.completeRepair();
+    }
+    await this.recoverIncompleteSessionCreations();
+  }
+
+  catalogRepairStatus(): CatalogRepairReport {
+    return { ...this.startupRepairReport };
+  }
+
   private async recoverIncompleteSessionCreations(): Promise<void> {
     const commands = await this.catalog.listCreatingGlobalCommands();
     for (const command of commands) {
@@ -318,6 +761,14 @@ export class SessionStoreManager {
             title: command.request.title,
             createdAtMs: command.updatedAtMs,
             eventId: command.reservedEventId,
+            creation: {
+              commandId: command.commandId,
+              payloadHash: command.payloadHash,
+              commandMethod: "session.create",
+              eventId: command.reservedEventId,
+              result: { sessionId: command.reservedSessionId },
+              acceptedAtMs: command.updatedAtMs,
+            },
           },
           databasePath,
         );
@@ -335,7 +786,9 @@ export class SessionStoreManager {
         commandId: command.commandId,
         payloadHash: command.payloadHash,
         result: { sessionId: command.reservedSessionId },
-        acceptedAtMs: this.now(),
+        // A creating reservation's timestamp is immutable provenance. Recovery
+        // must not manufacture a restart-time acceptance timestamp.
+        acceptedAtMs: command.updatedAtMs,
       });
       this.sessionFaultStatuses.delete(command.reservedSessionId);
       this.reconciledSessions.add(command.reservedSessionId);
@@ -448,9 +901,24 @@ export class SessionStoreManager {
     }
   }
 
-  private async drainOperations(): Promise<void> {
+  private async drainOperations(deadlineAtMs?: number): Promise<void> {
     while (this.activeOperations.size > 0) {
-      await Promise.all(this.activeOperations);
+      const drain = Promise.all(this.activeOperations);
+      if (deadlineAtMs === undefined) {
+        await drain;
+        continue;
+      }
+      const remaining = deadlineAtMs - Date.now();
+      if (remaining <= 0) {
+        throw new StorageError("storage.worker_timeout", "Storage operation drain exceeded shutdown deadline", true);
+      }
+      await Promise.race([
+        drain,
+        new Promise<never>((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new StorageError("storage.worker_timeout", "Storage operation drain exceeded shutdown deadline", true)), remaining);
+          timer.unref();
+        }),
+      ]);
     }
   }
 
@@ -469,6 +937,16 @@ export class SessionStoreManager {
     command: SessionCreateCommand,
   ): Promise<CreateSessionStorageResult> {
     await this.ready();
+    const existingCommand = await this.catalog.getGlobalCommand(command.commandId);
+    if (
+      existingCommand === null &&
+      await this.catalog.countSessions() >= this.sessionDiscoveryLimit
+    ) {
+      throw new StorageError(
+        "storage.resource_limit",
+        `Session count reached the configured limit of ${String(this.sessionDiscoveryLimit)}`,
+      );
+    }
     const payloadHash = await hashCommandContent(command);
     const now = this.now();
     const reservation = await this.catalog.reserveGlobalCommand({
@@ -523,6 +1001,14 @@ export class SessionStoreManager {
           title,
           createdAtMs,
           eventId: reservation.command.reservedEventId,
+          creation: {
+            commandId: command.commandId,
+            payloadHash,
+            commandMethod: "session.create",
+            eventId: reservation.command.reservedEventId,
+            result: { sessionId },
+            acceptedAtMs: now,
+          },
         },
         databasePath,
       );
@@ -538,6 +1024,11 @@ export class SessionStoreManager {
       };
     }
 
+    this.testFailpoints?.hit("after_session_create_before_catalog_ready", {
+      sessionId,
+      commandId: command.commandId,
+      headSequence: initialized.manifest.lastEventSequence,
+    });
     const session = await this.catalog.createSessionIndex({
       sessionId,
       projectId,
@@ -553,6 +1044,7 @@ export class SessionStoreManager {
       pendingApprovalCount: 0,
       pendingInputCount: 0,
       sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+      recoveryCandidate: false,
     });
     const commandRecord = await this.catalog.completeGlobalCommand({
       commandId: command.commandId,
@@ -572,21 +1064,44 @@ export class SessionStoreManager {
   }
 
   async createSession(command: SessionCreateCommand): Promise<CreateSessionStorageResult> {
-    return this.runOperation(() => this.createSessionInternal(command));
+    return this.runOperation(async () => {
+      const previousCreation = this.sessionCreationTail;
+      let releaseCreation = (): void => undefined;
+      this.sessionCreationTail = new Promise<void>((resolve) => {
+        releaseCreation = resolve;
+      });
+      await previousCreation;
+      try {
+        return await this.createSessionInternal(command);
+      } finally {
+        releaseCreation();
+      }
+    });
   }
 
   private async openSessionInternal(sessionId: string): Promise<SessionClient> {
     await this.ready();
     const summary = await this.catalog.getSession(sessionId);
     if (summary === null) throw new Error(`Session ${sessionId} was not found in the catalog`);
+    const expectedRelativePath = sessionDatabaseRelativePath(sessionId);
+    if (summary.dbRelativePath !== expectedRelativePath) {
+      throw new StorageError("storage.corrupt", "Catalog session path is not the generated path");
+    }
     return this.sessions.registerSession(
       sessionId,
-      resolveStoragePath(this.homeDirectory, summary.dbRelativePath),
+      resolveStoragePath(this.homeDirectory, expectedRelativePath),
       async () => {
         await this.ensureSessionReconciled(sessionId);
       },
       (events, headSequence) => {
         this.scheduleCatalogObservation(sessionId, events, headSequence);
+      },
+      async (input) => {
+        if (this.transactionMayCreateNonterminalRun(input)) {
+          // This precedes the canonical write. A failed write can leave an
+          // over-inclusive candidate; a crash can never miss a real run.
+          await this.catalog.markRecoveryCandidate(sessionId);
+        }
       },
     );
   }
@@ -753,6 +1268,7 @@ export class SessionStoreManager {
           observation.pendingApprovalCount > 0 || observation.pendingInputCount > 0,
         pendingApprovalCount: observation.pendingApprovalCount,
         pendingInputCount: observation.pendingInputCount,
+        recoveryNeeded: observation.recoveryNeeded,
       };
       await this.catalogProjectionWriter(this.catalog, update, signal);
       if (signal.aborted) return false;
@@ -782,6 +1298,28 @@ export class SessionStoreManager {
     }
   }
 
+  private transactionMayCreateNonterminalRun(
+    input: AcceptCommandInput | AppendTransactionInput,
+  ): boolean {
+    const projections = ("transaction" in input ? input.transaction.projections : input.projections) ?? [];
+    return projections.some((projection) => {
+      if (projection.kind === "run.put") {
+        return !["completed", "cancelled", "failed", "interrupted"].includes(projection.state);
+      }
+      if (projection.kind === "run.state") {
+        return !["completed", "cancelled", "failed", "interrupted"].includes(projection.nextState);
+      }
+      return false;
+    });
+  }
+
+  async listRecoveryCandidatePage(
+    cursor: RecoveryCandidateCursor | null = null,
+  ): Promise<RecoveryCandidatePage> {
+    await this.ready();
+    return this.catalog.listRecoveryCandidatePage(cursor);
+  }
+
   async acceptCommand(
     sessionId: string,
     input: AcceptCommandInput,
@@ -804,26 +1342,51 @@ export class SessionStoreManager {
     });
   }
 
-  private async finishClose(): Promise<void> {
-    const [startupResult] = await Promise.allSettled([this.startupRecovery]);
-    await this.drainOperations();
-    await this.drainCatalogObservations({
-      timeoutMs: this.catalogObservationShutdownTimeoutMs,
-    }).catch(() => undefined);
+  private async finishClose(deadlineAtMs?: number): Promise<void> {
+    const errors: unknown[] = [];
+    const remaining = (): number => deadlineAtMs === undefined
+      ? this.catalogObservationShutdownTimeoutMs
+      : Math.max(1, deadlineAtMs - Date.now());
+    let startupTimeout: NodeJS.Timeout | null = null;
+    const startupDrain = deadlineAtMs === undefined
+      ? this.startupRecovery
+      : Promise.race([
+          this.startupRecovery,
+          new Promise<never>((_resolve, reject) => {
+            startupTimeout = setTimeout(
+              () => reject(new StorageError("storage.worker_timeout", "Startup recovery drain exceeded shutdown deadline", true)),
+              remaining(),
+            );
+            startupTimeout.unref();
+          }),
+        ]);
+    const startupResult = await Promise.allSettled([startupDrain]);
+    if (startupTimeout !== null) clearTimeout(startupTimeout);
+    if (startupResult[0]?.status === "rejected") errors.push(startupResult[0].reason);
+    try {
+      await this.drainOperations(deadlineAtMs);
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      await this.drainCatalogObservations({ timeoutMs: Math.min(this.catalogObservationShutdownTimeoutMs, remaining()) });
+    } catch (error) {
+      errors.push(error);
+    }
     this.catalogObservationAbort.abort();
     this.catalogObservations.clear();
-    const [sessionsResult] = await Promise.allSettled([this.sessions.close()]);
-    const [catalogResult] = await Promise.allSettled([this.catalog.close()]);
-    if (startupResult?.status === "rejected") throw startupResult.reason;
-    if (sessionsResult?.status === "rejected") throw sessionsResult.reason;
-    if (catalogResult?.status === "rejected") throw catalogResult.reason;
+    const [sessionsResult] = await Promise.allSettled([this.sessions.close(deadlineAtMs)]);
+    const [catalogResult] = await Promise.allSettled([this.catalog.close(deadlineAtMs)]);
+    if (sessionsResult?.status === "rejected") errors.push(sessionsResult.reason);
+    if (catalogResult?.status === "rejected") errors.push(catalogResult.reason);
+    if (errors.length > 0) throw new AggregateError(errors, "Storage shutdown failed");
   }
 
-  close(): Promise<void> {
+  close(deadlineAtMs?: number): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
     this.acceptingOperations = false;
     this.sessions.stopAcceptingCommits();
-    this.closePromise = this.finishClose();
+    this.closePromise = this.finishClose(deadlineAtMs);
     return this.closePromise;
   }
 }

@@ -33,6 +33,8 @@ import {
   SessionEventPageInputSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
+  CreationProvenanceSchema,
+  type CreationProvenance,
   type AcceptCommandInput,
   type AcceptedCommandResult,
   type AppendTransactionInput,
@@ -60,6 +62,9 @@ export const InitializeSessionInputSchema = z.strictObject({
   title: z.string(),
   createdAtMs: z.number().int().nonnegative().safe(),
   eventId: z.string().min(1),
+  // Direct storage fixtures retained from pre-v4 may initialize without this
+  // immutable identity; normal SessionStoreManager creation always supplies it.
+  creation: CreationProvenanceSchema.optional(),
 });
 
 interface EventRow {
@@ -98,6 +103,7 @@ export class SessionRepository {
   constructor(
     private readonly database: Database.Database,
     private readonly allowTestOperations: boolean,
+    private readonly allowTestFailpoints = false,
   ) {
     applyMigrations(database, sessionMigrations, SESSION_SCHEMA_VERSION);
   }
@@ -113,6 +119,14 @@ export class SessionRepository {
         existing.createdAtMs !== input.createdAtMs
       ) {
         throw new StorageError("storage.corrupt", "Session manifest identity does not match");
+      }
+      const provenance = this.getCreationProvenance();
+      if (
+        provenance !== null &&
+        input.creation !== undefined &&
+        canonicalJson(provenance) !== canonicalJson(input.creation)
+      ) {
+        throw new StorageError("storage.corrupt", "Session creation provenance does not match");
       }
       const events = this.getEventsAfter(0, 1);
       const created = events[0];
@@ -157,6 +171,15 @@ export class SessionRepository {
           data,
         },
       ]);
+      if (input.creation !== undefined) {
+        this.database
+          .prepare(
+            `INSERT INTO creation_provenance (
+               singleton, command_id, payload_hash, command_method, event_id, result_json, accepted_at_ms
+             ) VALUES (1, @commandId, @payloadHash, @commandMethod, @eventId, @resultJson, @acceptedAtMs)`,
+          )
+          .run({ ...input.creation, resultJson: canonicalJson(input.creation.result) });
+      }
       return events;
     });
     const events = transaction.immediate();
@@ -169,6 +192,24 @@ export class SessionRepository {
       throw new StorageError("storage.session_uninitialized", "Session is not initialized");
     }
     return manifest;
+  }
+
+  getCreationProvenance(): CreationProvenance | null {
+    const row = this.database
+      .prepare(
+        `SELECT command_id AS commandId, payload_hash AS payloadHash, command_method AS commandMethod,
+                event_id AS eventId, result_json AS resultJson, accepted_at_ms AS acceptedAtMs
+         FROM creation_provenance WHERE singleton = 1`,
+      )
+      .get() as Record<string, unknown> | undefined;
+    if (row === undefined) return null;
+    return decodeStoredValue("session creation provenance", () => {
+      const { resultJson, ...provenance } = row;
+      return CreationProvenanceSchema.parse({
+        ...provenance,
+        result: JSON.parse(String(resultJson)),
+      });
+    });
   }
 
   private getManifestOrNull(): SessionManifest | null {
@@ -269,7 +310,7 @@ export class SessionRepository {
     headSequence: number;
   } {
     const input = AppendTransactionInputSchema.parse(inputValue);
-    if (input.testFailpoint !== undefined && !this.allowTestOperations) {
+    if (input.testFailpoint !== undefined && !this.allowTestFailpoints) {
       throw new StorageError("storage.worker_failed", "Storage failpoints are disabled");
     }
     const transaction = this.database.transaction(() => {
@@ -294,7 +335,7 @@ export class SessionRepository {
 
   acceptCommand(inputValue: unknown): AcceptedCommandResult {
     const input = AcceptCommandInputSchema.parse(inputValue);
-    if (input.transaction.testFailpoint !== undefined && !this.allowTestOperations) {
+    if (input.transaction.testFailpoint !== undefined && !this.allowTestFailpoints) {
       throw new StorageError("storage.worker_failed", "Storage failpoints are disabled");
     }
     const transaction = this.database.transaction(() => {
@@ -333,6 +374,9 @@ export class SessionRepository {
           acceptedAtMs: input.acceptedAtMs,
         });
       if (input.transaction.testFailpoint === "crash_before_commit") process.exit(71);
+      if (input.transaction.testFailpoint === "after_command_event_insert_before_commit") {
+        process.exit(74);
+      }
       const row = this.getAcceptedCommandRow(input.commandId);
       if (row === null) throw new Error("Accepted command disappeared");
       return this.acceptedResult(row, false, append.events);
@@ -1007,11 +1051,19 @@ export class SessionRepository {
   }
 
   getCatalogObservation(): SessionCatalogObservation {
+    const recoveryNeeded = (
+      this.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM runs WHERE state IN ('created', 'queued', 'running', 'waiting_for_user', 'cancelling')",
+        )
+        .get() as { count: number }
+    ).count > 0;
     return SessionCatalogObservationSchema.parse({
       headSequence: this.getHeadSequence(),
       projection: this.getCatalogProjection(),
       pendingApprovalCount: this.getPendingApprovals().length,
       pendingInputCount: this.getPendingInputCount(),
+      recoveryNeeded,
     });
   }
 

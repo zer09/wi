@@ -1,3 +1,4 @@
+import { existsSync, renameSync } from "node:fs";
 import { parentPort, workerData } from "node:worker_threads";
 
 import type Database from "better-sqlite3";
@@ -13,11 +14,12 @@ import {
   type WorkerResponse,
 } from "../common/worker-rpc.js";
 import { ProjectRecordSchema } from "../types.js";
-import { CatalogRepository } from "./repository.js";
+import { CatalogRepairReasonSchema, CatalogRepository } from "./repository.js";
 
 const WorkerDataSchema = z.strictObject({
   workerId: z.string().min(1),
   databasePath: z.string().min(1),
+  allowRepair: z.boolean(),
 });
 
 const config = WorkerDataSchema.parse(workerData);
@@ -27,26 +29,76 @@ const port = parentPort;
 let database: Database.Database | null = null;
 let repository: CatalogRepository | null = null;
 let startupError: StorageError | null = null;
-try {
-  database = openWorkerDatabase(config.databasePath);
-  repository = new CatalogRepository(database);
-} catch (error) {
+
+function openCatalog(): void {
+  try {
+    database = openWorkerDatabase(config.databasePath);
+    repository = new CatalogRepository(database);
+    startupError = null;
+  } catch (error) {
+    database?.close();
+    database = null;
+    repository = null;
+    startupError = toStorageError(error, "storage.migration_failed", "Catalog migration failed");
+  }
+}
+
+function repairCatalog(): { quarantinedPath: string | null } {
+  if (!config.allowRepair) {
+    throw new StorageError("storage.worker_failed", "Catalog repair mode is disabled");
+  }
   database?.close();
   database = null;
-  startupError = toStorageError(error, "storage.migration_failed", "Catalog migration failed");
+  repository = null;
+  const quarantinedPath = existsSync(config.databasePath)
+    ? `${config.databasePath}.quarantine-${Date.now()}-${process.pid}`
+    : null;
+  if (quarantinedPath !== null) {
+    renameSync(config.databasePath, quarantinedPath);
+    for (const suffix of ["-wal", "-shm"] as const) {
+      const sidecar = `${config.databasePath}${suffix}`;
+      if (existsSync(sidecar)) renameSync(sidecar, `${quarantinedPath}${suffix}`);
+    }
+  }
+  openCatalog();
+  if (startupError !== null) throw startupError;
+  // The replacement database was initialized with catalog_new in the same
+  // migration transaction. Classify it before returning control to the manager.
+  const repairedRepository = repository as CatalogRepository | null;
+  if (repairedRepository === null) {
+    throw new StorageError("storage.worker_failed", "Catalog repository is unavailable");
+  }
+  repairedRepository.beginRepair("catalog_corrupt");
+  return { quarantinedPath };
 }
+
+openCatalog();
 
 function execute(operation: string, payload: unknown): unknown {
   if (operation === "worker.close") {
     database?.close();
     return null;
   }
+  if (operation === "catalog.repair") return repairCatalog();
   if (startupError !== null) throw startupError;
   if (repository === null) {
     throw new StorageError("storage.worker_failed", "Catalog repository is unavailable");
   }
 
   switch (operation) {
+    case "catalog.getStartupState":
+      return {
+        created: false,
+        repairReason: repository.getRepairReason(),
+        hasCompletedRepair: repository.hasCompletedRepair(),
+      };
+    case "catalog.beginRepair": {
+      const input = z.strictObject({ reason: CatalogRepairReasonSchema }).parse(payload);
+      return repository.beginRepair(input.reason);
+    }
+    case "catalog.completeRepair":
+      repository.completeRepair();
+      return null;
     case "catalog.createProject":
       return repository.createProject(ProjectRecordSchema.parse(payload));
     case "catalog.reserveGlobalCommand":
@@ -65,8 +117,14 @@ function execute(operation: string, payload: unknown): unknown {
       return repository.listCreatingGlobalCommands();
     case "catalog.createSessionIndex":
       return repository.createSessionIndex(payload);
+    case "catalog.countSessions":
+      return repository.countSessions();
     case "catalog.listSessions":
       return repository.listSessions();
+    case "catalog.listCatalogRepairPage":
+      return repository.listCatalogRepairPage(payload);
+    case "catalog.markSessionsMissing":
+      return repository.markSessionsMissing(payload);
     case "catalog.listBrowserSessionsBounded":
       return repository.listBrowserSessionsBounded(payload);
     case "catalog.getSession": {
@@ -77,6 +135,15 @@ function execute(operation: string, payload: unknown): unknown {
       return repository.updateSessionProjection(payload);
     case "catalog.markSessionStatus":
       return repository.markSessionStatus(payload);
+    case "catalog.repairSessionClassification":
+      return repository.repairSessionClassification(payload);
+    case "catalog.listRecoveryCandidates":
+      return repository.listRecoveryCandidates(payload);
+    case "catalog.markRecoveryCandidate": {
+      const input = z.strictObject({ sessionId: z.string().min(1) }).parse(payload);
+      repository.markRecoveryCandidate(input.sessionId);
+      return null;
+    }
     case "catalog.reconcileSession":
       return repository.reconcileSession(payload);
     default:

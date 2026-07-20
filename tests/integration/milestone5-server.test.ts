@@ -744,7 +744,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     expect(JSON.stringify(parsed)).not.toContain("sqlite");
   });
 
-  it("bounds bootstrap rows and text inside the catalog worker query", async () => {
+  it("bounds bootstrap rows and recovery candidates inside catalog worker queries", async () => {
     const fixture = await startFixture();
     const oversizedTitle = "😀".repeat(1_000);
     const oversizedPreview = "p".repeat(300_000);
@@ -764,8 +764,21 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         pendingApprovalCount: 0,
         pendingInputCount: 0,
         sessionSchemaVersion: 1,
+        recoveryCandidate: true,
       });
     }
+
+    const firstRecoveryPage = await fixture.runtime.storage.listRecoveryCandidatePage();
+    expect(firstRecoveryPage.sessionIds).toHaveLength(1_000);
+    expect(firstRecoveryPage.nextCursor).not.toBeNull();
+    const secondRecoveryPage = await fixture.runtime.storage.listRecoveryCandidatePage(
+      firstRecoveryPage.nextCursor,
+    );
+    expect(secondRecoveryPage.sessionIds).toHaveLength(2);
+    expect(secondRecoveryPage.nextCursor).not.toBeNull();
+    await expect(
+      fixture.runtime.storage.listRecoveryCandidatePage(secondRecoveryPage.nextCursor),
+    ).resolves.toEqual({ sessionIds: [], nextCursor: null });
 
     const response = await bootstrap(fixture.server);
     expect(response.response.status).toBe(200);

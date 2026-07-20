@@ -32,6 +32,7 @@ export class SessionClient {
       events: readonly SessionEvent[],
       headSequence: number,
     ) => void,
+    private readonly beforeCommit?: (input: AcceptCommandInput | AppendTransactionInput) => Promise<void>,
   ) {}
 
   private async prepare(): Promise<void> {
@@ -52,12 +53,14 @@ export class SessionClient {
   }
 
   async acceptCommand(input: AcceptCommandInput): Promise<AcceptedCommandResult> {
+    await this.beforeCommit?.(input);
     const result = await this.pool.acceptCommand(this.sessionId, input);
     this.observeCommit(result.events, result.acceptedSequence ?? 0);
     return result;
   }
 
   async appendTransaction(input: AppendTransactionInput): Promise<AppendTransactionResult> {
+    await this.beforeCommit?.(input);
     const result = await this.pool.appendTransaction(this.sessionId, input);
     this.observeCommit(result.events, result.headSequence);
     return result;

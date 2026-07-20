@@ -88,6 +88,24 @@ export function toStorageError(
   ) {
     return new StorageError("storage.busy", message, true);
   }
+  // These errors describe a temporarily unusable filesystem/SQLite boundary,
+  // not evidence that the canonical database bytes are corrupt. Classify them
+  // before applying a caller's corruption fallback so repair retains its marker.
+  if (
+    sqliteCode === "EACCES" ||
+    sqliteCode === "EPERM" ||
+    sqliteCode === "EMFILE" ||
+    sqliteCode === "ENFILE" ||
+    sqliteCode === "EIO" ||
+    sqliteCode === "SQLITE_CANTOPEN" ||
+    sqliteCode.startsWith("SQLITE_IOERR") ||
+    lower.includes("permission denied") ||
+    lower.includes("too many open files") ||
+    lower.includes("input/output error") ||
+    lower.includes("disk i/o error")
+  ) {
+    return new StorageError("storage.operational", message, true);
+  }
   if (
     sqliteCode === "SQLITE_CORRUPT" ||
     sqliteCode === "SQLITE_NOTADB" ||
@@ -578,7 +596,7 @@ export class WorkerRpcClient {
     );
   }
 
-  private async finishClose(): Promise<void> {
+  private async finishClose(deadlineAtMs?: number): Promise<void> {
     const worker = this.worker;
     this.rejectAll("storage.worker_closed", `Storage worker ${this.workerId} is closing`, false);
     if (worker === null) {
@@ -590,13 +608,17 @@ export class WorkerRpcClient {
       return;
     }
     let terminationConfirmed = true;
+    let closeRpcError: unknown = null;
     try {
+      const remaining = deadlineAtMs === undefined ? this.closeTimeoutMs : Math.max(1, deadlineAtMs - Date.now());
       await this.sendRequest(worker, "worker.close", {}, z.null(), {
-        timeoutMs: this.closeTimeoutMs,
+        timeoutMs: Math.min(this.closeTimeoutMs, remaining),
         outcome: "read",
       });
-    } catch {
-      // Shutdown remains best-effort and bounded; termination below owns cleanup.
+    } catch (error) {
+      // Retain the RPC error even if forced termination succeeds: callers need
+      // diagnostics that distinguish a clean close from a forced boundary.
+      closeRpcError = error;
     } finally {
       if (this.worker === worker) this.worker = null;
       this.rejectAll("storage.worker_closed", `Storage worker ${this.workerId} closed`, false);
@@ -607,12 +629,13 @@ export class WorkerRpcClient {
         terminationConfirmed && terminationResults.every((confirmed) => confirmed);
     }
     if (!terminationConfirmed) throw this.unconfirmedTerminationError();
+    if (closeRpcError !== null) throw closeRpcError;
   }
 
-  close(): Promise<void> {
+  close(deadlineAtMs?: number): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
     this.closing = true;
-    this.closePromise = this.finishClose();
+    this.closePromise = this.finishClose(deadlineAtMs);
     return this.closePromise;
   }
 }

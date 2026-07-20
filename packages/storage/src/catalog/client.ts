@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   BrowserSessionSummarySchema,
+  SessionIdSchema,
   type BrowserSessionSummary,
 } from "@wi/protocol";
 
@@ -23,12 +24,22 @@ import {
 import {
   BoundedSessionListInputSchema,
   CatalogProjectionUpdateResultSchema,
+  CatalogRepairPageInputSchema,
+  CatalogRepairPageSchema,
+  CatalogRepairReasonSchema,
+  MarkSessionsMissingInputSchema,
   MAXIMUM_BOUNDED_SESSION_LIST_LIMIT,
+  MAXIMUM_CATALOG_REPAIR_PAGE_SIZE,
   ReconcileSessionResultSchema,
+  RepairSessionClassificationInputSchema,
   type CatalogProjectionUpdateResult,
+  type CatalogRepairPage,
+  type CatalogRepairReason,
+  type CreateSessionIndexInput,
   type FailGlobalCommandInput,
   type MarkSessionStatusInput,
   type ReconcileSessionResult,
+  type RepairSessionClassificationInput,
   type SetGlobalCommandQuarantineInput,
   type UpdateSessionProjectionInput,
 } from "./repository.js";
@@ -38,6 +49,28 @@ export interface CatalogClientOptions {
   readonly defaultRequestTimeoutMs?: number;
   readonly closeTimeoutMs?: number;
   readonly onWorkerReplacement?: (replacementCount: number) => void;
+  readonly allowRepair?: boolean;
+}
+
+export interface CatalogStartupState {
+  // Retained only for RPC compatibility; durable repair state is authoritative.
+  readonly created: boolean;
+  readonly repairReason: CatalogRepairReason | null;
+  readonly hasCompletedRepair: boolean;
+}
+
+export interface CatalogRepairResult {
+  readonly quarantinedPath: string | null;
+}
+
+export interface RecoveryCandidateCursor {
+  readonly updatedAtMs: number;
+  readonly sessionId: string;
+}
+
+export interface RecoveryCandidatePage {
+  readonly sessionIds: readonly string[];
+  readonly nextCursor: RecoveryCandidateCursor | null;
 }
 
 export interface ReserveGlobalCommandInput {
@@ -66,6 +99,7 @@ export interface ReconcileSessionInput {
   readonly lastMessagePreview: SessionSummary["lastMessagePreview"];
   readonly pendingApprovalCount: number;
   readonly pendingInputCount: number;
+  readonly recoveryNeeded: boolean;
 }
 
 export class CatalogClient {
@@ -78,6 +112,7 @@ export class CatalogClient {
       workerData: {
         workerId: "catalog",
         databasePath: resolve(options.homeDirectory, "catalog.sqlite3"),
+        allowRepair: options.allowRepair === true,
       },
       ...(options.defaultRequestTimeoutMs === undefined
         ? {}
@@ -87,6 +122,37 @@ export class CatalogClient {
         ? {}
         : { onReplacement: options.onWorkerReplacement }),
     });
+  }
+
+  async getStartupState(): Promise<CatalogStartupState> {
+    return this.rpc.request(
+      "catalog.getStartupState",
+      {},
+      z.strictObject({
+        created: z.boolean(),
+        repairReason: z.union([CatalogRepairReasonSchema, z.null()]),
+        hasCompletedRepair: z.boolean(),
+      }),
+    );
+  }
+
+  async beginRepair(reason: CatalogRepairReason): Promise<CatalogRepairReason> {
+    return this.rpc.request("catalog.beginRepair", { reason }, CatalogRepairReasonSchema, {
+      outcome: "write",
+    });
+  }
+
+  async completeRepair(): Promise<void> {
+    await this.rpc.request("catalog.completeRepair", {}, z.null(), { outcome: "write" });
+  }
+
+  async repair(): Promise<CatalogRepairResult> {
+    return this.rpc.request(
+      "catalog.repair",
+      {},
+      z.strictObject({ quarantinedPath: z.string().nullable() }),
+      { outcome: "write" },
+    );
   }
 
   async createProject(input: ProjectRecord): Promise<ProjectRecord> {
@@ -151,14 +217,46 @@ export class CatalogClient {
     );
   }
 
-  async createSessionIndex(input: SessionSummary): Promise<SessionSummary> {
+  async createSessionIndex(input: CreateSessionIndexInput): Promise<SessionSummary> {
     return this.rpc.request("catalog.createSessionIndex", input, SessionSummarySchema, {
       outcome: "write",
     });
   }
 
+  async countSessions(): Promise<number> {
+    return this.rpc.request(
+      "catalog.countSessions",
+      {},
+      z.number().int().nonnegative().safe(),
+    );
+  }
+
   async listSessions(): Promise<readonly SessionSummary[]> {
     return this.rpc.request("catalog.listSessions", {}, z.array(SessionSummarySchema));
+  }
+
+  async listCatalogRepairPage(afterSessionId: string | null): Promise<CatalogRepairPage> {
+    const input = CatalogRepairPageInputSchema.parse({
+      afterSessionId,
+      limit: MAXIMUM_CATALOG_REPAIR_PAGE_SIZE,
+    });
+    return this.rpc.request(
+      "catalog.listCatalogRepairPage",
+      input,
+      CatalogRepairPageSchema,
+    );
+  }
+
+  async markSessionsMissing(
+    sessions: readonly { readonly sessionId: string; readonly dbRelativePath: string }[],
+  ): Promise<readonly string[]> {
+    const input = MarkSessionsMissingInputSchema.parse({ sessions });
+    return this.rpc.request(
+      "catalog.markSessionsMissing",
+      input,
+      z.array(SessionIdSchema).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
+      { outcome: "write" },
+    );
   }
 
   async listBrowserSessionsBounded(
@@ -191,8 +289,45 @@ export class CatalogClient {
     );
   }
 
+  async listRecoveryCandidatePage(
+    cursor: RecoveryCandidateCursor | null = null,
+  ): Promise<RecoveryCandidatePage> {
+    return this.rpc.request(
+      "catalog.listRecoveryCandidates",
+      {
+        afterUpdatedAtMs: cursor?.updatedAtMs ?? null,
+        afterSessionId: cursor?.sessionId ?? null,
+        limit: 1_000,
+      },
+      z.strictObject({
+        sessionIds: z.array(SessionIdSchema).max(1_000),
+        nextCursor: z
+          .strictObject({
+            updatedAtMs: z.number().int().nonnegative().safe(),
+            sessionId: SessionIdSchema,
+          })
+          .nullable(),
+      }),
+    );
+  }
+
+  async markRecoveryCandidate(sessionId: string): Promise<void> {
+    await this.rpc.request("catalog.markRecoveryCandidate", { sessionId }, z.null(), {
+      outcome: "write",
+    });
+  }
+
   async markSessionStatus(input: MarkSessionStatusInput): Promise<SessionSummary> {
     return this.rpc.request("catalog.markSessionStatus", input, SessionSummarySchema, {
+      outcome: "write",
+    });
+  }
+
+  async repairSessionClassification(
+    inputValue: RepairSessionClassificationInput,
+  ): Promise<SessionSummary> {
+    const input = RepairSessionClassificationInputSchema.parse(inputValue);
+    return this.rpc.request("catalog.repairSessionClassification", input, SessionSummarySchema, {
       outcome: "write",
     });
   }
@@ -212,7 +347,7 @@ export class CatalogClient {
     return (await this.reconcileSessionWithStatus(input)).summary;
   }
 
-  async close(): Promise<void> {
-    await this.rpc.close();
+  async close(deadlineAtMs?: number): Promise<void> {
+    await this.rpc.close(deadlineAtMs);
   }
 }

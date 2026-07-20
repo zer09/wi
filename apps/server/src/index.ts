@@ -8,6 +8,14 @@ export type { WiServerOptions } from "./http/server.js";
 export { BoundedLogSink, JsonLogger, nonThrowingLogger } from "./logging/logger.js";
 export type { JsonLoggerOptions, Logger, LogRecord } from "./logging/logger.js";
 export { malformedPayloadMetadata, redactLogFields } from "./logging/redaction.js";
+export {
+  createTestFailpointController,
+  TEST_FAILPOINTS,
+} from "./testing/failpoints.js";
+export type {
+  TestFailpointController,
+  TestFailpointName,
+} from "./testing/failpoints.js";
 export { BrowserConnection } from "./websocket/connection.js";
 export type {
   ConnectionCommandHooks,

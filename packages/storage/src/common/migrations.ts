@@ -9,6 +9,7 @@ export function applyMigrations(
   database: Database.Database,
   migrations: readonly Migration[],
   targetVersion: number,
+  options: { readonly onFreshDatabase?: () => void } = {},
 ): void {
   const currentVersion = database.pragma("user_version", { simple: true }) as number;
   if (currentVersion > targetVersion) {
@@ -31,6 +32,9 @@ export function applyMigrations(
       database.exec(migration.sql);
       database.pragma(`user_version = ${migration.version}`);
     }
+    // A new catalog's repair intent must become durable with its schema, not in a
+    // later manager RPC that could be skipped by a crash.
+    if (currentVersion === 0) options.onFreshDatabase?.();
   })();
 
   const finalVersion = database.pragma("user_version", { simple: true }) as number;

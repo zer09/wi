@@ -13,6 +13,7 @@ export const FAKE_PROVIDER_SCENARIOS = [
   "transient-failure-before-output",
   "failure-after-visible-output",
   "partial-tool-call-without-terminal",
+  "staged-tool-then-text-without-terminal",
   "provider-cleanup-probe",
   "duplicate-call-id-same-arguments",
   "duplicate-call-id-later-step",

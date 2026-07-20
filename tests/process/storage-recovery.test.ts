@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,11 +11,14 @@ import {
   SessionStoreManager,
 } from "@wi/storage";
 
+import { FixtureProcessRunner } from "./fixture-process.js";
+
 const fixture = fileURLToPath(new URL("./storage-crash-fixture.mjs", import.meta.url));
 const catalogV1Fixture = fileURLToPath(new URL("./catalog-v1-fixture.mjs", import.meta.url));
 const sessionV1Fixture = fileURLToPath(new URL("./session-v1-fixture.mjs", import.meta.url));
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
+const fixtureProcesses = new FixtureProcessRunner();
 
 async function createHomeAndSession(): Promise<{
   homeDirectory: string;
@@ -44,62 +46,49 @@ async function createHomeAndSession(): Promise<{
   return { homeDirectory, sessionId: created.session.sessionId };
 }
 
-function runCrashFixture(
+async function runCrashFixture(
   homeDirectory: string,
   sessionId: string,
   mode: string,
 ): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [fixture, homeDirectory, sessionId, mode], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0 && stderr.trim().length > 0) reject(new Error(stderr));
-      else resolve(code);
-    });
-  });
+  const { WI_ALLOW_TEST_FAILPOINTS: _allowTestFailpoints, ...baseEnvironment } = process.env;
+  void _allowTestFailpoints;
+  const result = await fixtureProcesses.run(
+    process.execPath,
+    [fixture, homeDirectory, sessionId, mode],
+    10_000,
+    {
+      ...baseEnvironment,
+      NODE_ENV: "test",
+      ...(mode === "failpoint_gate_probe" ? {} : { WI_ALLOW_TEST_FAILPOINTS: "1" }),
+    },
+  );
+  if (result.code === 0 && result.stderr.trim().length > 0 && mode !== "failpoint_gate_probe") {
+    throw new Error(result.stderr);
+  }
+  return result.code;
 }
 
-function runCatalogV1Fixture(homeDirectory: string): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [catalogV1Fixture, homeDirectory], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) reject(new Error(stderr || `catalog v1 fixture exited ${String(code)}`));
-      else resolve(code);
-    });
-  });
+async function runCatalogV1Fixture(homeDirectory: string): Promise<number | null> {
+  const result = await fixtureProcesses.run(process.execPath, [catalogV1Fixture, homeDirectory]);
+  if (result.code !== 0) {
+    throw new Error(result.stderr || `catalog v1 fixture exited ${String(result.code)}`);
+  }
+  return result.code;
 }
 
-function runSessionV1Fixture(homeDirectory: string, mode: string): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [sessionV1Fixture, homeDirectory, mode], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) reject(new Error(stderr || `session v1 fixture exited ${String(code)}`));
-      else resolve(code);
-    });
-  });
+async function runSessionV1Fixture(
+  homeDirectory: string,
+  mode: string,
+): Promise<number | null> {
+  const result = await fixtureProcesses.run(
+    process.execPath,
+    [sessionV1Fixture, homeDirectory, mode],
+  );
+  if (result.code !== 0) {
+    throw new Error(result.stderr || `session v1 fixture exited ${String(result.code)}`);
+  }
+  return result.code;
 }
 
 function restart(homeDirectory: string): SessionStoreManager {
@@ -112,18 +101,28 @@ function restart(homeDirectory: string): SessionStoreManager {
 }
 
 afterEach(async () => {
+  await fixtureProcesses.terminateAll();
   await Promise.allSettled(managers.splice(0).map((storage) => storage.close()));
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
 describe("storage crash windows", () => {
-  it("migrates a retained version-1 catalog to version 2", async () => {
+  it("rejects direct storage failpoints without the explicit allow gate", async () => {
+    const { homeDirectory, sessionId } = await createHomeAndSession();
+    await expect(runCrashFixture(homeDirectory, sessionId, "failpoint_gate_probe")).resolves.toBe(0);
+  });
+
+  it("migrates a retained version-1 catalog to the current schema", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
     homes.push(homeDirectory);
     await expect(runCatalogV1Fixture(homeDirectory)).resolves.toBe(0);
 
     const storage = restart(homeDirectory);
     await storage.ready();
+    await expect(storage.catalog.getStartupState()).resolves.toMatchObject({
+      created: false,
+      repairReason: null,
+    });
     await expect(storage.catalog.getGlobalCommand("cmd_v1Migrated")).resolves.toMatchObject({
       state: "accepted",
       failureCode: null,
@@ -133,6 +132,34 @@ describe("storage crash windows", () => {
     });
   });
 
+  it("reconstructs a retained session v1 without migrating or creating sidecars", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await expect(runSessionV1Fixture(homeDirectory, "valid")).resolves.toBe(0);
+    const databasePath = resolveStoragePath(
+      homeDirectory,
+      sessionDatabaseRelativePath("ses_v1Populated"),
+    );
+    const originalBytes = await readFile(databasePath);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+    }
+
+    const storage = restart(homeDirectory);
+    await storage.ready();
+    await expect(storage.catalog.getSession("ses_v1Populated")).resolves.toMatchObject({
+      status: "ready",
+      sessionSchemaVersion: 1,
+    });
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+
+    expect(await readFile(databasePath)).toEqual(originalBytes);
+    await expect(stat(`${databasePath}-wal`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(`${databasePath}-shm`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runSessionV1Fixture(homeDirectory, "inspect-readonly")).resolves.toBe(0);
+  }, 15_000);
+
   it("migrates a populated session v1 and backfills tool call occurrences", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
     homes.push(homeDirectory);
@@ -140,7 +167,7 @@ describe("storage crash windows", () => {
 
     const storage = restart(homeDirectory);
     const session = await storage.openSession("ses_v1Populated");
-    await expect(session.getManifest()).resolves.toMatchObject({ schemaVersion: 3 });
+    await expect(session.getManifest()).resolves.toMatchObject({ schemaVersion: 4 });
     await expect(session.getToolExecutionsForStep("step_v1Original")).resolves.toEqual([
       expect.objectContaining({ callId: "call_v1Existing", state: "completed" }),
     ]);

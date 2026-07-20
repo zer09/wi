@@ -168,6 +168,19 @@ export function createFakeProviderScript(
         };
         await controller.wait(fakeProviderGateLabel(request.runId, "partial"), signal);
       });
+    case "staged-tool-then-text-without-terminal":
+      return single(configuration, async function* (request, _context, controller, signal) {
+        yield* started(request);
+        yield {
+          type: "tool_call.completed",
+          ...identity(request),
+          callId: "call_stagedBeforeTextCrash",
+          name: "echo",
+          argumentsJson: '{"text":"must be discarded"}',
+        };
+        yield { type: "text.delta", ...identity(request), delta: "x".repeat(512) };
+        await controller.wait(fakeProviderGateLabel(request.runId, "partial"), signal);
+      });
     case "provider-cleanup-probe":
       return single(configuration, async function* (request, _context, controller, signal) {
         yield* started(request);

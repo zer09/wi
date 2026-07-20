@@ -2,7 +2,7 @@ import { availableParallelism } from "node:os";
 
 import { z } from "zod";
 
-import { SessionEventSchema } from "@wi/protocol";
+import { SessionEventSchema, SessionIdSchema } from "@wi/protocol";
 
 import {
   StorageError,
@@ -28,6 +28,7 @@ import {
   SessionCatalogProjectionSchema,
   SessionManifestSchema,
   SessionRecoveryResultSchema,
+  CreationProvenanceSchema,
   type AcceptCommandInput,
   type AcceptedCommandResult,
   type AppendTransactionInput,
@@ -48,8 +49,13 @@ import {
   type SessionCatalogProjection,
   type SessionManifest,
   type SessionRecoveryResult,
+  type CreationProvenance,
 } from "../types.js";
 import { SessionClient } from "./client.js";
+import {
+  DISCOVERY_ERROR_CODE_MAXIMUM_UNITS,
+  DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS,
+} from "./discovery-limits.js";
 
 export interface SessionWorkerPoolOptions {
   readonly size?: number;
@@ -67,6 +73,7 @@ export interface InitializeSessionInput {
   readonly title: string;
   readonly createdAtMs: number;
   readonly eventId: string;
+  readonly creation?: CreationProvenance;
 }
 
 export interface SessionWorkerStats {
@@ -76,6 +83,60 @@ export interface SessionWorkerStats {
 
 export interface SessionWorkerBarrier {
   readonly release: () => Promise<void>;
+}
+
+const DiscoveredSessionSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("valid"),
+    sessionId: SessionIdSchema,
+    manifest: SessionManifestSchema,
+    observation: SessionCatalogObservationSchema,
+    creationProvenance: z.union([CreationProvenanceSchema, z.null()]),
+  }),
+  z.strictObject({
+    kind: z.literal("corrupt"),
+    sessionId: SessionIdSchema,
+    code: z.string().min(1).max(DISCOVERY_ERROR_CODE_MAXIMUM_UNITS),
+    message: z.string().max(DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("transient"),
+    sessionId: SessionIdSchema,
+    code: z.string().min(1).max(DISCOVERY_ERROR_CODE_MAXIMUM_UNITS),
+    message: z.string().max(DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("oversized"),
+    sessionId: SessionIdSchema,
+    code: z.literal("storage.resource_limit"),
+    message: z.string().max(DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("unsupported"),
+    sessionId: SessionIdSchema,
+    code: z.literal("storage.migration_failed"),
+    message: z.string().max(DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS).optional(),
+    schemaVersion: z.number().int().positive().safe(),
+  }),
+  z.strictObject({
+    kind: z.literal("missing"),
+    sessionId: SessionIdSchema,
+    code: z.literal("storage.session_missing"),
+    message: z.string().max(DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS).optional(),
+  }),
+]);
+
+export type DiscoveredSession = z.infer<typeof DiscoveredSessionSchema>;
+
+export interface SessionDiscoveryInventory {
+  readonly sessionIds: readonly string[];
+  readonly inspectedEntries: number;
+  readonly ignoredEntries: number;
+}
+
+export interface SessionDiscoveryPage {
+  readonly records: readonly DiscoveredSession[];
+  readonly processedCount: number;
 }
 
 export interface SessionSqlitePragmas {
@@ -114,6 +175,8 @@ export class SessionWorkerPool {
     }
     this.allowTestOperations =
       options.allowTestOperations === true && process.env.NODE_ENV === "test";
+    const allowTestFailpoints =
+      this.allowTestOperations && process.env.WI_ALLOW_TEST_FAILPOINTS === "1";
     this.onSessionError = options.onSessionError;
     const workers: WorkerRpcClient[] = [];
     try {
@@ -126,6 +189,7 @@ export class SessionWorkerPool {
               workerId: `session-${workerIndex}`,
               maxOpenHandles,
               allowTestOperations: this.allowTestOperations,
+              allowTestFailpoints,
             },
             ...(options.defaultRequestTimeoutMs === undefined
               ? {}
@@ -149,6 +213,49 @@ export class SessionWorkerPool {
     this.workers = workers;
   }
 
+  async discoverSessionInventory(
+    homeDirectory: string,
+    maximumSessions = 1_000,
+  ): Promise<SessionDiscoveryInventory> {
+    if (!Number.isSafeInteger(maximumSessions) || maximumSessions < 1 || maximumSessions > 10_000) {
+      throw new RangeError("Session discovery limit must be between 1 and 10000");
+    }
+    const worker = this.workers[0];
+    if (worker === undefined) throw new Error("Session discovery requires a worker");
+    return worker.request(
+      "session.discoverInventory",
+      { homeDirectory, maximumSessions },
+      z.strictObject({
+        sessionIds: z.array(SessionIdSchema).max(maximumSessions),
+        inspectedEntries: z.number().int().nonnegative().safe(),
+        ignoredEntries: z.number().int().nonnegative().safe(),
+      }),
+      { timeoutMs: Math.min(120_000, Math.max(10_000, maximumSessions * 250)) },
+    );
+  }
+
+  async discoverSessionPage(
+    homeDirectory: string,
+    sessionIds: readonly string[],
+    startIndex: number,
+  ): Promise<SessionDiscoveryPage> {
+    if (!Number.isSafeInteger(startIndex) || startIndex < 0 || startIndex >= sessionIds.length) {
+      throw new RangeError("Session discovery page index is outside the inventory");
+    }
+    const worker = this.workers[0];
+    if (worker === undefined) throw new Error("Session discovery requires a worker");
+    const candidates = sessionIds.slice(startIndex, startIndex + 64);
+    return worker.request(
+      "session.discoverPage",
+      { homeDirectory, sessionIds: candidates },
+      z.strictObject({
+        records: z.array(DiscoveredSessionSchema).min(1).max(candidates.length),
+        processedCount: z.number().int().positive().max(candidates.length),
+      }),
+      { timeoutMs: 120_000 },
+    );
+  }
+
   workerIndexFor(sessionId: string): number {
     return stableSessionWorkerIndex(sessionId, this.size);
   }
@@ -161,13 +268,14 @@ export class SessionWorkerPool {
       events: readonly z.infer<typeof SessionEventSchema>[],
       headSequence: number,
     ) => void,
+    beforeCommit?: (input: AcceptCommandInput | AppendTransactionInput) => Promise<void>,
   ): SessionClient {
     const existing = this.paths.get(sessionId);
     if (existing !== undefined && existing !== databasePath) {
       throw new Error("Session database path cannot change within a pool");
     }
     this.paths.set(sessionId, databasePath);
-    return new SessionClient(this, sessionId, beforeUse, afterCommit);
+    return new SessionClient(this, sessionId, beforeUse, afterCommit, beforeCommit);
   }
 
   session(sessionId: string): SessionClient {
@@ -253,9 +361,24 @@ export class SessionWorkerPool {
     }
   }
 
-  private async drainCommitOperations(): Promise<void> {
+  private async drainCommitOperations(deadlineAtMs?: number): Promise<void> {
     while (this.activeCommitOperations.size > 0) {
-      await Promise.all(this.activeCommitOperations);
+      const drain = Promise.all(this.activeCommitOperations);
+      if (deadlineAtMs === undefined) {
+        await drain;
+        continue;
+      }
+      const remaining = deadlineAtMs - Date.now();
+      if (remaining <= 0) {
+        throw new StorageError("storage.worker_timeout", "Session commit drain exceeded shutdown deadline", true);
+      }
+      await Promise.race([
+        drain,
+        new Promise<never>((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new StorageError("storage.worker_timeout", "Session commit drain exceeded shutdown deadline", true)), remaining);
+          timer.unref();
+        }),
+      ]);
     }
   }
 
@@ -624,12 +747,18 @@ export class SessionWorkerPool {
     const barrier = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 2);
     const view = new Int32Array(barrier);
     const request = this.request(sessionId, "session.testBarrier", { barrier }, z.null());
+    // Observe rejection immediately so shutdown can reject the blocked RPC
+    // without creating an unhandled-rejection process exit in the test fixture.
+    const observedRequest = request.then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
     const deadline = Date.now() + 5_000;
     while (Atomics.load(view, 0) < 1) {
       if (Date.now() >= deadline) {
         Atomics.store(view, 1, 1);
         Atomics.notify(view, 1);
-        await request.catch(() => undefined);
+        await observedRequest;
         throw new Error("Session worker did not reach the barrier");
       }
       await new Promise((resolve) => setTimeout(resolve, 1));
@@ -641,7 +770,8 @@ export class SessionWorkerPool {
         released = true;
         Atomics.store(view, 1, 1);
         Atomics.notify(view, 1);
-        await request;
+        const outcome = await observedRequest;
+        if (!outcome.ok) throw outcome.error;
       },
     };
   }
@@ -692,14 +822,23 @@ export class SessionWorkerPool {
     await this.request(sessionId, "session.testCrashWorker", {}, z.null());
   }
 
-  private async finishClose(): Promise<void> {
-    await this.drainCommitOperations();
-    await Promise.all(this.workers.map((worker) => worker.close()));
+  private async finishClose(deadlineAtMs?: number): Promise<void> {
+    const errors: unknown[] = [];
+    try {
+      await this.drainCommitOperations(deadlineAtMs);
+    } catch (error) {
+      errors.push(error);
+    }
+    // Force every worker boundary even when draining commits timed out. This
+    // prevents an abandoned write from keeping subsequent storage cleanup open.
+    const results = await Promise.allSettled(this.workers.map((worker) => worker.close(deadlineAtMs)));
+    for (const result of results) if (result.status === "rejected") errors.push(result.reason);
+    if (errors.length > 0) throw new AggregateError(errors, "Session worker shutdown failed");
   }
 
-  close(): Promise<void> {
+  close(deadlineAtMs?: number): Promise<void> {
     this.stopAcceptingCommits();
-    this.closePromise ??= this.finishClose();
+    this.closePromise ??= this.finishClose(deadlineAtMs);
     return this.closePromise;
   }
 }

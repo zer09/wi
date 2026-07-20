@@ -143,6 +143,9 @@ export class FixtureProcessRunner {
   private terminate(child: ChildProcess): Promise<void> {
     const existing = this.terminations.get(child);
     if (existing !== undefined) return existing;
+    // A timeout callback can finish cleanup before run() reaches its finally block.
+    // Successful cleanup already removed ownership; only failed cleanup stays retryable.
+    if (!this.children.has(child)) return Promise.resolve();
 
     const termination = terminateProcessTree(child, this.terminationGraceMs).then(() => {
       // Drop ownership only after the whole process boundary is verified empty.

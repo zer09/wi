@@ -41,4 +41,15 @@ No architecture policy or ADR changed. This is an FFI module-lifecycle correctio
 | Cleanup inspection | Passed; no matching fixture/server/browser process, temporary process home, or port 4317 listener |
 | Required `windows-process` CI | Pending after explicit commit/push |
 
-The remediation remains unstaged and uncommitted. `prompts/` remains untracked and excluded.
+## First Windows rerun follow-up
+
+Commit `9469190eb6caeb46e18be140240e0f614a743567` removed the duplicate-type failure. In CI run [29785463293](https://github.com/zer09/wi/actions/runs/29785463293):
+
+- the explicit anonymous-binding reload regression passed;
+- Windows improved from 33 failures to 2, with 74 tests passing;
+- `checks` and `e2e` passed;
+- both remaining failures reported `Windows process tree cleanup requires Job Object ownership` from `FixtureProcessRunner` timeout cleanup.
+
+The timeout callback could complete `terminateProcessTree`, remove successful Job Object ownership, and delete the child from the runner before `run()` reached its unconditional `finally` cleanup. The second cleanup then treated the already-clean tree as an ownership failure. `FixtureProcessRunner.terminate` now returns immediately when a child has already been removed after successful cleanup, while retaining children after failed cleanup so `terminateAll` can still retry them.
+
+The follow-up remains unstaged and uncommitted. `prompts/` remains untracked and excluded.

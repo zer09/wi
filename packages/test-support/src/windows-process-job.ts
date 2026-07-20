@@ -8,8 +8,10 @@ const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x0000_2000;
 
 const kernel32 = koffi.load("kernel32.dll");
-koffi.pointer("HANDLE", koffi.opaque());
-const JobBasicLimit = koffi.struct("JOBOBJECT_BASIC_LIMIT_INFORMATION", {
+// Koffi keeps named types in a process-global registry. Vitest reloads this module
+// for isolated files, so anonymous descriptors prevent duplicate registrations.
+const Handle = koffi.pointer(koffi.opaque());
+const JobBasicLimit = koffi.struct({
   PerProcessUserTimeLimit: "int64",
   PerJobUserTimeLimit: "int64",
   LimitFlags: "uint32",
@@ -20,7 +22,7 @@ const JobBasicLimit = koffi.struct("JOBOBJECT_BASIC_LIMIT_INFORMATION", {
   PriorityClass: "uint32",
   SchedulingClass: "uint32",
 });
-const IoCounters = koffi.struct("IO_COUNTERS", {
+const IoCounters = koffi.struct({
   ReadOperationCount: "uint64",
   WriteOperationCount: "uint64",
   OtherOperationCount: "uint64",
@@ -28,7 +30,7 @@ const IoCounters = koffi.struct("IO_COUNTERS", {
   WriteTransferCount: "uint64",
   OtherTransferCount: "uint64",
 });
-const JobExtendedLimit = koffi.struct("JOBOBJECT_EXTENDED_LIMIT_INFORMATION", {
+const JobExtendedLimit = koffi.struct({
   BasicLimitInformation: JobBasicLimit,
   IoInfo: IoCounters,
   ProcessMemoryLimit: "size_t",
@@ -36,7 +38,7 @@ const JobExtendedLimit = koffi.struct("JOBOBJECT_EXTENDED_LIMIT_INFORMATION", {
   PeakProcessMemoryUsed: "size_t",
   PeakJobMemoryUsed: "size_t",
 });
-const JobAccounting = koffi.struct("JOBOBJECT_BASIC_ACCOUNTING_INFORMATION", {
+const JobAccounting = koffi.struct({
   TotalUserTime: "int64",
   TotalKernelTime: "int64",
   ThisPeriodTotalUserTime: "int64",
@@ -48,19 +50,34 @@ const JobAccounting = koffi.struct("JOBOBJECT_BASIC_ACCOUNTING_INFORMATION", {
 });
 
 const CreateJobObjectW = kernel32.func(
-  "HANDLE __stdcall CreateJobObjectW(void *attributes, const char16_t *name)",
+  "__stdcall",
+  "CreateJobObjectW",
+  Handle,
+  ["void *", "str16"],
 ) as (attributes: null, name: string) => bigint | null;
 const OpenJobObjectW = kernel32.func(
-  "HANDLE __stdcall OpenJobObjectW(uint32 access, int inherit, const char16_t *name)",
+  "__stdcall",
+  "OpenJobObjectW",
+  Handle,
+  ["uint32", "int", "str16"],
 ) as (access: number, inherit: number, name: string) => bigint | null;
 const GetCurrentProcess = kernel32.func(
-  "HANDLE __stdcall GetCurrentProcess(void)",
+  "__stdcall",
+  "GetCurrentProcess",
+  Handle,
+  [],
 ) as () => bigint;
 const AssignProcessToJobObject = kernel32.func(
-  "int __stdcall AssignProcessToJobObject(HANDLE job, HANDLE process)",
+  "__stdcall",
+  "AssignProcessToJobObject",
+  "int",
+  [Handle, Handle],
 ) as (job: bigint, process: bigint) => number;
 const QueryInformationJobObject = kernel32.func(
-  "int __stdcall QueryInformationJobObject(HANDLE job, int informationClass, _Out_ JOBOBJECT_BASIC_ACCOUNTING_INFORMATION *information, uint32 informationLength, void *returnLength)",
+  "__stdcall",
+  "QueryInformationJobObject",
+  "int",
+  [Handle, "int", koffi.out(koffi.pointer(JobAccounting)), "uint32", "void *"],
 ) as (
   job: bigint,
   informationClass: number,
@@ -69,7 +86,10 @@ const QueryInformationJobObject = kernel32.func(
   returnLength: null,
 ) => number;
 const SetInformationJobObject = kernel32.func(
-  "int __stdcall SetInformationJobObject(HANDLE job, int informationClass, _In_ const JOBOBJECT_EXTENDED_LIMIT_INFORMATION *information, uint32 informationLength)",
+  "__stdcall",
+  "SetInformationJobObject",
+  "int",
+  [Handle, "int", koffi.pointer(JobExtendedLimit), "uint32"],
 ) as (
   job: bigint,
   informationClass: number,
@@ -77,12 +97,23 @@ const SetInformationJobObject = kernel32.func(
   informationLength: number,
 ) => number;
 const TerminateJobObject = kernel32.func(
-  "int __stdcall TerminateJobObject(HANDLE job, uint32 exitCode)",
+  "__stdcall",
+  "TerminateJobObject",
+  "int",
+  [Handle, "uint32"],
 ) as (job: bigint, exitCode: number) => number;
 const CloseHandle = kernel32.func(
-  "int __stdcall CloseHandle(HANDLE handle)",
+  "__stdcall",
+  "CloseHandle",
+  "int",
+  [Handle],
 ) as (handle: bigint) => number;
-const GetLastError = kernel32.func("uint32 __stdcall GetLastError(void)") as () => number;
+const GetLastError = kernel32.func(
+  "__stdcall",
+  "GetLastError",
+  "uint32",
+  [],
+) as () => number;
 
 interface JobExtendedLimitInformation {
   readonly BasicLimitInformation: {

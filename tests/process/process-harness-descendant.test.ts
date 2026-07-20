@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RealServerProcess } from "@wi/test-support";
 
@@ -32,6 +32,19 @@ async function expectProcessGone(pid: number): Promise<void> {
 }
 
 describe("real process-tree cleanup", () => {
+  it.skipIf(process.platform !== "win32")(
+    "reloads anonymous Windows Job Object bindings across isolated modules",
+    async () => {
+      await expect(
+        import("../../packages/test-support/src/windows-process-job.js"),
+      ).resolves.toHaveProperty("WindowsProcessJob");
+      vi.resetModules();
+      await expect(
+        import("../../packages/test-support/src/windows-process-job.js"),
+      ).resolves.toHaveProperty("WindowsProcessJob");
+    },
+  );
+
   it.each(["leader-live", "leader-exits"] as const)(
     "terminates descendants when the %s case is cleaned up",
     async (mode) => {

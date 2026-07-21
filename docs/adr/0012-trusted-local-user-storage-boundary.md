@@ -42,7 +42,8 @@ Negative:
 
 - a malicious or compromised process running as the same user can redirect or mutate Wi storage;
 - filesystem identity checks are defense-in-depth, not a security boundary against that actor;
-- multi-user, sandbox-hostile, or remote deployment remains unsupported.
+- multi-user, sandbox-hostile, or remote deployment remains unsupported;
+- expanding to multi-user, remote, macOS, or Windows operation requires a new or superseding ADR and a security review of the storage trust boundary.
 
 ## Alternatives considered
 

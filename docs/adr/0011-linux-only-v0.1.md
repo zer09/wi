@@ -20,7 +20,7 @@ Wi v0.1 supports Linux only.
 - CI runs checks, process tests, and browser E2E on Linux.
 - Windows Job Object code, Windows preload code, Windows-only fixtures/tests, the Koffi dependency, and the required `windows-process` CI job are removed.
 
-Supporting Windows later requires a new ADR and a dedicated implementation/release gate. It must not be inferred from Node.js portability alone.
+Supporting Windows or macOS later requires a new ADR, a security review of the expanded platform boundary, and a dedicated implementation/release gate. It must not be inferred from Node.js portability alone.
 
 ## Consequences
 

@@ -1,10 +1,10 @@
 # Milestone 7 release-gate remediation 17
 
-Status: **IMPLEMENTED — owner accepted the trusted-user/Linux-only scope; independent verification pending**
+Status: **RESOLVED — independently verified under the accepted trusted-user/Linux-only scope**
 
-Review target: `6acba7d2e0b49ce535281e5a335c71b026fe30c1` on `milestone-7-crash-recovery`.
+Review target: `27207689863b2cb8837aa2d6caa660c0af7eaf25` on `milestone-7-crash-recovery`.
 
-This ledger records the independent H1 verification chain after the remote re-review of PR #13. It supersedes conflicting H1 readiness and Windows-support claims in earlier Milestone 7 ledgers. WI-M7-H2 and later findings remain blocked until this scope correction receives independent verification.
+This ledger records the independent H1 verification chain after the remote re-review of PR #13. It supersedes conflicting H1 readiness and Windows-support claims in earlier Milestone 7 ledgers. WI-M7-H2 may proceed; merge and Milestone 8 remain blocked by the later remediation findings and release gates.
 
 ## Anti-cycle rule
 
@@ -118,6 +118,29 @@ The existing storage checks remain defense-in-depth and must not be described as
 
 Wi v0.1 now supports Linux only. The server fails before storage construction on unsupported operating systems. Linux process groups, owner-pipe watchdog behavior, signals, and directory symlinks remain release-gated. Historical native Windows evidence is retained in earlier ledgers but is no longer a current product requirement.
 
+## Final independent verification
+
+Independent verification at `27207689863b2cb8837aa2d6caa660c0af7eaf25` classified:
+
+- **WI-M7-H1: RESOLVED**
+- **Architecture/scope correction: ACCEPTED WITH DOCUMENTATION GAPS**
+
+The verifier found no current-head in-scope H1 defect. The post-callback/ABA and missing-catalog ancestor races remain technically possible but require the concurrent same-user filesystem mutation explicitly accepted by ADR-0012. The verifier confirmed that no v0.1 browser, provider, project, or built-in tool input has that filesystem authority.
+
+Independent results:
+
+| Check | Result |
+|---|---|
+| Focused platform/process-harness suites | 4 files; 23 passed |
+| Linux descendant/owner-death suite | 6 passed |
+| Focused cumulative H1 process regressions | 9 passed |
+| Focused H1 unit/integration regressions | 4 passed |
+| `pnpm check` | 66 files; 852 passed; no skips |
+| `pnpm test:e2e` | 33 passed |
+| Cleanup and `git diff --check` | Passed |
+
+The low documentation gap was that future multi-user, remote, macOS, or Windows expansion did not explicitly require a security review. ADR-0011 and ADR-0012 now state that requirement.
+
 ## Next action
 
-Run the complete Linux gates, commit this scope correction atomically, and obtain fresh independent H1 verification against ADR-0011 and ADR-0012. Do not begin WI-M7-H2, merge PR #13, or begin Milestone 8 before that report.
+Proceed to WI-M7-H2. PR merge and Milestone 8 remain blocked by H2, M1, M4, L1, final local review, Linux CI, and fresh independent remote re-review.

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createId } from "@wi/protocol";
 import { WiRuntime } from "./composition.js";
-import { parseServerConfig } from "./config.js";
+import { assertSupportedServerPlatform, parseServerConfig } from "./config.js";
 import { WiServer } from "./http/server.js";
 import { logFatalServerLifecycleFailure } from "./logging/lifecycle.js";
 import { JsonLogger, nonThrowingLogger } from "./logging/logger.js";
@@ -47,6 +47,7 @@ async function shutdown(signal: string): Promise<void> {
 
 async function main(): Promise<void> {
   try {
+    assertSupportedServerPlatform(process.platform);
     const config = parseServerConfig(process.env);
     shutdownDeadlineMs = config.shutdownDeadlineMs;
     const runtime = new WiRuntime({

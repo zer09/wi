@@ -2712,7 +2712,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it.skipIf(process.platform === "win32")(
+  it(
     "rejects a healthy-catalog lazy open through a symlink outside WI_HOME",
     async () => {
       const homeDirectory = await temporaryHome();
@@ -2752,7 +2752,7 @@ describe("catalog and per-session storage workers", () => {
     },
   );
 
-  it.skipIf(process.platform === "win32")(
+  it(
     "retains repair intent and canonical files after an operational discovery failure",
     async () => {
       const homeDirectory = await temporaryHome();

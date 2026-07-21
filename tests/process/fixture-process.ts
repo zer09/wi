@@ -209,7 +209,7 @@ export class FixtureProcessRunner {
       return result;
     } finally {
       if (timer !== null) clearTimeout(timer);
-      // Leader exit does not prove its detached group or Job Object is empty.
+      // Leader exit does not prove its detached process group is empty.
       await this.terminate(child);
     }
   }

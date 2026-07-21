@@ -1077,12 +1077,7 @@ describe("Milestone 7 real server crash recovery", () => {
     const approvalId = approvalEvent.data.approvalId;
     await first.process.signal("SIGKILL");
     const forcedExit = await first.process.waitForExit();
-    if (process.platform === "win32") {
-      expect(forcedExit.signal).toBeNull();
-      expect(forcedExit.code).not.toBeNull();
-    } else {
-      expect(forcedExit).toMatchObject({ code: null, signal: "SIGKILL" });
-    }
+    expect(forcedExit).toMatchObject({ code: null, signal: "SIGKILL" });
 
     const pendingRestart = await start(harness, "approval-round-trip");
     const pendingSocket = await connect(pendingRestart.origin);
@@ -2169,11 +2164,7 @@ describe("Milestone 7 real server crash recovery", () => {
       const ready = repairing.ready();
       await replacementReached;
       await rename(harness.homeDirectory, originalHome);
-      await symlink(
-        externalHome,
-        harness.homeDirectory,
-        process.platform === "win32" ? "junction" : "dir",
-      );
+      await symlink(externalHome, harness.homeDirectory, "dir");
       releaseReplacement();
 
       const startupError = await ready.then(
@@ -2271,11 +2262,7 @@ describe("Milestone 7 real server crash recovery", () => {
       const ready = repairing.ready();
       await openReached;
       await rename(harness.homeDirectory, originalHome);
-      await symlink(
-        externalHome,
-        harness.homeDirectory,
-        process.platform === "win32" ? "junction" : "dir",
-      );
+      await symlink(externalHome, harness.homeDirectory, "dir");
       releaseOpen();
 
       await expect(ready).rejects.toMatchObject({
@@ -2753,11 +2740,7 @@ describe("Milestone 7 real server crash recovery", () => {
       const ready = repairing.ready();
       await isolationReached;
       await rename(prefixDirectory, originalPrefixDirectory);
-      await symlink(
-        externalPrefix,
-        prefixDirectory,
-        process.platform === "win32" ? "junction" : "dir",
-      );
+      await symlink(externalPrefix, prefixDirectory, "dir");
       releaseIsolation();
       await ready;
 
@@ -2941,11 +2924,7 @@ describe("Milestone 7 real server crash recovery", () => {
     const externalDirectory = join(harness.homeDirectory, "external-session");
     await mkdir(externalDirectory, { recursive: true });
     await mkdir(join(symlinkPath, ".."), { recursive: true });
-    await symlink(
-      externalDirectory,
-      symlinkPath,
-      process.platform === "win32" ? "junction" : "dir",
-    );
+    await symlink(externalDirectory, symlinkPath, "dir");
     for (const suffix of ["", "-wal", "-shm"]) {
       await rm(join(harness.homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
     }

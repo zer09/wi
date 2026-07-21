@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { BoundedProcessOutput, processTreeSignalPlan } from "./process-harness.js";
+import { BoundedProcessOutput } from "./process-harness.js";
 
 describe("bounded process output", () => {
   it("retains the newest bytes across ring wrap without changing the full hash", () => {
@@ -28,30 +28,6 @@ describe("bounded process output", () => {
       retainedBytes: 4,
       totalBytes: 10,
       truncated: true,
-    });
-  });
-});
-
-describe("process tree signal planning", () => {
-  it("signals the detached POSIX process group", () => {
-    expect(processTreeSignalPlan("linux", 1234, "SIGTERM")).toEqual({
-      kind: "process-group",
-      pid: -1234,
-      signal: "SIGTERM",
-    });
-  });
-
-  it("separates graceful Windows control from Job Object escalation", () => {
-    expect(processTreeSignalPlan("win32", 1234, "SIGTERM")).toEqual({
-      kind: "windows-control",
-      signal: "SIGTERM",
-    });
-    expect(processTreeSignalPlan("win32", 1234, "SIGINT")).toEqual({
-      kind: "windows-control",
-      signal: "SIGINT",
-    });
-    expect(processTreeSignalPlan("win32", 1234, "SIGKILL")).toEqual({
-      kind: "windows-job",
     });
   });
 });

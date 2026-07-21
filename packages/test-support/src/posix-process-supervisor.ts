@@ -5,7 +5,7 @@ const CONTROL_TOKEN_NAME = "WI_TEST_SUPPORT_POSIX_CONTROL_TOKEN";
 const TERM_GRACE_MS = 250;
 const KILL_GRACE_MS = 1_000;
 
-if (process.platform === "win32" || typeof process.send !== "function") process.exit(64);
+if (process.platform !== "linux" || typeof process.send !== "function") process.exit(64);
 
 const controlToken = process.env[CONTROL_TOKEN_NAME];
 delete process.env[CONTROL_TOKEN_NAME];

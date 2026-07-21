@@ -3,7 +3,7 @@ import { readSync, writeSync } from "node:fs";
 const readyDescriptor = process.env.WI_TEST_SUPPORT_POSIX_READY_FD;
 const acknowledgementDescriptor = process.env.WI_TEST_SUPPORT_POSIX_ACKNOWLEDGEMENT_FD;
 
-if (process.platform !== "win32" && readyDescriptor !== undefined) {
+if (process.platform === "linux" && readyDescriptor !== undefined) {
   delete process.env.WI_TEST_SUPPORT_POSIX_READY_FD;
   delete process.env.WI_TEST_SUPPORT_POSIX_ACKNOWLEDGEMENT_FD;
   if (acknowledgementDescriptor === undefined) {

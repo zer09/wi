@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from "node:url";
 
 import { spawnNodeProcessTree } from "@wi/test-support";
 
-if (process.platform === "win32" || typeof process.send !== "function") process.exit(64);
+if (process.platform !== "linux" || typeof process.send !== "function") process.exit(64);
 
 const descendantFixturePath = fileURLToPath(
   new URL("./process-harness-descendant-fixture.mjs", import.meta.url),

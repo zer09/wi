@@ -114,26 +114,13 @@ function formatOutputDiagnostics(
   return `${stream}=${diagnostics.tail} (${retention}, sha256=${diagnostics.sha256})`;
 }
 
-interface WindowsJobOwnership {
-  readonly name: string;
-  readonly activeProcessCount: () => number;
-  readonly terminate: () => void;
-  readonly close: () => void;
-}
-
 interface PosixSupervisorOwnership {
   readonly supervisor: ChildProcess;
   readonly controlToken: string;
   release: Promise<void> | null;
 }
 
-const windowsJobs = new WeakMap<ChildProcess, WindowsJobOwnership>();
-const windowsGracefulTokens = new WeakMap<ChildProcess, string>();
 const posixSupervisors = new WeakMap<ChildProcess, PosixSupervisorOwnership>();
-const WINDOWS_JOB_NAME = "WI_TEST_SUPPORT_WINDOWS_JOB_NAME";
-const WINDOWS_JOB_READY_FD = "WI_TEST_SUPPORT_WINDOWS_JOB_READY_FD";
-const WINDOWS_JOB_ACKNOWLEDGEMENT_FD = "WI_TEST_SUPPORT_WINDOWS_JOB_ACKNOWLEDGEMENT_FD";
-const WINDOWS_GRACEFUL_TOKEN = "WI_TEST_SUPPORT_WINDOWS_GRACEFUL_TOKEN";
 const POSIX_CONTROL_TOKEN = "WI_TEST_SUPPORT_POSIX_CONTROL_TOKEN";
 const POSIX_READY_FD = "WI_TEST_SUPPORT_POSIX_READY_FD";
 const POSIX_ACKNOWLEDGEMENT_FD = "WI_TEST_SUPPORT_POSIX_ACKNOWLEDGEMENT_FD";
@@ -149,41 +136,6 @@ function environmentWithValue(
   }
   result[name] = value;
   return result;
-}
-
-async function waitForWindowsJobAssignment(child: ChildProcess): Promise<void> {
-  // The preload blocks before fixture code until the parent confirms that the
-  // process joined its job, so no descendant can escape through an assignment race.
-  const readiness = child.stdio[3];
-  const acknowledgement = child.stdio[4];
-  if (
-    readiness === undefined ||
-    readiness === null ||
-    !("once" in readiness) ||
-    acknowledgement === undefined ||
-    acknowledgement === null ||
-    !("write" in acknowledgement)
-  ) {
-    throw new Error("Windows Job Object preload has no handshake pipes");
-  }
-  let onReady = (): void => undefined;
-  let onExit = (): void => undefined;
-  try {
-    await withTimeout(
-      new Promise<void>((resolve, reject) => {
-        onReady = () => resolve();
-        onExit = () => reject(new Error("Fixture exited before joining its Windows Job Object"));
-        readiness.once("data", onReady);
-        child.once("exit", onExit);
-      }),
-      5_000,
-      () => "Fixture did not join its Windows Job Object",
-    );
-  } finally {
-    readiness.off("data", onReady);
-    child.off("exit", onExit);
-  }
-  acknowledgement.write("continue");
 }
 
 async function waitForPosixSupervisorMessage(
@@ -243,7 +195,6 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
     env: environment,
     stdio: ["ignore", "ignore", "ignore", "pipe", "ipc"],
     detached: true,
-    windowsHide: true,
   });
   const ownerPipe = supervisor.stdio[3];
   if (ownerPipe === undefined || ownerPipe === null || !("write" in ownerPipe)) {
@@ -362,45 +313,20 @@ export async function spawnNodeProcessTree(
     readonly ipc?: boolean;
   } = {},
 ): Promise<ChildProcess> {
-  let environment = { ...process.env, ...options.environment };
-  let ownership: WindowsJobOwnership | null = null;
-  let posixOwnership: PosixSupervisorOwnership | null = null;
-  if (process.platform === "win32") {
-    const { WindowsProcessJob } = await import("./windows-process-job.js");
-    ownership = WindowsProcessJob.create(
-      `Local\\wi-test-${String(process.pid)}-${randomUUID()}`,
-    );
-    const preloadUrl = new URL("./windows-job-preload.js", import.meta.url).href;
-    const existingNodeOptions = environment.NODE_OPTIONS?.trim();
-    environment = environmentWithValue(
-      environment,
-      "NODE_OPTIONS",
-      `${existingNodeOptions === undefined || existingNodeOptions === "" ? "" : `${existingNodeOptions} `}--import=${preloadUrl}`,
-    );
-    environment = environmentWithValue(environment, WINDOWS_JOB_NAME, ownership.name);
-    environment = environmentWithValue(environment, WINDOWS_JOB_READY_FD, "3");
-    environment = environmentWithValue(
-      environment,
-      WINDOWS_JOB_ACKNOWLEDGEMENT_FD,
-      "4",
-    );
-    environment = environmentWithValue(
-      environment,
-      WINDOWS_GRACEFUL_TOKEN,
-      randomUUID(),
-    );
-  } else {
-    posixOwnership = await startPosixSupervisor();
-    const preloadUrl = new URL("./posix-owner-preload.js", import.meta.url).href;
-    const existingNodeOptions = environment.NODE_OPTIONS?.trim();
-    environment = environmentWithValue(
-      environment,
-      "NODE_OPTIONS",
-      `${existingNodeOptions === undefined || existingNodeOptions === "" ? "" : `${existingNodeOptions} `}--import=${preloadUrl}`,
-    );
-    environment = environmentWithValue(environment, POSIX_READY_FD, "3");
-    environment = environmentWithValue(environment, POSIX_ACKNOWLEDGEMENT_FD, "4");
+  if (process.platform !== "linux") {
+    throw new Error("The Wi v0.1 process harness supports Linux only");
   }
+  let environment = { ...process.env, ...options.environment };
+  const posixOwnership = await startPosixSupervisor();
+  const preloadUrl = new URL("./posix-owner-preload.js", import.meta.url).href;
+  const existingNodeOptions = environment.NODE_OPTIONS?.trim();
+  environment = environmentWithValue(
+    environment,
+    "NODE_OPTIONS",
+    `${existingNodeOptions === undefined || existingNodeOptions === "" ? "" : `${existingNodeOptions} `}--import=${preloadUrl}`,
+  );
+  environment = environmentWithValue(environment, POSIX_READY_FD, "3");
+  environment = environmentWithValue(environment, POSIX_ACKNOWLEDGEMENT_FD, "4");
 
   let child: ChildProcess | null = null;
   try {
@@ -410,57 +336,38 @@ export async function spawnNodeProcessTree(
         "ignore",
         "pipe",
         "pipe",
-        ...(ownership === null && posixOwnership === null
-          ? []
-          : ["pipe" as const, "pipe" as const]),
-        ...(options.ipc === true || ownership !== null ? ["ipc" as const] : []),
+        "pipe",
+        "pipe",
+        ...(options.ipc === true ? ["ipc" as const] : []),
       ],
-      detached: process.platform !== "win32",
-      windowsHide: true,
+      detached: true,
     });
-    if (ownership !== null) {
-      windowsJobs.set(child, ownership);
-      const gracefulToken = environment[WINDOWS_GRACEFUL_TOKEN];
-      if (gracefulToken === undefined) throw new Error("Windows graceful control token is missing");
-      windowsGracefulTokens.set(child, gracefulToken);
-      await waitForWindowsJobAssignment(child);
-    } else if (posixOwnership !== null) {
-      posixSupervisors.set(child, posixOwnership);
-      await waitForPosixFixtureGate(child);
-      const managedChild = child;
-      const managedOwnership = posixOwnership;
-      managedOwnership.supervisor.once("close", () => {
-        if (managedOwnership.release !== null || managedChild.pid === undefined) return;
-        try {
-          process.kill(-managedChild.pid, "SIGKILL");
-        } catch {
-          // The fixture group may already have completed naturally.
-        }
-      });
-      managedChild.once("close", () => {
-        void releasePosixSupervisor(managedChild).catch(() => undefined);
-      });
-    }
+    posixSupervisors.set(child, posixOwnership);
+    await waitForPosixFixtureGate(child);
+    const managedChild = child;
+    posixOwnership.supervisor.once("close", () => {
+      if (posixOwnership.release !== null || managedChild.pid === undefined) return;
+      try {
+        process.kill(-managedChild.pid, "SIGKILL");
+      } catch {
+        // The fixture group may already have completed naturally.
+      }
+    });
+    managedChild.once("close", () => {
+      void releasePosixSupervisor(managedChild).catch(() => undefined);
+    });
     return child;
   } catch (error) {
-    if (ownership !== null) {
+    if (child?.pid !== undefined) {
       try {
-        ownership.terminate();
-      } finally {
-        ownership.close();
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // The gated fixture may already be gone.
       }
-    } else if (posixOwnership !== null) {
-      if (child?.pid !== undefined) {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-        } catch {
-          // The gated fixture may already be gone.
-        }
-      }
-      posixOwnership.supervisor.stdio[3]?.destroy();
-      posixOwnership.supervisor.kill("SIGKILL");
-      if (child !== null) posixSupervisors.delete(child);
     }
+    posixOwnership.supervisor.stdio[3]?.destroy();
+    posixOwnership.supervisor.kill("SIGKILL");
+    if (child !== null) posixSupervisors.delete(child);
     try {
       child?.kill("SIGKILL");
     } catch {
@@ -661,58 +568,13 @@ export class RealServerHarness {
   }
 }
 
-export type ProcessTreeSignalPlan =
-  | { readonly kind: "process-group"; readonly pid: number; readonly signal: NodeJS.Signals }
-  | { readonly kind: "windows-control"; readonly signal: "SIGTERM" | "SIGINT" }
-  | { readonly kind: "windows-job" };
-
-export function processTreeSignalPlan(
-  platform: NodeJS.Platform,
-  pid: number,
-  signal: NodeJS.Signals,
-): ProcessTreeSignalPlan {
-  if (platform === "win32") {
-    if (signal === "SIGTERM" || signal === "SIGINT") {
-      return { kind: "windows-control", signal };
-    }
-    return { kind: "windows-job" };
-  }
-  return { kind: "process-group", pid: -pid, signal };
-}
-
 export async function signalProcessTree(
   child: ChildProcess,
   signal: NodeJS.Signals,
 ): Promise<void> {
   if (child.pid === undefined) return;
-  const windowsJob = windowsJobs.get(child);
-  const plan = processTreeSignalPlan(process.platform, child.pid, signal);
-  if (plan.kind === "windows-control") {
-    const token = windowsGracefulTokens.get(child);
-    if (windowsJob === undefined || token === undefined || !child.connected) {
-      throw new Error("Windows graceful process signaling requires authenticated IPC ownership");
-    }
-    await new Promise<void>((resolve, reject) => {
-      child.send(
-        {
-          type: "wi.test-support.graceful-signal",
-          token,
-          signal: plan.signal,
-        },
-        (error) => error === null ? resolve() : reject(error),
-      );
-    });
-    return;
-  }
-  if (plan.kind === "windows-job") {
-    if (windowsJob === undefined) {
-      throw new Error("Windows process tree signaling requires Job Object ownership");
-    }
-    windowsJob.terminate();
-    return;
-  }
   try {
-    process.kill(plan.pid, plan.signal);
+    process.kill(-child.pid, signal);
   } catch (groupError) {
     try {
       child.kill(signal);
@@ -727,18 +589,11 @@ async function waitForProcessTreeGone(child: ChildProcess, timeoutMs: number): P
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const leaderGone = child.exitCode !== null || child.signalCode !== null;
-    if (process.platform === "win32") {
-      const windowsJob = windowsJobs.get(child);
-      if (windowsJob === undefined) return false;
-      if (windowsJob.activeProcessCount() === 0) return true;
-    } else if (child.pid === undefined) {
-      return leaderGone;
-    } else {
-      try {
-        process.kill(-child.pid, 0);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
-      }
+    if (child.pid === undefined) return leaderGone;
+    try {
+      process.kill(-child.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -749,27 +604,13 @@ export async function terminateProcessTree(
   child: ChildProcess,
   terminationGraceMs = 1_000,
 ): Promise<void> {
-  // POSIX groups and Windows Job Objects can outlive their direct leader. Always
-  // signal and verify the owned boundary, not merely the leader's close event.
-  const windowsJob = windowsJobs.get(child);
-  if (process.platform === "win32" && windowsJob === undefined) {
-    throw new Error("Windows process tree cleanup requires Job Object ownership");
-  }
+  // A detached process group can outlive its direct leader. Always signal and
+  // verify the owned group, not merely the leader's close event.
   const errors: unknown[] = [];
   try {
     await signalProcessTree(child, "SIGTERM");
   } catch (error) {
-    if (windowsJob === undefined) {
-      errors.push(error);
-    } else {
-      // Cleanup still owns the Job Object if the leader closed or disconnected
-      // before accepting graceful control, so escalate without losing the tree.
-      try {
-        windowsJob.terminate();
-      } catch (escalationError) {
-        errors.push(escalationError);
-      }
-    }
+    errors.push(error);
   }
   const terminated = await waitForProcessTreeGone(child, terminationGraceMs);
   if (!terminated) {
@@ -782,22 +623,10 @@ export async function terminateProcessTree(
       errors.push(new Error(`Server process tree ${String(child.pid)} did not disappear`));
     }
   }
-  if (windowsJob !== undefined) {
-    try {
-      if (windowsJob.activeProcessCount() === 0) {
-        windowsJob.close();
-        windowsJobs.delete(child);
-        windowsGracefulTokens.delete(child);
-      }
-    } catch (error) {
-      errors.push(error);
-    }
-  } else {
-    try {
-      await releasePosixSupervisor(child);
-    } catch (error) {
-      errors.push(error);
-    }
+  try {
+    await releasePosixSupervisor(child);
+  } catch (error) {
+    errors.push(error);
   }
   if (errors.length > 0) throw new AggregateError(errors, "Server process cleanup failed");
 }

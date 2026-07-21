@@ -1,7 +1,19 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseServerConfig } from "./config.js";
+import { assertSupportedServerPlatform, parseServerConfig } from "./config.js";
+
+describe("assertSupportedServerPlatform", () => {
+  it("accepts Linux and rejects unsupported operating systems", () => {
+    expect(() => assertSupportedServerPlatform("linux")).not.toThrow();
+    expect(() => assertSupportedServerPlatform("win32")).toThrow(
+      "Wi v0.1 supports Linux only",
+    );
+    expect(() => assertSupportedServerPlatform("darwin")).toThrow(
+      "Wi v0.1 supports Linux only",
+    );
+  });
+});
 
 describe("parseServerConfig", () => {
   it("uses loopback, the default port, and the default Wi home", () => {

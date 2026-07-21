@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { RealServerProcess } from "@wi/test-support";
 
@@ -12,9 +12,6 @@ import { FixtureProcessRunner, FixtureProcessTimeoutError } from "./fixture-proc
 
 const fixturePath = fileURLToPath(
   new URL("./process-harness-descendant-fixture.mjs", import.meta.url),
-);
-const ownerDeathFixturePath = fileURLToPath(
-  new URL("./process-harness-owner-death-fixture.mjs", import.meta.url),
 );
 const posixOwnerDeathFixturePath = fileURLToPath(
   new URL("./process-harness-posix-owner-death-fixture.mjs", import.meta.url),
@@ -42,19 +39,6 @@ async function expectProcessGone(pid: number): Promise<void> {
 }
 
 describe("real process-tree cleanup", () => {
-  it.skipIf(process.platform !== "win32")(
-    "reloads anonymous Windows Job Object bindings across isolated modules",
-    async () => {
-      await expect(
-        import("../../packages/test-support/src/windows-process-job.js"),
-      ).resolves.toHaveProperty("WindowsProcessJob");
-      vi.resetModules();
-      await expect(
-        import("../../packages/test-support/src/windows-process-job.js"),
-      ).resolves.toHaveProperty("WindowsProcessJob");
-    },
-  );
-
   it.each(["leader-live", "leader-exits"] as const)(
     "terminates descendants when the %s case is cleaned up",
     async (mode) => {
@@ -84,41 +68,8 @@ describe("real process-tree cleanup", () => {
     10_000,
   );
 
-  it.skipIf(process.platform !== "win32")(
+  it(
     "kills nested fixture descendants when the harness owner dies",
-    async () => {
-      const owner = await RealServerProcess.start({
-        fixturePath: ownerDeathFixturePath,
-        waitForReady: false,
-      });
-      let leaderPid: number | null = null;
-      let descendantPid: number | null = null;
-      try {
-        const ready = await owner.waitForMessage("ready");
-        if (typeof ready.leaderPid !== "number" || typeof ready.descendantPid !== "number") {
-          throw new Error("Owner-death fixture did not report its nested process tree");
-        }
-        leaderPid = ready.leaderPid;
-        descendantPid = ready.descendantPid;
-        expect(processExists(leaderPid)).toBe(true);
-        expect(processExists(descendantPid)).toBe(true);
-        await expect(owner.waitForExit()).resolves.toMatchObject({ code: 0, signal: null });
-
-        // Do not call terminate() before these checks: only closing the dead owner's
-        // nested Job Object handle is allowed to reclaim this process tree.
-        await expectProcessGone(leaderPid);
-        await expectProcessGone(descendantPid);
-      } finally {
-        await owner.terminate().catch(() => undefined);
-        if (leaderPid !== null) await expectProcessGone(leaderPid);
-        if (descendantPid !== null) await expectProcessGone(descendantPid);
-      }
-    },
-    10_000,
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "kills nested fixture descendants when the POSIX harness owner dies",
     async () => {
       const owner = await RealServerProcess.start({
         fixturePath: posixOwnerDeathFixturePath,
@@ -160,8 +111,8 @@ describe("real process-tree cleanup", () => {
     10_000,
   );
 
-  it.skipIf(process.platform === "win32")(
-    "fails closed before fixture code when POSIX ownership setup cannot complete",
+  it(
+    "fails closed before fixture code when process ownership setup cannot complete",
     async () => {
       const sentinelPath = join(tmpdir(), `wi-posix-owner-${randomUUID()}`);
       try {

@@ -5,6 +5,12 @@ const DEFAULT_PORT = 4317;
 const DEFAULT_SHUTDOWN_DEADLINE_MS = 15_000;
 const DEFAULT_SESSION_DISCOVERY_LIMIT = 1_000;
 
+export function assertSupportedServerPlatform(platform: NodeJS.Platform): void {
+  if (platform !== "linux") {
+    throw new Error("Wi v0.1 supports Linux only");
+  }
+}
+
 export interface ServerConfig {
   readonly host: "127.0.0.1";
   readonly port: number;

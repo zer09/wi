@@ -2,7 +2,7 @@
 
 ## Product scope
 
-Wi is a local, single-operating-system-user, browser-based coding-agent harness.
+Wi is a local, single-operating-system-user, Linux-only browser-based coding-agent harness.
 
 The browser is a temporary GUI. The Node.js backend owns sessions, runs, provider requests, tool execution, approvals, pending questions, project services, and persistence. Browser refresh, disconnect, tab closure, or Wi UI sign-out must not cancel backend work.
 
@@ -26,7 +26,7 @@ Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit am
 
 ## Runtime and tooling
 
-- Target Node.js 24.
+- Target Node.js 24 on Linux. The v0.1 server must fail fast on other operating systems.
 - Use pnpm workspaces.
 - Use TypeScript ESM with strict checking.
 - Enable `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
@@ -54,6 +54,8 @@ Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit am
 - Do not add OpenAI integration during the first vertical slice.
 - Do not add browser SSE; use the multiplexed WebSocket protocol.
 - Fail the smallest reasonable fault domain and log a redacted diagnostic.
+- Treat the local operating-system user as trusted; hostile concurrent same-user mutation of `WI_HOME` is outside v0.1's threat model.
+- Do not add Windows support or Windows CI without a new ADR.
 - Do not silently switch provider, endpoint, transport, model, account, or billing source.
 
 ## Dependency boundaries

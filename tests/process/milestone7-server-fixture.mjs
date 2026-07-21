@@ -17,6 +17,12 @@ const blockReplay = process.env.WI_M7_BLOCK_REPLAY === "1";
 const blockCatalogObservation = process.env.WI_M7_BLOCK_CATALOG_OBSERVATION === "1";
 const blockStorageRequest = process.env.WI_M7_BLOCK_STORAGE_REQUEST === "1";
 const retainBlocksOnShutdown = process.env.WI_M7_RETAIN_BLOCKS_ON_SHUTDOWN === "1";
+const blockCommandSessionId = process.env.WI_M7_BLOCK_COMMAND_SESSION_ID;
+let commandBlockUsed = false;
+let releaseCommand = () => {};
+const commandGate = new Promise((resolve) => {
+  releaseCommand = resolve;
+});
 let releaseReplay = () => {};
 const replayGate = new Promise((resolve) => {
   releaseReplay = resolve;
@@ -63,17 +69,39 @@ const server = new WiServer({
   runtime,
   port: 0,
   gateway:
-    testFailpoints === null && !blockReplay
+    testFailpoints === null && !blockReplay && blockCommandSessionId === undefined
       ? undefined
       : {
-          ...(testFailpoints === null
+          ...(testFailpoints === null && blockCommandSessionId === undefined
             ? {}
             : {
                 commandHooks: {
-                  afterRouteBeforeSend: (command) => {
-                    testFailpoints.hit("after_command_commit_before_ack", {
-                      commandId: command.commandId,
+                  beforeRoute: async (command) => {
+                    if (
+                      commandBlockUsed ||
+                      blockCommandSessionId === undefined ||
+                      command.sessionId !== blockCommandSessionId
+                    ) {
+                      return;
+                    }
+                    commandBlockUsed = true;
+                    process.send?.({
+                      type: "command-blocked",
                       sessionId: command.sessionId,
+                      commandId: command.commandId,
+                    });
+                    await commandGate;
+                  },
+                  afterRouteBeforeSend: (command, accepted) => {
+                    testFailpoints?.hit("after_command_commit_before_ack", {
+                      commandId: command.commandId,
+                      sessionId:
+                        command.sessionId ??
+                        (accepted.result !== null &&
+                        typeof accepted.result === "object" &&
+                        "sessionId" in accepted.result
+                          ? accepted.result.sessionId
+                          : undefined),
                     });
                   },
                 },
@@ -103,6 +131,7 @@ function closeServer() {
   if (closing) return;
   closing = true;
   if (!retainBlocksOnShutdown) {
+    releaseCommand();
     releaseReplay();
     releaseCatalogObservation();
   }
@@ -119,6 +148,14 @@ function closeServer() {
 }
 
 process.on("message", (message) => {
+  if (
+    message !== null &&
+    typeof message === "object" &&
+    message.type === "release-command"
+  ) {
+    releaseCommand();
+    return;
+  }
   if (
     blockStorageRequest &&
     message !== null &&

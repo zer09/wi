@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { rename } from "node:fs/promises";
 
 import {
   canonicalJson,
@@ -64,6 +63,10 @@ export interface StorageTestFailpoints {
       | "after_catalog_replacement_before_repair",
     fields?: Readonly<Record<string, unknown>>,
   ) => void;
+  readonly beforeCatalogSessionIsolation?: (fields: {
+    readonly sessionId: string;
+    readonly reason: "corrupt" | "oversized" | "unsupported" | "provenance_conflict";
+  }) => void | Promise<void>;
 }
 
 export interface SessionStoreManagerOptions {
@@ -362,11 +365,6 @@ export class SessionStoreManager {
     const failureMessage =
       "The partial session database is unavailable and was retained for recovery.";
     const dbRelativePath = sessionDatabaseRelativePath(command.reservedSessionId);
-    const sessionDirectoryRelativePath = dbRelativePath.slice(
-      0,
-      -"/session.sqlite3".length,
-    );
-    const quarantinedRelativePath = `${sessionDirectoryRelativePath}.quarantine-${diagnosticId}`;
     const failedAtMs = this.now();
     const session: SessionSummary = {
       sessionId: command.reservedSessionId,
@@ -385,7 +383,7 @@ export class SessionStoreManager {
       sessionSchemaVersion: SESSION_SCHEMA_VERSION,
       recoveryCandidate: false,
     };
-    let failedCommand = await this.catalog.failGlobalCommand({
+    const failedCommand = await this.catalog.failGlobalCommand({
       commandId: command.commandId,
       payloadHash: command.payloadHash,
       session,
@@ -397,18 +395,8 @@ export class SessionStoreManager {
     });
 
     await this.sessions.closeSession(command.reservedSessionId).catch(() => undefined);
-    const source = resolveStoragePath(this.homeDirectory, sessionDirectoryRelativePath);
-    const destination = resolveStoragePath(this.homeDirectory, quarantinedRelativePath);
-    try {
-      await rename(source, destination);
-      failedCommand = await this.catalog.setGlobalCommandQuarantine({
-        commandId: command.commandId,
-        diagnosticId,
-        quarantinedRelativePath,
-      });
-    } catch {
-      // The terminal failure stays truthful: an unrecorded quarantine path is never claimed.
-    }
+    // Node has no cross-platform handle-relative directory rename. Preserve the
+    // partial database in place rather than risk following a swapped ancestor.
     this.sessionFaultStatuses.set(command.reservedSessionId, "unavailable");
     this.reconciledSessions.delete(command.reservedSessionId);
     return { command: failedCommand, session };
@@ -442,7 +430,9 @@ export class SessionStoreManager {
     );
     const observedSessionIds = new Set(discovery.sessionIds);
     let repaired = 0;
-    let quarantined = 0;
+    // Retain the report field for compatibility with earlier catalogs; current
+    // session isolation never performs a pathname-based directory quarantine.
+    const quarantined = 0;
     let transientFailure = false;
     const provenanceOwners = new Map<string, string>();
     const conflictingProvenanceSessions = new Set<string>();
@@ -577,9 +567,12 @@ export class SessionStoreManager {
         return;
       }
 
+      await this.testFailpoints?.beforeCatalogSessionIsolation?.({
+        sessionId: record.sessionId,
+        reason: classification?.kind ?? "provenance_conflict",
+      });
       const atMs = this.now();
       const preserveUnsupported = classification?.kind === "unsupported";
-      const preserveInPlace = preserveUnsupported || classification?.kind === "oversized";
       let recoveredTitle = "Unavailable recovered session";
       if (preserveUnsupported) recoveredTitle = "Unsupported recovered session";
       if (classification?.kind === "oversized") recoveredTitle = "Oversized recovered session";
@@ -603,7 +596,7 @@ export class SessionStoreManager {
             ? classification.schemaVersion
             : SESSION_SCHEMA_VERSION,
           recoveryCandidate: false,
-          unavailableReason: preserveInPlace ? null : "quarantined",
+          unavailableReason: null,
         });
       } else {
         await this.catalog.repairSessionClassification({
@@ -611,33 +604,11 @@ export class SessionStoreManager {
           dbRelativePath,
           status: "unavailable",
           sessionSchemaVersion: preserveUnsupported ? classification.schemaVersion : null,
-          unavailableReason: preserveInPlace ? null : "quarantined",
+          unavailableReason: null,
         });
       }
-      if (!preserveInPlace) {
-        const sessionDirectoryRelativePath = dbRelativePath.slice(
-          0,
-          -"/session.sqlite3".length,
-        );
-        const quarantineRelativePath = `${sessionDirectoryRelativePath}.quarantine-${this.diagnosticId()}`;
-        try {
-          await rename(
-            resolveStoragePath(this.homeDirectory, sessionDirectoryRelativePath),
-            resolveStoragePath(this.homeDirectory, quarantineRelativePath),
-          );
-          quarantined += 1;
-        } catch {
-          // A failed rename is unavailable but not durably quarantined. A later
-          // absent canonical path must therefore be allowed to become missing.
-          await this.catalog.repairSessionClassification({
-            sessionId: record.sessionId,
-            dbRelativePath,
-            status: "unavailable",
-            sessionSchemaVersion: null,
-            unavailableReason: null,
-          });
-        }
-      }
+      // Pathname-based rename cannot prove which directory it will move if a
+      // same-user process swaps an ancestor. Keep every unavailable session in place.
       this.sessionFaultStatuses.set(record.sessionId, "unavailable");
     });
 
@@ -680,7 +651,7 @@ export class SessionStoreManager {
     };
     if (transientFailure) {
       // Retain the marker; an operational failure is not proof that a canonical
-      // database is corrupt and must be retried without quarantine.
+      // database is corrupt and must be retried without destructive isolation.
       throw new StorageError("storage.busy", "Catalog repair retained for an operational discovery failure", true);
     }
   }
@@ -835,7 +806,7 @@ export class SessionStoreManager {
         this.sessionFaultStatuses.set(sessionId, status);
         return;
       }
-      // A known corrupt session does not become less informative merely because quarantine moved it.
+      // A known corrupt session does not become less informative if its file later disappears.
       if (existing.status === "unavailable") status = "unavailable";
       this.sessionFaultStatuses.set(sessionId, status);
       if (existing.status !== status) {

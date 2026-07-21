@@ -2,7 +2,9 @@ import {
   copyFile,
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
+  readdir,
   rename,
   rm,
   stat,
@@ -10,6 +12,7 @@ import {
   truncate,
   writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +37,7 @@ const storageCloseFixturePath = fileURLToPath(
   new URL("./milestone7-storage-close-fixture.mjs", import.meta.url),
 );
 const harnesses = new Set<RealServerHarness>();
+const externalHomes = new Set<string>();
 const fixtureProcesses = new FixtureProcessRunner(2_000);
 
 class TestSocket {
@@ -157,11 +161,25 @@ async function replay(client: TestSocket, sessionId: string): Promise<readonly S
   );
 }
 
+type FailpointSelectorEnvironment = Readonly<
+  Partial<
+    Record<
+      | "WI_TEST_FAILPOINT_SESSION_ID"
+      | "WI_TEST_FAILPOINT_COMMAND_ID"
+      | "WI_TEST_FAILPOINT_RUN_ID"
+      | "WI_TEST_FAILPOINT_CATALOG_GLOBAL",
+      string
+    >
+  >
+>;
+
 async function start(
   harness: RealServerHarness,
   scenario = "plain-text",
   failpoint?: string,
   repairMode = "auto",
+  selector: FailpointSelectorEnvironment = {},
+  blockCommandSessionId?: string,
 ): Promise<{ readonly process: RealServerProcess; readonly origin: string; readonly ready: Record<string, unknown> }> {
   const processHandle = await harness.start({
     fixturePath,
@@ -173,6 +191,10 @@ async function start(
             NODE_ENV: "test",
             WI_ALLOW_TEST_FAILPOINTS: "1",
             WI_TEST_FAILPOINT: failpoint,
+            ...selector,
+            ...(blockCommandSessionId === undefined
+              ? {}
+              : { WI_M7_BLOCK_COMMAND_SESSION_ID: blockCommandSessionId }),
           },
   });
   const portRecord = await findServerOrigin(processHandle);
@@ -384,38 +406,136 @@ async function seedPendingInput(homeDirectory: string): Promise<{
 
 afterEach(async () => {
   await fixtureProcesses.terminateAll();
-  await Promise.all([...harnesses].map((harness) => harness.cleanup()));
+  await Promise.all([
+    ...[...harnesses].map((harness) => harness.cleanup()),
+    ...[...externalHomes].map((directory) => rm(directory, { recursive: true, force: true })),
+  ]);
   harnesses.clear();
+  externalHomes.clear();
 });
 
 const workflowFailpoints = [
-  ["after_command_event_insert_before_commit", "plain-text", 90],
-  ["after_command_commit_before_ack", "plain-text", 91],
-  ["after_event_commit_before_publish", "plain-text", 92],
-  ["after_tool_requested_commit", "echo-tool-round-trip", 93],
-  ["after_tool_started_commit", "echo-tool-round-trip", 94],
-  ["after_tool_result_commit_before_provider_continue", "echo-tool-round-trip", 95],
-  ["after_provider_text_commit", "staged-tool-then-text-without-terminal", 96],
-  ["after_run_terminal_commit", "plain-text", 97],
+  ["after_command_event_insert_before_commit", "plain-text", 90, "command"],
+  ["after_command_commit_before_ack", "plain-text", 91, "command"],
+  ["after_event_commit_before_publish", "plain-text", 92, "run"],
+  ["after_tool_requested_commit", "echo-tool-round-trip", 93, "run"],
+  ["after_tool_started_commit", "echo-tool-round-trip", 94, "run"],
+  ["after_tool_result_commit_before_provider_continue", "echo-tool-round-trip", 95, "run"],
+  ["after_provider_text_commit", "staged-tool-then-text-without-terminal", 96, "run"],
+  ["after_run_terminal_commit", "plain-text", 97, "run"],
 ] as const;
+
+function workflowSelector(
+  kind: "command" | "session" | "run",
+  sessionId: string,
+  commandId: string,
+  runId: string,
+): FailpointSelectorEnvironment {
+  if (kind === "command") {
+    return {
+      WI_TEST_FAILPOINT_SESSION_ID: sessionId,
+      WI_TEST_FAILPOINT_COMMAND_ID: commandId,
+    };
+  }
+  if (kind === "run") {
+    return {
+      WI_TEST_FAILPOINT_SESSION_ID: sessionId,
+      WI_TEST_FAILPOINT_COMMAND_ID: commandId,
+      WI_TEST_FAILPOINT_RUN_ID: runId,
+    };
+  }
+  return { WI_TEST_FAILPOINT_SESSION_ID: sessionId };
+}
+
+function unrelatedBoundaryEvent(failpoint: string): string | null {
+  switch (failpoint) {
+    case "after_tool_requested_commit":
+    case "after_tool_started_commit":
+    case "after_tool_result_commit_before_provider_continue":
+      return "run.completed";
+    case "after_provider_text_commit":
+      return "provider.text.delta";
+    case "after_run_terminal_commit":
+      return "run.completed";
+    default:
+      return null;
+  }
+}
 
 describe("Milestone 7 real server crash recovery", () => {
   it.each(workflowFailpoints)(
     "recovers %s through the real WebSocket server",
-    async (failpoint, scenario, exitCode) => {
+    async (failpoint, scenario, exitCode, selectorKind) => {
       const harness = await RealServerHarness.create(`wi-m7-${failpoint}-`);
       harnesses.add(harness);
       const sessionId = await seedSession(harness.homeDirectory, failpoint.replaceAll("_", "").slice(0, 20));
-      const crashedServer = await start(harness, scenario, failpoint);
+      const unrelatedSessionId = await seedSession(
+        harness.homeDirectory,
+        `other${String(exitCode)}`,
+      );
+      const commandId = `cmd_m7_submit_${exitCode}`;
+      const targetRunId = `run_m7_target_${exitCode}`;
+      const selector = workflowSelector(
+        selectorKind,
+        sessionId,
+        commandId,
+        targetRunId,
+      );
+      const crashedServer = await start(
+        harness,
+        scenario,
+        failpoint,
+        "auto",
+        selector,
+        sessionId,
+      );
       const socket = await connect(crashedServer.origin);
       command(socket, {
         v: 1,
         kind: "command",
-        commandId: `cmd_m7_submit_${exitCode}`,
+        commandId,
         sessionId,
         method: "message.submit",
         params: { text: `Trigger ${failpoint}` },
       });
+      await expect(
+        crashedServer.process.waitForMessage("command-blocked"),
+      ).resolves.toMatchObject({ sessionId, commandId });
+
+      const unrelatedSocket = await connect(crashedServer.origin);
+      await replay(unrelatedSocket, unrelatedSessionId);
+      const unrelatedCommandId = `cmd_m7_unrelated_${exitCode}`;
+      command(unrelatedSocket, {
+        v: 1,
+        kind: "command",
+        commandId: unrelatedCommandId,
+        sessionId: unrelatedSessionId,
+        method: "message.submit",
+        params: { text: `Unrelated operation before ${failpoint}` },
+      });
+      await expect(
+        unrelatedSocket.take(
+          (message) =>
+            message.kind === "command.accepted" &&
+            message.commandId === unrelatedCommandId,
+        ),
+      ).resolves.toMatchObject({ duplicate: false });
+      const boundaryEvent = unrelatedBoundaryEvent(failpoint);
+      if (boundaryEvent !== null) {
+        await expect(
+          unrelatedSocket.take(
+            (message) =>
+              message.kind === "event" &&
+              message.sessionId === unrelatedSessionId &&
+              message.eventType === boundaryEvent,
+          ),
+        ).resolves.toMatchObject({ kind: "event" });
+      }
+      await expect(findServerOrigin(crashedServer.process)).resolves.toMatchObject({
+        origin: crashedServer.origin,
+      });
+
+      crashedServer.process.send({ type: "release-command" });
       const crashed = await crashedServer.process.waitForExit(15_000);
       expect(crashed).toMatchObject({ code: exitCode, signal: null });
 
@@ -514,6 +634,7 @@ describe("Milestone 7 real server crash recovery", () => {
           const durableEvents = await session.getEventsAfter(0);
           const created = durableEvents.find((event) => event.eventType === "run.created");
           if (created?.eventType !== "run.created") throw new Error("Recovered run is missing");
+          if (selectorKind === "run") expect(created.data.runId).toBe(targetRunId);
           const tools = await session.getToolExecutionsForRun(created.data.runId);
           expect(tools).toHaveLength(1);
           if (failpoint === "after_provider_text_commit") {
@@ -530,7 +651,9 @@ describe("Milestone 7 real server crash recovery", () => {
               join(harness.homeDirectory, "milestone7-tool-executions.log"),
               "utf8",
             )).trim().split("\n").filter(Boolean);
-            expect(executionLines).toHaveLength(1);
+            // The deterministic fake provider reuses its call ID across sessions.
+            // One execution belongs to unrelated B and one to recovered target A.
+            expect(executionLines).toHaveLength(2);
           }
         } finally {
           await storage.close();
@@ -540,11 +663,41 @@ describe("Milestone 7 real server crash recovery", () => {
     30_000,
   );
 
+  it("rejects an impossible failpoint selector before server readiness", async () => {
+    const harness = await RealServerHarness.create("wi-m7-invalid-failpoint-selector-");
+    harnesses.add(harness);
+    const processHandle = await harness.start({
+      fixturePath,
+      arguments: ["plain-text", "auto"],
+      environment: {
+        NODE_ENV: "test",
+        WI_ALLOW_TEST_FAILPOINTS: "1",
+        WI_TEST_FAILPOINT: "after_catalog_session_repair",
+        WI_TEST_FAILPOINT_SESSION_ID: "ses_target",
+        WI_TEST_FAILPOINT_RUN_ID: "run_impossible",
+      },
+      waitForReady: false,
+    });
+    const exited = await processHandle.waitForExit();
+    expect(exited).toMatchObject({ code: 1, signal: null });
+    expect(exited.stderr).toContain("Invalid test failpoint selector");
+  });
+
   it("survives two consecutive crashes with the same publication failpoint", async () => {
     const harness = await RealServerHarness.create("wi-m7-double-crash-");
     harnesses.add(harness);
     const sessionId = await seedSession(harness.homeDirectory, "doublecrash");
-    const first = await start(harness, "plain-text", "after_event_commit_before_publish");
+    const first = await start(
+      harness,
+      "plain-text",
+      "after_event_commit_before_publish",
+      "auto",
+      {
+        WI_TEST_FAILPOINT_SESSION_ID: sessionId,
+        WI_TEST_FAILPOINT_COMMAND_ID: "cmd_m7_double_crash",
+        WI_TEST_FAILPOINT_RUN_ID: "run_m7_double_crash",
+      },
+    );
     const firstSocket = await connect(first.origin);
     // This socket is intentionally reset by the crash failpoint immediately
     // after the command is accepted; do not mask errors outside this window.
@@ -568,6 +721,9 @@ describe("Milestone 7 real server crash recovery", () => {
         NODE_ENV: "test",
         WI_ALLOW_TEST_FAILPOINTS: "1",
         WI_TEST_FAILPOINT: "after_event_commit_before_publish",
+        WI_TEST_FAILPOINT_SESSION_ID: sessionId,
+        WI_TEST_FAILPOINT_COMMAND_ID: "cmd_m7_double_crash",
+        WI_TEST_FAILPOINT_RUN_ID: "run_m7_double_crash",
       },
       waitForReady: false,
     });
@@ -857,6 +1013,8 @@ describe("Milestone 7 real server crash recovery", () => {
       harness,
       "plain-text",
       "after_session_create_before_catalog_ready",
+      "auto",
+      { WI_TEST_FAILPOINT_COMMAND_ID: "cmd_m7_session_create_crash" },
     );
     const socket = await connect(crashedServer.origin);
     command(socket, {
@@ -939,6 +1097,11 @@ describe("Milestone 7 real server crash recovery", () => {
       harness,
       "approval-round-trip",
       "after_command_commit_before_ack",
+      "auto",
+      {
+        WI_TEST_FAILPOINT_SESSION_ID: sessionId,
+        WI_TEST_FAILPOINT_COMMAND_ID: "cmd_m7_approval_resolve",
+      },
     );
     const resolutionSocket = await connect(resolutionCrash.origin);
     await replay(resolutionSocket, sessionId);
@@ -1436,12 +1599,12 @@ describe("Milestone 7 real server crash recovery", () => {
     }
   }, 30_000);
 
-  it("changes deleted preserved sessions to missing but retains quarantined unavailable state", async () => {
+  it("changes deleted preserved sessions to missing while retained corruption stays unavailable", async () => {
     const harness = await RealServerHarness.create("wi-m7-preserved-to-missing-");
     harnesses.add(harness);
     const unsupportedId = await seedSession(harness.homeDirectory, "deletedUnsupported");
     const oversizedId = await seedSession(harness.homeDirectory, "deletedOversized");
-    const quarantinedId = await seedSession(harness.homeDirectory, "retainedQuarantine");
+    const corruptId = await seedSession(harness.homeDirectory, "retainedCorrupt");
     await mutateCreationProvenance(
       harness.homeDirectory,
       unsupportedId,
@@ -1453,7 +1616,7 @@ describe("Milestone 7 real server crash recovery", () => {
       256 * 1024 * 1024 + 1,
     );
     await writeFile(
-      resolveStoragePath(harness.homeDirectory, sessionDatabaseRelativePath(quarantinedId)),
+      resolveStoragePath(harness.homeDirectory, sessionDatabaseRelativePath(corruptId)),
       "not a sqlite database",
     );
 
@@ -1461,11 +1624,11 @@ describe("Milestone 7 real server crash recovery", () => {
     const classifiedBootstrap = await fetch(`${classified.origin}/bootstrap`).then(
       (response) => response.json(),
     ) as { sessions: readonly { sessionId: string; status: string }[] };
-    expect(classified.ready.repair).toMatchObject({ quarantined: 1 });
+    expect(classified.ready.repair).toMatchObject({ quarantined: 0 });
     expect(classifiedBootstrap.sessions).toEqual(expect.arrayContaining([
       expect.objectContaining({ sessionId: unsupportedId, status: "unavailable" }),
       expect.objectContaining({ sessionId: oversizedId, status: "unavailable" }),
-      expect.objectContaining({ sessionId: quarantinedId, status: "unavailable" }),
+      expect.objectContaining({ sessionId: corruptId, status: "unavailable" }),
     ]));
     await stop(classified.process);
 
@@ -1481,7 +1644,7 @@ describe("Milestone 7 real server crash recovery", () => {
     expect(repaired.ready.repair).toMatchObject({
       triggered: true,
       reason: "explicit",
-      discovered: 0,
+      discovered: 1,
     });
     await stop(repaired.process);
 
@@ -1495,10 +1658,10 @@ describe("Milestone 7 real server crash recovery", () => {
           dbRelativePath: sessionDatabaseRelativePath(sessionId),
         });
       }
-      await expect(inspected.catalog.getSession(quarantinedId)).resolves.toMatchObject({
-        sessionId: quarantinedId,
+      await expect(inspected.catalog.getSession(corruptId)).resolves.toMatchObject({
+        sessionId: corruptId,
         status: "unavailable",
-        dbRelativePath: sessionDatabaseRelativePath(quarantinedId),
+        dbRelativePath: sessionDatabaseRelativePath(corruptId),
       });
     } finally {
       await inspected.close();
@@ -1540,7 +1703,7 @@ describe("Milestone 7 real server crash recovery", () => {
       reason: "explicit",
       discovered: 4,
       repaired: 1,
-      quarantined: 1,
+      quarantined: 0,
     });
     await stop(repaired.process);
 
@@ -1564,7 +1727,7 @@ describe("Milestone 7 real server crash recovery", () => {
     }
   }, 30_000);
 
-  it("quarantines semantically invalid creation provenance without blocking a healthy session", async () => {
+  it("isolates semantically invalid creation provenance without blocking a healthy session", async () => {
     const harness = await RealServerHarness.create("wi-m7-provenance-validation-");
     harnesses.add(harness);
     const healthyId = await seedSession(harness.homeDirectory, "provenanceHealthy");
@@ -1605,7 +1768,7 @@ describe("Milestone 7 real server crash recovery", () => {
       reason: "catalog_new",
       discovered: 5,
       repaired: 1,
-      quarantined: 4,
+      quarantined: 0,
     });
     const bootstrap = await fetch(`${repaired.origin}/bootstrap`).then(
       (response) => response.json(),
@@ -1641,7 +1804,7 @@ describe("Milestone 7 real server crash recovery", () => {
       reason: "catalog_new",
       discovered: 3,
       repaired: 1,
-      quarantined: 2,
+      quarantined: 0,
     });
     const bootstrap = await fetch(`${repaired.origin}/bootstrap`).then(
       (response) => response.json(),
@@ -1783,7 +1946,7 @@ describe("Milestone 7 real server crash recovery", () => {
       reason: "explicit",
       discovered: 3,
       repaired: 1,
-      quarantined: 1,
+      quarantined: 0,
     });
     const bootstrap = await fetch(`${repaired.origin}/bootstrap`).then(
       (response) => response.json(),
@@ -1838,6 +2001,7 @@ describe("Milestone 7 real server crash recovery", () => {
         NODE_ENV: "test",
         WI_ALLOW_TEST_FAILPOINTS: "1",
         WI_TEST_FAILPOINT: "after_catalog_session_repair",
+        WI_TEST_FAILPOINT_SESSION_ID: firstId,
       },
       waitForReady: false,
     });
@@ -1871,6 +2035,7 @@ describe("Milestone 7 real server crash recovery", () => {
         NODE_ENV: "test",
         WI_ALLOW_TEST_FAILPOINTS: "1",
         WI_TEST_FAILPOINT: "after_catalog_session_repair",
+        WI_TEST_FAILPOINT_SESSION_ID: firstId,
       },
       waitForReady: false,
     });
@@ -1934,6 +2099,7 @@ describe("Milestone 7 real server crash recovery", () => {
             NODE_ENV: "test",
             WI_ALLOW_TEST_FAILPOINTS: "1",
             WI_TEST_FAILPOINT: "after_catalog_replacement_before_repair",
+            WI_TEST_FAILPOINT_CATALOG_GLOBAL: "1",
           },
           waitForReady: false,
         });
@@ -2003,7 +2169,227 @@ describe("Milestone 7 real server crash recovery", () => {
     await stop(server.process);
   }, 20_000);
 
-  it("rebuilds a deleted catalog and quarantines one corrupt discovered database", async () => {
+  it("never follows a swapped session-prefix ancestor while isolating corruption", async () => {
+    const harness = await RealServerHarness.create("wi-m7-isolation-ancestor-swap-");
+    harnesses.add(harness);
+    const corruptId = await seedSession(
+      harness.homeDirectory,
+      "ancestorSwap",
+      undefined,
+      "ses_aaAncestorSwap",
+    );
+    const healthyId = await seedSession(
+      harness.homeDirectory,
+      "ancestorSwapHealthy",
+      undefined,
+      "ses_zzAncestorSwapHealthy",
+    );
+    await writeFile(
+      resolveStoragePath(harness.homeDirectory, sessionDatabaseRelativePath(corruptId)),
+      "not a sqlite database",
+    );
+
+    const externalPrefix = await mkdtemp(join(tmpdir(), "wi-m7-external-prefix-"));
+    externalHomes.add(externalPrefix);
+    const externalSessionDirectory = join(externalPrefix, corruptId);
+    const externalSentinel = join(externalSessionDirectory, "sentinel.txt");
+    await mkdir(externalSessionDirectory);
+    await writeFile(externalSentinel, "external data must not move");
+    const externalIdentityBefore = await stat(externalSessionDirectory);
+
+    const databasePath = resolveStoragePath(
+      harness.homeDirectory,
+      sessionDatabaseRelativePath(corruptId),
+    );
+    const sessionDirectory = databasePath.slice(0, -"/session.sqlite3".length);
+    const prefixDirectory = join(sessionDirectory, "..");
+    const originalPrefixDirectory = `${prefixDirectory}.original`;
+    let releaseIsolation = (): void => {};
+    let markIsolationReached = (): void => {};
+    const isolationGate = new Promise<void>((resolve) => {
+      releaseIsolation = resolve;
+    });
+    const isolationReached = new Promise<void>((resolve) => {
+      markIsolationReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "force",
+      ids: {
+        sessionId: () => "ses_unusedAncestorSwap",
+        eventId: () => "evt_unusedAncestorSwap",
+        diagnosticId: () => "err_ancestorSwap",
+      },
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogSessionIsolation: async ({ sessionId }) => {
+          if (sessionId !== corruptId) return;
+          markIsolationReached();
+          await isolationGate;
+        },
+      },
+    });
+    try {
+      const ready = repairing.ready();
+      await isolationReached;
+      await rename(prefixDirectory, originalPrefixDirectory);
+      await symlink(
+        externalPrefix,
+        prefixDirectory,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      releaseIsolation();
+      await ready;
+
+      expect(repairing.catalogRepairStatus()).toMatchObject({
+        triggered: true,
+        reason: "explicit",
+        repaired: 1,
+        quarantined: 0,
+      });
+      await expect(repairing.catalog.getSession(corruptId)).resolves.toMatchObject({
+        status: "unavailable",
+      });
+      expect(
+        (await repairing.catalog.listCatalogRepairPage(null)).records.find(
+          (record) => record.sessionId === corruptId,
+        ),
+      ).toMatchObject({ status: "unavailable", unavailableReason: null });
+      await expect(repairing.catalog.getSession(healthyId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      expect((await lstat(prefixDirectory)).isSymbolicLink()).toBe(true);
+      const externalIdentityAfter = await stat(externalSessionDirectory);
+      expect({ dev: externalIdentityAfter.dev, ino: externalIdentityAfter.ino }).toEqual({
+        dev: externalIdentityBefore.dev,
+        ino: externalIdentityBefore.ino,
+      });
+      await expect(readFile(externalSentinel, "utf8")).resolves.toBe(
+        "external data must not move",
+      );
+      expect(await readdir(externalPrefix)).toEqual([corruptId]);
+      await expect(
+        stat(join(originalPrefixDirectory, corruptId, "session.sqlite3")),
+      ).resolves.toBeDefined();
+    } finally {
+      releaseIsolation();
+      await repairing.close().catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("does not move a healthy canonical replacement after corrupt classification", async () => {
+    const harness = await RealServerHarness.create("wi-m7-isolation-healthy-swap-");
+    harnesses.add(harness);
+    const sessionId = await seedSession(
+      harness.homeDirectory,
+      "healthyReplacement",
+      undefined,
+      "ses_abHealthyReplacement",
+    );
+    const unrelatedId = await seedSession(
+      harness.homeDirectory,
+      "healthyReplacementUnrelated",
+      undefined,
+      "ses_zyHealthyReplacementUnrelated",
+    );
+    const databasePath = resolveStoragePath(
+      harness.homeDirectory,
+      sessionDatabaseRelativePath(sessionId),
+    );
+    const sessionDirectory = databasePath.slice(0, -"/session.sqlite3".length);
+    const replacementDirectory = `${sessionDirectory}.healthy-replacement`;
+    const corruptOriginalDirectory = `${sessionDirectory}.corrupt-original`;
+    await rename(sessionDirectory, replacementDirectory);
+    await mkdir(sessionDirectory);
+    await writeFile(databasePath, "not a sqlite database");
+    const replacementIdentity = await stat(replacementDirectory);
+
+    let releaseIsolation = (): void => {};
+    let markIsolationReached = (): void => {};
+    const isolationGate = new Promise<void>((resolve) => {
+      releaseIsolation = resolve;
+    });
+    const isolationReached = new Promise<void>((resolve) => {
+      markIsolationReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "force",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogSessionIsolation: async ({ sessionId: candidateId }) => {
+          if (candidateId !== sessionId) return;
+          markIsolationReached();
+          await isolationGate;
+        },
+      },
+    });
+    try {
+      const ready = repairing.ready();
+      await isolationReached;
+      await rename(sessionDirectory, corruptOriginalDirectory);
+      await rename(replacementDirectory, sessionDirectory);
+      releaseIsolation();
+      await ready;
+
+      expect(repairing.catalogRepairStatus()).toMatchObject({
+        triggered: true,
+        reason: "explicit",
+        quarantined: 0,
+      });
+      await expect(repairing.catalog.getSession(sessionId)).resolves.toMatchObject({
+        status: "unavailable",
+      });
+      expect(
+        (await repairing.catalog.listCatalogRepairPage(null)).records.find(
+          (record) => record.sessionId === sessionId,
+        ),
+      ).toMatchObject({ status: "unavailable", unavailableReason: null });
+      await expect(repairing.catalog.getSession(unrelatedId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      const replacementAfter = await stat(sessionDirectory);
+      expect({ dev: replacementAfter.dev, ino: replacementAfter.ino }).toEqual({
+        dev: replacementIdentity.dev,
+        ino: replacementIdentity.ino,
+      });
+      await expect(stat(join(corruptOriginalDirectory, "session.sqlite3"))).resolves.toBeDefined();
+    } finally {
+      releaseIsolation();
+      await repairing.close().catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+
+    const repeatedRepair = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "force",
+    });
+    try {
+      await repeatedRepair.ready();
+      await expect(repeatedRepair.catalog.getSession(sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      expect(
+        (await repeatedRepair.catalog.listCatalogRepairPage(null)).records.find(
+          (record) => record.sessionId === sessionId,
+        ),
+      ).toMatchObject({ status: "ready", unavailableReason: null });
+      await expect(repeatedRepair.catalog.getSession(unrelatedId)).resolves.toMatchObject({
+        status: "ready",
+      });
+    } finally {
+      await repeatedRepair.close();
+    }
+  }, 30_000);
+
+  it("rebuilds a deleted catalog and preserves corrupt discovered databases", async () => {
     const harness = await RealServerHarness.create("wi-m7-catalog-repair-");
     harnesses.add(harness);
     const healthyId = await seedSession(harness.homeDirectory, "healthy");
@@ -2064,12 +2450,12 @@ describe("Milestone 7 real server crash recovery", () => {
       harness.homeDirectory,
       sessionDatabaseRelativePath(corruptId).slice(0, -"/session.sqlite3".length),
     );
-    await expect(stat(corruptDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(corruptDirectory)).resolves.toBeDefined();
     const mismatchDirectory = resolveStoragePath(
       harness.homeDirectory,
       sessionDatabaseRelativePath(mismatchId).slice(0, -"/session.sqlite3".length),
     );
-    await expect(stat(mismatchDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(mismatchDirectory)).resolves.toBeDefined();
     await expect(stat(wrongPrefixDirectory)).resolves.toBeDefined();
     await expect(lstat(symlinkPath)).resolves.toMatchObject({ isSymbolicLink: expect.any(Function) });
     expect((await lstat(symlinkPath)).isSymbolicLink()).toBe(true);

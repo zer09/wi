@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +15,12 @@ const fixturePath = fileURLToPath(
 );
 const ownerDeathFixturePath = fileURLToPath(
   new URL("./process-harness-owner-death-fixture.mjs", import.meta.url),
+);
+const posixOwnerDeathFixturePath = fileURLToPath(
+  new URL("./process-harness-posix-owner-death-fixture.mjs", import.meta.url),
+);
+const setupSentinelFixturePath = fileURLToPath(
+  new URL("./process-harness-setup-sentinel-fixture.mjs", import.meta.url),
 );
 
 function processExists(pid: number): boolean {
@@ -102,6 +112,72 @@ describe("real process-tree cleanup", () => {
         await owner.terminate().catch(() => undefined);
         if (leaderPid !== null) await expectProcessGone(leaderPid);
         if (descendantPid !== null) await expectProcessGone(descendantPid);
+      }
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "kills nested fixture descendants when the POSIX harness owner dies",
+    async () => {
+      const owner = await RealServerProcess.start({
+        fixturePath: posixOwnerDeathFixturePath,
+        waitForReady: false,
+      });
+      let leaderPid: number | null = null;
+      let descendantPid: number | null = null;
+      try {
+        const ready = await owner.waitForMessage("ready");
+        if (typeof ready.leaderPid !== "number" || typeof ready.descendantPid !== "number") {
+          throw new Error("POSIX owner-death fixture did not report its nested process tree");
+        }
+        leaderPid = ready.leaderPid;
+        descendantPid = ready.descendantPid;
+        expect(processExists(leaderPid)).toBe(true);
+        expect(processExists(descendantPid)).toBe(true);
+        await expect(owner.waitForExit()).resolves.toMatchObject({ code: 0, signal: null });
+
+        // Do not invoke fallback cleanup before these checks. Owner-pipe EOF
+        // alone must reclaim the nested fixture group.
+        await expectProcessGone(leaderPid);
+        await expectProcessGone(descendantPid);
+      } finally {
+        await owner.terminate().catch(() => undefined);
+        if (
+          leaderPid !== null &&
+          (processExists(leaderPid) || (descendantPid !== null && processExists(descendantPid)))
+        ) {
+          try {
+            process.kill(-leaderPid, "SIGKILL");
+          } catch {
+            // The assertions below report any process that fallback did not reap.
+          }
+        }
+        if (leaderPid !== null) await expectProcessGone(leaderPid);
+        if (descendantPid !== null) await expectProcessGone(descendantPid);
+      }
+    },
+    10_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "fails closed before fixture code when POSIX ownership setup cannot complete",
+    async () => {
+      const sentinelPath = join(tmpdir(), `wi-posix-owner-${randomUUID()}`);
+      try {
+        await expect(
+          RealServerProcess.start({
+            fixturePath: setupSentinelFixturePath,
+            arguments: [sentinelPath],
+            environment: {
+              NODE_OPTIONS: "--import=/wi-test-support-owner-setup-does-not-exist.mjs",
+            },
+            waitForReady: false,
+          }),
+        ).rejects.toThrow(/ownership|Fixture exited/);
+        await expect(stat(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(sentinelPath, { force: true });
       }
     },
     10_000,

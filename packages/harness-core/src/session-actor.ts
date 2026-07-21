@@ -110,7 +110,14 @@ export type SessionActorTestFailpoint =
   | "after_run_terminal_commit";
 
 export interface SessionActorTestFailpoints {
-  readonly is: (name: SessionActorTestFailpoint) => boolean;
+  readonly matches: (
+    name: SessionActorTestFailpoint,
+    fields?: Readonly<Record<string, unknown>>,
+  ) => boolean;
+  readonly takeRunIdForCommand: (
+    sessionId: string,
+    commandId: string,
+  ) => string | null;
   readonly hit: (
     name: SessionActorTestFailpoint,
     fields?: Readonly<Record<string, unknown>>,
@@ -596,9 +603,16 @@ export class SessionActor {
     }
   }
 
-  private hitCommittedFailpoints(events: readonly SessionEvent[]): void {
+  private hitCommittedFailpoints(
+    events: readonly SessionEvent[],
+    runId?: string,
+  ): void {
     if (events.length === 0) return;
-    const fields = { sessionId: this.sessionId, headSequence: events.at(-1)?.sequence };
+    const fields = {
+      sessionId: this.sessionId,
+      ...(runId === undefined ? {} : { runId }),
+      headSequence: events.at(-1)?.sequence,
+    };
     this.testFailpoints?.hit("after_event_commit_before_publish", fields);
     if (events.some((event) => event.eventType === "provider.text.delta")) {
       this.testFailpoints?.hit("after_provider_text_commit", fields);
@@ -1096,7 +1110,7 @@ export class SessionActor {
         }
         active.record = current;
       }
-      this.hitCommittedFailpoints(committed.events);
+      this.hitCommittedFailpoints(committed.events, runId);
       this.publishOrThrow(committed.events);
       this.applyProjectionMemory(input);
       this.touch();
@@ -1211,7 +1225,7 @@ export class SessionActor {
     return this.mailbox.enqueue(async () => {
       this.assertNotFaulted();
       this.touch();
-      const runId = this.ids.runId();
+      const generatedRunId = this.ids.runId();
       const messageId = this.ids.messageId();
       const createdAtMs = this.now();
       const wasQueued = this.activeRun !== null || this.queuedRuns.length > 0;
@@ -1228,6 +1242,22 @@ export class SessionActor {
           providerConfig: decodeProviderConfiguration(createdProviderSnapshot.providerConfig),
         };
       }
+      const runId = existingCommand === null
+        ? this.testFailpoints?.takeRunIdForCommand(
+            this.sessionId,
+            command.commandId,
+          ) ?? generatedRunId
+        : generatedRunId;
+      const failpointFields = {
+        sessionId: this.sessionId,
+        commandId: command.commandId,
+        runId,
+      };
+      const crashBeforeCommandCommit =
+        this.testFailpoints?.matches(
+          "after_command_event_insert_before_commit",
+          failpointFields,
+        ) === true;
       const input: AcceptCommandInput = {
         commandId: command.commandId,
         commandMethod: command.method,
@@ -1236,7 +1266,7 @@ export class SessionActor {
         acceptedAtMs: createdAtMs,
         runId,
         transaction: {
-          ...(this.testFailpoints?.is("after_command_event_insert_before_commit") === true
+          ...(crashBeforeCommandCommit
             ? { testFailpoint: "after_command_event_insert_before_commit" as const }
             : {}),
           events: [
@@ -1289,8 +1319,19 @@ export class SessionActor {
           ],
         },
       };
-      const acceptance = await this.acceptCommand(input);
-      this.hitCommittedFailpoints(acceptance.events);
+      let acceptance: AcceptedCommandResult;
+      try {
+        acceptance = await this.acceptCommand(input);
+      } catch (error) {
+        if (crashBeforeCommandCommit) {
+          this.testFailpoints?.hit(
+            "after_command_event_insert_before_commit",
+            failpointFields,
+          );
+        }
+        throw error;
+      }
+      this.hitCommittedFailpoints(acceptance.events, runId);
       this.publish(acceptance.events);
       const acceptedRunId = acceptance.runId;
       if (acceptedRunId === null) {

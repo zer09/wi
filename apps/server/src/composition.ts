@@ -222,10 +222,6 @@ export class WiRuntime {
           ? { allowTestOperations: true }
           : {}),
         onWorkerReplacement: (workerIndex, replacementCount) => {
-          options.testFailpoints?.hit("after_command_event_insert_before_commit", {
-            workerId: `session-${workerIndex}`,
-            replacementCount,
-          });
           const diagnosticId = this.diagnosticId();
           this.logger.warn("storage_worker_replaced", {
             diagnosticId,
@@ -321,7 +317,13 @@ export class WiRuntime {
             ? {}
             : {
                 testFailpoints: {
-                  is: (name) => options.testFailpoints?.is(name) === true,
+                  matches: (name, fields) =>
+                    options.testFailpoints?.matches(name, fields) === true,
+                  takeRunIdForCommand: (targetSessionId, commandId) =>
+                    options.testFailpoints?.takeRunIdForCommand(
+                      targetSessionId,
+                      commandId,
+                    ) ?? null,
                   hit: (name, fields) => options.testFailpoints?.hit(name, fields),
                 },
               }),

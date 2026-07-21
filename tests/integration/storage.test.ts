@@ -1040,7 +1040,7 @@ describe("catalog and per-session storage workers", () => {
     ).rejects.toMatchObject({ code: "protocol.command_id_conflict" });
   });
 
-  it("isolates a corrupt incomplete creation without blocking healthy sessions", async () => {
+  it("preserves a corrupt incomplete creation without blocking healthy sessions", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_healthyA"]);
     const healthy = await original.createSession(createCommand("cmd_healthyA", "Healthy"));
@@ -1070,15 +1070,18 @@ describe("catalog and per-session storage workers", () => {
       reservedSessionId: "ses_corruptCreating",
       failureCode: "storage.corrupt",
       diagnosticId: expect.stringMatching(/^err_/),
-      quarantinedRelativePath: expect.stringContaining(".quarantine-"),
+      quarantinedRelativePath: null,
     });
     await expect(restarted.catalog.getSession("ses_corruptCreating")).resolves.toMatchObject({
       status: "unavailable",
       title: "Corrupt creating",
     });
+    await expect(
+      stat(resolveStoragePath(homeDirectory, "sessions/co/ses_corruptCreating/session.sqlite3")),
+    ).resolves.toBeDefined();
   });
 
-  it("does not claim quarantine when the atomic rename fails", async () => {
+  it("does not claim quarantine when a quarantine-style sibling already exists", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_unusedQuarantineSetup"]);
     await original.ready();
@@ -1122,9 +1125,12 @@ describe("catalog and per-session storage workers", () => {
       quarantinedRelativePath: null,
     });
     await expect(stat(join(sourceDirectory, "session.sqlite3"))).resolves.toBeDefined();
+    await expect(readFile(join(blockedDestination, "keep"), "utf8")).resolves.toBe(
+      "occupied",
+    );
   });
 
-  it("quarantines semantically corrupt stored data without blocking healthy sessions", async () => {
+  it("isolates semantically corrupt stored data without blocking healthy sessions", async () => {
     const storage = await manager({}, ["ses_corruptData", "ses_healthyData"]);
     const corrupt = await storage.createSession(createCommand("cmd_corruptData", "Corrupt"));
     const healthy = await storage.createSession(createCommand("cmd_healthyData", "Healthy"));
@@ -1184,7 +1190,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it("fails startup on a non-quarantinable incomplete-creation error", async () => {
+  it("fails startup on a non-isolatable incomplete-creation error", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_unusedDiskFull"]);
     await original.ready();
@@ -1853,7 +1859,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it("keeps quarantine sticky when a delayed observer races database removal", async () => {
+  it("keeps unavailable status sticky when a delayed observer races database removal", async () => {
     let releaseWriter = (): void => {};
     let markWriterStarted = (): void => {};
     const writerGate = new Promise<void>((resolve) => {
@@ -1909,7 +1915,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it("reapplies quarantine when a stale reconciliation races database removal", async () => {
+  it("reapplies unavailable status when stale reconciliation races database removal", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory });
     const created = await original.createSession(createCommand());
@@ -2787,7 +2793,7 @@ describe("catalog and per-session storage workers", () => {
     },
   );
 
-  it("bounds database-derived discovery data before parsing or quarantine", async () => {
+  it("bounds database-derived discovery data before parsing or isolation", async () => {
     const homeDirectory = await temporaryHome();
     const original = new SessionStoreManager({
       homeDirectory,

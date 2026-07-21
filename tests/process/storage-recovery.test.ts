@@ -16,6 +16,7 @@ import { FixtureProcessRunner } from "./fixture-process.js";
 const fixture = fileURLToPath(new URL("./storage-crash-fixture.mjs", import.meta.url));
 const catalogV1Fixture = fileURLToPath(new URL("./catalog-v1-fixture.mjs", import.meta.url));
 const sessionV1Fixture = fileURLToPath(new URL("./session-v1-fixture.mjs", import.meta.url));
+const sessionV3Fixture = fileURLToPath(new URL("./session-v3-fixture.mjs", import.meta.url));
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
 const fixtureProcesses = new FixtureProcessRunner();
@@ -89,6 +90,32 @@ async function runSessionV1Fixture(
     throw new Error(result.stderr || `session v1 fixture exited ${String(result.code)}`);
   }
   return result.code;
+}
+
+interface SessionV3Snapshot {
+  readonly userVersion: number;
+  readonly schema: readonly { readonly type: string; readonly name: string }[];
+  readonly manifest: readonly Record<string, unknown>[];
+  readonly events: readonly Record<string, unknown>[];
+  readonly creationProvenance: readonly Record<string, unknown>[] | null;
+}
+
+async function runSessionV3Fixture(
+  homeDirectory: string,
+  mode: string,
+): Promise<string> {
+  const result = await fixtureProcesses.run(
+    process.execPath,
+    [sessionV3Fixture, homeDirectory, mode],
+  );
+  if (result.code !== 0) {
+    throw new Error(result.stderr || `session v3 fixture exited ${String(result.code)}`);
+  }
+  return result.stdout;
+}
+
+async function sessionV3Snapshot(homeDirectory: string): Promise<SessionV3Snapshot> {
+  return JSON.parse(await runSessionV3Fixture(homeDirectory, "snapshot")) as SessionV3Snapshot;
 }
 
 function restart(homeDirectory: string): SessionStoreManager {
@@ -227,6 +254,129 @@ describe("storage crash windows", () => {
     await expect(runSessionV1Fixture(homeDirectory, "inspect-conflict")).resolves.toBe(0);
   });
 
+  it("migrates an exact retained session v3 to v4 without changing durable state", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await runSessionV3Fixture(homeDirectory, "seed-valid");
+    const before = await sessionV3Snapshot(homeDirectory);
+    expect(before.userVersion).toBe(3);
+    expect(before.manifest).toEqual([
+      expect.objectContaining({ schema_version: 3, last_event_sequence: 12 }),
+    ]);
+    expect(before.creationProvenance).toBeNull();
+    expect(before.schema.some((entry) => entry.name === "creation_provenance")).toBe(false);
+
+    const storage = restart(homeDirectory);
+    const session = await storage.openSession("ses_v3Retained");
+    await expect(session.getManifest()).resolves.toMatchObject({
+      schemaVersion: 4,
+      lastEventSequence: 12,
+      title: "Retained session v3",
+    });
+    const events = await session.getEventsAfter(0);
+    expect(events).toHaveLength(12);
+    expect(events.map((event) => event.eventId)).toEqual(
+      before.events.map((event) => event.event_id),
+    );
+    await expect(session.getAcceptedCommand("cmd_v3Submit")).resolves.toMatchObject({
+      commandMethod: "message.submit",
+      acceptedSequence: 6,
+      runId: "run_v3Approval",
+      result: { runId: "run_v3Approval" },
+      duplicate: true,
+    });
+    await expect(session.getRun("run_v3Approval")).resolves.toMatchObject({
+      state: "waiting_for_user",
+      providerConfig: { scenario: "guarded-echo" },
+    });
+    await expect(session.getRun("run_v3Failed")).resolves.toMatchObject({
+      state: "failed",
+      failureCategory: "provider.protocol_error",
+    });
+    await expect(session.getProviderStep("step_v3Failed")).resolves.toMatchObject({
+      state: "failed",
+      diagnosticId: "err_v3Failed",
+    });
+    await expect(session.getToolExecutionsForStep("step_v3Approval")).resolves.toEqual([
+      expect.objectContaining({
+        callId: "call_v3Approval",
+        state: "awaiting_approval",
+        effectClass: "pure",
+      }),
+    ]);
+    await expect(session.getPendingApprovals()).resolves.toEqual([
+      expect.objectContaining({
+        approvalId: "approval_v3Pending",
+        callId: "call_v3Approval",
+        state: "pending",
+      }),
+    ]);
+    await expect(session.getPendingInputs()).resolves.toEqual([
+      expect.objectContaining({
+        inputId: "input_v3Pending",
+        runId: "run_v3Input",
+        state: "pending",
+      }),
+    ]);
+    await expect(session.getInput("input_v3Pending")).resolves.toMatchObject({
+      state: "pending",
+      value: null,
+    });
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+
+    const after = await sessionV3Snapshot(homeDirectory);
+    expect(after.userVersion).toBe(4);
+    expect(after.manifest).toEqual([
+      expect.objectContaining({ schema_version: 4, last_event_sequence: 12 }),
+    ]);
+    expect(after.events).toEqual(before.events);
+    expect(after.creationProvenance).toEqual([]);
+    await runSessionV3Fixture(homeDirectory, "verify-v4");
+
+    const repeated = restart(homeDirectory);
+    await expect(
+      (await repeated.openSession("ses_v3Retained")).getManifest(),
+    ).resolves.toMatchObject({ schemaVersion: 4 });
+    await repeated.close();
+    managers.splice(managers.indexOf(repeated), 1);
+    await expect(sessionV3Snapshot(homeDirectory)).resolves.toEqual(after);
+  }, 20_000);
+
+  it("rolls back an injected v3 to v4 migration failure and remains recoverable", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
+    homes.push(homeDirectory);
+    await runSessionV3Fixture(homeDirectory, "seed-failure");
+    const before = await sessionV3Snapshot(homeDirectory);
+    expect(before.userVersion).toBe(3);
+    expect(before.creationProvenance).toBeNull();
+
+    const failedStorage = restart(homeDirectory);
+    const failedSession = await failedStorage.openSession("ses_v3Retained");
+    await expect(failedSession.getManifest()).rejects.toMatchObject({
+      code: "storage.migration_failed",
+    });
+    await failedStorage.close();
+    managers.splice(managers.indexOf(failedStorage), 1);
+
+    const rolledBack = await sessionV3Snapshot(homeDirectory);
+    expect(rolledBack).toEqual(before);
+    expect(rolledBack.userVersion).toBe(3);
+    expect(rolledBack.creationProvenance).toBeNull();
+
+    await runSessionV3Fixture(homeDirectory, "drop-failure");
+    const recoveredStorage = restart(homeDirectory);
+    const recoveredSession = await recoveredStorage.openSession("ses_v3Retained");
+    await expect(recoveredSession.getManifest()).resolves.toMatchObject({ schemaVersion: 4 });
+    await recoveredStorage.close();
+    managers.splice(managers.indexOf(recoveredStorage), 1);
+
+    const recovered = await sessionV3Snapshot(homeDirectory);
+    expect(recovered.userVersion).toBe(4);
+    expect(recovered.events).toEqual(before.events);
+    expect(recovered.creationProvenance).toEqual([]);
+  }, 20_000);
+
   it("completes session creation committed before catalog readiness during startup", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-process-"));
     homes.push(homeDirectory);
@@ -290,15 +440,19 @@ describe("storage crash windows", () => {
       failureCode: "storage.corrupt",
       diagnosticId: expect.stringMatching(/^err_/),
     });
+    if (failed === null) throw new Error("Failed creation command was not retained");
     await expect(firstRestart.catalog.getSession(sessionId)).resolves.toMatchObject({
       status: "unavailable",
       title: "Corrupt incomplete",
     });
-    if (failed?.quarantinedRelativePath === null || failed?.quarantinedRelativePath === undefined) {
-      throw new Error("Failed creation did not record its quarantine path");
-    }
+    expect(failed?.quarantinedRelativePath).toBeNull();
     await expect(
-      stat(resolveStoragePath(homeDirectory, failed.quarantinedRelativePath)),
+      stat(
+        resolveStoragePath(
+          homeDirectory,
+          sessionDatabaseRelativePath(sessionId),
+        ),
+      ),
     ).resolves.toBeDefined();
     await firstRestart.close();
 
@@ -309,11 +463,11 @@ describe("storage crash windows", () => {
     ).resolves.toMatchObject({
       state: "failed",
       diagnosticId: failed.diagnosticId,
-      quarantinedRelativePath: failed.quarantinedRelativePath,
+      quarantinedRelativePath: null,
     });
     await expect(
       (await secondRestart.openSession(sessionId)).getManifest(),
-    ).rejects.toMatchObject({ code: "storage.session_missing" });
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
     await expect(secondRestart.catalog.getSession(sessionId)).resolves.toMatchObject({
       status: "unavailable",
     });
@@ -361,7 +515,7 @@ describe("storage crash windows", () => {
     await expect(stat(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("quarantines a corrupt session database without blocking the catalog", async () => {
+  it("marks a corrupt session database unavailable without blocking the catalog", async () => {
     const { homeDirectory, sessionId } = await createHomeAndSession();
     const databasePath = resolveStoragePath(
       homeDirectory,

@@ -1,13 +1,23 @@
 import type { ChildProcess } from "node:child_process";
 
-import { spawnNodeProcessTree, terminateProcessTree } from "@wi/test-support";
+import {
+  BoundedProcessOutput,
+  PROCESS_READINESS_MARKER_MAX_BYTES,
+  spawnNodeProcessTree,
+  terminateProcessTree,
+  type ProcessOutputDiagnostics,
+} from "@wi/test-support";
 
 export interface FixtureProcessResult {
   readonly pid: number | null;
   readonly code: number | null;
   readonly signal: NodeJS.Signals | null;
+  /** Bounded diagnostic tail. */
   readonly stdout: string;
+  /** Bounded diagnostic tail. */
   readonly stderr: string;
+  readonly stdoutDiagnostics: ProcessOutputDiagnostics;
+  readonly stderrDiagnostics: ProcessOutputDiagnostics;
 }
 
 export class FixtureProcessTimeoutError extends Error {
@@ -15,7 +25,9 @@ export class FixtureProcessTimeoutError extends Error {
     readonly timeoutMs: number,
     readonly result: FixtureProcessResult,
   ) {
-    super(`Fixture process ${result.pid ?? "unknown"} exceeded ${timeoutMs}ms.`);
+    super(
+      `Fixture process ${result.pid ?? "unknown"} exceeded ${timeoutMs}ms. ${formatResultDiagnostics(result)}`,
+    );
     this.name = "FixtureProcessTimeoutError";
   }
 }
@@ -26,7 +38,9 @@ export class FixtureProcessReadinessTimeoutError extends Error {
     readonly timeoutMs: number,
     readonly result: FixtureProcessResult,
   ) {
-    super(`Fixture process ${result.pid ?? "unknown"} did not print its readiness marker within ${timeoutMs}ms.`);
+    super(
+      `Fixture process ${result.pid ?? "unknown"} did not print its readiness marker within ${timeoutMs}ms. ${formatResultDiagnostics(result)}`,
+    );
     this.name = "FixtureProcessReadinessTimeoutError";
   }
 }
@@ -34,6 +48,59 @@ export class FixtureProcessReadinessTimeoutError extends Error {
 export interface FixtureProcessRunOptions {
   readonly startTimeoutAfterStdout?: string;
   readonly readinessTimeoutMs?: number;
+}
+
+function formatOutputDiagnostics(
+  stream: "stdout" | "stderr",
+  diagnostics: ProcessOutputDiagnostics,
+): string {
+  const retention = diagnostics.truncated
+    ? `${String(diagnostics.retainedBytes)}-byte tail truncated after ${String(diagnostics.totalBytes)} total bytes`
+    : `${String(diagnostics.totalBytes)} total bytes`;
+  return `${stream}=${diagnostics.tail} (${retention}, sha256=${diagnostics.sha256})`;
+}
+
+function formatResultDiagnostics(result: FixtureProcessResult): string {
+  return `${formatOutputDiagnostics("stdout", result.stdoutDiagnostics)} ${formatOutputDiagnostics("stderr", result.stderrDiagnostics)}`;
+}
+
+class StreamingMarkerMatcher {
+  private readonly marker: Buffer;
+  private readonly fallback: Int32Array;
+  private matchedBytes = 0;
+
+  constructor(marker: string) {
+    this.marker = Buffer.from(marker);
+    if (this.marker.length > PROCESS_READINESS_MARKER_MAX_BYTES) {
+      throw new Error(
+        `Fixture readiness marker exceeds ${String(PROCESS_READINESS_MARKER_MAX_BYTES)} bytes`,
+      );
+    }
+    this.fallback = new Int32Array(this.marker.length);
+    for (let index = 1; index < this.marker.length; index += 1) {
+      let candidate = this.fallback[index - 1] ?? 0;
+      while (candidate > 0 && this.marker[index] !== this.marker[candidate]) {
+        candidate = this.fallback[candidate - 1] ?? 0;
+      }
+      if (this.marker[index] === this.marker[candidate]) candidate += 1;
+      this.fallback[index] = candidate;
+    }
+  }
+
+  push(chunk: Uint8Array): boolean {
+    if (this.marker.length === 0) return true;
+    for (const byte of chunk) {
+      while (this.matchedBytes > 0 && byte !== this.marker[this.matchedBytes]) {
+        this.matchedBytes = this.fallback[this.matchedBytes - 1] ?? 0;
+      }
+      if (byte === this.marker[this.matchedBytes]) this.matchedBytes += 1;
+      if (this.matchedBytes === this.marker.length) {
+        this.matchedBytes = this.fallback[this.matchedBytes - 1] ?? 0;
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 export class FixtureProcessRunner {
@@ -59,19 +126,22 @@ export class FixtureProcessRunner {
     if (command !== process.execPath) {
       throw new Error("FixtureProcessRunner accepts only the current Node.js executable");
     }
+    const readinessMarker = options.startTimeoutAfterStdout;
+    const readinessMatcher = readinessMarker === undefined
+      ? null
+      : new StreamingMarkerMatcher(readinessMarker);
     const child = await spawnNodeProcessTree(
       arguments_,
       environment === undefined ? {} : { environment },
     );
     this.children.add(child);
-    let stdout = "";
-    let stderr = "";
+    const stdoutOutput = new BoundedProcessOutput();
+    const stderrOutput = new BoundedProcessOutput();
     let spawnError: Error | null = null;
     let timedOut = false;
     let readinessTimedOut = false;
     let readinessObserved = false;
     let timer: NodeJS.Timeout | null = null;
-    const readinessMarker = options.startTimeoutAfterStdout;
     const armRunTimeout = (): void => {
       timer = setTimeout(() => {
         timedOut = true;
@@ -79,22 +149,20 @@ export class FixtureProcessRunner {
       }, timeoutMs);
       timer.unref();
     };
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutOutput.append(chunk);
       if (
-        readinessMarker !== undefined &&
+        readinessMatcher !== null &&
         !readinessObserved &&
-        stdout.includes(readinessMarker)
+        readinessMatcher.push(chunk)
       ) {
         readinessObserved = true;
         if (timer !== null) clearTimeout(timer);
         armRunTimeout();
       }
     });
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderrOutput.append(chunk);
     });
     child.once("error", (error) => {
       spawnError = error;
@@ -103,7 +171,17 @@ export class FixtureProcessRunner {
 
     const closed = new Promise<FixtureProcessResult>((resolve) => {
       child.once("close", (code, signal) => {
-        resolve({ pid: child.pid ?? null, code, signal, stdout, stderr });
+        const stdoutDiagnostics = stdoutOutput.snapshot();
+        const stderrDiagnostics = stderrOutput.snapshot();
+        resolve({
+          pid: child.pid ?? null,
+          code,
+          signal,
+          stdout: stdoutDiagnostics.tail,
+          stderr: stderrDiagnostics.tail,
+          stdoutDiagnostics,
+          stderrDiagnostics,
+        });
       });
     });
     if (readinessMarker === undefined) {

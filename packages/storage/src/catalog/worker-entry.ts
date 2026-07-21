@@ -1,4 +1,3 @@
-import { existsSync, renameSync } from "node:fs";
 import { parentPort, workerData } from "node:worker_threads";
 
 import type Database from "better-sqlite3";
@@ -43,33 +42,20 @@ function openCatalog(): void {
   }
 }
 
-function repairCatalog(): { quarantinedPath: string | null } {
+function repairCatalog(): never {
   if (!config.allowRepair) {
     throw new StorageError("storage.worker_failed", "Catalog repair mode is disabled");
   }
   database?.close();
   database = null;
   repository = null;
-  const quarantinedPath = existsSync(config.databasePath)
-    ? `${config.databasePath}.quarantine-${Date.now()}-${process.pid}`
-    : null;
-  if (quarantinedPath !== null) {
-    renameSync(config.databasePath, quarantinedPath);
-    for (const suffix of ["-wal", "-shm"] as const) {
-      const sidecar = `${config.databasePath}${suffix}`;
-      if (existsSync(sidecar)) renameSync(sidecar, `${quarantinedPath}${suffix}`);
-    }
-  }
-  openCatalog();
-  if (startupError !== null) throw startupError;
-  // The replacement database was initialized with catalog_new in the same
-  // migration transaction. Classify it before returning control to the manager.
-  const repairedRepository = repository as CatalogRepository | null;
-  if (repairedRepository === null) {
-    throw new StorageError("storage.worker_failed", "Catalog repository is unavailable");
-  }
-  repairedRepository.beginRepair("catalog_corrupt");
-  return { quarantinedPath };
+  // Node has no cross-platform handle-relative, no-follow, no-overwrite move.
+  // Preserve the catalog and sidecars rather than mutate a substituted pathname.
+  throw new StorageError(
+    "storage.corrupt",
+    "Catalog is corrupt and was preserved in place",
+    false,
+  );
 }
 
 openCatalog();

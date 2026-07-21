@@ -1,7 +1,6 @@
 export { CatalogClient } from "./catalog/client.js";
 export type {
   CatalogClientOptions,
-  CatalogRepairResult,
   CatalogStartupState,
   CompleteGlobalCommandInput,
   ReconcileSessionInput,

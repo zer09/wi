@@ -67,6 +67,7 @@ export interface StorageTestFailpoints {
     readonly sessionId: string;
     readonly reason: "corrupt" | "oversized" | "unsupported" | "provenance_conflict";
   }) => void | Promise<void>;
+  readonly beforeCatalogReplacement?: () => void | Promise<void>;
 }
 
 export interface SessionStoreManagerOptions {
@@ -671,6 +672,7 @@ export class SessionStoreManager {
         repairMarked = true;
       } catch (error) {
         if (!(error instanceof StorageError) || error.code !== "storage.corrupt") throw error;
+        await this.testFailpoints?.beforeCatalogReplacement?.();
         await this.catalog.repair();
         repairReason = "catalog_corrupt";
         repairMarked = true;
@@ -701,6 +703,7 @@ export class SessionStoreManager {
         if (!(error instanceof StorageError) || error.code !== "storage.corrupt" || mode === "off") {
           throw error;
         }
+        await this.testFailpoints?.beforeCatalogReplacement?.();
         await this.catalog.repair();
         repairReason = "catalog_corrupt";
       }

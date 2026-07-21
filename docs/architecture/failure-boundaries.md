@@ -194,11 +194,12 @@ Examples:
 - catalog corruption
 - catalog path unavailable
 
-Because catalog discovery is foundational, normal startup may stop.
+Because catalog discovery is foundational, normal startup may stop. An existing corrupt catalog and its sidecars are preserved in place: automatic quarantine/replacement is forbidden because Node exposes no cross-platform handle-relative, no-follow, no-overwrite move. With Wi stopped, an operator may restore the catalog or deliberately relocate it outside Wi before using the missing-catalog rebuild path.
 
 Action:
 
 - emit a clear fatal diagnostic
+- close the catalog handle without renaming, deleting, overwriting, or recreating the corrupt pathname
 - avoid mutating session databases during uncertain discovery
 - provide a maintenance/rebuild path from session manifests
 - terminate the Wi server when safe operation cannot be guaranteed

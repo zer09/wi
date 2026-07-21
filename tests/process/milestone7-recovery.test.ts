@@ -2072,12 +2072,9 @@ describe("Milestone 7 real server crash recovery", () => {
     await stop(restarted.process);
   }, 30_000);
 
-  it.each([
-    ["missing", false, "catalog_new"],
-    ["corrupt", true, "catalog_corrupt"],
-  ] as const)(
-    "recovers a %s catalog after repeated pre-repair crashes",
-    async (_label, corruptCatalog, expectedReason) => {
+  it(
+    "recovers a missing catalog after repeated pre-repair crashes",
+    async () => {
       const harness = await RealServerHarness.create("wi-m7-catalog-pre-marker-");
       harnesses.add(harness);
       const firstId = await seedSession(harness.homeDirectory, "premarkerA");
@@ -2085,11 +2082,7 @@ describe("Milestone 7 real server crash recovery", () => {
       for (const suffix of ["-wal", "-shm"]) {
         await rm(join(harness.homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
       }
-      if (corruptCatalog) {
-        await writeFile(join(harness.homeDirectory, "catalog.sqlite3"), "not a sqlite database");
-      } else {
-        await rm(join(harness.homeDirectory, "catalog.sqlite3"), { force: true });
-      }
+      await rm(join(harness.homeDirectory, "catalog.sqlite3"), { force: true });
 
       for (let crash = 0; crash < 2; crash += 1) {
         const processHandle = await harness.start({
@@ -2112,7 +2105,7 @@ describe("Milestone 7 real server crash recovery", () => {
       const restarted = await start(harness);
       expect(restarted.ready.repair).toMatchObject({
         triggered: true,
-        reason: expectedReason,
+        reason: "catalog_new",
         discovered: 2,
         repaired: 2,
       });
@@ -2127,23 +2120,233 @@ describe("Milestone 7 real server crash recovery", () => {
     40_000,
   );
 
-  it("quarantines a corrupt catalog and reconstructs its surviving sessions", async () => {
+  it("never follows a swapped catalog-home ancestor after corrupt classification", async () => {
+    const harness = await RealServerHarness.create("wi-m7-catalog-ancestor-swap-");
+    harnesses.add(harness);
+    await seedSession(harness.homeDirectory, "catalogAncestorSwap");
+    const catalogPath = join(harness.homeDirectory, "catalog.sqlite3");
+    await writeFile(catalogPath, "not a sqlite database");
+
+    const externalHome = await mkdtemp(join(tmpdir(), "wi-m7-external-catalog-home-"));
+    externalHomes.add(externalHome);
+    const externalCatalog = join(externalHome, "catalog.sqlite3");
+    const externalWal = `${externalCatalog}-wal`;
+    const externalShm = `${externalCatalog}-shm`;
+    await writeFile(externalCatalog, "external catalog must not move");
+    await writeFile(externalWal, "external wal must not move");
+    await writeFile(externalShm, "external shm must not move");
+    const externalIdentities = await Promise.all(
+      [externalCatalog, externalWal, externalShm].map(async (path) => {
+        const identity = await stat(path);
+        return { path, dev: identity.dev, ino: identity.ino };
+      }),
+    );
+
+    let releaseReplacement = (): void => {};
+    let markReplacementReached = (): void => {};
+    const replacementGate = new Promise<void>((resolve) => {
+      releaseReplacement = resolve;
+    });
+    const replacementReached = new Promise<void>((resolve) => {
+      markReplacementReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogReplacement: async () => {
+          markReplacementReached();
+          await replacementGate;
+        },
+      },
+    });
+    const originalHome = `${harness.homeDirectory}.original`;
+    try {
+      const ready = repairing.ready();
+      await replacementReached;
+      await rename(harness.homeDirectory, originalHome);
+      await symlink(
+        externalHome,
+        harness.homeDirectory,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      releaseReplacement();
+
+      const startupError = await ready.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect((await lstat(harness.homeDirectory)).isSymbolicLink()).toBe(true);
+      for (const expected of externalIdentities) {
+        const actual = await stat(expected.path);
+        expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+          dev: expected.dev,
+          ino: expected.ino,
+        });
+      }
+      await expect(readFile(externalCatalog, "utf8")).resolves.toBe(
+        "external catalog must not move",
+      );
+      await expect(readFile(externalWal, "utf8")).resolves.toBe("external wal must not move");
+      await expect(readFile(externalShm, "utf8")).resolves.toBe("external shm must not move");
+      expect((await readdir(externalHome)).sort()).toEqual([
+        "catalog.sqlite3",
+        "catalog.sqlite3-shm",
+        "catalog.sqlite3-wal",
+      ]);
+      await expect(readFile(join(originalHome, "catalog.sqlite3"), "utf8")).resolves.toBe(
+        "not a sqlite database",
+      );
+      expect(startupError).toMatchObject({
+        code: "storage.corrupt",
+        message: "Catalog is corrupt and was preserved in place",
+      });
+    } finally {
+      releaseReplacement();
+      await repairing.close().catch(() => undefined);
+      await rm(harness.homeDirectory, { recursive: true, force: true });
+      await rename(originalHome, harness.homeDirectory).catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("preserves a replaced catalog source and existing quarantine evidence", async () => {
+    const harness = await RealServerHarness.create("wi-m7-catalog-source-swap-");
+    harnesses.add(harness);
+    await seedSession(harness.homeDirectory, "catalogSourceSwap");
+    const catalogPath = join(harness.homeDirectory, "catalog.sqlite3");
+    await writeFile(catalogPath, "classified corrupt catalog");
+    const existingQuarantine = `${catalogPath}.quarantine-existing`;
+    const existingQuarantineWal = `${existingQuarantine}-wal`;
+    const existingQuarantineShm = `${existingQuarantine}-shm`;
+    await writeFile(existingQuarantine, "existing quarantine catalog");
+    await writeFile(existingQuarantineWal, "existing quarantine wal");
+    await writeFile(existingQuarantineShm, "existing quarantine shm");
+
+    let releaseReplacement = (): void => {};
+    let markReplacementReached = (): void => {};
+    const replacementGate = new Promise<void>((resolve) => {
+      releaseReplacement = resolve;
+    });
+    const replacementReached = new Promise<void>((resolve) => {
+      markReplacementReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogReplacement: async () => {
+          markReplacementReached();
+          await replacementGate;
+        },
+      },
+    });
+    const classifiedCatalog = `${catalogPath}.classified`;
+    const replacementFiles = [catalogPath, `${catalogPath}-wal`, `${catalogPath}-shm`];
+    const quarantineFiles = [existingQuarantine, existingQuarantineWal, existingQuarantineShm];
+    try {
+      const ready = repairing.ready();
+      await replacementReached;
+      await rename(catalogPath, classifiedCatalog);
+      await writeFile(catalogPath, "healthy replacement catalog");
+      await writeFile(`${catalogPath}-wal`, "healthy replacement wal");
+      await writeFile(`${catalogPath}-shm`, "healthy replacement shm");
+      const identities = await Promise.all(
+        [...replacementFiles, classifiedCatalog, ...quarantineFiles].map(async (path) => {
+          const identity = await stat(path);
+          return { path, dev: identity.dev, ino: identity.ino };
+        }),
+      );
+      releaseReplacement();
+
+      const startupError = await ready.then(
+        () => null,
+        (error: unknown) => error,
+      );
+      for (const expected of identities) {
+        const actual = await stat(expected.path);
+        expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+          dev: expected.dev,
+          ino: expected.ino,
+        });
+      }
+      await expect(readFile(catalogPath, "utf8")).resolves.toBe("healthy replacement catalog");
+      await expect(readFile(`${catalogPath}-wal`, "utf8")).resolves.toBe(
+        "healthy replacement wal",
+      );
+      await expect(readFile(`${catalogPath}-shm`, "utf8")).resolves.toBe(
+        "healthy replacement shm",
+      );
+      await expect(readFile(classifiedCatalog, "utf8")).resolves.toBe(
+        "classified corrupt catalog",
+      );
+      await expect(readFile(existingQuarantine, "utf8")).resolves.toBe(
+        "existing quarantine catalog",
+      );
+      await expect(readFile(existingQuarantineWal, "utf8")).resolves.toBe(
+        "existing quarantine wal",
+      );
+      await expect(readFile(existingQuarantineShm, "utf8")).resolves.toBe(
+        "existing quarantine shm",
+      );
+      expect(
+        (await readdir(harness.homeDirectory))
+          .filter((name) => name.startsWith("catalog.sqlite3.quarantine-"))
+          .sort(),
+      ).toEqual([
+        "catalog.sqlite3.quarantine-existing",
+        "catalog.sqlite3.quarantine-existing-shm",
+        "catalog.sqlite3.quarantine-existing-wal",
+      ]);
+      expect(startupError).toMatchObject({
+        code: "storage.corrupt",
+        message: "Catalog is corrupt and was preserved in place",
+      });
+    } finally {
+      releaseReplacement();
+      await repairing.close().catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("fails closed and preserves a corrupt catalog with surviving sessions", async () => {
     const harness = await RealServerHarness.create("wi-m7-catalog-corrupt-");
     harnesses.add(harness);
     const sessionId = await seedSession(harness.homeDirectory, "catalogcorrupt");
-    await writeFile(join(harness.homeDirectory, "catalog.sqlite3"), "not a sqlite database");
-    const server = await start(harness);
-    expect(server.ready.repair).toMatchObject({
-      triggered: true,
-      reason: "catalog_corrupt",
-      discovered: 1,
-      repaired: 1,
+    const catalogPath = join(harness.homeDirectory, "catalog.sqlite3");
+    await writeFile(catalogPath, "not a sqlite database");
+    const catalogIdentity = await stat(catalogPath);
+    const processHandle = await harness.start({
+      fixturePath,
+      arguments: ["plain-text", "auto"],
+      waitForReady: false,
     });
-    const bootstrap = await fetch(`${server.origin}/bootstrap`).then((response) => response.json()) as {
-      sessions: readonly { sessionId: string }[];
-    };
-    expect(bootstrap.sessions).toEqual([expect.objectContaining({ sessionId })]);
-    await stop(server.process);
+    const exited = await processHandle.waitForExit();
+    expect(exited).toMatchObject({ code: 1, signal: null });
+    expect(exited.stderr).toContain("Catalog is corrupt and was preserved in place");
+    expect(exited.stderr).not.toContain(harness.homeDirectory);
+    const preservedIdentity = await stat(catalogPath);
+    expect({ dev: preservedIdentity.dev, ino: preservedIdentity.ino }).toEqual({
+      dev: catalogIdentity.dev,
+      ino: catalogIdentity.ino,
+    });
+    await expect(readFile(catalogPath, "utf8")).resolves.toBe("not a sqlite database");
+    await expect(
+      stat(resolveStoragePath(harness.homeDirectory, sessionDatabaseRelativePath(sessionId))),
+    ).resolves.toBeDefined();
+    expect(
+      (await readdir(harness.homeDirectory)).filter((name) =>
+        name.startsWith("catalog.sqlite3.quarantine-"),
+      ),
+    ).toEqual([]);
   }, 20_000);
 
   it("keeps healthy-catalog startup catalog-only", async () => {

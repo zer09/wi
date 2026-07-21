@@ -59,10 +59,6 @@ export interface CatalogStartupState {
   readonly hasCompletedRepair: boolean;
 }
 
-export interface CatalogRepairResult {
-  readonly quarantinedPath: string | null;
-}
-
 export interface RecoveryCandidateCursor {
   readonly updatedAtMs: number;
   readonly sessionId: string;
@@ -146,13 +142,8 @@ export class CatalogClient {
     await this.rpc.request("catalog.completeRepair", {}, z.null(), { outcome: "write" });
   }
 
-  async repair(): Promise<CatalogRepairResult> {
-    return this.rpc.request(
-      "catalog.repair",
-      {},
-      z.strictObject({ quarantinedPath: z.string().nullable() }),
-      { outcome: "write" },
-    );
+  async repair(): Promise<never> {
+    return this.rpc.request("catalog.repair", {}, z.never(), { outcome: "write" });
   }
 
   async createProject(input: ProjectRecord): Promise<ProjectRecord> {

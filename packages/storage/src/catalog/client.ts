@@ -120,6 +120,14 @@ export class CatalogClient {
     });
   }
 
+  async prepareOpen(): Promise<void> {
+    await this.rpc.request("catalog.prepareOpen", {}, z.null());
+  }
+
+  async openPrepared(): Promise<void> {
+    await this.rpc.request("catalog.openPrepared", {}, z.null());
+  }
+
   async getStartupState(): Promise<CatalogStartupState> {
     return this.rpc.request(
       "catalog.getStartupState",

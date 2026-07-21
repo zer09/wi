@@ -2215,6 +2215,248 @@ describe("Milestone 7 real server crash recovery", () => {
     }
   }, 30_000);
 
+  it("does not mutate a catalog substituted after copy validation", async () => {
+    const harness = await RealServerHarness.create("wi-m7-catalog-open-swap-");
+    harnesses.add(harness);
+    const seeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, harness.homeDirectory, "valid-with-sidecars"],
+      10_000,
+    );
+    expect(seeded).toMatchObject({ code: 0, signal: null });
+
+    const externalHome = await mkdtemp(join(tmpdir(), "wi-m7-external-open-catalog-"));
+    externalHomes.add(externalHome);
+    const externalSeeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, externalHome, "corrupt-with-sidecars"],
+      10_000,
+    );
+    expect(externalSeeded).toMatchObject({ code: 0, signal: null });
+    const externalPaths = [
+      join(externalHome, "catalog.sqlite3"),
+      join(externalHome, "catalog.sqlite3-wal"),
+      join(externalHome, "catalog.sqlite3-shm"),
+    ];
+    const externalBefore = await Promise.all(
+      externalPaths.map(async (path) => {
+        const identity = await stat(path);
+        return { path, dev: identity.dev, ino: identity.ino, content: await readFile(path) };
+      }),
+    );
+
+    let releaseOpen = (): void => {};
+    let markOpenReached = (): void => {};
+    const openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const openReached = new Promise<void>((resolve) => {
+      markOpenReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogCanonicalOpen: async () => {
+          markOpenReached();
+          await openGate;
+        },
+      },
+    });
+    const originalHome = `${harness.homeDirectory}.validated`;
+    try {
+      const ready = repairing.ready();
+      await openReached;
+      await rename(harness.homeDirectory, originalHome);
+      await symlink(
+        externalHome,
+        harness.homeDirectory,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      releaseOpen();
+
+      await expect(ready).rejects.toMatchObject({
+        code: "storage.corrupt",
+        message: "Catalog is corrupt and was preserved in place",
+      });
+      expect((await lstat(harness.homeDirectory)).isSymbolicLink()).toBe(true);
+      for (const expected of externalBefore) {
+        const actual = await stat(expected.path);
+        expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+          dev: expected.dev,
+          ino: expected.ino,
+        });
+        await expect(readFile(expected.path)).resolves.toEqual(expected.content);
+      }
+      await expect(stat(join(originalHome, "catalog.sqlite3"))).resolves.toBeDefined();
+      await expect(stat(join(originalHome, "catalog.sqlite3-wal"))).resolves.toBeDefined();
+      await expect(stat(join(originalHome, "catalog.sqlite3-shm"))).resolves.toBeDefined();
+    } finally {
+      releaseOpen();
+      await repairing.close().catch(() => undefined);
+      await rm(harness.homeDirectory, { recursive: true, force: true });
+      await rename(originalHome, harness.homeDirectory).catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("does not mutate catalog files substituted after copy validation", async () => {
+    const harness = await RealServerHarness.create("wi-m7-catalog-open-source-swap-");
+    harnesses.add(harness);
+    const seeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, harness.homeDirectory, "valid-with-sidecars"],
+      10_000,
+    );
+    expect(seeded).toMatchObject({ code: 0, signal: null });
+
+    const corruptHome = await mkdtemp(join(tmpdir(), "wi-m7-open-source-replacement-"));
+    externalHomes.add(corruptHome);
+    const corruptSeeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, corruptHome, "corrupt-with-sidecars"],
+      10_000,
+    );
+    expect(corruptSeeded).toMatchObject({ code: 0, signal: null });
+
+    let releaseOpen = (): void => {};
+    let markOpenReached = (): void => {};
+    const openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const openReached = new Promise<void>((resolve) => {
+      markOpenReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogCanonicalOpen: async () => {
+          markOpenReached();
+          await openGate;
+        },
+      },
+    });
+    const suffixes = ["", "-wal", "-shm"] as const;
+    try {
+      const ready = repairing.ready();
+      await openReached;
+      for (const suffix of suffixes) {
+        const canonical = join(harness.homeDirectory, `catalog.sqlite3${suffix}`);
+        await rename(canonical, `${canonical}.validated`);
+        await copyFile(join(corruptHome, `catalog.sqlite3${suffix}`), canonical);
+      }
+      const before = await Promise.all(
+        suffixes.flatMap((suffix) => {
+          const canonical = join(harness.homeDirectory, `catalog.sqlite3${suffix}`);
+          return [canonical, `${canonical}.validated`];
+        }).map(async (path) => {
+          const identity = await stat(path);
+          return { path, dev: identity.dev, ino: identity.ino, content: await readFile(path) };
+        }),
+      );
+      releaseOpen();
+
+      await expect(ready).rejects.toMatchObject({
+        code: "storage.busy",
+        message: "Catalog storage changed during startup",
+      });
+      for (const expected of before) {
+        const actual = await stat(expected.path);
+        expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+          dev: expected.dev,
+          ino: expected.ino,
+        });
+        await expect(readFile(expected.path)).resolves.toEqual(expected.content);
+      }
+    } finally {
+      releaseOpen();
+      await repairing.close().catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("does not open a catalog that appears after missing-catalog reservation", async () => {
+    const harness = await RealServerHarness.create("wi-m7-missing-catalog-open-swap-");
+    harnesses.add(harness);
+    const corruptHome = await mkdtemp(join(tmpdir(), "wi-m7-missing-open-replacement-"));
+    externalHomes.add(corruptHome);
+    const corruptSeeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, corruptHome, "corrupt-with-sidecars"],
+      10_000,
+    );
+    expect(corruptSeeded).toMatchObject({ code: 0, signal: null });
+
+    let releaseOpen = (): void => {};
+    let markOpenReached = (): void => {};
+    const openGate = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    const openReached = new Promise<void>((resolve) => {
+      markOpenReached = resolve;
+    });
+    const previousFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+      testFailpoints: {
+        hit: () => {},
+        beforeCatalogCanonicalOpen: async () => {
+          markOpenReached();
+          await openGate;
+        },
+      },
+    });
+    const catalogPath = join(harness.homeDirectory, "catalog.sqlite3");
+    try {
+      const ready = repairing.ready();
+      await openReached;
+      await rename(catalogPath, `${catalogPath}.reserved`);
+      for (const suffix of ["", "-wal", "-shm"] as const) {
+        await copyFile(
+          join(corruptHome, `catalog.sqlite3${suffix}`),
+          `${catalogPath}${suffix}`,
+        );
+      }
+      const replacementBefore = await Promise.all(
+        [catalogPath, `${catalogPath}-wal`, `${catalogPath}-shm`].map(async (path) => {
+          const identity = await stat(path);
+          return { path, dev: identity.dev, ino: identity.ino, content: await readFile(path) };
+        }),
+      );
+      releaseOpen();
+
+      await expect(ready).rejects.toMatchObject({
+        code: "storage.busy",
+        message: "Catalog storage changed during startup",
+      });
+      for (const expected of replacementBefore) {
+        const actual = await stat(expected.path);
+        expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+          dev: expected.dev,
+          ino: expected.ino,
+        });
+        await expect(readFile(expected.path)).resolves.toEqual(expected.content);
+      }
+      await expect(stat(`${catalogPath}.reserved`)).resolves.toMatchObject({ size: 0 });
+    } finally {
+      releaseOpen();
+      await repairing.close().catch(() => undefined);
+      if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+      else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
   it("preserves a replaced catalog source and existing quarantine evidence", async () => {
     const harness = await RealServerHarness.create("wi-m7-catalog-source-swap-");
     harnesses.add(harness);

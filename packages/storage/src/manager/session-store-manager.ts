@@ -68,6 +68,7 @@ export interface StorageTestFailpoints {
     readonly reason: "corrupt" | "oversized" | "unsupported" | "provenance_conflict";
   }) => void | Promise<void>;
   readonly beforeCatalogReplacement?: () => void | Promise<void>;
+  readonly beforeCatalogCanonicalOpen?: () => void | Promise<void>;
 }
 
 export interface SessionStoreManagerOptions {
@@ -657,6 +658,13 @@ export class SessionStoreManager {
     }
   }
 
+  private async catalogStartupState(): Promise<Awaited<ReturnType<CatalogClient["getStartupState"]>>> {
+    await this.catalog.prepareOpen();
+    await this.testFailpoints?.beforeCatalogCanonicalOpen?.();
+    await this.catalog.openPrepared();
+    return this.catalog.getStartupState();
+  }
+
   private async runStartupRecovery(
     mode: NonNullable<SessionStoreManagerOptions["catalogRepair"]>,
   ): Promise<void> {
@@ -666,7 +674,7 @@ export class SessionStoreManager {
       // A healthy catalog is reconciled in place so catalog-only projects and
       // global command outcomes are not silently destroyed by maintenance.
       try {
-        const state = await this.catalog.getStartupState();
+        const state = await this.catalogStartupState();
         repairReason = state.repairReason ?? "explicit";
         if (state.repairReason === null) await this.catalog.beginRepair("explicit");
         repairMarked = true;
@@ -679,7 +687,7 @@ export class SessionStoreManager {
       }
     } else {
       try {
-        const state = await this.catalog.getStartupState();
+        const state = await this.catalogStartupState();
         if (state.repairReason !== null) {
           if (mode === "off") {
             // A brand-new empty installation has no canonical work to protect;

@@ -23,6 +23,7 @@ export function sqliteVersionAtLeast(actual: string, minimum = MINIMUM_SQLITE_VE
 
 export interface OpenWorkerDatabaseOptions {
   readonly fileMustExist?: boolean;
+  readonly beforeConfigure?: () => void;
 }
 
 export function openWorkerDatabase(
@@ -32,6 +33,9 @@ export function openWorkerDatabase(
   if (options.fileMustExist !== true) mkdirSync(dirname(path), { recursive: true });
   const database = new Database(path, { fileMustExist: options.fileMustExist === true });
   try {
+    // The constructor only acquires SQLite's handle. Catalog startup uses this
+    // boundary to verify the selected pathname before recovery-capable PRAGMAs.
+    options.beforeConfigure?.();
     database.pragma("journal_mode = WAL");
     database.pragma("synchronous = FULL");
     database.pragma("foreign_keys = ON");

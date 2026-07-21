@@ -118,9 +118,13 @@ async function sessionV3Snapshot(homeDirectory: string): Promise<SessionV3Snapsh
   return JSON.parse(await runSessionV3Fixture(homeDirectory, "snapshot")) as SessionV3Snapshot;
 }
 
-function restart(homeDirectory: string): SessionStoreManager {
+function restart(
+  homeDirectory: string,
+  catalogRepair: "auto" | "force" | "off" = "auto",
+): SessionStoreManager {
   const storage = new SessionStoreManager({
     homeDirectory,
+    catalogRepair,
     sessionWorkers: { size: 1, allowTestOperations: true },
   });
   managers.push(storage);
@@ -365,7 +369,7 @@ describe("storage crash windows", () => {
     expect(rolledBack.creationProvenance).toBeNull();
 
     await runSessionV3Fixture(homeDirectory, "drop-failure");
-    const recoveredStorage = restart(homeDirectory);
+    const recoveredStorage = restart(homeDirectory, "force");
     const recoveredSession = await recoveredStorage.openSession("ses_v3Retained");
     await expect(recoveredSession.getManifest()).resolves.toMatchObject({ schemaVersion: 4 });
     await recoveredStorage.close();
@@ -465,9 +469,9 @@ describe("storage crash windows", () => {
       diagnosticId: failed.diagnosticId,
       quarantinedRelativePath: null,
     });
-    await expect(
-      (await secondRestart.openSession(sessionId)).getManifest(),
-    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(secondRestart.openSession(sessionId)).rejects.toMatchObject({
+      code: "storage.corrupt",
+    });
     await expect(secondRestart.catalog.getSession(sessionId)).resolves.toMatchObject({
       status: "unavailable",
     });

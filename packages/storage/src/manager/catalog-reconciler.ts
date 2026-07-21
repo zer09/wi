@@ -13,17 +13,42 @@ export class CatalogReconciler {
 
   async inspectSession(sessionId: string): Promise<ReconcileSessionInput> {
     const expectedCatalog = await this.catalog.getSession(sessionId);
+    if (expectedCatalog?.status === "missing") {
+      throw new StorageError("storage.session_missing", "Session database is missing");
+    }
+    if (expectedCatalog !== null && expectedCatalog.status !== "ready") {
+      throw new StorageError("storage.corrupt", "Session is unavailable");
+    }
     const relativePath = sessionDatabaseRelativePath(sessionId);
     const session = this.sessions.registerSession(
       sessionId,
       resolveStoragePath(this.homeDirectory, relativePath),
     );
-    const [manifest, projection, pendingApprovals, pendingInputCount] = await Promise.all([
-      session.getManifest(),
-      session.getCatalogProjection(),
-      session.getPendingApprovals(),
-      session.getPendingInputCount(),
-    ]);
+    const [manifest, projection, pendingApprovals, pendingInputCount, nonterminalRuns] =
+      await Promise.all([
+        session.getManifest(),
+        session.getCatalogProjection(),
+        session.getPendingApprovals(),
+        session.getPendingInputCount(),
+        session.getNonterminalRuns(),
+      ]);
+    const currentCatalog = await this.catalog.getSession(sessionId);
+    if (currentCatalog?.status === "missing") {
+      await session.close().catch(() => undefined);
+      throw new StorageError("storage.session_missing", "Session database is missing");
+    }
+    if (currentCatalog !== null && currentCatalog.status !== "ready") {
+      await session.close().catch(() => undefined);
+      throw new StorageError("storage.corrupt", "Session is unavailable");
+    }
+    if (currentCatalog?.status !== expectedCatalog?.status) {
+      await session.close().catch(() => undefined);
+      throw new StorageError(
+        "storage.busy",
+        "Catalog status changed during session inspection",
+        true,
+      );
+    }
     return {
       manifest,
       dbRelativePath: relativePath,
@@ -34,7 +59,7 @@ export class CatalogReconciler {
       lastMessagePreview: projection.lastMessagePreview,
       pendingApprovalCount: pendingApprovals.length,
       pendingInputCount,
-      recoveryNeeded: (await session.getNonterminalRuns()).length > 0,
+      recoveryNeeded: nonterminalRuns.length > 0,
     };
   }
 
@@ -42,12 +67,14 @@ export class CatalogReconciler {
     let inspection = initialInspection;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const summary = await this.catalog.reconcileSession(inspection);
-      if (
-        summary.status !== "ready" ||
-        summary.lastEventSequence >= inspection.manifest.lastEventSequence
-      ) {
-        return summary;
+      if (summary.status !== "ready") {
+        await this.sessions.closeSession(inspection.manifest.sessionId).catch(() => undefined);
+        if (summary.status === "missing") {
+          throw new StorageError("storage.session_missing", "Session database is missing");
+        }
+        throw new StorageError("storage.corrupt", "Session is unavailable");
       }
+      if (summary.lastEventSequence >= inspection.manifest.lastEventSequence) return summary;
       inspection = await this.inspectSession(inspection.manifest.sessionId);
     }
     throw new StorageError(

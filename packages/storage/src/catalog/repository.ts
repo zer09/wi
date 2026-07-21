@@ -519,16 +519,33 @@ export class CatalogRepository {
     return row === undefined ? null : globalCommandFromRow(row);
   }
 
-  createSessionIndex(inputValue: unknown, allowPathRepair = false): SessionSummary {
+  createSessionIndex(
+    inputValue: unknown,
+    options: {
+      readonly allowPathRepair?: boolean;
+      readonly allowReadyPromotion?: boolean;
+    } = {},
+  ): SessionSummary {
     const input = CreateSessionIndexInputSchema.parse(inputValue);
     this.database.transaction(() => {
       const existing = this.getSession(input.sessionId);
       if (
-        !allowPathRepair &&
+        options.allowPathRepair !== true &&
         existing !== null &&
         existing.dbRelativePath !== input.dbRelativePath
       ) {
         throw new StorageError("storage.corrupt", "Session path changed for an existing session");
+      }
+      if (
+        options.allowReadyPromotion !== true &&
+        existing !== null &&
+        existing.status !== "ready" &&
+        input.status === "ready"
+      ) {
+        throw new StorageError(
+          "storage.corrupt",
+          "Only validated repair can restore a non-ready session",
+        );
       }
       this.database
         .prepare(
@@ -810,9 +827,37 @@ export class CatalogRepository {
   }
 
   reconcileSession(inputValue: unknown): ReconcileSessionResult {
+    return this.reconcileSessionInternal(inputValue, false);
+  }
+
+  reconcileValidatedRepairSession(inputValue: unknown): ReconcileSessionResult {
+    return this.reconcileSessionInternal(inputValue, true);
+  }
+
+  private reconcileSessionInternal(
+    inputValue: unknown,
+    allowNonReadyPromotion: boolean,
+  ): ReconcileSessionResult {
     const input = ReconcileSessionInputSchema.parse(inputValue);
     const manifest: SessionManifest = input.manifest;
     const existing = this.getSession(manifest.sessionId);
+    if (!allowNonReadyPromotion) {
+      if (existing !== null && existing.status !== "ready") {
+        return { summary: existing, applied: false };
+      }
+      if (
+        input.expectedCatalogStatus !== null &&
+        input.expectedCatalogStatus !== "ready"
+      ) {
+        if (existing === null) {
+          throw new StorageError(
+            "storage.corrupt",
+            "Generic reconciliation cannot restore a non-ready session",
+          );
+        }
+        return { summary: existing, applied: false };
+      }
+    }
     if (existing !== null) {
       const statusChangedDuringInspection = existing.status !== input.expectedCatalogStatus;
       const newerProjectionWon =
@@ -840,7 +885,10 @@ export class CatalogRepository {
       sessionSchemaVersion: manifest.schemaVersion,
       // Only an observation of canonical terminal/no-active state clears a candidate.
       recoveryCandidate: input.recoveryNeeded,
-    }, true);
+    }, {
+      allowPathRepair: true,
+      allowReadyPromotion: allowNonReadyPromotion,
+    });
     return { summary, applied: true };
   }
 }

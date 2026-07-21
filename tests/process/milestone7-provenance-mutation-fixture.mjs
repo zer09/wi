@@ -3,7 +3,11 @@ import Database from "../../packages/storage/node_modules/better-sqlite3/lib/ind
 const [databasePath, mutation, value] = process.argv.slice(2);
 if (databasePath === undefined || mutation === undefined || value === undefined) process.exit(64);
 
-const database = new Database(databasePath);
+const readOnly = mutation === "read-user-version" || mutation === "read-event-head";
+const database = new Database(
+  databasePath,
+  readOnly ? { readonly: true, fileMustExist: true } : undefined,
+);
 try {
   switch (mutation) {
     case "result-session":
@@ -29,6 +33,13 @@ try {
     case "read-user-version":
       process.stdout.write(`${String(database.pragma("user_version", { simple: true }))}\n`);
       break;
+    case "read-event-head": {
+      const row = database.prepare(
+        "SELECT last_event_sequence AS lastEventSequence FROM manifest WHERE singleton = 1",
+      ).get();
+      process.stdout.write(`${String(row?.lastEventSequence)}\n`);
+      break;
+    }
     case "catalog-session-stale":
       database.prepare(
         `UPDATE sessions SET

@@ -24,6 +24,7 @@ import {
   resolveStoragePath,
   sessionDatabaseRelativePath,
   SessionStoreManager,
+  type AppendTransactionInput,
 } from "@wi/storage";
 import { RealServerHarness, type RealServerProcess } from "@wi/test-support";
 
@@ -326,6 +327,106 @@ async function readSessionUserVersion(
   );
   expect(result).toMatchObject({ code: 0, signal: null });
   return Number.parseInt(result.stdout.trim(), 10);
+}
+
+async function readSessionEventHead(
+  homeDirectory: string,
+  sessionId: string,
+): Promise<number> {
+  const databasePath = resolveStoragePath(
+    homeDirectory,
+    sessionDatabaseRelativePath(sessionId),
+  );
+  const result = await fixtureProcesses.run(
+    process.execPath,
+    [provenanceMutationFixturePath, databasePath, "read-event-head", "unused"],
+  );
+  expect(result).toMatchObject({ code: 0, signal: null });
+  return Number.parseInt(result.stdout.trim(), 10);
+}
+
+async function expectUnavailableSessionIsolation(
+  homeDirectory: string,
+  sessionIds: readonly string[],
+  healthySessionId?: string,
+): Promise<void> {
+  const before = new Map<
+    string,
+    { readonly head: number; readonly device: number; readonly inode: number; readonly size: number }
+  >();
+  for (const sessionId of sessionIds) {
+    const databasePath = resolveStoragePath(
+      homeDirectory,
+      sessionDatabaseRelativePath(sessionId),
+    );
+    const identity = await stat(databasePath);
+    before.set(sessionId, {
+      head: await readSessionEventHead(homeDirectory, sessionId),
+      device: identity.dev,
+      inode: identity.ino,
+      size: identity.size,
+    });
+  }
+
+  const storage = new SessionStoreManager({ homeDirectory });
+  try {
+    await storage.ready();
+    for (const [index, sessionId] of sessionIds.entries()) {
+      const suffix = `isolated${String(index)}`;
+      const append: AppendTransactionInput = {
+        events: [
+          {
+            eventId: `evt_m7${suffix}`,
+            eventType: "run.created",
+            createdAtMs: 9_000 + index,
+            data: { eventVersion: 1 as const, runId: `run_m7${suffix}` },
+          },
+        ],
+        projections: [],
+      };
+      await expect(storage.openSession(sessionId)).rejects.toMatchObject({
+        code: "storage.corrupt",
+      });
+      await expect(
+        storage.acceptCommand(sessionId, {
+          commandId: `cmd_m7${suffix}`,
+          commandMethod: "message.submit",
+          payloadHash: String(index).repeat(64),
+          result: { runId: `run_m7${suffix}` },
+          acceptedAtMs: 9_000 + index,
+          runId: `run_m7${suffix}`,
+          transaction: append,
+        }),
+      ).rejects.toMatchObject({ code: "storage.corrupt" });
+      await expect(storage.appendTransaction(sessionId, append)).rejects.toMatchObject({
+        code: "storage.corrupt",
+      });
+      await expect(storage.catalog.getSession(sessionId)).resolves.toMatchObject({
+        status: "unavailable",
+      });
+    }
+    if (healthySessionId !== undefined) {
+      await expect(
+        (await storage.openSession(healthySessionId)).getManifest(),
+      ).resolves.toMatchObject({ sessionId: healthySessionId });
+    }
+  } finally {
+    await storage.close();
+  }
+
+  for (const sessionId of sessionIds) {
+    const databasePath = resolveStoragePath(
+      homeDirectory,
+      sessionDatabaseRelativePath(sessionId),
+    );
+    const identity = await stat(databasePath);
+    expect({
+      head: await readSessionEventHead(homeDirectory, sessionId),
+      device: identity.dev,
+      inode: identity.ino,
+      size: identity.size,
+    }).toEqual(before.get(sessionId));
+  }
 }
 
 async function deleteCatalog(homeDirectory: string): Promise<void> {
@@ -1627,6 +1728,7 @@ describe("Milestone 7 real server crash recovery", () => {
       expect.objectContaining({ sessionId: corruptId, status: "unavailable" }),
     ]));
     await stop(classified.process);
+    await expectUnavailableSessionIsolation(harness.homeDirectory, [oversizedId]);
 
     for (const sessionId of [unsupportedId, oversizedId]) {
       const directory = resolveStoragePath(
@@ -1778,6 +1880,11 @@ describe("Milestone 7 real server crash recovery", () => {
       ]),
     );
     await stop(repaired.process);
+    await expectUnavailableSessionIsolation(
+      harness.homeDirectory,
+      [resultId],
+      healthyId,
+    );
   }, 30_000);
 
   it("isolates every conflicting provenance claimant and repairs an independent session", async () => {
@@ -1813,6 +1920,11 @@ describe("Milestone 7 real server crash recovery", () => {
       ]),
     );
     await stop(repaired.process);
+    await expectUnavailableSessionIsolation(
+      harness.homeDirectory,
+      [firstId, secondId],
+      healthyId,
+    );
   }, 30_000);
 
   it("marks a catalog-known missing database without overwriting metadata or renaming its directory", async () => {
@@ -2866,6 +2978,19 @@ describe("Milestone 7 real server crash recovery", () => {
       await repairing.close().catch(() => undefined);
       if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
       else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+
+    const blocked = new SessionStoreManager({ homeDirectory: harness.homeDirectory });
+    try {
+      await blocked.ready();
+      await expect(blocked.openSession(sessionId)).rejects.toMatchObject({
+        code: "storage.corrupt",
+      });
+      await expect(blocked.catalog.getSession(sessionId)).resolves.toMatchObject({
+        status: "unavailable",
+      });
+    } finally {
+      await blocked.close();
     }
 
     const repeatedRepair = new SessionStoreManager({

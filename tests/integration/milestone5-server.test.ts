@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { request as createHttpRequest } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -1503,6 +1503,83 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         code: "storage.corrupt",
       }),
     );
+    await client.close();
+  });
+
+  it("rechecks catalog readiness after the command-router precheck before actor construction", async () => {
+    const fixture = await startFixture();
+    const created = await fixture.runtime.storage.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_create_statusRace",
+      method: "session.create",
+      params: { title: "Status race" },
+    });
+    const sessionId = created.session.sessionId;
+    const databasePath = resolveStoragePath(fixture.homeDirectory, created.session.dbRelativePath);
+    const identityBefore = await stat(databasePath);
+    const headBefore = await fixture.runtime.storage.sessions.getHeadSequence(sessionId);
+    const getSession = fixture.runtime.storage.catalog.getSession.bind(
+      fixture.runtime.storage.catalog,
+    );
+    let targetReads = 0;
+    const getSessionSpy = vi
+      .spyOn(fixture.runtime.storage.catalog, "getSession")
+      .mockImplementation(async (candidateId) => {
+        const summary = await getSession(candidateId);
+        if (candidateId === sessionId && targetReads === 0) {
+          targetReads += 1;
+          await fixture.runtime.storage.catalog.markSessionStatus({
+            sessionId,
+            status: "unavailable",
+          });
+          return summary;
+        }
+        return summary;
+      });
+
+    const { cookie } = await bootstrap(fixture.server);
+    const client = await connect(fixture.server, cookie);
+    await hello(client, "statusRace");
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_statusRace",
+      sessionId,
+      method: "message.submit",
+      params: { text: "Do not construct an actor after isolation." },
+    });
+    const rejected = await client.take(
+      (message): message is CommandRejectedFrame =>
+        message.kind === "command.rejected" && message.commandId === "cmd_statusRace",
+    );
+    getSessionSpy.mockRestore();
+
+    expect(rejected).toMatchObject({
+      code: "storage.corrupt",
+      message: "The requested session storage is unavailable.",
+      recoverable: false,
+    });
+    expect(targetReads).toBe(1);
+    expect(fixture.runtime.actors.states().some((state) => state.sessionId === sessionId)).toBe(
+      false,
+    );
+    expect(
+      (await fixture.runtime.storage.sessions.getStats()).flatMap(
+        (worker) => worker.openSessionIds,
+      ),
+    ).not.toContain(sessionId);
+    await expect(fixture.runtime.storage.catalog.getSession(sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    await expect(fixture.runtime.storage.sessions.getHeadSequence(sessionId)).resolves.toBe(
+      headBefore,
+    );
+    const identityAfter = await stat(databasePath);
+    expect({ dev: identityAfter.dev, ino: identityAfter.ino }).toEqual({
+      dev: identityBefore.dev,
+      ino: identityBefore.ino,
+    });
     await client.close();
   });
 

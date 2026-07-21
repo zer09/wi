@@ -322,6 +322,8 @@ function execute(operation: string, payload: unknown): unknown {
     }
     case "catalog.reconcileSession":
       return repository.reconcileSession(payload);
+    case "catalog.reconcileValidatedRepairSession":
+      return repository.reconcileValidatedRepairSession(payload);
     default:
       throw new StorageError("storage.worker_failed", `Unknown catalog operation ${operation}`);
   }

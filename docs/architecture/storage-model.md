@@ -346,16 +346,15 @@ This protects against:
 
 The reconciler compares catalog summary data with session manifests and heads.
 
-It may repair:
+For a catalog row already in `ready`, ordinary reconciliation may repair:
 
 - last event sequence
-- status
 - title and preview
 - pending attention counts
 - schema version
 - orphaned session entries
 
-It never rewrites canonical session events.
+It never rewrites canonical session events. Catalog status is authoritative at the storage boundary: normal open, read, recovery, command acceptance, and append paths reject `unavailable` or `missing` rows before session-worker use and close any retained lazy handle. Generic reconciliation accepts only a trusted `ready` row (or an absent row being reconstructed through an already-authorized creation flow) and cannot promote `unavailable` or `missing` to `ready`. Only the bounded repair scanner's internal capability may do that, after complete worker-contained path, manifest, schema, size, creation-provenance, and projection validation. This is deliberately not a public catalog mutation mode.
 
 Reconciliation runs:
 

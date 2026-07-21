@@ -98,6 +98,8 @@ export interface ReconcileSessionInput {
   readonly recoveryNeeded: boolean;
 }
 
+const validatedRepairReconciliation = Symbol("validatedRepairReconciliation");
+
 export class CatalogClient {
   private readonly rpc: WorkerRpcClient;
 
@@ -346,7 +348,25 @@ export class CatalogClient {
     return (await this.reconcileSessionWithStatus(input)).summary;
   }
 
+  async [validatedRepairReconciliation](
+    input: ReconcileSessionInput,
+  ): Promise<ReconcileSessionResult> {
+    return this.rpc.request(
+      "catalog.reconcileValidatedRepairSession",
+      input,
+      ReconcileSessionResultSchema,
+      { outcome: "write" },
+    );
+  }
+
   async close(deadlineAtMs?: number): Promise<void> {
     await this.rpc.close(deadlineAtMs);
   }
+}
+
+export function reconcileValidatedRepairSession(
+  catalog: CatalogClient,
+  input: ReconcileSessionInput,
+): Promise<ReconcileSessionResult> {
+  return catalog[validatedRepairReconciliation](input);
 }

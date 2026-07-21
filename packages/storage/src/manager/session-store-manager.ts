@@ -10,6 +10,7 @@ import {
 
 import {
   CatalogClient,
+  reconcileValidatedRepairSession,
   type CatalogClientOptions,
   type ReconcileSessionInput,
   type RecoveryCandidateCursor,
@@ -484,7 +485,7 @@ export class SessionStoreManager {
         !conflictingProvenanceSessions.has(record.sessionId)) {
         const observation = record.observation;
         const expectedCatalog = await this.catalog.getSession(record.sessionId);
-        const reconciliation = await this.catalog.reconcileSessionWithStatus({
+        const reconciliation = await reconcileValidatedRepairSession(this.catalog, {
           manifest: record.manifest,
           dbRelativePath,
           expectedCatalogSequence: expectedCatalog?.lastEventSequence ?? null,
@@ -523,6 +524,8 @@ export class SessionStoreManager {
             acceptedAtMs: provenance.acceptedAtMs,
           });
         }
+        this.sessionFaultStatuses.delete(record.sessionId);
+        this.reconciledSessions.add(record.sessionId);
         repaired += 1;
         this.testFailpoints?.hit("after_catalog_session_repair", {
           sessionId: record.sessionId,
@@ -830,7 +833,24 @@ export class SessionStoreManager {
     }
   }
 
+  private async requireReadySession(sessionId: string): Promise<SessionSummary> {
+    const summary = await this.catalog.getSession(sessionId);
+    if (summary !== null && summary.status === "ready") return summary;
+
+    // A retained database may already have a lazy worker handle. Close it before
+    // returning the catalog's authoritative non-ready classification.
+    await this.sessions.closeSession(sessionId).catch(() => undefined);
+    if (summary === null) {
+      throw new StorageError("session.not_found", "Session was not found");
+    }
+    if (summary.status === "missing") {
+      throw new StorageError("storage.session_missing", "Session database is missing");
+    }
+    throw new StorageError("storage.corrupt", "Session is unavailable");
+  }
+
   private async ensureSessionReconciled(sessionId: string): Promise<boolean> {
+    await this.requireReadySession(sessionId);
     if (this.reconciledSessions.has(sessionId)) return true;
     const existing = this.reconciliationInFlight.get(sessionId);
     if (existing !== undefined) return existing;
@@ -1063,8 +1083,7 @@ export class SessionStoreManager {
 
   private async openSessionInternal(sessionId: string): Promise<SessionClient> {
     await this.ready();
-    const summary = await this.catalog.getSession(sessionId);
-    if (summary === null) throw new Error(`Session ${sessionId} was not found in the catalog`);
+    const summary = await this.requireReadySession(sessionId);
     const expectedRelativePath = sessionDatabaseRelativePath(sessionId);
     if (summary.dbRelativePath !== expectedRelativePath) {
       throw new StorageError("storage.corrupt", "Catalog session path is not the generated path");
@@ -1073,17 +1092,26 @@ export class SessionStoreManager {
       sessionId,
       resolveStoragePath(this.homeDirectory, expectedRelativePath),
       async () => {
-        await this.ensureSessionReconciled(sessionId);
+        if (!(await this.ensureSessionReconciled(sessionId))) {
+          await this.requireReadySession(sessionId);
+          throw new StorageError("storage.busy", "Session reconciliation lost its status check", true);
+        }
+        await this.requireReadySession(sessionId);
       },
       (events, headSequence) => {
         this.scheduleCatalogObservation(sessionId, events, headSequence);
       },
       async (input) => {
+        if (!(await this.ensureSessionReconciled(sessionId))) {
+          await this.requireReadySession(sessionId);
+          throw new StorageError("storage.busy", "Session reconciliation lost its status check", true);
+        }
         if (this.transactionMayCreateNonterminalRun(input)) {
           // This precedes the canonical write. A failed write can leave an
           // over-inclusive candidate; a crash can never miss a real run.
           await this.catalog.markRecoveryCandidate(sessionId);
         }
+        await this.requireReadySession(sessionId);
       },
     );
   }

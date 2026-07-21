@@ -749,7 +749,7 @@ export class SessionStoreManager {
         inspection = await this.reconciler.inspectSession(command.reservedSessionId);
       } catch (error) {
         if (unavailableStatus(error) === null) throw error;
-        // Persist a terminal command result before attempting the best-effort atomic rename.
+        // Persist a terminal command result before preserving the partial database in place.
         await this.failIncompleteSessionCreation(command, error);
         continue;
       }

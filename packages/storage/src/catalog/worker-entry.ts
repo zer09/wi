@@ -1,3 +1,12 @@
+import {
+  constants,
+  copyFileSync,
+  lstatSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 
 import type Database from "better-sqlite3";
@@ -29,8 +38,108 @@ let database: Database.Database | null = null;
 let repository: CatalogRepository | null = null;
 let startupError: StorageError | null = null;
 
+interface CatalogFileIdentity {
+  readonly suffix: "" | "-wal" | "-shm";
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+function catalogFileIdentity(
+  databasePath: string,
+  suffix: CatalogFileIdentity["suffix"],
+): CatalogFileIdentity | null {
+  try {
+    const identity = lstatSync(`${databasePath}${suffix}`, { bigint: true });
+    if (!identity.isFile()) {
+      throw new StorageError("storage.corrupt", "Catalog storage is not a regular file");
+    }
+    return {
+      suffix,
+      dev: identity.dev,
+      ino: identity.ino,
+      size: identity.size,
+      mtimeNs: identity.mtimeNs,
+      ctimeNs: identity.ctimeNs,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function catalogFileIdentities(databasePath: string): readonly CatalogFileIdentity[] {
+  return (["", "-wal", "-shm"] as const).flatMap((suffix) => {
+    const identity = catalogFileIdentity(databasePath, suffix);
+    return identity === null ? [] : [identity];
+  });
+}
+
+function sameCatalogFileIdentities(
+  first: readonly CatalogFileIdentity[],
+  second: readonly CatalogFileIdentity[],
+): boolean {
+  return first.length === second.length && first.every((expected, index) => {
+    const actual = second[index];
+    return actual !== undefined &&
+      expected.suffix === actual.suffix &&
+      expected.dev === actual.dev &&
+      expected.ino === actual.ino &&
+      expected.size === actual.size &&
+      expected.mtimeNs === actual.mtimeNs &&
+      expected.ctimeNs === actual.ctimeNs;
+  });
+}
+
+function validateCatalogCopy(databasePath: string): void {
+  const before = catalogFileIdentities(databasePath);
+  if (!before.some(({ suffix }) => suffix === "")) {
+    if (before.length > 0) {
+      throw new StorageError(
+        "storage.corrupt",
+        "Catalog sidecars exist without the catalog database",
+      );
+    }
+    return;
+  }
+
+  const probeDirectory = mkdtempSync(join(tmpdir(), "wi-catalog-probe-"));
+  const probePath = join(probeDirectory, "catalog.sqlite3");
+  let probeDatabase: Database.Database | null = null;
+  try {
+    for (const { suffix } of before) {
+      copyFileSync(
+        `${databasePath}${suffix}`,
+        `${probePath}${suffix}`,
+        constants.COPYFILE_EXCL,
+      );
+    }
+    if (!sameCatalogFileIdentities(before, catalogFileIdentities(databasePath))) {
+      throw new StorageError("storage.busy", "Catalog storage changed during validation", true);
+    }
+    probeDatabase = openWorkerDatabase(probePath, { fileMustExist: true });
+    const integrity = probeDatabase.pragma("quick_check") as readonly Record<string, unknown>[];
+    if (integrity.length !== 1 || integrity[0]?.quick_check !== "ok") {
+      throw new StorageError("storage.corrupt", "Catalog integrity check failed");
+    }
+    new CatalogRepository(probeDatabase);
+    if (!sameCatalogFileIdentities(before, catalogFileIdentities(databasePath))) {
+      throw new StorageError("storage.busy", "Catalog storage changed during validation", true);
+    }
+  } finally {
+    try {
+      probeDatabase?.close();
+    } finally {
+      rmSync(probeDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
 function openCatalog(): void {
   try {
+    validateCatalogCopy(config.databasePath);
     database = openWorkerDatabase(config.databasePath);
     repository = new CatalogRepository(database);
     startupError = null;

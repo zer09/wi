@@ -194,7 +194,7 @@ Examples:
 - catalog corruption
 - catalog path unavailable
 
-Because catalog discovery is foundational, normal startup may stop. An existing corrupt catalog and its sidecars are preserved in place: automatic quarantine/replacement is forbidden because Node exposes no cross-platform handle-relative, no-follow, no-overwrite move. With Wi stopped, an operator may restore the catalog or deliberately relocate it outside Wi before using the missing-catalog rebuild path.
+Because catalog discovery is foundational, normal startup may stop. Before an existing catalog is opened read-write, SQLite recovery, integrity checking, and migration validation run on a disposable copy of the database and WAL/SHM sidecars. Failed validation leaves the canonical files unopened and unchanged. Automatic quarantine/replacement is forbidden because Node exposes no cross-platform handle-relative, no-follow, no-overwrite move. With Wi stopped, an operator may restore the catalog or deliberately relocate it outside Wi before using the missing-catalog rebuild path.
 
 Action:
 

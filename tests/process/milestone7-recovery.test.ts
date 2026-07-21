@@ -30,6 +30,7 @@ import { RealServerHarness, type RealServerProcess } from "@wi/test-support";
 import { FixtureProcessRunner } from "./fixture-process.js";
 
 const fixturePath = fileURLToPath(new URL("./milestone7-server-fixture.mjs", import.meta.url));
+const catalogFixturePath = fileURLToPath(new URL("./catalog-v1-fixture.mjs", import.meta.url));
 const provenanceMutationFixturePath = fileURLToPath(
   new URL("./milestone7-provenance-mutation-fixture.mjs", import.meta.url),
 );
@@ -2314,6 +2315,78 @@ describe("Milestone 7 real server crash recovery", () => {
       await repairing.close().catch(() => undefined);
       if (previousFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
       else process.env.WI_ALLOW_TEST_FAILPOINTS = previousFailpointGate;
+    }
+  }, 30_000);
+
+  it("opens a valid crash-left catalog through the nonmutating copy probe", async () => {
+    const harness = await RealServerHarness.create("wi-m7-valid-catalog-sidecars-");
+    harnesses.add(harness);
+    const seeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, harness.homeDirectory, "valid-with-sidecars"],
+      10_000,
+    );
+    expect(seeded).toMatchObject({ code: 0, signal: null });
+    await expect(stat(join(harness.homeDirectory, "catalog.sqlite3-wal"))).resolves.toBeDefined();
+    await expect(stat(join(harness.homeDirectory, "catalog.sqlite3-shm"))).resolves.toBeDefined();
+
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+    });
+    try {
+      await repairing.ready();
+      expect(repairing.catalogRepairStatus()).toMatchObject({
+        triggered: false,
+        reason: "none",
+      });
+      await expect(repairing.catalog.countSessions()).resolves.toBe(0);
+    } finally {
+      await repairing.close();
+    }
+  }, 30_000);
+
+  it("preserves pre-existing catalog database and sidecars through corrupt classification", async () => {
+    const harness = await RealServerHarness.create("wi-m7-catalog-sidecar-preservation-");
+    harnesses.add(harness);
+    const seeded = await fixtureProcesses.run(
+      process.execPath,
+      [catalogFixturePath, harness.homeDirectory, "corrupt-with-sidecars"],
+      10_000,
+    );
+    expect(seeded).toMatchObject({ code: 0, signal: null });
+
+    const catalogFiles = [
+      join(harness.homeDirectory, "catalog.sqlite3"),
+      join(harness.homeDirectory, "catalog.sqlite3-wal"),
+      join(harness.homeDirectory, "catalog.sqlite3-shm"),
+    ];
+    const before = await Promise.all(
+      catalogFiles.map(async (path) => {
+        const identity = await stat(path);
+        return { path, dev: identity.dev, ino: identity.ino, content: await readFile(path) };
+      }),
+    );
+
+    const repairing = new SessionStoreManager({
+      homeDirectory: harness.homeDirectory,
+      catalogRepair: "auto",
+    });
+    try {
+      await expect(repairing.ready()).rejects.toMatchObject({
+        code: "storage.migration_failed",
+      });
+    } finally {
+      await repairing.close().catch(() => undefined);
+    }
+
+    for (const expected of before) {
+      const actual = await stat(expected.path);
+      expect({ dev: actual.dev, ino: actual.ino }).toEqual({
+        dev: expected.dev,
+        ino: expected.ino,
+      });
+      await expect(readFile(expected.path)).resolves.toEqual(expected.content);
     }
   }, 30_000);
 

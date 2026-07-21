@@ -168,7 +168,7 @@ Action:
 - update catalog status when possible
 - keep other sessions running
 
-Catalog `unavailable` and `missing` states are authoritative, not UI hints. Normal storage clients recheck status before reads, recovery, and every command/append mutation, and close retained worker handles on rejection. Generic lazy reconciliation may update only a `ready` session and cannot restore an isolated row. Restoration requires the internal complete-discovery repair path to validate the canonical database, schema, size, identity, projection, and creation provenance before committing `ready`; unrelated sessions remain usable throughout.
+Catalog `unavailable` and `missing` states are authoritative, not UI hints. Normal storage clients recheck status before reads, recovery, and every command/append mutation, and close retained worker handles on rejection. Generic lazy reconciliation may update only a `ready` session and cannot restore an isolated row. Restoration requires the internal complete-discovery repair path to validate the canonical database, schema, size, identity, projection, and creation provenance before committing `ready`; unrelated sessions remain usable throughout. The validated-repair RPC is reachable only through module-closure state, not client fields or prototype symbols. Worker pools and client hooks are JavaScript-private, and their constructors are absent from the normal package runtime exports; internal test-only access is environment-gated and not exported by the package.
 
 ## 10. Database-worker failure
 

@@ -30,6 +30,7 @@ import {
   type SessionClient,
   type SessionWorkerBarrier,
 } from "@wi/storage";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 import { EchoInputSchema, ToolRegistry } from "@wi/tools";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +79,10 @@ interface Fixture {
 const PROVIDER_SECRET = "AUDIT_PROVIDER_BEARER_SECRET";
 const TOOL_SECRET = "AUDIT_TOOL_BEARER_SECRET";
 const HTTP_SECRET = "AUDIT_HTTP_BEARER_SECRET";
+
+function sessionWorkers(storage: SessionStoreManager) {
+  return sessionWorkerPoolForTest(storage);
+}
 
 class ThrowingSecretProvider extends FakeProviderAdapter {
   override async *stream(
@@ -1518,7 +1523,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     const sessionId = created.session.sessionId;
     const databasePath = resolveStoragePath(fixture.homeDirectory, created.session.dbRelativePath);
     const identityBefore = await stat(databasePath);
-    const headBefore = await fixture.runtime.storage.sessions.getHeadSequence(sessionId);
+    const headBefore = await sessionWorkers(fixture.runtime.storage).getHeadSequence(sessionId);
     const getSession = fixture.runtime.storage.catalog.getSession.bind(
       fixture.runtime.storage.catalog,
     );
@@ -1565,14 +1570,14 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       false,
     );
     expect(
-      (await fixture.runtime.storage.sessions.getStats()).flatMap(
+      (await sessionWorkers(fixture.runtime.storage).getStats()).flatMap(
         (worker) => worker.openSessionIds,
       ),
     ).not.toContain(sessionId);
     await expect(fixture.runtime.storage.catalog.getSession(sessionId)).resolves.toMatchObject({
       status: "unavailable",
     });
-    await expect(fixture.runtime.storage.sessions.getHeadSequence(sessionId)).resolves.toBe(
+    await expect(sessionWorkers(fixture.runtime.storage).getHeadSequence(sessionId)).resolves.toBe(
       headBefore,
     );
     const identityAfter = await stat(databasePath);
@@ -2783,7 +2788,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     if (created.sessionId === undefined) throw new Error("Session creation failed");
 
     await expect(
-      fixture.runtime.storage.sessions.malformedResponseForTest(created.sessionId),
+      sessionWorkers(fixture.runtime.storage).malformedResponseForTest(created.sessionId),
     ).rejects.toBeDefined();
     await eventually(() => {
       expect(fixture.records).toContainEqual(
@@ -4048,7 +4053,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       gateway: {
         replayHooks: {
           afterHeadCaptured: async (sessionId) => {
-            await fixture.runtime.storage.sessions.corruptManifestForTest(sessionId);
+            await sessionWorkers(fixture.runtime.storage).corruptManifestForTest(sessionId);
           },
         },
       },
@@ -4369,7 +4374,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         replayHooks: {
           afterHeadCaptured: async (sessionId) => {
             barrier.current =
-              await fixture.runtime.storage.sessions.blockWorkerForTest(sessionId);
+              await sessionWorkers(fixture.runtime.storage).blockWorkerForTest(sessionId);
             blocked();
           },
         },
@@ -4424,15 +4429,15 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       const candidate = await createSession(client, `busyWorkerOther${attempt}`);
       if (
         candidate.sessionId !== undefined &&
-        fixture.runtime.storage.sessions.workerIndexFor(candidate.sessionId) !==
-          fixture.runtime.storage.sessions.workerIndexFor(first.sessionId)
+        sessionWorkers(fixture.runtime.storage).workerIndexFor(candidate.sessionId) !==
+          sessionWorkers(fixture.runtime.storage).workerIndexFor(first.sessionId)
       ) {
         secondSessionId = candidate.sessionId;
       }
     }
     if (secondSessionId === null) throw new Error("Could not create sessions on distinct workers");
 
-    const barrier = await fixture.runtime.storage.sessions.blockWorkerForTest(first.sessionId);
+    const barrier = await sessionWorkers(fixture.runtime.storage).blockWorkerForTest(first.sessionId);
     try {
       const accepted = await submitMessage(client, secondSessionId, "busyWorkerResponsive");
       const runId = accepted.runId;

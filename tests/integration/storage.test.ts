@@ -30,6 +30,11 @@ import {
   type ProjectionMutation,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
+
+type StorageTestManager = SessionStoreManager & {
+  readonly sessions: ReturnType<typeof sessionWorkerPoolForTest>;
+};
 
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
@@ -63,10 +68,10 @@ function sequenceGenerator(values: readonly string[]): () => string {
 async function manager(
   options: Partial<SessionStoreManagerOptions> = {},
   sessionIds: readonly string[] = ["ses_storageA"],
-): Promise<SessionStoreManager> {
+): Promise<StorageTestManager> {
   const homeDirectory = options.homeDirectory ?? (await temporaryHome());
   let eventNumber = 1;
-  const storage = new SessionStoreManager({
+  const core = new SessionStoreManager({
     homeDirectory,
     now: options.now ?? (() => 1_000),
     ids: options.ids ?? {
@@ -97,6 +102,13 @@ async function manager(
     ...(options.catalogRepair === undefined ? {} : { catalogRepair: options.catalogRepair }),
     ...(options.testFailpoints === undefined ? {} : { testFailpoints: options.testFailpoints }),
   });
+  const storage = new Proxy(core, {
+    get(target, property) {
+      if (property === "sessions") return sessionWorkerPoolForTest(target);
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as StorageTestManager;
   managers.push(storage);
   return storage;
 }
@@ -404,6 +416,30 @@ describe("catalog and per-session storage workers", () => {
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "unavailable",
     });
+  });
+
+  it("does not expose hookless session-worker access through the normal package API", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const client = await storage.openSession(created.session.sessionId);
+    const storagePackage = await import("@wi/storage");
+
+    expect(Object.hasOwn(storage, "sessions")).toBe(false);
+    expect(Object.hasOwn(storage.reconciler, "sessions")).toBe(false);
+    expect(Object.hasOwn(client, "pool")).toBe(false);
+    expect(storagePackage).not.toHaveProperty("SessionWorkerPool");
+    expect(storagePackage).not.toHaveProperty("SessionClient");
+  });
+
+  it("does not expose validated repair or its worker RPC through catalog reflection", async () => {
+    const storage = await manager();
+    const prototype = Object.getPrototypeOf(storage.catalog) as object;
+    const symbolDescriptions = Object.getOwnPropertySymbols(prototype).map(
+      (symbol) => symbol.description,
+    );
+
+    expect(symbolDescriptions).not.toContain("validatedRepairReconciliation");
+    expect(Object.hasOwn(storage.catalog, "rpc")).toBe(false);
   });
 
   it("rejects changed immutable session-creation identity", async () => {
@@ -1347,7 +1383,7 @@ describe("catalog and per-session storage workers", () => {
       sessionWorkers: { size: 1, allowTestOperations: true },
     });
     managers.push(restarted);
-    vi.spyOn(restarted.sessions, "initialize").mockRejectedValue(
+    vi.spyOn(sessionWorkerPoolForTest(restarted), "initialize").mockRejectedValue(
       new StorageError("storage.disk_full", "injected session storage failure"),
     );
 
@@ -2754,10 +2790,10 @@ describe("catalog and per-session storage workers", () => {
       process.env.NODE_ENV = originalNodeEnv;
     }
     if (storage === null) throw new Error("Storage manager did not initialize");
-    const created = await storage.createSession(createCommand());
-    await expect(
-      storage.sessions.crashWorkerForTest(created.session.sessionId),
-    ).rejects.toThrow("Test operations are disabled");
+    await storage.createSession(createCommand());
+    expect(() => sessionWorkerPoolForTest(storage)).toThrow(
+      "Session worker test access was not enabled",
+    );
   });
 
   it("keeps a replacement worker healthy when its monitoring callback throws", async () => {

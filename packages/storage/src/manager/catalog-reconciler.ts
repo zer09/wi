@@ -5,14 +5,22 @@ import type { SessionSummary } from "../types.js";
 import { resolveStoragePath, sessionDatabaseRelativePath } from "./paths.js";
 
 export class CatalogReconciler {
+  readonly #homeDirectory: string;
+  readonly #catalog: CatalogClient;
+  readonly #sessions: SessionWorkerPool;
+
   constructor(
-    private readonly homeDirectory: string,
-    private readonly catalog: CatalogClient,
-    private readonly sessions: SessionWorkerPool,
-  ) {}
+    homeDirectory: string,
+    catalog: CatalogClient,
+    sessions: SessionWorkerPool,
+  ) {
+    this.#homeDirectory = homeDirectory;
+    this.#catalog = catalog;
+    this.#sessions = sessions;
+  }
 
   async inspectSession(sessionId: string): Promise<ReconcileSessionInput> {
-    const expectedCatalog = await this.catalog.getSession(sessionId);
+    const expectedCatalog = await this.#catalog.getSession(sessionId);
     if (expectedCatalog?.status === "missing") {
       throw new StorageError("storage.session_missing", "Session database is missing");
     }
@@ -20,9 +28,9 @@ export class CatalogReconciler {
       throw new StorageError("storage.corrupt", "Session is unavailable");
     }
     const relativePath = sessionDatabaseRelativePath(sessionId);
-    const session = this.sessions.registerSession(
+    const session = this.#sessions.registerSession(
       sessionId,
-      resolveStoragePath(this.homeDirectory, relativePath),
+      resolveStoragePath(this.#homeDirectory, relativePath),
     );
     const [manifest, projection, pendingApprovals, pendingInputCount, nonterminalRuns] =
       await Promise.all([
@@ -32,7 +40,7 @@ export class CatalogReconciler {
         session.getPendingInputCount(),
         session.getNonterminalRuns(),
       ]);
-    const currentCatalog = await this.catalog.getSession(sessionId);
+    const currentCatalog = await this.#catalog.getSession(sessionId);
     if (currentCatalog?.status === "missing") {
       await session.close().catch(() => undefined);
       throw new StorageError("storage.session_missing", "Session database is missing");
@@ -66,9 +74,9 @@ export class CatalogReconciler {
   async reconcileInspection(initialInspection: ReconcileSessionInput): Promise<SessionSummary> {
     let inspection = initialInspection;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const summary = await this.catalog.reconcileSession(inspection);
+      const summary = await this.#catalog.reconcileSession(inspection);
       if (summary.status !== "ready") {
-        await this.sessions.closeSession(inspection.manifest.sessionId).catch(() => undefined);
+        await this.#sessions.closeSession(inspection.manifest.sessionId).catch(() => undefined);
         if (summary.status === "missing") {
           throw new StorageError("storage.session_missing", "Session database is missing");
         }

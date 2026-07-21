@@ -41,6 +41,7 @@ import {
 } from "../types.js";
 import { CatalogReconciler } from "./catalog-reconciler.js";
 import { resolveStoragePath, sessionDatabaseRelativePath } from "./paths.js";
+import { registerSessionWorkerPoolForTest } from "./testing-access.js";
 
 export interface StorageIdGenerators {
   readonly sessionId: () => string;
@@ -266,7 +267,7 @@ interface CatalogObservationState {
 
 export class SessionStoreManager {
   readonly catalog: CatalogClient;
-  readonly sessions: SessionWorkerPool;
+  readonly #sessions: SessionWorkerPool;
   readonly reconciler: CatalogReconciler;
   private readonly homeDirectory: string;
   private readonly ids: StorageIdGenerators;
@@ -315,7 +316,7 @@ export class SessionStoreManager {
     });
     const configuredSessionError = options.sessionWorkers?.onSessionError;
     try {
-      this.sessions = new SessionWorkerPool({
+      this.#sessions = new SessionWorkerPool({
         ...options.sessionWorkers,
         onSessionError: async (sessionId, error) => {
           this.invalidateSessionAfterUncertainWorkerFailure(sessionId, error);
@@ -331,6 +332,7 @@ export class SessionStoreManager {
       void this.catalog.close().catch(() => undefined);
       throw error;
     }
+    registerSessionWorkerPoolForTest(this, this.#sessions);
     this.catalogProjectionWriter =
       options.catalogProjectionWriter ??
       (async (catalog, update) => {
@@ -350,7 +352,7 @@ export class SessionStoreManager {
     this.reconciler = new CatalogReconciler(
       this.homeDirectory,
       this.catalog,
-      this.sessions,
+      this.#sessions,
     );
     this.startupRecovery = this.runStartupRecovery(catalogRepair);
   }
@@ -397,7 +399,7 @@ export class SessionStoreManager {
       failedAtMs,
     });
 
-    await this.sessions.closeSession(command.reservedSessionId).catch(() => undefined);
+    await this.#sessions.closeSession(command.reservedSessionId).catch(() => undefined);
     // Node has no cross-platform handle-relative directory rename. Preserve the
     // partial database in place rather than risk following a swapped ancestor.
     this.sessionFaultStatuses.set(command.reservedSessionId, "unavailable");
@@ -411,7 +413,7 @@ export class SessionStoreManager {
   ): Promise<void> {
     let startIndex = 0;
     while (startIndex < sessionIds.length) {
-      const page = await this.sessions.discoverSessionPage(
+      const page = await this.#sessions.discoverSessionPage(
         this.homeDirectory,
         sessionIds,
         startIndex,
@@ -427,7 +429,7 @@ export class SessionStoreManager {
   private async discoverAndRepairCatalog(
     reason: Exclude<CatalogRepairReport["reason"], "none">,
   ): Promise<void> {
-    const discovery = await this.sessions.discoverSessionInventory(
+    const discovery = await this.#sessions.discoverSessionInventory(
       this.homeDirectory,
       this.sessionDiscoveryLimit,
     );
@@ -739,7 +741,7 @@ export class SessionStoreManager {
       try {
         const relativePath = sessionDatabaseRelativePath(command.reservedSessionId);
         const databasePath = resolveStoragePath(this.homeDirectory, relativePath);
-        await this.sessions.initialize(
+        await this.#sessions.initialize(
           {
             sessionId: command.reservedSessionId,
             projectId: command.request.projectId,
@@ -839,7 +841,7 @@ export class SessionStoreManager {
 
     // A retained database may already have a lazy worker handle. Close it before
     // returning the catalog's authoritative non-ready classification.
-    await this.sessions.closeSession(sessionId).catch(() => undefined);
+    await this.#sessions.closeSession(sessionId).catch(() => undefined);
     if (summary === null) {
       throw new StorageError("session.not_found", "Session was not found");
     }
@@ -996,7 +998,7 @@ export class SessionStoreManager {
     const createdAtMs = reservation.command.updatedAtMs;
     let initialized: Awaited<ReturnType<SessionWorkerPool["initialize"]>>;
     try {
-      initialized = await this.sessions.initialize(
+      initialized = await this.#sessions.initialize(
         {
           sessionId,
           projectId,
@@ -1088,7 +1090,7 @@ export class SessionStoreManager {
     if (summary.dbRelativePath !== expectedRelativePath) {
       throw new StorageError("storage.corrupt", "Catalog session path is not the generated path");
     }
-    return this.sessions.registerSession(
+    return this.#sessions.registerSession(
       sessionId,
       resolveStoragePath(this.homeDirectory, expectedRelativePath),
       async () => {
@@ -1261,7 +1263,7 @@ export class SessionStoreManager {
         );
       }
 
-      const observation = await this.sessions.getCatalogObservation(sessionId);
+      const observation = await this.#sessions.getCatalogObservation(sessionId);
       if (observation.headSequence < headSequence) {
         throw new StorageError(
           "storage.corrupt",
@@ -1385,7 +1387,7 @@ export class SessionStoreManager {
     }
     this.catalogObservationAbort.abort();
     this.catalogObservations.clear();
-    const [sessionsResult] = await Promise.allSettled([this.sessions.close(deadlineAtMs)]);
+    const [sessionsResult] = await Promise.allSettled([this.#sessions.close(deadlineAtMs)]);
     const [catalogResult] = await Promise.allSettled([this.catalog.close(deadlineAtMs)]);
     if (sessionsResult?.status === "rejected") errors.push(sessionsResult.reason);
     if (catalogResult?.status === "rejected") errors.push(catalogResult.reason);
@@ -1395,7 +1397,7 @@ export class SessionStoreManager {
   close(deadlineAtMs?: number): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
     this.acceptingOperations = false;
-    this.sessions.stopAcceptingCommits();
+    this.#sessions.stopAcceptingCommits();
     this.closePromise = this.finishClose(deadlineAtMs);
     return this.closePromise;
   }

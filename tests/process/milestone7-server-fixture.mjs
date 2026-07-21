@@ -6,6 +6,7 @@ import {
   WiRuntime,
   WiServer,
 } from "../../apps/server/dist/index.js";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 import { ToolExecutor } from "../../packages/tools/dist/index.js";
 
 const [homeDirectory, scenario = "plain-text", repairMode = "auto"] = process.argv.slice(2);
@@ -164,7 +165,7 @@ process.on("message", (message) => {
     typeof message.sessionId === "string"
   ) {
     void runtime.storage.openSession(message.sessionId).then((session) =>
-      runtime.storage.sessions.blockWorkerForTest(session.sessionId),
+      sessionWorkerPoolForTest(runtime.storage).blockWorkerForTest(session.sessionId),
     ).then(
       () => process.send?.({ type: "storage-request-blocked", sessionId: message.sessionId }),
       (error) => {

@@ -6,7 +6,10 @@ const root = resolve(import.meta.dirname, "..");
 const expectedExports = {
   "@wi/client-state": ["createBrowserSessionState", "reduceSessionEvent", "replaySessionEvents"],
   "@wi/protocol": ["ClientMessageSchema", "SessionEventSchema", "canonicalJson"],
-  "@wi/storage": ["CatalogClient", "SessionStoreManager", "SessionWorkerPool"],
+  "@wi/storage": ["CatalogClient", "SessionStoreManager"],
+};
+const forbiddenExports = {
+  "@wi/storage": ["SessionClient", "SessionWorkerPool"],
 };
 
 const workspaceDirectories = readdirSync(resolve(root, "packages"), { withFileTypes: true })
@@ -29,6 +32,11 @@ for (const directory of workspaceDirectories) {
   for (const exportName of expectedExports[manifest.name] ?? []) {
     if (!(exportName in publicModule)) {
       throw new Error(`${manifest.name} is missing public export ${exportName}`);
+    }
+  }
+  for (const exportName of forbiddenExports[manifest.name] ?? []) {
+    if (exportName in publicModule) {
+      throw new Error(`${manifest.name} exposes forbidden internal export ${exportName}`);
     }
   }
 }

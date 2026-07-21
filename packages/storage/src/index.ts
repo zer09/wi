@@ -47,8 +47,7 @@ export type {
   StorageIdGenerators,
   StorageTestFailpoints,
 } from "./manager/session-store-manager.js";
-export { SessionClient } from "./session/client.js";
-export { SessionWorkerPool } from "./session/worker-pool.js";
+export type { SessionClient } from "./session/client.js";
 export type {
   DiscoveredSession,
   InitializeSessionInput,

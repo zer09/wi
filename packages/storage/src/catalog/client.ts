@@ -98,13 +98,17 @@ export interface ReconcileSessionInput {
   readonly recoveryNeeded: boolean;
 }
 
-const validatedRepairReconciliation = Symbol("validatedRepairReconciliation");
+const catalogClients = new WeakMap<CatalogClient, WorkerRpcClient>();
+
+function catalogRpc(client: CatalogClient): WorkerRpcClient {
+  const rpc = catalogClients.get(client);
+  if (rpc === undefined) throw new Error("Catalog client is not initialized");
+  return rpc;
+}
 
 export class CatalogClient {
-  private readonly rpc: WorkerRpcClient;
-
   constructor(options: CatalogClientOptions) {
-    this.rpc = new WorkerRpcClient({
+    catalogClients.set(this, new WorkerRpcClient({
       workerId: "catalog",
       entryUrl: new URL("./worker-entry.js", import.meta.url),
       workerData: {
@@ -119,19 +123,19 @@ export class CatalogClient {
       ...(options.onWorkerReplacement === undefined
         ? {}
         : { onReplacement: options.onWorkerReplacement }),
-    });
+    }));
   }
 
   async prepareOpen(): Promise<void> {
-    await this.rpc.request("catalog.prepareOpen", {}, z.null());
+    await catalogRpc(this).request("catalog.prepareOpen", {}, z.null());
   }
 
   async openPrepared(): Promise<void> {
-    await this.rpc.request("catalog.openPrepared", {}, z.null());
+    await catalogRpc(this).request("catalog.openPrepared", {}, z.null());
   }
 
   async getStartupState(): Promise<CatalogStartupState> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.getStartupState",
       {},
       z.strictObject({
@@ -143,21 +147,21 @@ export class CatalogClient {
   }
 
   async beginRepair(reason: CatalogRepairReason): Promise<CatalogRepairReason> {
-    return this.rpc.request("catalog.beginRepair", { reason }, CatalogRepairReasonSchema, {
+    return catalogRpc(this).request("catalog.beginRepair", { reason }, CatalogRepairReasonSchema, {
       outcome: "write",
     });
   }
 
   async completeRepair(): Promise<void> {
-    await this.rpc.request("catalog.completeRepair", {}, z.null(), { outcome: "write" });
+    await catalogRpc(this).request("catalog.completeRepair", {}, z.null(), { outcome: "write" });
   }
 
   async repair(): Promise<never> {
-    return this.rpc.request("catalog.repair", {}, z.never(), { outcome: "write" });
+    return catalogRpc(this).request("catalog.repair", {}, z.never(), { outcome: "write" });
   }
 
   async createProject(input: ProjectRecord): Promise<ProjectRecord> {
-    return this.rpc.request("catalog.createProject", input, ProjectRecordSchema, {
+    return catalogRpc(this).request("catalog.createProject", input, ProjectRecordSchema, {
       outcome: "write",
     });
   }
@@ -165,7 +169,7 @@ export class CatalogClient {
   async reserveGlobalCommand(
     input: ReserveGlobalCommandInput,
   ): Promise<GlobalCommandReservation> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.reserveGlobalCommand",
       input,
       GlobalCommandReservationSchema,
@@ -174,7 +178,7 @@ export class CatalogClient {
   }
 
   async completeGlobalCommand(input: CompleteGlobalCommandInput): Promise<GlobalCommandRecord> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.completeGlobalCommand",
       input,
       GlobalCommandRecordSchema,
@@ -183,7 +187,7 @@ export class CatalogClient {
   }
 
   async failGlobalCommand(input: FailGlobalCommandInput): Promise<GlobalCommandRecord> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.failGlobalCommand",
       input,
       GlobalCommandRecordSchema,
@@ -194,7 +198,7 @@ export class CatalogClient {
   async setGlobalCommandQuarantine(
     input: SetGlobalCommandQuarantineInput,
   ): Promise<GlobalCommandRecord> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.setGlobalCommandQuarantine",
       input,
       GlobalCommandRecordSchema,
@@ -203,7 +207,7 @@ export class CatalogClient {
   }
 
   async getGlobalCommand(commandId: string): Promise<GlobalCommandRecord | null> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.getGlobalCommand",
       { commandId },
       z.union([GlobalCommandRecordSchema, z.null()]),
@@ -211,7 +215,7 @@ export class CatalogClient {
   }
 
   async listCreatingGlobalCommands(): Promise<readonly GlobalCommandRecord[]> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.listCreatingGlobalCommands",
       {},
       z.array(GlobalCommandRecordSchema),
@@ -219,13 +223,13 @@ export class CatalogClient {
   }
 
   async createSessionIndex(input: CreateSessionIndexInput): Promise<SessionSummary> {
-    return this.rpc.request("catalog.createSessionIndex", input, SessionSummarySchema, {
+    return catalogRpc(this).request("catalog.createSessionIndex", input, SessionSummarySchema, {
       outcome: "write",
     });
   }
 
   async countSessions(): Promise<number> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.countSessions",
       {},
       z.number().int().nonnegative().safe(),
@@ -233,7 +237,7 @@ export class CatalogClient {
   }
 
   async listSessions(): Promise<readonly SessionSummary[]> {
-    return this.rpc.request("catalog.listSessions", {}, z.array(SessionSummarySchema));
+    return catalogRpc(this).request("catalog.listSessions", {}, z.array(SessionSummarySchema));
   }
 
   async listCatalogRepairPage(afterSessionId: string | null): Promise<CatalogRepairPage> {
@@ -241,7 +245,7 @@ export class CatalogClient {
       afterSessionId,
       limit: MAXIMUM_CATALOG_REPAIR_PAGE_SIZE,
     });
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.listCatalogRepairPage",
       input,
       CatalogRepairPageSchema,
@@ -252,7 +256,7 @@ export class CatalogClient {
     sessions: readonly { readonly sessionId: string; readonly dbRelativePath: string }[],
   ): Promise<readonly string[]> {
     const input = MarkSessionsMissingInputSchema.parse({ sessions });
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.markSessionsMissing",
       input,
       z.array(SessionIdSchema).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
@@ -264,7 +268,7 @@ export class CatalogClient {
     limit: number,
   ): Promise<readonly BrowserSessionSummary[]> {
     const input = BoundedSessionListInputSchema.parse({ limit });
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.listBrowserSessionsBounded",
       input,
       z.array(BrowserSessionSummarySchema).max(MAXIMUM_BOUNDED_SESSION_LIST_LIMIT),
@@ -272,7 +276,7 @@ export class CatalogClient {
   }
 
   async getSession(sessionId: string): Promise<SessionSummary | null> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.getSession",
       { sessionId },
       z.union([SessionSummarySchema, z.null()]),
@@ -282,7 +286,7 @@ export class CatalogClient {
   async updateSessionProjection(
     input: UpdateSessionProjectionInput,
   ): Promise<CatalogProjectionUpdateResult> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.updateSessionProjection",
       input,
       CatalogProjectionUpdateResultSchema,
@@ -293,7 +297,7 @@ export class CatalogClient {
   async listRecoveryCandidatePage(
     cursor: RecoveryCandidateCursor | null = null,
   ): Promise<RecoveryCandidatePage> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.listRecoveryCandidates",
       {
         afterUpdatedAtMs: cursor?.updatedAtMs ?? null,
@@ -313,13 +317,13 @@ export class CatalogClient {
   }
 
   async markRecoveryCandidate(sessionId: string): Promise<void> {
-    await this.rpc.request("catalog.markRecoveryCandidate", { sessionId }, z.null(), {
+    await catalogRpc(this).request("catalog.markRecoveryCandidate", { sessionId }, z.null(), {
       outcome: "write",
     });
   }
 
   async markSessionStatus(input: MarkSessionStatusInput): Promise<SessionSummary> {
-    return this.rpc.request("catalog.markSessionStatus", input, SessionSummarySchema, {
+    return catalogRpc(this).request("catalog.markSessionStatus", input, SessionSummarySchema, {
       outcome: "write",
     });
   }
@@ -328,7 +332,7 @@ export class CatalogClient {
     inputValue: RepairSessionClassificationInput,
   ): Promise<SessionSummary> {
     const input = RepairSessionClassificationInputSchema.parse(inputValue);
-    return this.rpc.request("catalog.repairSessionClassification", input, SessionSummarySchema, {
+    return catalogRpc(this).request("catalog.repairSessionClassification", input, SessionSummarySchema, {
       outcome: "write",
     });
   }
@@ -336,7 +340,7 @@ export class CatalogClient {
   async reconcileSessionWithStatus(
     input: ReconcileSessionInput,
   ): Promise<ReconcileSessionResult> {
-    return this.rpc.request(
+    return catalogRpc(this).request(
       "catalog.reconcileSession",
       input,
       ReconcileSessionResultSchema,
@@ -348,19 +352,8 @@ export class CatalogClient {
     return (await this.reconcileSessionWithStatus(input)).summary;
   }
 
-  async [validatedRepairReconciliation](
-    input: ReconcileSessionInput,
-  ): Promise<ReconcileSessionResult> {
-    return this.rpc.request(
-      "catalog.reconcileValidatedRepairSession",
-      input,
-      ReconcileSessionResultSchema,
-      { outcome: "write" },
-    );
-  }
-
   async close(deadlineAtMs?: number): Promise<void> {
-    await this.rpc.close(deadlineAtMs);
+    await catalogRpc(this).close(deadlineAtMs);
   }
 }
 
@@ -368,5 +361,10 @@ export function reconcileValidatedRepairSession(
   catalog: CatalogClient,
   input: ReconcileSessionInput,
 ): Promise<ReconcileSessionResult> {
-  return catalog[validatedRepairReconciliation](input);
+  return catalogRpc(catalog).request(
+    "catalog.reconcileValidatedRepairSession",
+    input,
+    ReconcileSessionResultSchema,
+    { outcome: "write" },
+  );
 }

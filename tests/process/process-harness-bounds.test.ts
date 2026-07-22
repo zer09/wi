@@ -120,19 +120,20 @@ describe("bounded process-harness diagnostics", () => {
 
       const diagnostics = processHandle.diagnostics;
       const ipc = diagnostics.ipc;
-      expect(ipc.totalMessages).toBe(68);
+      expect(ipc.totalMessages).toBe(104);
       expect(ipc.pendingRetainedEstimatedBytes).toBeLessThanOrEqual(
         PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
       );
       expect(ipc.historyRetainedEstimatedBytes).toBeLessThanOrEqual(
         PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
       );
-      expect(ipc.oversizedMessages).toBe(3);
+      expect(ipc.rejectedMessages).toBe(8);
+      expect(ipc.oversizedMessages).toBe(6);
       expect(ipc.pendingTruncated).toBe(true);
       expect(ipc.historyTruncated).toBe(true);
       expect(ipc.latestTruncation).toMatchObject({
-        originalType: "oversized-noise",
-        reason: "string",
+        originalType: null,
+        reason: "protocol",
         hashComplete: true,
       });
       expect(ipc.latestTruncation?.preview.length).toBeLessThanOrEqual(
@@ -143,15 +144,36 @@ describe("bounded process-harness diagnostics", () => {
       const retainedMessages = processHandle.receivedMessages;
       const retainedHistory = JSON.stringify(retainedMessages);
       expect(Buffer.byteLength(retainedHistory)).toBeLessThanOrEqual(
-        PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
+        ipc.historyRetainedEstimatedBytes,
       );
       expect(retainedHistory).not.toContain("OVERSIZED-TERMINAL-MARKER");
-      const truncationReasons = retainedMessages.flatMap((message) =>
-        message.type === "wi.test-support.ipc-truncated" && typeof message.reason === "string"
-          ? [message.reason]
-          : [],
+      const truncationMessages = retainedMessages.filter(
+        (message) => message.type === "wi.test-support.ipc-truncated",
       );
-      expect(truncationReasons).toEqual(expect.arrayContaining(["depth", "nodes", "string"]));
+      const truncationReasons = truncationMessages.flatMap((message) =>
+        typeof message.reason === "string" ? [message.reason] : [],
+      );
+      expect(truncationReasons).toEqual(
+        expect.arrayContaining(["depth", "nodes", "string", "protocol"]),
+      );
+      expect(truncationMessages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ originalType: "deep-noise", reason: "depth" }),
+          expect.objectContaining({ originalType: "node-heavy-noise", reason: "nodes" }),
+          expect.objectContaining({ originalType: "key-heavy-noise", reason: "nodes" }),
+          expect.objectContaining({ originalType: "nested-string-noise", reason: "string" }),
+          expect.objectContaining({
+            originalType: "oversized-noise",
+            reason: "string",
+            hashComplete: true,
+          }),
+          expect.objectContaining({
+            originalType: "encoded-byte-noise",
+            reason: "estimated_bytes",
+            hashComplete: true,
+          }),
+        ]),
+      );
 
       let timeoutError: unknown;
       try {
@@ -165,6 +187,55 @@ describe("bounded process-harness diagnostics", () => {
       expect(Buffer.byteLength(timeoutMessage)).toBeLessThanOrEqual(
         PROCESS_OUTPUT_TAIL_MAX_BYTES + 4 * 1024,
       );
+    } finally {
+      await processHandle.terminate();
+    }
+    if (descendantPid === null) throw new Error("Missing descendant PID");
+    await expectProcessGone(descendantPid);
+  });
+
+  it("rejects oversized outbound controls before sending them to the child", async () => {
+    const processHandle = await RealServerProcess.start({
+      fixturePath,
+      arguments: ["ipc-controls", "0", "0"],
+      waitForReady: false,
+    });
+    let descendantPid: number | null = null;
+    try {
+      const ready = await processHandle.waitForMessage("control-fixture-ready", 10_000);
+      if (typeof ready.descendantPid !== "number") {
+        throw new Error("IPC control fixture omitted its descendant PID");
+      }
+      descendantPid = ready.descendantPid;
+
+      processHandle.send("shutdown");
+      await processHandle.waitForMessage("string-control-received");
+      processHandle.send({ type: "small-control", value: "small" });
+      await processHandle.waitForMessage("object-control-received");
+
+      expect(() =>
+        processHandle.send({ type: "oversized-control", value: "x".repeat(outputBytes) }),
+      ).toThrow(/string limit/u);
+      let deep: Record<string, unknown> = { value: "leaf" };
+      for (let depth = 0; depth < 80; depth += 1) deep = { child: deep };
+      expect(() => processHandle.send({ type: "deep-control", deep })).toThrow(/depth limit/u);
+      expect(() =>
+        processHandle.send({
+          type: "node-heavy-control",
+          values: Array.from({ length: 5_000 }, (_, index) => index),
+        }),
+      ).toThrow(/nodes limit/u);
+      const cyclic: Record<string, unknown> = { type: "cyclic-control" };
+      cyclic.self = cyclic;
+      expect(() => processHandle.send(cyclic as never)).toThrow(/depth limit/u);
+      expect(() =>
+        processHandle.send({ type: "non-json-control", value: new Date(0) } as never),
+      ).toThrow(/protocol limit/u);
+
+      processHandle.send({ type: "report-control-count" });
+      await expect(processHandle.waitForMessage("control-count")).resolves.toMatchObject({
+        receivedControls: 2,
+      });
     } finally {
       await processHandle.terminate();
     }

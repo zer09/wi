@@ -57,7 +57,7 @@ interface Analysis {
   readonly preview: string;
   readonly sha256: string;
   readonly hashComplete: boolean;
-  readonly reason: Exclude<ProcessIpcTruncationReason, "protocol"> | null;
+  readonly reason: ProcessIpcTruncationReason | null;
 }
 
 interface AnalysisFrame {
@@ -75,6 +75,39 @@ function updateHashString(hash: Hash, value: string): void {
   for (let offset = 0; offset < value.length; offset += 1_024) {
     hash.update(value.slice(offset, offset + 1_024), "utf8");
   }
+}
+
+function jsonEncodedStringByteLength(value: string): number {
+  let bytes = 2;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (
+      code === 0x22 ||
+      code === 0x5c ||
+      code === 0x08 ||
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0c ||
+      code === 0x0d
+    ) {
+      bytes += 2;
+    } else if (code <= 0x1f || (code >= 0xd800 && code <= 0xdfff)) {
+      const next = value.charCodeAt(index + 1);
+      if (code >= 0xd800 && code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 6;
+      }
+    } else if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function analyzeIpcValue(value: unknown): Analysis {
@@ -130,8 +163,7 @@ function analyzeIpcValue(value: unknown): Analysis {
       hash.update("string:");
       updateHashString(hash, current);
       hash.update(";");
-      const bytes = Buffer.byteLength(current);
-      estimatedBytes += bytes;
+      estimatedBytes += jsonEncodedStringByteLength(current);
       appendPreview(
         `${frame.label}=${JSON.stringify(current.slice(0, 96))}${current.length > 96 ? "…" : ""}`,
       );
@@ -148,11 +180,13 @@ function analyzeIpcValue(value: unknown): Analysis {
       const encoded = String(current);
       hash.update(`${typeof current}:${encoded};`);
       appendPreview(`${frame.label}=${encoded}`);
+      const jsonEncoded = JSON.stringify(current) ?? "null";
+      if (!addEstimatedBytes(Buffer.byteLength(jsonEncoded))) break;
       continue;
     }
     if (typeof current !== "object") {
       hash.update(`unsupported:${typeof current};`);
-      reason = "estimated_bytes";
+      reason = "protocol";
       hashComplete = false;
       continue;
     }
@@ -168,6 +202,14 @@ function analyzeIpcValue(value: unknown): Analysis {
       for (let index = current.length - 1; index >= 0; index -= 1) {
         stack.push({ value: current[index], depth: frame.depth + 1, label: `${frame.label}[${String(index)}]` });
       }
+      continue;
+    }
+
+    const prototype = Object.getPrototypeOf(current);
+    if (prototype !== Object.prototype && prototype !== null) {
+      hash.update("unsupported:prototype;");
+      reason = "protocol";
+      hashComplete = false;
       continue;
     }
 
@@ -191,12 +233,12 @@ function analyzeIpcValue(value: unknown): Analysis {
       hash.update("key:");
       updateHashString(hash, key);
       hash.update(";");
-      estimatedBytes += Buffer.byteLength(key) + 8;
       if (key.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) {
         reason = "string";
         hashComplete = false;
         break;
       }
+      estimatedBytes += jsonEncodedStringByteLength(key) + 8;
       if (estimatedBytes > PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES) {
         reason = "estimated_bytes";
         hashComplete = false;

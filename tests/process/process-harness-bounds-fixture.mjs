@@ -52,6 +52,9 @@ if (mode === "fixture-runner") {
   for (let index = 0; index < messageCount; index += 1) {
     await send({ type: "aggregate-noise", index, payload: "a".repeat(12 * 1024) });
   }
+  for (let index = 0; index < 31; index += 1) {
+    await send({ type: "escaped-noise", index, payload: "\0".repeat(8 * 1024) });
+  }
   let deep = { value: "leaf" };
   for (let depth = 0; depth < 80; depth += 1) deep = { child: deep };
   await send({ type: "deep-noise", deep });
@@ -60,10 +63,32 @@ if (mode === "fixture-runner") {
     values: Array.from({ length: 5_000 }, (_, index) => index),
   });
   await send({
+    type: "key-heavy-noise",
+    ...Object.fromEntries(Array.from({ length: 5_000 }, (_, index) => [`key-${String(index)}`, index])),
+  });
+  await send({ type: "nested-string-noise", nested: { value: "n".repeat(16 * 1024 + 1) } });
+  await send({
     type: "oversized-noise",
     payload: `${"x".repeat(outputBytes)}OVERSIZED-TERMINAL-MARKER`,
   });
+  await send({ type: "encoded-byte-noise", payload: "\0".repeat(16 * 1024) });
+  await send({ type: 42, payload: "invalid type" });
+  await send({ type: "t".repeat(129), payload: "overlong type" });
   await send({ type: "control-ready", descendantPid: descendant.pid, value: "small" });
+} else if (mode === "ipc-controls") {
+  await send({ type: "control-fixture-ready", descendantPid: descendant.pid });
+  let receivedControls = 0;
+  process.on("message", (message) => {
+    if (message === "shutdown") {
+      receivedControls += 1;
+      void send({ type: "string-control-received" });
+    } else if (message?.type === "small-control") {
+      receivedControls += 1;
+      void send({ type: "object-control-received" });
+    } else if (message?.type === "report-control-count") {
+      void send({ type: "control-count", receivedControls });
+    }
+  });
 } else {
   throw new Error(`Unknown fixture mode: ${String(mode)}`);
 }

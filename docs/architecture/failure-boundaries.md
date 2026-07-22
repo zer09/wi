@@ -352,7 +352,7 @@ after_catalog_session_repair
 after_catalog_replacement_before_repair
 ```
 
-A process test starts Wi, arms the failpoint with a strict test-only session/command/run or catalog-global selector, triggers the boundary, restarts using the same `WI_HOME`, and verifies the exact durable outcome. Concurrent-session cases hold target A before the boundary, let unrelated B cross it without terminating Wi, then release A and require the documented exit.
+A process test starts Wi, arms the failpoint with a strict test-only session/command/run or catalog-global selector, triggers the boundary, restarts using the same `WI_HOME`, and verifies the exact durable outcome. Run-scoped selectors bind in two stages: `commandId` and `sessionId` identify the target command when its deterministic selected `runId` is assigned, then committed publication/provider/tool/run boundaries match `sessionId + runId` before consuming the crash one-shot; they do not recheck `commandId` at that later boundary. Concurrent-session cases hold target A before the boundary, let unrelated B cross it without terminating Wi, then release A and require the documented exit. Unrelated sessions or commands cannot acquire the selected run ID or consume the one-shot.
 
 ## 19. Recovery expectations
 

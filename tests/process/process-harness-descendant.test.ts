@@ -84,7 +84,12 @@ async function waitForReleaseTestEvent(
 }
 
 async function withPosixReleaseTest(
-  mode: "ignore-first" | "error-first" | "disconnect-first" | "delay-first",
+  mode:
+    | "ignore-first"
+    | "error-first"
+    | "disconnect-first"
+    | "delay-first"
+    | "accept-exit-first",
   run: (statePath: string) => Promise<void>,
 ): Promise<void> {
   const statePath = join(tmpdir(), `wi-posix-release-${randomUUID()}.json`);
@@ -389,6 +394,81 @@ describe("real process-tree cleanup", () => {
       } finally {
         await rm(sentinelPath, { force: true });
       }
+    },
+    10_000,
+  );
+
+  it(
+    "verifies anchored process disappearance after ownership setup fails",
+    async () => {
+      await withPosixReleaseTest("ignore-first", async (releaseStatePath) => {
+        const sentinelPath = join(tmpdir(), `wi-posix-owner-${randomUUID()}`);
+        const setupStatePath = join(tmpdir(), `wi-posix-setup-${randomUUID()}.json`);
+        try {
+          await expect(
+            RealServerProcess.start({
+              fixturePath: setupSentinelFixturePath,
+              arguments: [sentinelPath],
+              environment: {
+                WI_TEST_SUPPORT_POSIX_PRELOAD_TEST_MODE: "fail-after-anchor",
+                WI_TEST_SUPPORT_POSIX_PRELOAD_TEST_STATE_PATH: setupStatePath,
+              },
+              waitForReady: false,
+            }),
+          ).rejects.toThrow(/ownership|Fixture exited/);
+          const setup = JSON.parse(await readFile(setupStatePath, "utf8")) as {
+            readonly fixturePid: number;
+            readonly anchorPid: number;
+          };
+          const watchdog = await readReleaseTestState(releaseStatePath);
+          expect(watchdog.event).toBe("ready");
+          await expectProcessGone(setup.fixturePid);
+          await expectProcessGone(setup.anchorPid);
+          await expectProcessGone(watchdog.watchdogPid);
+          expect(processGroupExists(setup.fixturePid)).toBe(false);
+          await expect(stat(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
+        } finally {
+          await rm(setupStatePath, { force: true });
+          await rm(sentinelPath, { force: true });
+        }
+      });
+    },
+    10_000,
+  );
+
+  it(
+    "fails closed without numeric fallback after accepted watchdog death",
+    async () => {
+      await withPosixReleaseTest("accept-exit-first", async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-live"],
+          waitForReady: false,
+        });
+        const ready = await processHandle.waitForMessage("ready");
+        if (typeof ready.pid !== "number" || typeof ready.descendantPid !== "number") {
+          throw new Error("Missing accepted-release fixture process IDs");
+        }
+        try {
+          await expect(processHandle.terminate()).rejects.toThrow("Server process cleanup failed");
+          const accepted = await waitForReleaseTestEvent(statePath, "accepted-release");
+          await expectProcessGone(accepted.watchdogPid);
+          expect(processGroupExists(ready.pid)).toBe(true);
+          expect(processExists(ready.descendantPid)).toBe(true);
+
+          await expect(processHandle.terminate()).rejects.toThrow("Server process cleanup failed");
+          expect(processGroupExists(ready.pid)).toBe(true);
+          expect(processExists(ready.descendantPid)).toBe(true);
+        } finally {
+          try {
+            process.kill(-ready.pid, "SIGKILL");
+          } catch {
+            // The assertions and final ownership release report failed fallback cleanup.
+          }
+          await expectProcessGone(ready.descendantPid);
+          await processHandle.terminate();
+        }
+      });
     },
     10_000,
   );

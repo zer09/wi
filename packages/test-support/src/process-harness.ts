@@ -142,6 +142,7 @@ interface PosixSupervisorOwnership {
   releaseAttempt: Promise<void> | null;
   explicitCleanupStarted: boolean;
   reclamationAccepted: boolean;
+  anchorEstablished: boolean;
 }
 
 const posixSupervisors = new WeakMap<ChildProcess, PosixSupervisorOwnership>();
@@ -240,6 +241,7 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
       releaseAttempt: null,
       explicitCleanupStarted: false,
       reclamationAccepted: false,
+      anchorEstablished: false,
     };
   } catch (error) {
     ownerPipe.destroy();
@@ -248,7 +250,10 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
   }
 }
 
-async function waitForPosixFixtureGate(child: ChildProcess): Promise<void> {
+async function waitForPosixFixtureGate(
+  child: ChildProcess,
+  failAfterAnchorForTest: boolean,
+): Promise<void> {
   const readiness = child.stdio[3];
   const acknowledgement = child.stdio[4];
   if (
@@ -287,9 +292,15 @@ async function waitForPosixFixtureGate(child: ChildProcess): Promise<void> {
     child.off("exit", onExit);
     child.off("error", onError);
   }
-  if (child.pid === undefined) throw new Error("POSIX fixture has no process ID");
   const ownership = posixSupervisors.get(child);
-  if (ownership === undefined || !ownership.supervisor.connected) {
+  if (ownership === undefined) throw new Error("POSIX fixture has no owner watchdog");
+  // Readiness is emitted only after the preload-created anchor joins the group.
+  ownership.anchorEstablished = true;
+  if (failAfterAnchorForTest) {
+    throw new Error("Injected POSIX ownership setup failure after anchor creation");
+  }
+  if (child.pid === undefined) throw new Error("POSIX fixture has no process ID");
+  if (!ownership.supervisor.connected) {
     throw new Error("POSIX fixture has no live owner watchdog");
   }
   const registered = waitForPosixSupervisorMessage(
@@ -473,6 +484,41 @@ function releasePosixSupervisor(child: ChildProcess): Promise<void> {
   return attempt;
 }
 
+async function cleanupFailedPosixSetup(
+  child: ChildProcess | null,
+  ownership: PosixSupervisorOwnership,
+): Promise<void> {
+  ownership.explicitCleanupStarted = true;
+  if (child === null) {
+    ownership.supervisor.stdio[3]?.destroy();
+    ownership.supervisor.kill("SIGKILL");
+    if (!(await waitForDirectProcessGone(ownership.supervisor, 1_000))) {
+      throw new Error("POSIX owner watchdog survived failed fixture setup");
+    }
+    return;
+  }
+
+  if (ownership.anchorEstablished) {
+    // Once readiness proves the anchor exists, the exact group remains safe to reclaim.
+    await safelyEscalatePosixSupervisorRelease(child, ownership);
+  } else {
+    // Before anchor readiness there can be no application descendants. Close the
+    // preload gates and wait for the direct child; never signal an unanchored PGID.
+    child.stdio[3]?.destroy();
+    child.stdio[4]?.destroy();
+    ownership.supervisor.stdio[3]?.destroy();
+    ownership.supervisor.kill("SIGKILL");
+    if (!(await waitForDirectProcessGone(ownership.supervisor, 1_000))) {
+      throw new Error("POSIX owner watchdog survived failed fixture setup");
+    }
+  }
+  if (!(await waitForDirectProcessGone(child, 1_000))) {
+    throw new Error("Fixture leader survived failed ownership setup");
+  }
+  ownership.supervisor.stdio[3]?.destroy();
+  if (posixSupervisors.get(child) === ownership) posixSupervisors.delete(child);
+}
+
 export async function spawnNodeProcessTree(
   arguments_: readonly string[],
   options: {
@@ -510,7 +556,10 @@ export async function spawnNodeProcessTree(
       detached: true,
     });
     posixSupervisors.set(child, posixOwnership);
-    await waitForPosixFixtureGate(child);
+    await waitForPosixFixtureGate(
+      child,
+      environment.WI_TEST_SUPPORT_POSIX_PRELOAD_TEST_MODE === "fail-after-anchor",
+    );
     const managedChild = child;
     posixOwnership.supervisor.once("close", () => {
       if (posixOwnership.releaseAttempt !== null) return;
@@ -523,20 +572,13 @@ export async function spawnNodeProcessTree(
     });
     return child;
   } catch (error) {
-    if (child?.pid !== undefined) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        // The gated fixture may already be gone.
-      }
-    }
-    posixOwnership.supervisor.stdio[3]?.destroy();
-    posixOwnership.supervisor.kill("SIGKILL");
-    if (child !== null) posixSupervisors.delete(child);
     try {
-      child?.kill("SIGKILL");
-    } catch {
-      // The failed child may already be gone.
+      await cleanupFailedPosixSetup(child, posixOwnership);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "POSIX fixture ownership setup and cleanup failed",
+      );
     }
     throw error;
   }

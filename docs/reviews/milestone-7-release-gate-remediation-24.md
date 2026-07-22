@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 24
 
-Status: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+Status: **SETUP-CLEANUP FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
 
 Starting head: `2b6e50a537034686a16e9c2baef633482fffe5cd` on `milestone-7-crash-recovery`.
 
@@ -57,7 +57,7 @@ Both probes checked the sentinel before fallback probe cleanup. Explicit target 
 ## Retained regressions
 
 - A fixture mode with no application descendant exits its direct leader while `ignore-first` retains the watchdog. The direct PID is gone but `process.kill(-oldPid, 0)` still confirms the anchor-held group exists.
-- The first explicit cleanup removes the anchored group but preserves retryable watchdog ownership; the second release succeeds and removes the watchdog.
+- A rejected first explicit cleanup retains the anchored group and retryable watchdog ownership; the second release succeeds and removes both.
 - Existing leader-live, leader-exits-with-descendant, owner-death, setup-failure, release retry/error/disconnect/delay, concurrent cleanup, and `FixtureProcessRunner` tests remain required.
 - Full process, repository, browser, and static gates remain required before independent verification.
 
@@ -71,12 +71,13 @@ Both probes checked the sentinel before fallback probe cleanup. Explicit target 
 | Corrected isolated owner-death probe | Reuse prevented; sentinel alive; watchdog gone |
 | Corrected isolated failed-release retry probe | Old group retained after rejection; forced allocation skipped PID/PGID 20 for sentinel 21; sentinel survived retry |
 | Focused anchor/retry regressions | 6 passed |
-| Complete process-harness descendant suite | 13 passed |
+| Setup-failure and accepted-watchdog-death follow-up | 3 passed |
+| Complete process-harness descendant suite | 15 passed |
 | `pnpm test:unit` | 42 files; 461 passed |
 | `pnpm test:integration` | 6 files; 262 passed |
 | `pnpm test:property` | 10 files; 36 passed |
-| `pnpm test:process` | 9 files; 102 passed |
-| `pnpm check` | 69 files; 882 passed; no skips |
+| `pnpm test:process` | 9 files; 104 passed |
+| `pnpm check` | 69 files; 884 passed; no skips |
 | `pnpm test:e2e` | 33 passed |
 | Lint, typecheck, build, package exports, `git diff --check` | Passed |
 
@@ -97,3 +98,19 @@ The follow-up correction closes that interval:
 - retry regressions now require the group to remain present after ignore, error, and disconnect failures and to disappear only after successful retry.
 
 A fresh review-only verifier must independently repeat the failed-release exact-reuse probe against the pre-follow-up commit and current HEAD, then confirm no path retains numeric cleanup authority after losing the anchor. The verifier must also reconfirm initial explicit cleanup, owner death, direct SIGTERM/SIGKILL, disconnected escalation, ordinary descendants, retry bounds, and cleanup before classifying `WI-M7-M5` as `RESOLVED`, `PARTIALLY RESOLVED`, `NOT RESOLVED`, or `INSUFFICIENT PROBE` and stopping.
+
+## Second independent verification and setup-cleanup follow-up
+
+The follow-up verifier independently reproduced the retry-gap defect at `2675198`, confirmed the exact-reuse correction at `37df1aa`, and verified owner death, direct leader signals, pre-acceptance retry/escalation, and post-acceptance fail-closed behavior. Its classification was **PARTIALLY RESOLVED** because the `spawnNodeProcessTree()` setup-error catch sent best-effort signals and deleted ownership immediately without bounded verification that an already-created anchor, fixture group, and watchdog had disappeared.
+
+The correction now routes failed setup through bounded anchored escalation:
+
+- if fixture spawn never succeeds, the watchdog is stopped and verified gone;
+- before anchor readiness, preload gate pipes are closed and the direct child is awaited without ever signalling an unanchored numeric PGID;
+- after anchor readiness, the watchdog is stopped while the anchor reserves the group, then the exact anchored group is reclaimed;
+- group (when anchored), fixture-leader, and watchdog disappearance are verified before the ownership record is deleted or the original setup error is returned;
+- cleanup failure is aggregated with the setup error and does not falsely delete ownership;
+- a real preload test hook records fixture/anchor identities and the harness injects failure immediately after anchor readiness; the regression requires fixture, anchor, group, and watchdog disappearance while proving fixture code remained gated;
+- a separate accepted-then-watchdog-death regression requires repeated cleanup to fail closed without numeric fallback while the group remains anchored, then uses explicit test fallback cleanup.
+
+Independent verification remains required before M5 can be closed.

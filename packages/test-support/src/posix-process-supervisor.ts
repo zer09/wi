@@ -153,10 +153,17 @@ process.on("message", (message: unknown) => {
       setTimeout(() => reclaimAndStop(false), 150);
       return;
     }
+    if (releaseTestMode === "accept-exit-first" && releaseAttempts === 1) {
+      recordReleaseTestState("accepted-release");
+      acceptRelease();
+      setTimeout(() => process.kill(process.pid, "SIGKILL"), 50);
+      return;
+    }
     recordReleaseTestState("release-requested");
     acceptRelease();
     reclaimAndStop(false);
   }
 });
 
+recordReleaseTestState("ready");
 process.send({ type: "wi.test-support.posix-ready", token: controlToken });

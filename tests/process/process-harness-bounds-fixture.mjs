@@ -99,6 +99,9 @@ if (mode === "fixture-runner") {
         bytes: Buffer.byteLength(JSON.stringify(message)),
         value: message.value,
       });
+    } else if (message?.type === "non-finite-control") {
+      receivedControls += 1;
+      void send({ type: "non-finite-control-received", value: message.value });
     } else if (message?.type === "report-control-count") {
       void send({ type: "control-count", receivedControls });
     }

@@ -232,6 +232,11 @@ describe("bounded process-harness diagnostics", () => {
       expect(() =>
         processHandle.send({ type: "non-json-control", value: new Date(0) } as never),
       ).toThrow(/protocol limit/u);
+      for (const value of [NaN, Infinity, -Infinity]) {
+        expect(() => processHandle.send({ type: "non-finite-control", value })).toThrow(
+          /protocol limit/u,
+        );
+      }
 
       let getterReads = 0;
       const statefulGetter = {

@@ -6,6 +6,7 @@ import {
   PROCESS_IPC_HISTORY_MAX_MESSAGES,
   PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_PENDING_MAX_MESSAGES,
+  snapshotBoundedIpcValue,
 } from "./bounded-ipc.js";
 
 function serializedHistoryBytes(retention: BoundedIpcRetention): number {
@@ -42,6 +43,34 @@ describe("BoundedIpcRetention", () => {
       diagnostics.historyRetainedEstimatedBytes,
     );
   });
+
+  it.each([NaN, Infinity, -Infinity])(
+    "rejects the non-finite number %s instead of retaining or snapshotting it as null",
+    (value) => {
+      const retention = new BoundedIpcRetention(
+        PROCESS_IPC_PENDING_MAX_MESSAGES,
+        PROCESS_IPC_HISTORY_MAX_MESSAGES,
+        () => false,
+      );
+
+      retention.accept({ type: "non-finite", value });
+
+      expect(retention.snapshot()).toMatchObject({
+        rejectedMessages: 1,
+        latestTruncation: { originalType: "non-finite", reason: "protocol" },
+      });
+      expect(retention.history).toEqual([
+        expect.objectContaining({
+          type: "wi.test-support.ipc-truncated",
+          originalType: "non-finite",
+          reason: "protocol",
+        }),
+      ]);
+      expect(() => snapshotBoundedIpcValue({ type: "non-finite", value })).toThrow(
+        /protocol limit/u,
+      );
+    },
+  );
 
   it("evicts unawaited noise before an awaited control", () => {
     const retention = new BoundedIpcRetention(

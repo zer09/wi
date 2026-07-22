@@ -24,6 +24,7 @@ const defineObjectProperty = Object.defineProperty;
 const getObjectOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const getObjectPrototypeOf = Object.getPrototypeOf;
 const setObjectPrototypeOf = Object.setPrototypeOf;
+const isFiniteNumber = Number.isFinite;
 const isSafeInteger = Number.isSafeInteger;
 const stringifyJson = JSON.stringify;
 
@@ -187,12 +188,24 @@ function analyzeIpcValue(value: unknown): Analysis {
       }
       continue;
     }
-    if (typeof current === "number" || typeof current === "boolean") {
+    if (typeof current === "number") {
       const encoded = String(current);
-      hash.update(`${typeof current}:${encoded};`);
+      hash.update(`number:${encoded};`);
       appendPreview(`${frame.label}=${encoded}`);
-      const jsonEncoded = stringifyJson(current) ?? "null";
+      if (!isFiniteNumber(current)) {
+        reason = "protocol";
+        hashComplete = stack.length === 0;
+        continue;
+      }
+      const jsonEncoded = stringifyJson(current);
       if (!addEstimatedBytes(jsonEncoded.length)) break;
+      continue;
+    }
+    if (typeof current === "boolean") {
+      const encoded = String(current);
+      hash.update(`boolean:${encoded};`);
+      appendPreview(`${frame.label}=${encoded}`);
+      if (!addEstimatedBytes(encoded.length)) break;
       continue;
     }
     if (typeof current !== "object") {
@@ -368,7 +381,8 @@ function snapshotIpcValue(
     return value;
   }
   if (typeof value === "number") {
-    addSnapshotBytes(state, (stringifyJson(value) ?? "null").length);
+    if (!isFiniteNumber(value)) throwIpcLimit("protocol");
+    addSnapshotBytes(state, stringifyJson(value).length);
     return value;
   }
   if (typeof value !== "object") throwIpcLimit("protocol");

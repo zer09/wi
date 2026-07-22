@@ -70,6 +70,19 @@ async function readReleaseTestState(path: string): Promise<PosixReleaseTestState
   throw new Error("POSIX release test state was not recorded");
 }
 
+async function waitForReleaseTestEvent(
+  path: string,
+  event: string,
+): Promise<PosixReleaseTestState> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const state = await readReleaseTestState(path);
+    if (state.event === event) return state;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`POSIX release test event ${event} was not recorded`);
+}
+
 async function withPosixReleaseTest(
   mode: "ignore-first" | "error-first" | "disconnect-first" | "delay-first",
   run: (statePath: string) => Promise<void>,
@@ -122,6 +135,40 @@ describe("real process-tree cleanup", () => {
         await processHandle.terminate().catch(() => undefined);
         if (descendantPid !== null) await expectProcessGone(descendantPid);
       }
+    },
+    10_000,
+  );
+
+  it(
+    "keeps a vacated fixture PGID allocated until watchdog release",
+    async () => {
+      await withPosixReleaseTest("ignore-first", async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-exits-empty"],
+          waitForReady: false,
+        });
+        const ready = await processHandle.waitForMessage("ready");
+        if (typeof ready.pid !== "number") throw new Error("Missing fixture PID");
+        try {
+          await expect(processHandle.waitForExit()).resolves.toMatchObject({ code: 0 });
+          const retained = await waitForReleaseTestEvent(statePath, "ignored-release");
+          expect(retained.fixturePid).toBe(ready.pid);
+          expect(processExists(ready.pid)).toBe(false);
+          // The preload anchor is now the only member. Kernel-held group
+          // membership prevents this numeric PGID from being allocated as a PID.
+          expect(processGroupExists(ready.pid)).toBe(true);
+
+          await expect(processHandle.terminate()).rejects.toThrow("cleanup failed");
+          expect(processGroupExists(ready.pid)).toBe(false);
+          await expect(processHandle.terminate()).resolves.toBeUndefined();
+          const released = await waitForReleaseTestEvent(statePath, "stopping");
+          expect(released.releaseAttempts).toBe(2);
+          await expectProcessGone(released.watchdogPid);
+        } finally {
+          await processHandle.terminate().catch(() => undefined);
+        }
+      });
     },
     10_000,
   );

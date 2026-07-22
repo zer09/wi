@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 21
 
-Status: **DOCUMENTATION CORRECTION IMPLEMENTED — fresh independent WI-M7-L1 verification pending**
+Status: **RESOLVED**
 
 Starting head: `434e5952514a9e202363ec6197da7010b2649988` on `milestone-7-crash-recovery`.
 
@@ -55,6 +55,12 @@ The correction preserves the tested guarantees that unrelated sessions or comman
 
 No assertion failure or unhandled rejection occurred. The canonical documentation no longer contains the inaccurate claim that every configured run-selector field is rechecked at the final committed boundary.
 
+## Independent verification closure
+
+Fresh independent verification at `d7971ba1fa29790f812ea646a41afe43c4d798d0` classified `WI-M7-L1` as **RESOLVED** with no findings. The verifier traced startup validation, all selector kinds, the separate `runIdAssigned` and `triggered` states, actor command acceptance, every committed run boundary, and the concurrent-session process matrix. Repository-wide canonical documentation search found no remaining present-tense claim that every configured run-selector field is rechecked at the final committed boundary.
+
+Independent gates passed: 23 focused failpoint-controller tests, 871 tests under `pnpm check`, 33 browser E2E tests, lint, typecheck, build, package exports, and `git diff --check`. No test was changed or weakened under this documentation-only Stable ID.
+
 ## Next action
 
-Obtain a fresh verification-only WI-M7-L1 review. Do not merge PR #13 or begin Milestone 8 until that review and the final full local review are complete.
+Run the final fresh full local review across every Stable ID. Do not merge PR #13 or begin Milestone 8 until that review passes and the exact committed head completes required CI and independent remote re-review.

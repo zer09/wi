@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 22
 
-Status: **IMPLEMENTED — fresh independent `WI-M7-M1-F1` verification pending**
+Status: **RESOLVED**
 
 Starting head: `4c490af7cc17838343fa26907ab90d8ddd7e4bff` on `milestone-7-crash-recovery`.
 
@@ -51,6 +51,12 @@ No production Wi server behavior changed; this correction remains inside `@wi/te
 
 No assertion failure or unhandled rejection occurred in the successful runs. No fixture, descendant, watchdog, server, or release-state file remained after the focused and full gates.
 
+## Independent verification closure
+
+Fresh independent verification at `50dca3949062c3c0f34aa3190c681c47f8e0c1e4` classified `WI-M7-M1-F1` as **RESOLVED** with no blocking, nonblocking, or informational findings. The verifier independently reproduced the baseline coercion with direct retention, snapshot, and real-child probes, then confirmed all three non-finite values are represented only by bounded protocol summaries on retention and synchronously rejected before any outbound `child.send()` call.
+
+The verification also exercised nested shapes, summary/hash completeness, a finite-number corpus including `-0` JSON semantics, startup-captured intrinsic resistance, accidental child-receipt instrumentation, all cumulative M1 bounds, and process cleanup. Independent gates passed: 461 unit tests, 97 process tests, 874 tests under `pnpm check`, 33 browser E2E tests, and all typecheck, build, package-export, lint, and diff checks.
+
 ## Next action
 
-Commit the atomic correction, then obtain fresh independent verification of `WI-M7-M1-F1`. Do not push or merge PR #13 and do not begin Milestone 8.
+Run the final fresh full local review against the new exact head. Do not push or merge PR #13 and do not begin Milestone 8 until that review passes, the committed head completes required CI, and a fresh independent remote re-review approves it.

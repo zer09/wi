@@ -54,6 +54,8 @@ Unknown names, missing gates, malformed IDs, missing selector fields, extra sele
 
 ## Startup catalog scanner
 
+Before catalog-worker construction, a missing configured `WI_HOME` directory chain is created synchronously with mode `0700`, then the created or existing directory is realpath-canonicalized for catalog paths and shared coordination identity. Existing components are not moved, overwritten, deleted, or chmodded. A file, inaccessible component, or other creation/canonicalization failure produces the fixed bounded `storage.operational` startup error without starting a catalog worker or HTTP listener.
+
 Normal startup reads the catalog only. It does not enumerate or open session databases.
 
 The bounded scanner runs only when:

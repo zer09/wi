@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { request as createHttpRequest } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -1325,20 +1325,28 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     ).toThrow(/HTTP shutdown timeout must be a positive safe integer/u);
   });
 
-  it("fails startup cleanly when canonical storage cannot initialize", async () => {
+  it("fails before server construction when canonical storage cannot initialize", async () => {
     const base = await mkdtemp(join(tmpdir(), "wi-milestone5-invalid-home-"));
     homes.add(base);
     const invalidHome = join(base, "not-a-directory");
     await writeFile(invalidHome, "occupied");
-    const records: LogRecord[] = [];
-    const runtime = new WiRuntime({
-      homeDirectory: invalidHome,
-      logger: new JsonLogger({ write: (record) => records.push(record) }),
+
+    let failure: unknown;
+    try {
+      new WiRuntime({
+        homeDirectory: invalidHome,
+        logger: new JsonLogger({ write: () => undefined }),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
     });
-    const server = new WiServer({ runtime, port: 0 });
-    servers.add(server);
-    await expect(server.start()).rejects.toBeDefined();
-    expect(server.address).toBeNull();
+    expect(JSON.stringify(failure)).not.toContain(base);
+    await expect(readFile(invalidHome, "utf8")).resolves.toBe("occupied");
   });
 
   it("reuses a durable failed session.create diagnostic on every WebSocket retry", async () => {

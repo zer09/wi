@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { z } from "zod";
@@ -120,7 +120,15 @@ const catalogClients = new WeakMap<CatalogClient, CatalogClientState>();
 
 function canonicalCatalogHomeDirectory(homeDirectory: string): string {
   try {
-    return realpathSync.native(resolve(homeDirectory));
+    const configuredHome = resolve(homeDirectory);
+    // A first run has no WI_HOME yet. Create only this bounded directory chain
+    // before deriving any worker path or shared coordination identity.
+    mkdirSync(configuredHome, { recursive: true, mode: 0o700 });
+    const canonicalHome = realpathSync.native(configuredHome);
+    if (!statSync(canonicalHome).isDirectory()) {
+      throw new Error("Catalog home is not a directory");
+    }
+    return canonicalHome;
   } catch {
     throw new StorageError("storage.operational", "Catalog storage is unavailable", true);
   }

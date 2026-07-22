@@ -180,6 +180,64 @@ afterEach(async () => {
 });
 
 describe("catalog and per-session storage workers", () => {
+  it("creates and canonicalizes a missing nested home before starting workers", async () => {
+    const root = await temporaryHome();
+    const homeDirectory = join(root, "new", "nested", ".wi");
+    const storage = await manager({ homeDirectory });
+
+    await expect(storage.ready()).resolves.toBeUndefined();
+    expect((await stat(homeDirectory)).isDirectory()).toBe(true);
+    expect((await stat(homeDirectory)).mode & 0o777).toBe(0o700);
+    await expect(storage.createSession(createCommand())).resolves.toMatchObject({
+      session: { status: "ready" },
+    });
+  });
+
+  it("rejects a non-directory home before starting workers", async () => {
+    const root = await temporaryHome();
+    const homeDirectory = join(root, "not-a-directory");
+    await writeFile(homeDirectory, "occupied", "utf8");
+
+    let failure: unknown;
+    try {
+      new CatalogClient({ homeDirectory });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
+    });
+    expect(JSON.stringify(failure)).not.toContain(root);
+    await expect(readFile(homeDirectory, "utf8")).resolves.toBe("occupied");
+  });
+
+  it("bounds and redacts an inaccessible-home startup failure", async () => {
+    const root = await temporaryHome();
+    const blockedParent = join(root, "blocked");
+    const homeDirectory = join(blockedParent, "home");
+    await mkdir(homeDirectory, { recursive: true });
+    await chmod(blockedParent, 0o000);
+
+    let failure: unknown;
+    try {
+      new CatalogClient({ homeDirectory });
+    } catch (error) {
+      failure = error;
+    } finally {
+      await chmod(blockedParent, 0o700);
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
+    });
+    const serialized = JSON.stringify(failure);
+    expect(serialized).not.toContain(root);
+    expect(serialized.length).toBeLessThan(1_024);
+  });
+
   it("creates a generated catalog-relative session database with a matching manifest", async () => {
     const homeDirectory = await temporaryHome();
     const storage = await manager({ homeDirectory });

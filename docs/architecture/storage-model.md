@@ -32,7 +32,7 @@ $WI_HOME/
 
 Rules:
 
-- Existing `WI_HOME` is canonicalized through its real directory once at startup, so static symlink aliases converge before catalog or session paths are derived.
+- On first run, the configured `WI_HOME` directory chain is created synchronously with mode `0700` before any storage worker is constructed. Existing components are not moved, overwritten, deleted, or chmodded. The resulting directory is then canonicalized through its real path once at startup, so static symlink aliases converge before catalog or session paths are derived; a non-directory or inaccessible path fails with a bounded redacted storage error.
 - The backend generates session paths; browser input never supplies them.
 - Catalog paths are relative to `WI_HOME`.
 - Session-directory prefixes are derived from session IDs to avoid oversized directories.

@@ -4,6 +4,7 @@ import {
   PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
   PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_PENDING_MAX_MESSAGES,
   PROCESS_OUTPUT_TAIL_MAX_BYTES,
@@ -232,9 +233,50 @@ describe("bounded process-harness diagnostics", () => {
         processHandle.send({ type: "non-json-control", value: new Date(0) } as never),
       ).toThrow(/protocol limit/u);
 
+      let getterReads = 0;
+      const statefulGetter = {
+        type: "stateful-getter-control",
+        get value() {
+          getterReads += 1;
+          return getterReads === 1 ? "small" : "x".repeat(outputBytes);
+        },
+      };
+      expect(() => processHandle.send(statefulGetter as never)).toThrow(/protocol limit/u);
+      expect(getterReads).toBe(0);
+
+      let proxyReads = 0;
+      const statefulProxy = new Proxy(
+        { type: "stateful-proxy-control", value: "small" },
+        {
+          get(target, property, receiver) {
+            if (property !== "value") return Reflect.get(target, property, receiver);
+            proxyReads += 1;
+            return proxyReads === 1 ? "small" : "x".repeat(outputBytes);
+          },
+        },
+      );
+      processHandle.send(statefulProxy);
+      const dynamicControl = await processHandle.waitForMessage("dynamic-control-received");
+      expect(dynamicControl).toMatchObject({ bytes: expect.any(Number), value: "small" });
+      if (typeof dynamicControl.bytes !== "number") {
+        throw new Error("Dynamic control response omitted its encoded byte count");
+      }
+      expect(dynamicControl.bytes).toBeLessThanOrEqual(PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES);
+      expect(proxyReads).toBe(0);
+
+      const throwingProxy = new Proxy(
+        { type: "throwing-proxy-control", value: "small" },
+        {
+          getOwnPropertyDescriptor() {
+            throw new Error("descriptor trap failed");
+          },
+        },
+      );
+      expect(() => processHandle.send(throwingProxy)).toThrow(/descriptor trap failed/u);
+
       processHandle.send({ type: "report-control-count" });
       await expect(processHandle.waitForMessage("control-count")).resolves.toMatchObject({
-        receivedControls: 2,
+        receivedControls: 3,
       });
     } finally {
       await processHandle.terminate();

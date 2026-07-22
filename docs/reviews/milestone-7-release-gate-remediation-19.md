@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 19
 
-Status: **ESTIMATOR FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-M1 verification pending**
+Status: **OUTBOUND SNAPSHOT FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-M1 verification pending**
 
 Starting head: `9d6c0f42ed8d20394fbd04e81bdad0f1269eebbb` on `milestone-7-crash-recovery`.
 
@@ -88,6 +88,38 @@ Test-first evidence reproduced V1 before the estimator correction: the unit regr
 | Typecheck, build, package exports, lint, `git diff --check` | Passed |
 
 No unhandled rejection or assertion failure occurred. Focused and full process runs reaped every fixture descendant and watchdog.
+
+## Independent verification of `12337d5`
+
+Verdict: **PARTIALLY RESOLVED**.
+
+The verifier independently confirmed V1 resolved across a 10,000-value encoding corpus, 2,000 aggregate transitions, and real-child escaped traffic; V2's material regression gaps were also closed. One medium finding remained:
+
+- `WI-M7-M1-V3`: outbound preflight read a dynamic object and then passed the original object to `child.send()`. A stateful getter returned `"small"` during validation and 100,000 characters during Node serialization, allowing a 100,038-byte control through the 65,536-byte limit.
+
+## Outbound snapshot follow-up correction
+
+- `RealServerProcess.send()` now creates one bounded plain-data snapshot and sends that exact captured object. Validation and transmission no longer observe the source object twice.
+- Snapshotting reads own data descriptors rather than property values. Accessor descriptors, sparse/accessor arrays, non-plain prototypes, unsupported values, depth/node/string/encoded-byte excess, and cycles fail before send.
+- Proxy descriptor results are copied into ordinary null-prototype objects or arrays. Later Proxy/get traps cannot alter the sent representation; a throwing descriptor trap fails synchronously without reaching the child.
+- A retained real-child regression proves a stateful getter is rejected without being read, a stateful Proxy's data descriptor is captured without invoking its changing `get` trap, the child receives only the small snapshot, throwing descriptor traps fail safely, and the child count contains only valid controls.
+
+Test-first evidence reproduced V3 before correction: the stateful getter control did not throw at the outbound boundary. The new assertion passes after snapshot-and-send.
+
+## Outbound follow-up verification evidence
+
+| Command/probe | Result |
+|---|---|
+| Stateful-getter real-child regression before snapshot correction | Failed as expected: outbound send returned without the required protocol rejection |
+| Focused `bounded-ipc` unit file | 3 passed |
+| Focused process-harness bounds file | 5 passed |
+| `pnpm test:unit` | 42 files; 458 passed |
+| `pnpm test:process` | 8 files; 92 passed |
+| `pnpm check` | 68 files; 866 passed; no skips |
+| `pnpm test:e2e` | 33 passed |
+| Typecheck, build, package exports, lint, `git diff --check` | Passed |
+
+No unhandled rejection or assertion failure occurred. The real-child control fixture and every full-suite process fixture reaped its descendant and watchdog.
 
 ## Next action
 

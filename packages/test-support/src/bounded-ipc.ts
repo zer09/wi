@@ -1,3 +1,4 @@
+import type { Serializable } from "node:child_process";
 import { createHash, type Hash } from "node:crypto";
 
 export interface ServerProcessMessage {
@@ -312,11 +313,88 @@ function truncationMessage(
   };
 }
 
-export function assertBoundedIpcValue(value: unknown): void {
-  const analysis = analyzeIpcValue(value);
-  if (!analysis.accepted) {
-    throw new Error(`Process IPC message exceeds the ${analysis.reason ?? "protocol"} limit`);
+type IpcSnapshot =
+  | null
+  | boolean
+  | number
+  | string
+  | IpcSnapshot[]
+  | { readonly [key: string]: IpcSnapshot };
+
+interface IpcSnapshotState {
+  estimatedBytes: number;
+  nodes: number;
+}
+
+function throwIpcLimit(reason: ProcessIpcTruncationReason): never {
+  throw new Error(`Process IPC message exceeds the ${reason} limit`);
+}
+
+function addSnapshotBytes(state: IpcSnapshotState, bytes: number): void {
+  state.estimatedBytes += bytes;
+  if (state.estimatedBytes > PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES) {
+    throwIpcLimit("estimated_bytes");
   }
+}
+
+function snapshotIpcValue(
+  value: unknown,
+  depth: number,
+  state: IpcSnapshotState,
+): IpcSnapshot {
+  if (depth > PROCESS_IPC_MESSAGE_MAX_DEPTH) throwIpcLimit("depth");
+  if (state.nodes >= PROCESS_IPC_MESSAGE_MAX_NODES) throwIpcLimit("nodes");
+  state.nodes += 1;
+  addSnapshotBytes(state, 16);
+
+  if (value === null) return null;
+  if (typeof value === "string") {
+    if (value.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) throwIpcLimit("string");
+    addSnapshotBytes(state, jsonEncodedStringByteLength(value));
+    return value;
+  }
+  if (typeof value === "boolean") {
+    addSnapshotBytes(state, value ? 4 : 5);
+    return value;
+  }
+  if (typeof value === "number") {
+    addSnapshotBytes(state, Buffer.byteLength(JSON.stringify(value) ?? "null"));
+    return value;
+  }
+  if (typeof value !== "object") throwIpcLimit("protocol");
+
+  if (Array.isArray(value)) {
+    if (value.length + state.nodes > PROCESS_IPC_MESSAGE_MAX_NODES) throwIpcLimit("nodes");
+    const snapshot: IpcSnapshot[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (descriptor === undefined || !("value" in descriptor)) throwIpcLimit("protocol");
+      snapshot.push(snapshotIpcValue(descriptor.value, depth + 1, state));
+    }
+    return snapshot;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throwIpcLimit("protocol");
+  const snapshot = Object.create(null) as Record<string, IpcSnapshot>;
+  for (const key in value) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable) continue;
+    if (!("value" in descriptor)) throwIpcLimit("protocol");
+    if (key.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) throwIpcLimit("string");
+    addSnapshotBytes(state, jsonEncodedStringByteLength(key) + 8);
+    Object.defineProperty(snapshot, key, {
+      value: snapshotIpcValue(descriptor.value, depth + 1, state),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return snapshot;
+}
+
+export function snapshotBoundedIpcValue(value: unknown): Serializable {
+  return snapshotIpcValue(value, 0, { estimatedBytes: 0, nodes: 0 }) as Serializable;
 }
 
 export class BoundedIpcRetention {

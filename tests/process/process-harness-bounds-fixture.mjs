@@ -85,6 +85,13 @@ if (mode === "fixture-runner") {
     } else if (message?.type === "small-control") {
       receivedControls += 1;
       void send({ type: "object-control-received" });
+    } else if (message?.type === "stateful-proxy-control") {
+      receivedControls += 1;
+      void send({
+        type: "dynamic-control-received",
+        bytes: Buffer.byteLength(JSON.stringify(message)),
+        value: message.value,
+      });
     } else if (message?.type === "report-control-count") {
       void send({ type: "control-count", receivedControls });
     }

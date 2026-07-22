@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  assertBoundedIpcValue,
   BoundedIpcRetention,
+  snapshotBoundedIpcValue,
   PROCESS_IPC_HISTORY_MAX_MESSAGES,
   PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS,
   PROCESS_IPC_PENDING_MAX_MESSAGES,
@@ -470,8 +470,8 @@ export class RealServerProcess {
   }
 
   send(message: Serializable): void {
-    assertBoundedIpcValue(message);
-    if (this.child.connected) this.child.send(message);
+    const snapshot = snapshotBoundedIpcValue(message);
+    if (this.child.connected) this.child.send(snapshot);
   }
 
   async waitForMessage(type: string, timeoutMs = 10_000): Promise<ServerProcessMessage> {

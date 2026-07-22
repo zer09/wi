@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { z } from "zod";
@@ -9,7 +10,7 @@ import {
 } from "@wi/protocol";
 
 import { SessionStatusCoordinator } from "../common/session-status-coordinator.js";
-import { WorkerRpcClient } from "../common/worker-rpc.js";
+import { StorageError, WorkerRpcClient } from "../common/worker-rpc.js";
 import {
   GlobalCommandRecordSchema,
   GlobalCommandReservationSchema,
@@ -117,6 +118,14 @@ const sharedCatalogSessionStatusCoordinators = new Map<
 >();
 const catalogClients = new WeakMap<CatalogClient, CatalogClientState>();
 
+function canonicalCatalogHomeDirectory(homeDirectory: string): string {
+  try {
+    return realpathSync.native(resolve(homeDirectory));
+  } catch {
+    throw new StorageError("storage.operational", "Catalog storage is unavailable", true);
+  }
+}
+
 function acquireCatalogSessionStatusCoordinator(
   homeDirectory: string,
 ): SharedCatalogSessionStatusCoordinator {
@@ -147,6 +156,10 @@ function catalogState(client: CatalogClient): CatalogClientState {
   return state;
 }
 
+export function catalogHomeDirectory(client: CatalogClient): string {
+  return catalogState(client).homeDirectory;
+}
+
 export function catalogSessionStatusCoordinator(
   client: CatalogClient,
 ): SessionStatusCoordinator {
@@ -167,7 +180,7 @@ function catalogRpc(client: CatalogClient): WorkerRpcClient {
 
 export class CatalogClient {
   constructor(options: CatalogClientOptions) {
-    const homeDirectory = resolve(options.homeDirectory);
+    const homeDirectory = canonicalCatalogHomeDirectory(options.homeDirectory);
     const sharedCoordinator = acquireCatalogSessionStatusCoordinator(homeDirectory);
     try {
       catalogClients.set(this, {
@@ -431,11 +444,13 @@ export class CatalogClient {
   async reconcileSessionWithStatus(
     input: ReconcileSessionInput,
   ): Promise<ReconcileSessionResult> {
-    return catalogRpc(this).request(
-      "catalog.reconcileSession",
-      input,
-      ReconcileSessionResultSchema,
-      { outcome: "write" },
+    return withCatalogSessionStatusTransition(this, [input.manifest.sessionId], () =>
+      catalogRpc(this).request(
+        "catalog.reconcileSession",
+        input,
+        ReconcileSessionResultSchema,
+        { outcome: "write" },
+      ),
     );
   }
 
@@ -451,6 +466,20 @@ export class CatalogClient {
       releaseCatalogSessionStatusCoordinator(state);
     }
   }
+}
+
+export function reconcileCreationSession(
+  catalog: CatalogClient,
+  input: ReconcileSessionInput,
+): Promise<ReconcileSessionResult> {
+  return withCatalogSessionStatusTransition(catalog, [input.manifest.sessionId], () =>
+    catalogRpc(catalog).request(
+      "catalog.reconcileCreationSession",
+      input,
+      ReconcileSessionResultSchema,
+      { outcome: "write" },
+    ),
+  );
 }
 
 export function reconcileValidatedRepairSession(

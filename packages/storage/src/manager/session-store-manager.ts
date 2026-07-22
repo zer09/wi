@@ -10,7 +10,9 @@ import {
 
 import {
   CatalogClient,
+  catalogHomeDirectory,
   catalogSessionStatusCoordinator,
+  reconcileCreationSession,
   reconcileValidatedRepairSession,
   type CatalogClientOptions,
   type ReconcileSessionInput,
@@ -73,6 +75,9 @@ export interface StorageTestFailpoints {
   }) => void | Promise<void>;
   readonly beforeCatalogReplacement?: () => void | Promise<void>;
   readonly beforeCatalogCanonicalOpen?: () => void | Promise<void>;
+  readonly beforeCreationReconciliation?: (fields: {
+    readonly sessionId: string;
+  }) => void | Promise<void>;
   readonly afterSessionFaultObserved?: (fields: {
     readonly sessionId: string;
     readonly status: "missing" | "unavailable";
@@ -312,7 +317,6 @@ export class SessionStoreManager {
 
   constructor(options: SessionStoreManagerOptions) {
     validateSessionStoreManagerOptions(options);
-    this.homeDirectory = options.homeDirectory;
     this.ids = options.ids ?? defaultIds();
     this.now = options.now ?? Date.now;
     const catalogRepair = options.catalogRepair ?? "auto";
@@ -321,6 +325,7 @@ export class SessionStoreManager {
       ...options.catalogWorker,
       allowRepair: catalogRepair !== "off",
     });
+    this.homeDirectory = catalogHomeDirectory(this.catalog);
     this.#statusCoordinator = catalogSessionStatusCoordinator(this.catalog);
     const configuredSessionError = options.sessionWorkers?.onSessionError;
     try {
@@ -776,8 +781,20 @@ export class SessionStoreManager {
         continue;
       }
 
-      // Catalog failures are installation-wide and must prevent normal startup.
-      await this.reconciler.reconcileInspection(inspection);
+      // Only a durable creating reservation may insert its missing catalog row.
+      await this.testFailpoints?.beforeCreationReconciliation?.({
+        sessionId: inspection.manifest.sessionId,
+      });
+      const reconciliation = await reconcileCreationSession(this.catalog, inspection);
+      if (
+        reconciliation.summary.status !== "ready" ||
+        reconciliation.summary.lastEventSequence < inspection.manifest.lastEventSequence
+      ) {
+        throw new StorageError(
+          "storage.corrupt",
+          "Incomplete creation reconciliation did not restore the ready session",
+        );
+      }
       await this.catalog.completeGlobalCommand({
         commandId: command.commandId,
         payloadHash: command.payloadHash,

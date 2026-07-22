@@ -31,6 +31,7 @@ import {
   type ProjectionMutation,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
+import { catalogSessionStatusCoordinator } from "../../packages/storage/dist/catalog/client.js";
 import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 
 type StorageTestManager = SessionStoreManager & {
@@ -396,11 +397,15 @@ describe("catalog and per-session storage workers", () => {
     }
   });
 
-  it("serializes another catalog client's unavailable transition behind an in-flight commit", async () => {
-    const homeDirectory = await temporaryHome();
+  it("serializes a statically aliased catalog client's unavailable transition behind an in-flight commit", async () => {
+    const storageRoot = await temporaryHome();
+    const homeDirectory = join(storageRoot, "real", "home");
+    const aliasDirectory = join(storageRoot, "alias");
+    await mkdir(homeDirectory, { recursive: true });
+    await symlink(join(storageRoot, "real"), aliasDirectory, "dir");
     const storage = await manager({ homeDirectory });
     const created = await storage.createSession(createCommand());
-    const statusCatalog = new CatalogClient({ homeDirectory });
+    const statusCatalog = new CatalogClient({ homeDirectory: join(aliasDirectory, "home") });
     await statusCatalog.prepareOpen();
     await statusCatalog.openPrepared();
     await statusCatalog.getStartupState();
@@ -447,6 +452,65 @@ describe("catalog and per-session storage workers", () => {
     }
   });
 
+  it("serializes generic reconciliation and rejects absent-row insertion", async () => {
+    const homeDirectory = await temporaryHome();
+    const storage = await manager({ homeDirectory });
+    const created = await storage.createSession(createCommand());
+    const inspection = await storage.reconciler.inspectSession(created.session.sessionId);
+    const absentSessionId = "ses_absentReconcile";
+    const coordinator = catalogSessionStatusCoordinator(storage.catalog);
+    const reconciliationCatalog = new CatalogClient({ homeDirectory });
+    await reconciliationCatalog.prepareOpen();
+    await reconciliationCatalog.openPrepared();
+    await reconciliationCatalog.getStartupState();
+
+    let releaseBoundary = (): void => undefined;
+    let boundaryEntered = (): void => undefined;
+    const boundaryGate = new Promise<void>((resolve) => {
+      releaseBoundary = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      boundaryEntered = resolve;
+    });
+    const heldBoundary = coordinator.run([absentSessionId], async () => {
+      boundaryEntered();
+      await boundaryGate;
+    });
+    await entered;
+
+    const reconciliation = reconciliationCatalog.reconcileSession({
+      ...inspection,
+      manifest: {
+        ...inspection.manifest,
+        sessionId: absentSessionId,
+        title: "Absent reconciliation",
+      },
+      dbRelativePath: `sessions/ab/${absentSessionId}/session.sqlite3`,
+      expectedCatalogSequence: null,
+      expectedCatalogStatus: null,
+    });
+    const reconciliationOutcome = reconciliation.then(
+      () => "reconciliation" as const,
+      () => "reconciliation" as const,
+    );
+    try {
+      const firstCatalogResult = await Promise.race([
+        reconciliationOutcome,
+        reconciliationCatalog.getSession(absentSessionId).then(() => "independent-read" as const),
+      ]);
+      expect(firstCatalogResult).toBe("independent-read");
+      await expect(reconciliationCatalog.getSession(absentSessionId)).resolves.toBeNull();
+
+      releaseBoundary();
+      await expect(reconciliation).rejects.toMatchObject({ code: "storage.corrupt" });
+      await expect(reconciliationCatalog.getSession(absentSessionId)).resolves.toBeNull();
+    } finally {
+      releaseBoundary();
+      await Promise.allSettled([heldBoundary, reconciliation]);
+      await reconciliationCatalog.close().catch(() => undefined);
+    }
+  });
+
   it("never lets generic reconciliation promote an unavailable session", async () => {
     const storage = await manager();
     const created = await storage.createSession(createCommand());
@@ -481,6 +545,8 @@ describe("catalog and per-session storage workers", () => {
     expect(Object.hasOwn(client, "pool")).toBe(false);
     expect(storagePackage).not.toHaveProperty("SessionWorkerPool");
     expect(storagePackage).not.toHaveProperty("SessionClient");
+    expect(storagePackage).not.toHaveProperty("reconcileCreationSession");
+    expect(storagePackage).not.toHaveProperty("reconcileValidatedRepairSession");
   });
 
   it("does not expose validated repair or its worker RPC through catalog reflection", async () => {
@@ -1404,11 +1470,14 @@ describe("catalog and per-session storage workers", () => {
     const restarted = new SessionStoreManager({
       homeDirectory,
       sessionWorkers: { size: 1, allowTestOperations: true },
+      testFailpoints: {
+        hit: () => undefined,
+        beforeCreationReconciliation: () => {
+          throw new StorageError("storage.disk_full", "injected catalog failure");
+        },
+      },
     });
     managers.push(restarted);
-    vi.spyOn(restarted.catalog, "reconcileSession").mockRejectedValue(
-      new StorageError("storage.disk_full", "injected catalog failure"),
-    );
 
     await expect(restarted.ready()).rejects.toMatchObject({ code: "storage.disk_full" });
     await expect(restarted.catalog.getGlobalCommand(command.commandId)).resolves.toMatchObject({

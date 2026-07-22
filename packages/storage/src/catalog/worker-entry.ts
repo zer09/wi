@@ -322,6 +322,8 @@ function execute(operation: string, payload: unknown): unknown {
     }
     case "catalog.reconcileSession":
       return repository.reconcileSession(payload);
+    case "catalog.reconcileCreationSession":
+      return repository.reconcileCreationSession(payload);
     case "catalog.reconcileValidatedRepairSession":
       return repository.reconcileValidatedRepairSession(payload);
     default:

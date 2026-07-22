@@ -827,32 +827,43 @@ export class CatalogRepository {
   }
 
   reconcileSession(inputValue: unknown): ReconcileSessionResult {
-    return this.reconcileSessionInternal(inputValue, false);
+    return this.reconcileSessionInternal(inputValue, "generic");
+  }
+
+  reconcileCreationSession(inputValue: unknown): ReconcileSessionResult {
+    return this.reconcileSessionInternal(inputValue, "creation");
   }
 
   reconcileValidatedRepairSession(inputValue: unknown): ReconcileSessionResult {
-    return this.reconcileSessionInternal(inputValue, true);
+    return this.reconcileSessionInternal(inputValue, "validated-repair");
   }
 
   private reconcileSessionInternal(
     inputValue: unknown,
-    allowNonReadyPromotion: boolean,
+    mode: "generic" | "creation" | "validated-repair",
   ): ReconcileSessionResult {
     const input = ReconcileSessionInputSchema.parse(inputValue);
     const manifest: SessionManifest = input.manifest;
     const existing = this.getSession(manifest.sessionId);
-    if (!allowNonReadyPromotion) {
+    const validatedRepair = mode === "validated-repair";
+    if (!validatedRepair) {
+      if (existing === null && mode !== "creation") {
+        throw new StorageError(
+          "storage.corrupt",
+          "Generic reconciliation requires an existing ready session",
+        );
+      }
       if (existing !== null && existing.status !== "ready") {
         return { summary: existing, applied: false };
       }
       if (
-        input.expectedCatalogStatus !== null &&
-        input.expectedCatalogStatus !== "ready"
+        input.expectedCatalogStatus !== "ready" &&
+        !(mode === "creation" && existing === null && input.expectedCatalogStatus === null)
       ) {
         if (existing === null) {
           throw new StorageError(
             "storage.corrupt",
-            "Generic reconciliation cannot restore a non-ready session",
+            "Creation reconciliation received an invalid catalog status",
           );
         }
         return { summary: existing, applied: false };
@@ -887,7 +898,7 @@ export class CatalogRepository {
       recoveryCandidate: input.recoveryNeeded,
     }, {
       allowPathRepair: true,
-      allowReadyPromotion: allowNonReadyPromotion,
+      allowReadyPromotion: validatedRepair,
     });
     return { summary, applied: true };
   }

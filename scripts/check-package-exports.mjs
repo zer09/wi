@@ -9,7 +9,14 @@ const expectedExports = {
   "@wi/storage": ["CatalogClient", "SessionStoreManager"],
 };
 const forbiddenExports = {
-  "@wi/storage": ["SessionClient", "SessionWorkerPool"],
+  "@wi/storage": [
+    "SessionClient",
+    "SessionWorkerPool",
+    "catalogHomeDirectory",
+    "catalogSessionStatusCoordinator",
+    "reconcileCreationSession",
+    "reconcileValidatedRepairSession",
+  ],
 };
 
 const workspaceDirectories = readdirSync(resolve(root, "packages"), { withFileTypes: true })

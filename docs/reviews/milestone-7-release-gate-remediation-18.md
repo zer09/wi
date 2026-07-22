@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 18
 
-Status: **COMMIT-TIME FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-H2 verification pending**
+Status: **ALIAS/RECONCILIATION FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-H2 verification pending**
 
 Starting head: `27207689863b2cb8837aa2d6caa660c0af7eaf25` on `milestone-7-crash-recovery`.
 
@@ -131,6 +131,40 @@ No `.only`, `.skip`, or `.todo` was added. Exact-v3 migration, healthy lazy open
 
 The first affected storage-file run exposed two test-only waits that expected an internal pool fault to complete while reconciliation deliberately held the new session boundary. Both tests now use a gated fault-observed signal, release reconciliation, and attach rejection assertions immediately; the full storage file and two later full gates passed without timeout or unhandled rejection. The previously flaky empty-catalog rebuild test now awaits manager readiness.
 
+## Independent verdict on the commit-time follow-up
+
+The fresh verifier confirmed that exact-path coordination closes the worker-queue race in both orders and that the earlier public/reflection bypasses remain closed, but classified `7d75684` as **NOT RESOLVED**:
+
+1. Coordinator sharing used lexical `resolve(homeDirectory)`. A normal manager and normal catalog client opened before any mutation through static ancestor aliases of the same physical home received different coordinators; `unavailable` committed while an already-authorized append remained blocked, and the append committed afterward.
+2. Normal `CatalogClient.reconcileSessionWithStatus()` bypassed coordination and generic repository reconciliation could insert an absent `ready` row. A deterministic probe inserted the row while that session's coordinator was held.
+
+Both findings are within the supported trusted-user model: neither requires hostile concurrent filesystem mutation.
+
+## Alias/reconciliation follow-up correction
+
+- `CatalogClient` realpath-canonicalizes the existing home before deriving its coordinator key or catalog path. `SessionStoreManager` reuses that canonical value for discovery and every session path, so static final-component or ancestor aliases converge on one process-local boundary.
+- Canonicalization failure returns a fixed bounded `storage.operational` error without forwarding the input pathname.
+- Normal generic reconciliation now participates in the per-session coordinator and requires an existing `ready` row; it cannot insert an absent row.
+- Incomplete session creation uses a separate module-internal reconciliation capability only after loading a durable `creating` reservation and initializing its exact reserved session identity. Validated scanner repair remains a distinct module-internal capability.
+- Neither internal capability, coordinator accessor, nor canonical-home accessor is exported by the normal package entry point; the build-time export audit fails if one appears.
+- Retained regressions use a static ancestor alias for the blocked-worker race and hold a session boundary while an ordinary catalog client attempts absent-row generic reconciliation.
+
+## Alias/reconciliation follow-up verification evidence
+
+| Command/probe | Result |
+|---|---|
+| Static-alias race and generic absent-row regressions before production correction | 2 failed as expected: the alias transition committed before the blocked append, and generic reconciliation resolved while the boundary was held |
+| Focused corrected regressions | 3 passed |
+| Full `tests/integration/storage.test.ts` | 67 passed |
+| `pnpm test:unit` | 41 files; 455 passed |
+| `pnpm test:integration` | 6 files; 259 passed |
+| `pnpm test:process` | 8 files; 90 passed |
+| `pnpm check` | 67 files; 861 passed; no skips |
+| `pnpm test:e2e` | 33 passed |
+| Lint, typecheck, build, package exports, `git diff --check` | Passed |
+
+The first full storage-file run correctly exposed incomplete-creation recovery as a legitimate absent-row reconciliation path. It now uses a separate module-internal creation capability backed by the durable `creating` reservation; the retained injected catalog-failure test moved to a gated internal boundary rather than spying on the now-restricted public generic method. The full storage file and all later gates passed.
+
 ## Next action
 
-Create one atomic WI-M7-H2 commit-time follow-up, then obtain another fresh verification-only review that reruns the blocked-worker race in both orders along with the earlier public-surface probes. Do not begin WI-M7-M1, merge PR #13, or begin Milestone 8 until H2 is independently resolved.
+Create one atomic WI-M7-H2 alias/reconciliation follow-up, then obtain another fresh verification-only review that reruns the static-alias worker race, generic absent-row probe, both exact-path race orders, and earlier public-surface probes. Do not begin WI-M7-M1, merge PR #13, or begin Milestone 8 until H2 is independently resolved.

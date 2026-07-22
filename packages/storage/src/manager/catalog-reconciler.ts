@@ -1,4 +1,5 @@
 import type { CatalogClient, ReconcileSessionInput } from "../catalog/client.js";
+import type { SessionStatusCoordinator } from "../common/session-status-coordinator.js";
 import { StorageError } from "../common/worker-rpc.js";
 import type { SessionWorkerPool } from "../session/worker-pool.js";
 import type { SessionSummary } from "../types.js";
@@ -8,18 +9,21 @@ export class CatalogReconciler {
   readonly #homeDirectory: string;
   readonly #catalog: CatalogClient;
   readonly #sessions: SessionWorkerPool;
+  readonly #statusCoordinator: SessionStatusCoordinator;
 
   constructor(
     homeDirectory: string,
     catalog: CatalogClient,
     sessions: SessionWorkerPool,
+    statusCoordinator: SessionStatusCoordinator,
   ) {
     this.#homeDirectory = homeDirectory;
     this.#catalog = catalog;
     this.#sessions = sessions;
+    this.#statusCoordinator = statusCoordinator;
   }
 
-  async inspectSession(sessionId: string): Promise<ReconcileSessionInput> {
+  private async inspectSessionUnlocked(sessionId: string): Promise<ReconcileSessionInput> {
     const expectedCatalog = await this.#catalog.getSession(sessionId);
     if (expectedCatalog?.status === "missing") {
       throw new StorageError("storage.session_missing", "Session database is missing");
@@ -71,7 +75,13 @@ export class CatalogReconciler {
     };
   }
 
-  async reconcileInspection(initialInspection: ReconcileSessionInput): Promise<SessionSummary> {
+  inspectSession(sessionId: string): Promise<ReconcileSessionInput> {
+    return this.#statusCoordinator.run([sessionId], () => this.inspectSessionUnlocked(sessionId));
+  }
+
+  private async reconcileInspectionUnlocked(
+    initialInspection: ReconcileSessionInput,
+  ): Promise<SessionSummary> {
     let inspection = initialInspection;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const summary = await this.#catalog.reconcileSession(inspection);
@@ -83,7 +93,7 @@ export class CatalogReconciler {
         throw new StorageError("storage.corrupt", "Session is unavailable");
       }
       if (summary.lastEventSequence >= inspection.manifest.lastEventSequence) return summary;
-      inspection = await this.inspectSession(inspection.manifest.sessionId);
+      inspection = await this.inspectSessionUnlocked(inspection.manifest.sessionId);
     }
     throw new StorageError(
       "storage.busy",
@@ -92,7 +102,15 @@ export class CatalogReconciler {
     );
   }
 
-  async reconcileSession(sessionId: string): Promise<SessionSummary> {
-    return this.reconcileInspection(await this.inspectSession(sessionId));
+  reconcileInspection(initialInspection: ReconcileSessionInput): Promise<SessionSummary> {
+    return this.#statusCoordinator.run([initialInspection.manifest.sessionId], () =>
+      this.reconcileInspectionUnlocked(initialInspection),
+    );
+  }
+
+  reconcileSession(sessionId: string): Promise<SessionSummary> {
+    return this.#statusCoordinator.run([sessionId], async () =>
+      this.reconcileInspectionUnlocked(await this.inspectSessionUnlocked(sessionId)),
+    );
   }
 }

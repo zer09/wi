@@ -19,6 +19,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { hashCommandContent, type SessionCreateCommand } from "@wi/protocol";
 import {
+  CatalogClient,
   resolveStoragePath,
   SessionStoreManager,
   SESSION_SCHEMA_VERSION,
@@ -395,6 +396,57 @@ describe("catalog and per-session storage workers", () => {
     }
   });
 
+  it("serializes another catalog client's unavailable transition behind an in-flight commit", async () => {
+    const homeDirectory = await temporaryHome();
+    const storage = await manager({ homeDirectory });
+    const created = await storage.createSession(createCommand());
+    const statusCatalog = new CatalogClient({ homeDirectory });
+    await statusCatalog.prepareOpen();
+    await statusCatalog.openPrepared();
+    await statusCatalog.getStartupState();
+    const client = await storage.openSession(created.session.sessionId);
+    const originalGetSession = storage.catalog.getSession.bind(storage.catalog);
+    let readinessChecks = 0;
+    vi.spyOn(storage.catalog, "getSession").mockImplementation(async (sessionId) => {
+      const summary = await originalGetSession(sessionId);
+      if (sessionId === created.session.sessionId) readinessChecks += 1;
+      return summary;
+    });
+    const barrier = await storage.sessions.blockWorkerForTest(created.session.sessionId);
+    const append = client.appendTransaction(
+      runAppend("evt_statusRaceAppend", "run_statusRaceAppend"),
+    );
+    let statusChange: ReturnType<typeof statusCatalog.markSessionStatus> | undefined;
+    try {
+      await vi.waitFor(() => expect(readinessChecks).toBeGreaterThanOrEqual(2));
+
+      statusChange = statusCatalog.markSessionStatus({
+        sessionId: created.session.sessionId,
+        status: "unavailable",
+      });
+      const firstCatalogResult = await Promise.race([
+        statusChange.then(() => "status-change" as const),
+        storage.catalog.getSession(created.session.sessionId).then(() => "independent-read" as const),
+      ]);
+
+      expect(firstCatalogResult).toBe("independent-read");
+      await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      await barrier.release();
+      await expect(append).resolves.toMatchObject({ headSequence: 2 });
+      await expect(statusChange).resolves.toMatchObject({ status: "unavailable" });
+      await expect(
+        client.appendTransaction(runAppend("evt_statusRaceRejected", "run_statusRaceRejected")),
+      ).rejects.toMatchObject({ code: "storage.corrupt" });
+      await expect(storage.sessions.getHeadSequence(created.session.sessionId)).resolves.toBe(2);
+    } finally {
+      await barrier.release().catch(() => undefined);
+      await Promise.allSettled(statusChange === undefined ? [append] : [append, statusChange]);
+      await statusCatalog.close().catch(() => undefined);
+    }
+  });
+
   it("never lets generic reconciliation promote an unavailable session", async () => {
     const storage = await manager();
     const created = await storage.createSession(createCommand());
@@ -527,6 +579,7 @@ describe("catalog and per-session storage workers", () => {
     ]);
 
     const rebuilt = await manager({ homeDirectory }, ["ses_unusedRebuild"]);
+    await rebuilt.ready();
     await expect(rebuilt.reconciler.reconcileSession(created.session.sessionId)).resolves.toMatchObject({
       sessionId: created.session.sessionId,
       projectId: "project_rebuildA",
@@ -1972,9 +2025,17 @@ describe("catalog and per-session storage workers", () => {
 
   it("reports an unhealthy catalog when empty-event reconciliation loses a fault race", async () => {
     const homeDirectory = await temporaryHome();
+    let markFaultObserved = (): void => {};
+    const faultObserved = new Promise<void>((resolve) => {
+      markFaultObserved = resolve;
+    });
     const storage = await manager({
       homeDirectory,
       sessionWorkers: { size: 1, allowTestOperations: true },
+      testFailpoints: {
+        hit: () => undefined,
+        afterSessionFaultObserved: () => markFaultObserved(),
+      },
     });
     const created = await storage.createSession(createCommand());
     const session = await storage.openSession(created.session.sessionId);
@@ -2007,21 +2068,25 @@ describe("catalog and per-session storage workers", () => {
       return reconcileSession(reconcileInput);
     });
 
-    const retry = session.acceptCommand({ ...input, transaction });
+    const retry = expect(
+      session.acceptCommand({ ...input, transaction }),
+    ).rejects.toMatchObject({ code: "storage.session_missing" });
     await reconciliationStarted;
     const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
     const movedDatabasePath = `${databasePath}.observation-fault-race`;
     await rename(databasePath, movedDatabasePath);
-    await expect(
+    const fault = expect(
       storage.sessions.getHeadSequence(created.session.sessionId),
     ).rejects.toMatchObject({ code: "storage.session_missing" });
+    await faultObserved;
     releaseReconciliation();
-    await expect(retry).rejects.toMatchObject({ code: "storage.session_missing" });
+    await fault;
+    await retry;
 
     await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
-      lastEventSequence: 1,
+      lastEventSequence: 2,
     });
 
     await rename(movedDatabasePath, databasePath);
@@ -2118,7 +2183,20 @@ describe("catalog and per-session storage workers", () => {
     const movedDatabasePath = `${databasePath}.reconcile-race`;
     await original.close();
 
-    const restarted = await manager({ homeDirectory }, ["ses_unusedReconcileRace"]);
+    let markFaultObserved = (): void => {};
+    const faultObserved = new Promise<void>((resolve) => {
+      markFaultObserved = resolve;
+    });
+    const restarted = await manager(
+      {
+        homeDirectory,
+        testFailpoints: {
+          hit: () => undefined,
+          afterSessionFaultObserved: () => markFaultObserved(),
+        },
+      },
+      ["ses_unusedReconcileRace"],
+    );
     const reconcileSession = restarted.catalog.reconcileSession.bind(restarted.catalog);
     let releaseReconciliation = (): void => {};
     let markReconciliationStarted = (): void => {};
@@ -2135,18 +2213,21 @@ describe("catalog and per-session storage workers", () => {
     });
 
     const client = await restarted.openSession(created.session.sessionId);
-    const opening = client.getHeadSequence();
+    const opening = expect(client.getHeadSequence()).rejects.toMatchObject({
+      code: "storage.session_missing",
+    });
     await reconciliationStarted;
     await rename(databasePath, movedDatabasePath);
-    await expect(
+    const fault = expect(
       restarted.sessions.getHeadSequence(created.session.sessionId),
     ).rejects.toMatchObject({ code: "storage.session_missing" });
+    await faultObserved;
+    releaseReconciliation();
+    await fault;
     await expect(restarted.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
     });
-
-    releaseReconciliation();
-    await expect(opening).rejects.toMatchObject({ code: "storage.session_missing" });
+    await opening;
     await expect(restarted.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
     });

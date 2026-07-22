@@ -10,6 +10,7 @@ import {
 
 import {
   CatalogClient,
+  catalogSessionStatusCoordinator,
   reconcileValidatedRepairSession,
   type CatalogClientOptions,
   type ReconcileSessionInput,
@@ -41,6 +42,7 @@ import {
 } from "../types.js";
 import { CatalogReconciler } from "./catalog-reconciler.js";
 import { resolveStoragePath, sessionDatabaseRelativePath } from "./paths.js";
+import type { SessionStatusCoordinator } from "../common/session-status-coordinator.js";
 import { registerSessionWorkerPoolForTest } from "./testing-access.js";
 
 export interface StorageIdGenerators {
@@ -71,6 +73,10 @@ export interface StorageTestFailpoints {
   }) => void | Promise<void>;
   readonly beforeCatalogReplacement?: () => void | Promise<void>;
   readonly beforeCatalogCanonicalOpen?: () => void | Promise<void>;
+  readonly afterSessionFaultObserved?: (fields: {
+    readonly sessionId: string;
+    readonly status: "missing" | "unavailable";
+  }) => void | Promise<void>;
 }
 
 export interface SessionStoreManagerOptions {
@@ -268,6 +274,7 @@ interface CatalogObservationState {
 export class SessionStoreManager {
   readonly catalog: CatalogClient;
   readonly #sessions: SessionWorkerPool;
+  readonly #statusCoordinator: SessionStatusCoordinator;
   readonly reconciler: CatalogReconciler;
   private readonly homeDirectory: string;
   private readonly ids: StorageIdGenerators;
@@ -314,6 +321,7 @@ export class SessionStoreManager {
       ...options.catalogWorker,
       allowRepair: catalogRepair !== "off",
     });
+    this.#statusCoordinator = catalogSessionStatusCoordinator(this.catalog);
     const configuredSessionError = options.sessionWorkers?.onSessionError;
     try {
       this.#sessions = new SessionWorkerPool({
@@ -353,6 +361,7 @@ export class SessionStoreManager {
       this.homeDirectory,
       this.catalog,
       this.#sessions,
+      this.#statusCoordinator,
     );
     this.startupRecovery = this.runStartupRecovery(catalogRepair);
   }
@@ -820,11 +829,13 @@ export class SessionStoreManager {
       const existing = await this.catalog.getSession(sessionId);
       if (existing === null) {
         this.sessionFaultStatuses.set(sessionId, status);
+        await this.testFailpoints?.afterSessionFaultObserved?.({ sessionId, status });
         return;
       }
       // A known corrupt session does not become less informative if its file later disappears.
       if (existing.status === "unavailable") status = "unavailable";
       this.sessionFaultStatuses.set(sessionId, status);
+      await this.testFailpoints?.afterSessionFaultObserved?.({ sessionId, status });
       if (existing.status !== status) {
         await this.catalog.markSessionStatus({ sessionId, status });
       }
@@ -1093,17 +1104,18 @@ export class SessionStoreManager {
     return this.#sessions.registerSession(
       sessionId,
       resolveStoragePath(this.homeDirectory, expectedRelativePath),
-      async () => {
+      (operation) => this.#statusCoordinator.run([sessionId], async () => {
         if (!(await this.ensureSessionReconciled(sessionId))) {
           await this.requireReadySession(sessionId);
           throw new StorageError("storage.busy", "Session reconciliation lost its status check", true);
         }
         await this.requireReadySession(sessionId);
-      },
+        return operation();
+      }),
       (events, headSequence) => {
         this.scheduleCatalogObservation(sessionId, events, headSequence);
       },
-      async (input) => {
+      (input, operation) => this.#statusCoordinator.run([sessionId], async () => {
         if (!(await this.ensureSessionReconciled(sessionId))) {
           await this.requireReadySession(sessionId);
           throw new StorageError("storage.busy", "Session reconciliation lost its status check", true);
@@ -1114,7 +1126,8 @@ export class SessionStoreManager {
           await this.catalog.markRecoveryCandidate(sessionId);
         }
         await this.requireReadySession(sessionId);
-      },
+        return operation();
+      }),
     );
   }
 

@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 18
 
-Status: **FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-H2 verification pending**
+Status: **COMMIT-TIME FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-H2 verification pending**
 
 Starting head: `27207689863b2cb8837aa2d6caa660c0af7eaf25` on `milestone-7-crash-recovery`.
 
@@ -51,6 +51,22 @@ The report also identified the earlier test gap: integration coverage used the p
 - Tests that need worker failpoints or direct diagnostics use an internal testing accessor. It is absent from package exports, requires `NODE_ENV=test`, and is never attached to a production manager.
 - Retained negative tests prove the manager, client, catalog client, and normal package entry point expose no ordinary hookless or validated-repair route.
 
+## Independent verdict on the API follow-up
+
+The fresh verifier confirmed the original promotion defect and both reflective/public-surface bypasses were corrected, but classified `5abfc8f` as **NOT RESOLVED** because a status transition could commit after a client's final readiness check while its mutation waited in the session-worker queue. Releasing the worker then committed the append while the catalog already said `unavailable`. The verifier also found a nonblocking lifecycle race in the empty-catalog rebuild test because it called the public reconciler before awaiting manager readiness.
+
+## Commit-time follow-up correction
+
+- A FIFO per-session coordinator serializes manager-created client use with every catalog operation that can insert or change session status, including separately constructed catalog clients for the same normalized storage home.
+- Client read/recovery guards span the final readiness check through the complete session-worker response.
+- Command and append guards likewise span reconciliation, recovery-candidate marking, the final readiness check, and the complete worker commit response.
+- A status transition requested during in-flight work waits. Later work queues behind the transition and rechecks the committed non-ready status before worker use.
+- Nested status classification caused by a worker failure reuses the held session boundary instead of deadlocking.
+- Catalog reconciliation inspection uses the same boundary through its worker-contained reads and catalog compare-and-swap.
+- The retained blocked-worker regression reproduces the verifier's exact interval. It also uses a separately constructed normal `CatalogClient`, proving the coordination cannot be bypassed by opening another client for the same home.
+- The empty-catalog rebuild test now awaits `SessionStoreManager.ready()` before invoking direct reconciliation.
+- Coordination is process-local and introduces no catalog/session cross-database transaction. Hostile concurrent same-user processes remain outside the accepted v0.1 threat model under ADR-0012.
+
 ## Retained classifications and regression evidence
 
 Process regressions now exercise preserved databases produced by the real repair classifier:
@@ -98,6 +114,23 @@ No `.only`, `.skip`, or `.todo` was added. Exact-v3 migration, healthy lazy open
 | Normal-runtime reflection probe | No pool/RPC own field, prototype symbol, manager/reconciler pool, or internal runtime export; temporary home removed |
 | Lint, typecheck, build, `git diff --check` | Passed |
 
+## Commit-time follow-up verification evidence
+
+| Command/probe | Result |
+|---|---|
+| Retained blocked-worker regression before production correction | Failed as expected: status transition won and the blocked append later timed out during test cleanup |
+| Coordinator unit tests | 2 passed; same-session FIFO, cross-session concurrency, and same-session reentrant coordination covered |
+| Focused H2/fault-race integration tests | 7 passed |
+| Full storage integration file | 66 passed |
+| `pnpm test:unit` | 41 files; 455 passed |
+| `pnpm test:integration` | 6 files; 258 passed |
+| `pnpm test:process` | 8 files; 90 passed |
+| `pnpm check` | 67 files; 860 passed; no skips |
+| `pnpm test:e2e` | 33 passed |
+| Lint, typecheck, build, package exports, `git diff --check` | Passed |
+
+The first affected storage-file run exposed two test-only waits that expected an internal pool fault to complete while reconciliation deliberately held the new session boundary. Both tests now use a gated fault-observed signal, release reconciliation, and attach rejection assertions immediately; the full storage file and two later full gates passed without timeout or unhandled rejection. The previously flaky empty-catalog rebuild test now awaits manager readiness.
+
 ## Next action
 
-Create one atomic WI-M7-H2 follow-up commit, then obtain a fresh verification-only review that reruns both independent public-surface probes. Do not begin WI-M7-M1, merge PR #13, or begin Milestone 8 until H2 is independently resolved.
+Create one atomic WI-M7-H2 commit-time follow-up, then obtain another fresh verification-only review that reruns the blocked-worker race in both orders along with the earlier public-surface probes. Do not begin WI-M7-M1, merge PR #13, or begin Milestone 8 until H2 is independently resolved.

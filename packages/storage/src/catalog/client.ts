@@ -8,6 +8,7 @@ import {
   type BrowserSessionSummary,
 } from "@wi/protocol";
 
+import { SessionStatusCoordinator } from "../common/session-status-coordinator.js";
 import { WorkerRpcClient } from "../common/worker-rpc.js";
 import {
   GlobalCommandRecordSchema,
@@ -98,32 +99,107 @@ export interface ReconcileSessionInput {
   readonly recoveryNeeded: boolean;
 }
 
-const catalogClients = new WeakMap<CatalogClient, WorkerRpcClient>();
+interface SharedCatalogSessionStatusCoordinator {
+  readonly coordinator: SessionStatusCoordinator;
+  references: number;
+}
+
+interface CatalogClientState {
+  readonly rpc: WorkerRpcClient;
+  readonly homeDirectory: string;
+  readonly sharedCoordinator: SharedCatalogSessionStatusCoordinator;
+  coordinatorReleased: boolean;
+}
+
+const sharedCatalogSessionStatusCoordinators = new Map<
+  string,
+  SharedCatalogSessionStatusCoordinator
+>();
+const catalogClients = new WeakMap<CatalogClient, CatalogClientState>();
+
+function acquireCatalogSessionStatusCoordinator(
+  homeDirectory: string,
+): SharedCatalogSessionStatusCoordinator {
+  let shared = sharedCatalogSessionStatusCoordinators.get(homeDirectory);
+  if (shared === undefined) {
+    shared = { coordinator: new SessionStatusCoordinator(), references: 0 };
+    sharedCatalogSessionStatusCoordinators.set(homeDirectory, shared);
+  }
+  shared.references += 1;
+  return shared;
+}
+
+function releaseCatalogSessionStatusCoordinator(state: CatalogClientState): void {
+  if (state.coordinatorReleased) return;
+  state.coordinatorReleased = true;
+  state.sharedCoordinator.references -= 1;
+  if (
+    state.sharedCoordinator.references === 0 &&
+    sharedCatalogSessionStatusCoordinators.get(state.homeDirectory) === state.sharedCoordinator
+  ) {
+    sharedCatalogSessionStatusCoordinators.delete(state.homeDirectory);
+  }
+}
+
+function catalogState(client: CatalogClient): CatalogClientState {
+  const state = catalogClients.get(client);
+  if (state === undefined) throw new Error("Catalog client is not initialized");
+  return state;
+}
+
+export function catalogSessionStatusCoordinator(
+  client: CatalogClient,
+): SessionStatusCoordinator {
+  return catalogState(client).sharedCoordinator.coordinator;
+}
+
+function withCatalogSessionStatusTransition<T>(
+  client: CatalogClient,
+  sessionIds: readonly string[],
+  operation: () => Promise<T>,
+): Promise<T> {
+  return catalogSessionStatusCoordinator(client).run(sessionIds, operation);
+}
 
 function catalogRpc(client: CatalogClient): WorkerRpcClient {
-  const rpc = catalogClients.get(client);
-  if (rpc === undefined) throw new Error("Catalog client is not initialized");
-  return rpc;
+  return catalogState(client).rpc;
 }
 
 export class CatalogClient {
   constructor(options: CatalogClientOptions) {
-    catalogClients.set(this, new WorkerRpcClient({
-      workerId: "catalog",
-      entryUrl: new URL("./worker-entry.js", import.meta.url),
-      workerData: {
-        workerId: "catalog",
-        databasePath: resolve(options.homeDirectory, "catalog.sqlite3"),
-        allowRepair: options.allowRepair === true,
-      },
-      ...(options.defaultRequestTimeoutMs === undefined
-        ? {}
-        : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
-      ...(options.closeTimeoutMs === undefined ? {} : { closeTimeoutMs: options.closeTimeoutMs }),
-      ...(options.onWorkerReplacement === undefined
-        ? {}
-        : { onReplacement: options.onWorkerReplacement }),
-    }));
+    const homeDirectory = resolve(options.homeDirectory);
+    const sharedCoordinator = acquireCatalogSessionStatusCoordinator(homeDirectory);
+    try {
+      catalogClients.set(this, {
+        rpc: new WorkerRpcClient({
+          workerId: "catalog",
+          entryUrl: new URL("./worker-entry.js", import.meta.url),
+          workerData: {
+            workerId: "catalog",
+            databasePath: resolve(homeDirectory, "catalog.sqlite3"),
+            allowRepair: options.allowRepair === true,
+          },
+          ...(options.defaultRequestTimeoutMs === undefined
+            ? {}
+            : { defaultRequestTimeoutMs: options.defaultRequestTimeoutMs }),
+          ...(options.closeTimeoutMs === undefined
+            ? {}
+            : { closeTimeoutMs: options.closeTimeoutMs }),
+          ...(options.onWorkerReplacement === undefined
+            ? {}
+            : { onReplacement: options.onWorkerReplacement }),
+        }),
+        homeDirectory,
+        sharedCoordinator,
+        coordinatorReleased: false,
+      });
+    } catch (error) {
+      sharedCoordinator.references -= 1;
+      if (sharedCoordinator.references === 0) {
+        sharedCatalogSessionStatusCoordinators.delete(homeDirectory);
+      }
+      throw error;
+    }
   }
 
   async prepareOpen(): Promise<void> {
@@ -187,11 +263,13 @@ export class CatalogClient {
   }
 
   async failGlobalCommand(input: FailGlobalCommandInput): Promise<GlobalCommandRecord> {
-    return catalogRpc(this).request(
-      "catalog.failGlobalCommand",
-      input,
-      GlobalCommandRecordSchema,
-      { outcome: "write" },
+    return withCatalogSessionStatusTransition(this, [input.session.sessionId], () =>
+      catalogRpc(this).request(
+        "catalog.failGlobalCommand",
+        input,
+        GlobalCommandRecordSchema,
+        { outcome: "write" },
+      ),
     );
   }
 
@@ -223,9 +301,11 @@ export class CatalogClient {
   }
 
   async createSessionIndex(input: CreateSessionIndexInput): Promise<SessionSummary> {
-    return catalogRpc(this).request("catalog.createSessionIndex", input, SessionSummarySchema, {
-      outcome: "write",
-    });
+    return withCatalogSessionStatusTransition(this, [input.sessionId], () =>
+      catalogRpc(this).request("catalog.createSessionIndex", input, SessionSummarySchema, {
+        outcome: "write",
+      }),
+    );
   }
 
   async countSessions(): Promise<number> {
@@ -256,11 +336,15 @@ export class CatalogClient {
     sessions: readonly { readonly sessionId: string; readonly dbRelativePath: string }[],
   ): Promise<readonly string[]> {
     const input = MarkSessionsMissingInputSchema.parse({ sessions });
-    return catalogRpc(this).request(
-      "catalog.markSessionsMissing",
-      input,
-      z.array(SessionIdSchema).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
-      { outcome: "write" },
+    return withCatalogSessionStatusTransition(
+      this,
+      input.sessions.map((session) => session.sessionId),
+      () => catalogRpc(this).request(
+        "catalog.markSessionsMissing",
+        input,
+        z.array(SessionIdSchema).max(MAXIMUM_CATALOG_REPAIR_PAGE_SIZE),
+        { outcome: "write" },
+      ),
     );
   }
 
@@ -323,18 +407,25 @@ export class CatalogClient {
   }
 
   async markSessionStatus(input: MarkSessionStatusInput): Promise<SessionSummary> {
-    return catalogRpc(this).request("catalog.markSessionStatus", input, SessionSummarySchema, {
-      outcome: "write",
-    });
+    return withCatalogSessionStatusTransition(this, [input.sessionId], () =>
+      catalogRpc(this).request("catalog.markSessionStatus", input, SessionSummarySchema, {
+        outcome: "write",
+      }),
+    );
   }
 
   async repairSessionClassification(
     inputValue: RepairSessionClassificationInput,
   ): Promise<SessionSummary> {
     const input = RepairSessionClassificationInputSchema.parse(inputValue);
-    return catalogRpc(this).request("catalog.repairSessionClassification", input, SessionSummarySchema, {
-      outcome: "write",
-    });
+    return withCatalogSessionStatusTransition(this, [input.sessionId], () =>
+      catalogRpc(this).request(
+        "catalog.repairSessionClassification",
+        input,
+        SessionSummarySchema,
+        { outcome: "write" },
+      ),
+    );
   }
 
   async reconcileSessionWithStatus(
@@ -353,7 +444,12 @@ export class CatalogClient {
   }
 
   async close(deadlineAtMs?: number): Promise<void> {
-    await catalogRpc(this).close(deadlineAtMs);
+    const state = catalogState(this);
+    try {
+      await state.rpc.close(deadlineAtMs);
+    } finally {
+      releaseCatalogSessionStatusCoordinator(state);
+    }
   }
 }
 
@@ -361,10 +457,12 @@ export function reconcileValidatedRepairSession(
   catalog: CatalogClient,
   input: ReconcileSessionInput,
 ): Promise<ReconcileSessionResult> {
-  return catalogRpc(catalog).request(
-    "catalog.reconcileValidatedRepairSession",
-    input,
-    ReconcileSessionResultSchema,
-    { outcome: "write" },
+  return withCatalogSessionStatusTransition(catalog, [input.manifest.sessionId], () =>
+    catalogRpc(catalog).request(
+      "catalog.reconcileValidatedRepairSession",
+      input,
+      ReconcileSessionResultSchema,
+      { outcome: "write" },
+    ),
   );
 }

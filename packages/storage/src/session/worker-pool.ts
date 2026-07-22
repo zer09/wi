@@ -51,7 +51,11 @@ import {
   type SessionRecoveryResult,
   type CreationProvenance,
 } from "../types.js";
-import { SessionClient } from "./client.js";
+import {
+  SessionClient,
+  type SessionCommitExecutor,
+  type SessionUseExecutor,
+} from "./client.js";
 import {
   DISCOVERY_ERROR_CODE_MAXIMUM_UNITS,
   DISCOVERY_ERROR_MESSAGE_MAXIMUM_UNITS,
@@ -263,19 +267,19 @@ export class SessionWorkerPool {
   registerSession(
     sessionId: string,
     databasePath: string,
-    beforeUse?: () => Promise<void>,
+    executeUse?: SessionUseExecutor,
     afterCommit?: (
       events: readonly z.infer<typeof SessionEventSchema>[],
       headSequence: number,
     ) => void,
-    beforeCommit?: (input: AcceptCommandInput | AppendTransactionInput) => Promise<void>,
+    executeCommit?: SessionCommitExecutor,
   ): SessionClient {
     const existing = this.paths.get(sessionId);
     if (existing !== undefined && existing !== databasePath) {
       throw new Error("Session database path cannot change within a pool");
     }
     this.paths.set(sessionId, databasePath);
-    return new SessionClient(this, sessionId, beforeUse, afterCommit, beforeCommit);
+    return new SessionClient(this, sessionId, executeUse, afterCommit, executeCommit);
   }
 
   session(sessionId: string): SessionClient {

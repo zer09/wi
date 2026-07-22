@@ -160,11 +160,46 @@ describe("real process-tree cleanup", () => {
           expect(processGroupExists(ready.pid)).toBe(true);
 
           await expect(processHandle.terminate()).rejects.toThrow("cleanup failed");
-          expect(processGroupExists(ready.pid)).toBe(false);
+          // Failed release retains both watchdog authority and the anchor-held
+          // group identity, so an exact PGID cannot be reused before retry.
+          expect(processGroupExists(ready.pid)).toBe(true);
           await expect(processHandle.terminate()).resolves.toBeUndefined();
+          expect(processGroupExists(ready.pid)).toBe(false);
           const released = await waitForReleaseTestEvent(statePath, "stopping");
           expect(released.releaseAttempts).toBe(2);
           await expectProcessGone(released.watchdogPid);
+        } finally {
+          await processHandle.terminate().catch(() => undefined);
+        }
+      });
+    },
+    10_000,
+  );
+
+  it(
+    "retains the anchored identity after direct leader SIGKILL until release retry",
+    async () => {
+      await withPosixReleaseTest("ignore-first", async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-live"],
+          waitForReady: false,
+        });
+        const ready = await processHandle.waitForMessage("ready");
+        if (typeof ready.descendantPid !== "number") throw new Error("Missing descendant PID");
+        try {
+          await processHandle.signal("SIGKILL");
+          await expect(processHandle.waitForExit()).resolves.toMatchObject({ signal: "SIGKILL" });
+          const retained = await waitForReleaseTestEvent(statePath, "ignored-release");
+          if (retained.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(retained.fixturePid)).toBe(true);
+          expect(processExists(ready.descendantPid)).toBe(true);
+
+          await expect(processHandle.terminate()).rejects.toThrow("cleanup failed");
+          expect(processGroupExists(retained.fixturePid)).toBe(true);
+          await expect(processHandle.terminate()).resolves.toBeUndefined();
+          expect(processGroupExists(retained.fixturePid)).toBe(false);
+          await expectProcessGone(ready.descendantPid);
         } finally {
           await processHandle.terminate().catch(() => undefined);
         }
@@ -190,9 +225,10 @@ describe("real process-tree cleanup", () => {
           expect(failed).toMatchObject({ releaseAttempts: 1, event: "ignored-release" });
           expect(processExists(failed.watchdogPid)).toBe(true);
           if (failed.fixturePid === null) throw new Error("Missing fixture PID");
-          expect(processGroupExists(failed.fixturePid)).toBe(false);
+          expect(processGroupExists(failed.fixturePid)).toBe(true);
 
           await expect(processHandle.terminate()).resolves.toBeUndefined();
+          expect(processGroupExists(failed.fixturePid)).toBe(false);
           const recovered = await readReleaseTestState(statePath);
           expect(recovered.releaseAttempts).toBe(2);
           await expectProcessGone(recovered.watchdogPid);
@@ -220,6 +256,8 @@ describe("real process-tree cleanup", () => {
           const failed = await readReleaseTestState(statePath);
           expect(failed.releaseAttempts).toBe(1);
           expect(processExists(failed.watchdogPid)).toBe(true);
+          if (failed.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(failed.fixturePid)).toBe(true);
 
           await expect(processHandle.terminate()).resolves.toBeUndefined();
           await expectProcessGone(failed.watchdogPid);
@@ -271,6 +309,8 @@ describe("real process-tree cleanup", () => {
           const failed = await readReleaseTestState(statePath);
           expect(failed).toMatchObject({ releaseAttempts: 1, event: "ignored-release" });
           expect(processExists(failed.watchdogPid)).toBe(true);
+          if (failed.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(failed.fixturePid)).toBe(true);
 
           await expect(runner.terminateAll()).resolves.toBeUndefined();
           expect(runner.activeCount).toBe(0);

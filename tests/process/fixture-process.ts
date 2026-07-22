@@ -142,10 +142,21 @@ export class FixtureProcessRunner {
     let readinessTimedOut = false;
     let readinessObserved = false;
     let timer: NodeJS.Timeout | null = null;
+    let cleanupFailure: unknown = null;
+    let rejectCleanup: (error: unknown) => void = () => undefined;
+    const cleanupFailed = new Promise<never>((_resolve, reject) => {
+      rejectCleanup = reject;
+    });
+    const requestTermination = (): void => {
+      void this.terminate(child).catch((error: unknown) => {
+        cleanupFailure = error;
+        rejectCleanup(error);
+      });
+    };
     const armRunTimeout = (): void => {
       timer = setTimeout(() => {
         timedOut = true;
-        void this.terminate(child).catch(() => undefined);
+        requestTermination();
       }, timeoutMs);
       timer.unref();
     };
@@ -166,7 +177,7 @@ export class FixtureProcessRunner {
     });
     child.once("error", (error) => {
       spawnError = error;
-      void this.terminate(child).catch(() => undefined);
+      requestTermination();
     });
 
     const closed = new Promise<FixtureProcessResult>((resolve) => {
@@ -190,13 +201,13 @@ export class FixtureProcessRunner {
       const readinessTimeoutMs = options.readinessTimeoutMs ?? 5_000;
       timer = setTimeout(() => {
         readinessTimedOut = true;
-        void this.terminate(child).catch(() => undefined);
+        requestTermination();
       }, readinessTimeoutMs);
       timer.unref();
     }
 
     try {
-      const result = await closed;
+      const result = await Promise.race([closed, cleanupFailed]);
       if (spawnError !== null) throw spawnError;
       if (readinessTimedOut) {
         throw new FixtureProcessReadinessTimeoutError(
@@ -209,8 +220,9 @@ export class FixtureProcessRunner {
       return result;
     } finally {
       if (timer !== null) clearTimeout(timer);
-      // Leader exit does not prove its detached process group is empty.
-      await this.terminate(child);
+      // Leader exit does not prove its detached process group is empty. A
+      // failed cleanup stays owned so terminateAll() can perform the retry.
+      if (cleanupFailure === null) await this.terminate(child);
     }
   }
 

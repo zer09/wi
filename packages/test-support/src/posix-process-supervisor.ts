@@ -81,6 +81,10 @@ function stopWatchdog(): never {
   throw new Error("POSIX owner watchdog did not stop");
 }
 
+function acceptRelease(): void {
+  process.send?.({ type: "wi.test-support.posix-release-accepted", token: controlToken });
+}
+
 function reclaimAndStop(immediate: boolean): void {
   if (settling) return;
   settling = true;
@@ -145,10 +149,12 @@ process.on("message", (message: unknown) => {
     }
     if (releaseTestMode === "delay-first" && releaseAttempts === 1) {
       recordReleaseTestState("delayed-release");
+      acceptRelease();
       setTimeout(() => reclaimAndStop(false), 150);
       return;
     }
     recordReleaseTestState("release-requested");
+    acceptRelease();
     reclaimAndStop(false);
   }
 });

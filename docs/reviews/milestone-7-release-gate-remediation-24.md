@@ -69,16 +69,31 @@ Both probes checked the sentinel before fallback probe cleanup. Explicit target 
 | Baseline isolated owner-death reuse probe | Reproduced unrelated sentinel death |
 | Corrected isolated explicit-cleanup probe | Reuse prevented; sentinel alive after cleanup and retry |
 | Corrected isolated owner-death probe | Reuse prevented; sentinel alive; watchdog gone |
-| Focused anchor regression | 1 passed |
-| Complete process-harness descendant suite | 12 passed |
+| Corrected isolated failed-release retry probe | Old group retained after rejection; forced allocation skipped PID/PGID 20 for sentinel 21; sentinel survived retry |
+| Focused anchor/retry regressions | 6 passed |
+| Complete process-harness descendant suite | 13 passed |
 | `pnpm test:unit` | 42 files; 461 passed |
 | `pnpm test:integration` | 6 files; 262 passed |
 | `pnpm test:property` | 10 files; 36 passed |
-| `pnpm test:process` | 9 files; 101 passed |
-| `pnpm check` | 69 files; 881 passed; no skips |
+| `pnpm test:process` | 9 files; 102 passed |
+| `pnpm check` | 69 files; 882 passed; no skips |
 | `pnpm test:e2e` | 33 passed |
 | Lint, typecheck, build, package exports, `git diff --check` | Passed |
 
-## Independent verification required
+The first complete follow-up `pnpm check` encountered the previously known unrelated 5-second timeout in the catalog bootstrap-bound integration test. That exact test then passed three consecutive `CI=true` focused runs in 959–978 ms, and a complete fresh `pnpm check` passed all 882 tests. No timeout or unrelated test behavior was changed.
 
-A fresh review-only verifier must reproduce or inspect the exact old-head PID/PGID trace, independently establish that the anchor is created before fixture code and keeps the kernel group identity allocated, rerun both corrected namespace paths, verify the unrelated sentinel remains unsignalled before fallback cleanup, and confirm all ordinary ownership/retry regressions and cleanup. The verifier must classify `WI-M7-M5` as `RESOLVED`, `PARTIALLY RESOLVED`, `NOT RESOLVED`, or `INSUFFICIENT PROBE` and stop.
+## First independent verification and retry-gap follow-up
+
+The first fresh verifier independently reproduced both baseline paths and confirmed the anchor prevents immediate post-leader and owner-death reuse, but classified the first correction **NOT RESOLVED**. Explicit `terminateProcessTree()` still signalled and removed the anchor before asking the watchdog to release. When the first release was deliberately rejected, ownership remained in the WeakMap while the group was empty. The verifier then forced the old PGID onto a sentinel, and the supported second cleanup attempt sent that unrelated sentinel `SIGTERM`; it exited 42.
+
+The follow-up correction closes that interval:
+
+- a watchdog-owned `terminateProcessTree()` now requests `releasePosixSupervisor()` without first signalling the group;
+- a rejected release retains the live watchdog, anchor, and kernel-held PGID together;
+- public signals to watchdog-owned fixtures target the direct leader, leaving the anchor and descendants for watchdog reclamation after leader settlement;
+- an unexpected or disconnected watchdog that has not accepted reclamation is stopped and verified gone while the anchor still reserves the group, then the harness directly reclaims that exact anchored group;
+- the watchdog sends an authenticated acceptance before its first group signal; after acceptance, the harness never uses a numeric fallback and fails closed unless watchdog-owned reclamation is verified;
+- unowned detached children retain the prior direct process-group TERM/KILL behavior;
+- retry regressions now require the group to remain present after ignore, error, and disconnect failures and to disappear only after successful retry.
+
+A fresh review-only verifier must independently repeat the failed-release exact-reuse probe against the pre-follow-up commit and current HEAD, then confirm no path retains numeric cleanup authority after losing the anchor. The verifier must also reconfirm initial explicit cleanup, owner death, direct SIGTERM/SIGKILL, disconnected escalation, ordinary descendants, retry bounds, and cleanup before classifying `WI-M7-M5` as `RESOLVED`, `PARTIALLY RESOLVED`, `NOT RESOLVED`, or `INSUFFICIENT PROBE` and stopping.

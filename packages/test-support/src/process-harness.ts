@@ -141,6 +141,7 @@ interface PosixSupervisorOwnership {
   readonly controlToken: string;
   releaseAttempt: Promise<void> | null;
   explicitCleanupStarted: boolean;
+  reclamationAccepted: boolean;
 }
 
 const posixSupervisors = new WeakMap<ChildProcess, PosixSupervisorOwnership>();
@@ -238,6 +239,7 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
       controlToken,
       releaseAttempt: null,
       explicitCleanupStarted: false,
+      reclamationAccepted: false,
     };
   } catch (error) {
     ownerPipe.destroy();
@@ -330,14 +332,29 @@ async function verifyPosixSupervisorRelease(
   }
 }
 
+async function signalDetachedProcessGroup(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+): Promise<void> {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch (groupError) {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group and leader are already gone.
+      if ((groupError as NodeJS.ErrnoException).code !== "ESRCH") throw groupError;
+    }
+  }
+}
+
 async function safelyEscalatePosixSupervisorRelease(
   child: ChildProcess,
   ownership: PosixSupervisorOwnership,
 ): Promise<void> {
-  await signalProcessTree(child, "SIGKILL");
-  if (!(await waitForProcessTreeGone(child, 1_000))) {
-    throw new Error(`Fixture process group ${String(child.pid)} survived watchdog escalation`);
-  }
+  // Stop the stale watchdog while the anchor still reserves the group identity.
+  // Only then may this process reclaim that exact still-owned group itself.
   if (
     ownership.supervisor.exitCode === null &&
     ownership.supervisor.signalCode === null
@@ -346,6 +363,15 @@ async function safelyEscalatePosixSupervisorRelease(
   }
   if (!(await waitForDirectProcessGone(ownership.supervisor, 1_000))) {
     throw new Error("POSIX owner watchdog survived release escalation");
+  }
+  if (!ownership.reclamationAccepted) {
+    await signalDetachedProcessGroup(child, "SIGKILL");
+  }
+  if (!(await waitForProcessTreeGone(child, 1_000))) {
+    const detail = ownership.reclamationAccepted
+      ? "remained after its watchdog accepted reclamation"
+      : "survived watchdog escalation";
+    throw new Error(`Fixture process group ${String(child.pid)} ${detail}`);
   }
 }
 
@@ -382,13 +408,19 @@ async function performPosixSupervisorRelease(
         onError = (error: Error) => reject(error);
         onMessage = (message: unknown) => {
           if (
-            message !== null &&
-            typeof message === "object" &&
-            "type" in message &&
-            message.type === "wi.test-support.posix-release-error" &&
-            "token" in message &&
-            message.token === ownership.controlToken
+            message === null ||
+            typeof message !== "object" ||
+            !("type" in message) ||
+            !("token" in message) ||
+            message.token !== ownership.controlToken
           ) {
+            return;
+          }
+          if (message.type === "wi.test-support.posix-release-accepted") {
+            // After this authenticated handoff, only the watchdog may have
+            // signalled the anchor. Numeric fallback is no longer safe.
+            ownership.reclamationAccepted = true;
+          } else if (message.type === "wi.test-support.posix-release-error") {
             reject(new Error("POSIX owner watchdog rejected release"));
           }
         };
@@ -481,12 +513,9 @@ export async function spawnNodeProcessTree(
     await waitForPosixFixtureGate(child);
     const managedChild = child;
     posixOwnership.supervisor.once("close", () => {
-      if (posixOwnership.releaseAttempt !== null || managedChild.pid === undefined) return;
-      try {
-        process.kill(-managedChild.pid, "SIGKILL");
-      } catch {
-        // The fixture group may already have completed naturally.
-      }
+      if (posixOwnership.releaseAttempt !== null) return;
+      // Route unexpected watchdog death through the same anchored escalation.
+      void releasePosixSupervisor(managedChild).catch(() => undefined);
     });
     managedChild.once("close", () => {
       if (posixOwnership.explicitCleanupStarted) return;
@@ -693,17 +722,13 @@ export async function signalProcessTree(
   child: ChildProcess,
   signal: NodeJS.Signals,
 ): Promise<void> {
-  if (child.pid === undefined) return;
-  try {
-    process.kill(-child.pid, signal);
-  } catch (groupError) {
-    try {
-      child.kill(signal);
-    } catch {
-      // The process group and leader are already gone.
-      if ((groupError as NodeJS.ErrnoException).code !== "ESRCH") throw groupError;
-    }
+  if (posixSupervisors.has(child)) {
+    // Keep the anchor alive until the watchdog has durably accepted cleanup.
+    // The watchdog reclaims descendants after the signalled leader settles.
+    child.kill(signal);
+    return;
   }
+  await signalDetachedProcessGroup(child, signal);
 }
 
 async function waitForProcessTreeGone(child: ChildProcess, timeoutMs: number): Promise<boolean> {
@@ -726,9 +751,18 @@ export async function terminateProcessTree(
   terminationGraceMs = 1_000,
 ): Promise<void> {
   const ownership = posixSupervisors.get(child);
-  if (ownership !== undefined) ownership.explicitCleanupStarted = true;
-  // A detached process group can outlive its direct leader. Always signal and
-  // verify the owned group, not merely the leader's close event.
+  if (ownership !== undefined) {
+    ownership.explicitCleanupStarted = true;
+    // The watchdog must accept and finish reclamation before the anchor can
+    // disappear. A rejected release retains both ownership and group identity.
+    try {
+      await releasePosixSupervisor(child);
+    } catch (error) {
+      throw new AggregateError([error], "Server process cleanup failed");
+    }
+    return;
+  }
+  // Unowned detached children still require direct group signalling.
   const errors: unknown[] = [];
   try {
     await signalProcessTree(child, "SIGTERM");
@@ -745,11 +779,6 @@ export async function terminateProcessTree(
     if (!(await waitForProcessTreeGone(child, terminationGraceMs))) {
       errors.push(new Error(`Server process tree ${String(child.pid)} did not disappear`));
     }
-  }
-  try {
-    await releasePosixSupervisor(child);
-  } catch (error) {
-    errors.push(error);
   }
   if (errors.length > 0) throw new AggregateError(errors, "Server process cleanup failed");
 }

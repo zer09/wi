@@ -145,7 +145,7 @@ export class FixtureProcessRunner {
     const armRunTimeout = (): void => {
       timer = setTimeout(() => {
         timedOut = true;
-        void this.terminate(child);
+        void this.terminate(child).catch(() => undefined);
       }, timeoutMs);
       timer.unref();
     };
@@ -166,7 +166,7 @@ export class FixtureProcessRunner {
     });
     child.once("error", (error) => {
       spawnError = error;
-      void this.terminate(child);
+      void this.terminate(child).catch(() => undefined);
     });
 
     const closed = new Promise<FixtureProcessResult>((resolve) => {
@@ -190,7 +190,7 @@ export class FixtureProcessRunner {
       const readinessTimeoutMs = options.readinessTimeoutMs ?? 5_000;
       timer = setTimeout(() => {
         readinessTimedOut = true;
-        void this.terminate(child);
+        void this.terminate(child).catch(() => undefined);
       }, readinessTimeoutMs);
       timer.unref();
     }

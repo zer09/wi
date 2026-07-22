@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,64 @@ async function expectProcessGone(pid: number): Promise<void> {
   expect(processExists(pid)).toBe(false);
 }
 
+function processGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+interface PosixReleaseTestState {
+  readonly watchdogPid: number;
+  readonly fixturePid: number | null;
+  readonly releaseAttempts: number;
+  readonly event: string;
+}
+
+async function readReleaseTestState(path: string): Promise<PosixReleaseTestState> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(await readFile(path, "utf8")) as PosixReleaseTestState;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !(error instanceof SyntaxError)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  throw new Error("POSIX release test state was not recorded");
+}
+
+async function withPosixReleaseTest(
+  mode: "ignore-first" | "error-first" | "disconnect-first" | "delay-first",
+  run: (statePath: string) => Promise<void>,
+): Promise<void> {
+  const statePath = join(tmpdir(), `wi-posix-release-${randomUUID()}.json`);
+  const previousMode = process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE;
+  const previousStatePath = process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH;
+  process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE = mode;
+  process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH = statePath;
+  try {
+    await run(statePath);
+  } finally {
+    if (previousMode === undefined) {
+      delete process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE;
+    } else {
+      process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE = previousMode;
+    }
+    if (previousStatePath === undefined) {
+      delete process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH;
+    } else {
+      process.env.WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH = previousStatePath;
+    }
+    await rm(statePath, { force: true });
+  }
+}
+
 describe("real process-tree cleanup", () => {
   it.each(["leader-live", "leader-exits"] as const)(
     "terminates descendants when the %s case is cleaned up",
@@ -64,6 +122,120 @@ describe("real process-tree cleanup", () => {
         await processHandle.terminate().catch(() => undefined);
         if (descendantPid !== null) await expectProcessGone(descendantPid);
       }
+    },
+    10_000,
+  );
+
+  it(
+    "retries POSIX watchdog release after the first request times out",
+    async () => {
+      await withPosixReleaseTest("ignore-first", async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-live"],
+          waitForReady: false,
+        });
+        const ready = await processHandle.waitForMessage("ready");
+        if (typeof ready.descendantPid !== "number") throw new Error("Missing descendant PID");
+        try {
+          await expect(processHandle.terminate()).rejects.toThrow("cleanup failed");
+          const failed = await readReleaseTestState(statePath);
+          expect(failed).toMatchObject({ releaseAttempts: 1, event: "ignored-release" });
+          expect(processExists(failed.watchdogPid)).toBe(true);
+          if (failed.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(failed.fixturePid)).toBe(false);
+
+          await expect(processHandle.terminate()).resolves.toBeUndefined();
+          const recovered = await readReleaseTestState(statePath);
+          expect(recovered.releaseAttempts).toBe(2);
+          await expectProcessGone(recovered.watchdogPid);
+          await expectProcessGone(ready.descendantPid);
+        } finally {
+          await processHandle.terminate().catch(() => undefined);
+        }
+      });
+    },
+    10_000,
+  );
+
+  it.each(["error-first", "disconnect-first"] as const)(
+    "retries POSIX watchdog release after %s failure",
+    async (mode) => {
+      await withPosixReleaseTest(mode, async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-live"],
+          waitForReady: false,
+        });
+        await processHandle.waitForMessage("ready");
+        try {
+          await expect(processHandle.terminate()).rejects.toThrow("cleanup failed");
+          const failed = await readReleaseTestState(statePath);
+          expect(failed.releaseAttempts).toBe(1);
+          expect(processExists(failed.watchdogPid)).toBe(true);
+
+          await expect(processHandle.terminate()).resolves.toBeUndefined();
+          await expectProcessGone(failed.watchdogPid);
+          if (failed.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(failed.fixturePid)).toBe(false);
+        } finally {
+          await processHandle.terminate().catch(() => undefined);
+        }
+      });
+    },
+    10_000,
+  );
+
+  it(
+    "shares one active POSIX watchdog release across concurrent cleanup calls",
+    async () => {
+      await withPosixReleaseTest("delay-first", async (statePath) => {
+        const processHandle = await RealServerProcess.start({
+          fixturePath,
+          arguments: ["leader-live"],
+          waitForReady: false,
+        });
+        await processHandle.waitForMessage("ready");
+        try {
+          await Promise.all([processHandle.terminate(), processHandle.terminate()]);
+          const released = await readReleaseTestState(statePath);
+          expect(released.releaseAttempts).toBe(1);
+          await expectProcessGone(released.watchdogPid);
+          if (released.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(released.fixturePid)).toBe(false);
+        } finally {
+          await processHandle.terminate().catch(() => undefined);
+        }
+      });
+    },
+    10_000,
+  );
+
+  it(
+    "FixtureProcessRunner terminateAll retries a failed watchdog cleanup",
+    async () => {
+      await withPosixReleaseTest("ignore-first", async (statePath) => {
+        const runner = new FixtureProcessRunner(150, 50);
+        try {
+          await expect(
+            runner.run(process.execPath, [fixturePath, "leader-live"], 150),
+          ).rejects.toThrow("cleanup failed");
+          expect(runner.activeCount).toBe(1);
+          const failed = await readReleaseTestState(statePath);
+          expect(failed).toMatchObject({ releaseAttempts: 1, event: "ignored-release" });
+          expect(processExists(failed.watchdogPid)).toBe(true);
+
+          await expect(runner.terminateAll()).resolves.toBeUndefined();
+          expect(runner.activeCount).toBe(0);
+          const recovered = await readReleaseTestState(statePath);
+          expect(recovered.releaseAttempts).toBe(2);
+          await expectProcessGone(recovered.watchdogPid);
+          if (recovered.fixturePid === null) throw new Error("Missing fixture PID");
+          expect(processGroupExists(recovered.fixturePid)).toBe(false);
+        } finally {
+          await runner.terminateAll().catch(() => undefined);
+        }
+      });
     },
     10_000,
   );

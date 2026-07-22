@@ -1,7 +1,9 @@
-import { createReadStream, fstatSync } from "node:fs";
+import { createReadStream, fstatSync, writeFileSync } from "node:fs";
 
 const OWNER_FD = 3;
 const CONTROL_TOKEN_NAME = "WI_TEST_SUPPORT_POSIX_CONTROL_TOKEN";
+const RELEASE_TEST_MODE_NAME = "WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE";
+const RELEASE_TEST_STATE_PATH_NAME = "WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH";
 const TERM_GRACE_MS = 250;
 const KILL_GRACE_MS = 1_000;
 
@@ -10,6 +12,10 @@ if (process.platform !== "linux" || typeof process.send !== "function") process.
 const controlToken = process.env[CONTROL_TOKEN_NAME];
 delete process.env[CONTROL_TOKEN_NAME];
 if (controlToken === undefined || controlToken.length === 0) process.exit(65);
+const releaseTestMode = process.env[RELEASE_TEST_MODE_NAME];
+const releaseTestStatePath = process.env[RELEASE_TEST_STATE_PATH_NAME];
+delete process.env[RELEASE_TEST_MODE_NAME];
+delete process.env[RELEASE_TEST_STATE_PATH_NAME];
 
 function groupExists(pid: number): boolean {
   try {
@@ -49,8 +55,27 @@ async function reclaimGroup(pid: number, immediate: boolean): Promise<boolean> {
 
 let fixturePid: number | null = null;
 let settling = false;
+let releaseAttempts = 0;
+
+function recordReleaseTestState(event: string): void {
+  if (releaseTestStatePath === undefined) return;
+  try {
+    writeFileSync(
+      releaseTestStatePath,
+      JSON.stringify({
+        watchdogPid: process.pid,
+        fixturePid,
+        releaseAttempts,
+        event,
+      }),
+    );
+  } catch {
+    // Test diagnostics must never weaken watchdog ownership.
+  }
+}
 
 function stopWatchdog(): never {
+  recordReleaseTestState("stopping");
   process.removeAllListeners();
   process.kill(process.pid, "SIGKILL");
   throw new Error("POSIX owner watchdog did not stop");
@@ -98,10 +123,32 @@ process.on("message", (message: unknown) => {
     groupExists(message.pid)
   ) {
     fixturePid = message.pid;
+    recordReleaseTestState("registered");
     process.send?.({ type: "wi.test-support.posix-registered", token: controlToken });
     return;
   }
   if (message.type === "wi.test-support.posix-release" && fixturePid !== null) {
+    releaseAttempts += 1;
+    if (releaseTestMode === "ignore-first" && releaseAttempts === 1) {
+      recordReleaseTestState("ignored-release");
+      return;
+    }
+    if (releaseTestMode === "error-first" && releaseAttempts === 1) {
+      recordReleaseTestState("release-error");
+      process.send?.({ type: "wi.test-support.posix-release-error", token: controlToken });
+      return;
+    }
+    if (releaseTestMode === "disconnect-first" && releaseAttempts === 1) {
+      recordReleaseTestState("disconnected-release");
+      process.disconnect?.();
+      return;
+    }
+    if (releaseTestMode === "delay-first" && releaseAttempts === 1) {
+      recordReleaseTestState("delayed-release");
+      setTimeout(() => reclaimAndStop(false), 150);
+      return;
+    }
+    recordReleaseTestState("release-requested");
     reclaimAndStop(false);
   }
 });

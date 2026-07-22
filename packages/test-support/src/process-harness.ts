@@ -139,7 +139,8 @@ function formatIpcDiagnostics(diagnostics: ProcessIpcDiagnostics): string {
 interface PosixSupervisorOwnership {
   readonly supervisor: ChildProcess;
   readonly controlToken: string;
-  release: Promise<void> | null;
+  releaseAttempt: Promise<void> | null;
+  explicitCleanupStarted: boolean;
 }
 
 const posixSupervisors = new WeakMap<ChildProcess, PosixSupervisorOwnership>();
@@ -232,7 +233,12 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
       "wi.test-support.posix-ready",
       controlToken,
     );
-    return { supervisor, controlToken, release: null };
+    return {
+      supervisor,
+      controlToken,
+      releaseAttempt: null,
+      explicitCleanupStarted: false,
+    };
   } catch (error) {
     ownerPipe.destroy();
     supervisor.kill("SIGKILL");
@@ -298,34 +304,141 @@ async function waitForPosixFixtureGate(child: ChildProcess): Promise<void> {
   acknowledgement.write("continue");
 }
 
+async function waitForDirectProcessGone(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return true;
+    try {
+      process.kill(child.pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function verifyPosixSupervisorRelease(
+  child: ChildProcess,
+  ownership: PosixSupervisorOwnership,
+): Promise<void> {
+  if (!(await waitForProcessTreeGone(child, 1_000))) {
+    throw new Error(`Fixture process group ${String(child.pid)} remained after watchdog release`);
+  }
+  if (!(await waitForDirectProcessGone(ownership.supervisor, 1_000))) {
+    throw new Error("POSIX owner watchdog remained after release");
+  }
+}
+
+async function safelyEscalatePosixSupervisorRelease(
+  child: ChildProcess,
+  ownership: PosixSupervisorOwnership,
+): Promise<void> {
+  await signalProcessTree(child, "SIGKILL");
+  if (!(await waitForProcessTreeGone(child, 1_000))) {
+    throw new Error(`Fixture process group ${String(child.pid)} survived watchdog escalation`);
+  }
+  if (
+    ownership.supervisor.exitCode === null &&
+    ownership.supervisor.signalCode === null
+  ) {
+    ownership.supervisor.kill("SIGKILL");
+  }
+  if (!(await waitForDirectProcessGone(ownership.supervisor, 1_000))) {
+    throw new Error("POSIX owner watchdog survived release escalation");
+  }
+}
+
+async function performPosixSupervisorRelease(
+  child: ChildProcess,
+  ownership: PosixSupervisorOwnership,
+): Promise<void> {
+  const supervisor = ownership.supervisor;
+  if (
+    supervisor.exitCode !== null ||
+    supervisor.signalCode !== null ||
+    !supervisor.connected
+  ) {
+    await safelyEscalatePosixSupervisorRelease(child, ownership);
+    return;
+  }
+
+  let onClose = (): void => undefined;
+  let onDisconnect = (): void => undefined;
+  let onError = (error: Error): void => {
+    void error;
+  };
+  let onMessage = (message: unknown): void => {
+    void message;
+  };
+  try {
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        onClose = () => resolve();
+        // A normal watchdog self-termination disconnects IPC before its close
+        // event. Keep waiting for verified process exit; a disconnected live
+        // watchdog times out and is safely escalated by the next attempt.
+        onDisconnect = () => undefined;
+        onError = (error: Error) => reject(error);
+        onMessage = (message: unknown) => {
+          if (
+            message !== null &&
+            typeof message === "object" &&
+            "type" in message &&
+            message.type === "wi.test-support.posix-release-error" &&
+            "token" in message &&
+            message.token === ownership.controlToken
+          ) {
+            reject(new Error("POSIX owner watchdog rejected release"));
+          }
+        };
+        supervisor.once("close", onClose);
+        supervisor.once("disconnect", onDisconnect);
+        supervisor.once("error", onError);
+        supervisor.on("message", onMessage);
+        try {
+          supervisor.send(
+            {
+              type: "wi.test-support.posix-release",
+              token: ownership.controlToken,
+            },
+            (error) => {
+              if (error !== null && error !== undefined) reject(error);
+            },
+          );
+        } catch (error) {
+          reject(error);
+        }
+      }),
+      2_000,
+      () => "POSIX owner watchdog did not release its fixture group",
+    );
+  } finally {
+    supervisor.off("close", onClose);
+    supervisor.off("disconnect", onDisconnect);
+    supervisor.off("error", onError);
+    supervisor.off("message", onMessage);
+  }
+  await verifyPosixSupervisorRelease(child, ownership);
+}
+
 function releasePosixSupervisor(child: ChildProcess): Promise<void> {
   const ownership = posixSupervisors.get(child);
   if (ownership === undefined) return Promise.resolve();
-  if (ownership.release !== null) return ownership.release;
-  ownership.release = withTimeout(
-    new Promise<void>((resolve, reject) => {
-      const supervisor = ownership.supervisor;
-      if (supervisor.exitCode !== null || supervisor.signalCode !== null) {
-        resolve();
-        return;
-      }
-      supervisor.once("close", () => resolve());
-      supervisor.once("error", reject);
-      if (!supervisor.connected) {
-        reject(new Error("POSIX owner watchdog disconnected before release"));
-        return;
-      }
-      supervisor.send({
-        type: "wi.test-support.posix-release",
-        token: ownership.controlToken,
-      });
-    }),
-    2_000,
-    () => "POSIX owner watchdog did not release its fixture group",
-  ).then(() => {
-    posixSupervisors.delete(child);
-  });
-  return ownership.release;
+  if (ownership.releaseAttempt !== null) return ownership.releaseAttempt;
+
+  const attempt = performPosixSupervisorRelease(child, ownership).then(
+    () => {
+      ownership.supervisor.stdio[3]?.destroy();
+      if (posixSupervisors.get(child) === ownership) posixSupervisors.delete(child);
+    },
+    (error: unknown) => {
+      if (ownership.releaseAttempt === attempt) ownership.releaseAttempt = null;
+      throw error;
+    },
+  );
+  ownership.releaseAttempt = attempt;
+  return attempt;
 }
 
 export async function spawnNodeProcessTree(
@@ -368,7 +481,7 @@ export async function spawnNodeProcessTree(
     await waitForPosixFixtureGate(child);
     const managedChild = child;
     posixOwnership.supervisor.once("close", () => {
-      if (posixOwnership.release !== null || managedChild.pid === undefined) return;
+      if (posixOwnership.releaseAttempt !== null || managedChild.pid === undefined) return;
       try {
         process.kill(-managedChild.pid, "SIGKILL");
       } catch {
@@ -376,6 +489,7 @@ export async function spawnNodeProcessTree(
       }
     });
     managedChild.once("close", () => {
+      if (posixOwnership.explicitCleanupStarted) return;
       void releasePosixSupervisor(managedChild).catch(() => undefined);
     });
     return child;
@@ -611,6 +725,8 @@ export async function terminateProcessTree(
   child: ChildProcess,
   terminationGraceMs = 1_000,
 ): Promise<void> {
+  const ownership = posixSupervisors.get(child);
+  if (ownership !== undefined) ownership.explicitCleanupStarted = true;
   // A detached process group can outlive its direct leader. Always signal and
   // verify the owned group, not merely the leader's close event.
   const errors: unknown[] = [];

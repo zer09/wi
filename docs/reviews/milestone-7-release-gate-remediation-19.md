@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 19
 
-Status: **ARRAY SNAPSHOT FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-M1 verification pending**
+Status: **RESOLVED**
 
 Starting head: `9d6c0f42ed8d20394fbd04e81bdad0f1269eebbb` on `milestone-7-crash-recovery`.
 
@@ -155,6 +155,22 @@ The verifier confirmed the plain-object getter/Proxy TOCTOU fixed and cumulative
 
 No unhandled rejection or assertion failure occurred. Focused and full process runs reaped every fixture descendant and watchdog.
 
+## Independent verification of `4616c14`
+
+Verdict: **RESOLVED**.
+
+The verifier independently reproduced V4–V6 at `862f91b`, then confirmed at `4616c14`:
+
+- array length and every index are captured through one own descriptor each with zero source `get` trap reads;
+- array snapshots remain actual arrays with null prototypes and cannot inherit installed serializers, setters, indexed values, iteration, or later prototype replacement;
+- real children received bounded arrays for malicious serializer installation from length, index, nested-element, and containing-object descriptor traps;
+- a 2,006-value outbound corpus and node-boundary probes had no charge failure;
+- inbound escape-heavy traffic remained within pending/history charges and caps with exact counters and bounded diagnostics;
+- existing Milestone 5/7 control protocols, readiness, cleanup, descendants, and watchdogs remained intact;
+- canonical docs distinguish the inbound pre-deserialization limitation from the outbound per-control/aggregate-buffering limitation.
+
+No blocking, nonblocking, or informational finding remained. Full gates passed: 458 unit, 92 process, 866 `pnpm check`, and 33 browser E2E tests.
+
 ## Next action
 
-Obtain a fresh verification-only WI-M7-M1 review. Do not begin WI-M7-M4, merge PR #13, or begin Milestone 8 until M1 is independently resolved.
+Proceed to `WI-M7-M4`. Do not merge PR #13 or begin Milestone 8 until all remaining remediation items receive fresh independent resolution.

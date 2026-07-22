@@ -105,6 +105,7 @@ The follow-up verifier independently reproduced the retry-gap defect at `2675198
 
 The correction now routes failed setup through bounded anchored escalation:
 
+- watchdog readiness failure stops and verifies the watchdog before returning, aggregating setup and cleanup errors if verification fails;
 - if fixture spawn never succeeds, the watchdog is stopped and verified gone;
 - before anchor readiness, preload gate pipes are closed and the direct child is awaited without ever signalling an unanchored numeric PGID;
 - after anchor readiness, the watchdog is stopped while the anchor reserves the group, then the exact anchored group is reclaimed;

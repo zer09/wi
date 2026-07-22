@@ -206,6 +206,17 @@ async function waitForPosixSupervisorMessage(
   }
 }
 
+async function stopPosixSupervisorAfterSetupFailure(
+  supervisor: ChildProcess,
+  ownerPipe?: NodeJS.WritableStream & { destroy(): void },
+): Promise<void> {
+  ownerPipe?.destroy();
+  supervisor.kill("SIGKILL");
+  if (!(await waitForDirectProcessGone(supervisor, 1_000))) {
+    throw new Error("POSIX owner watchdog survived setup failure");
+  }
+}
+
 async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
   const controlToken = randomUUID();
   const supervisorPath = fileURLToPath(
@@ -223,7 +234,7 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
   });
   const ownerPipe = supervisor.stdio[3];
   if (ownerPipe === undefined || ownerPipe === null || !("write" in ownerPipe)) {
-    supervisor.kill("SIGKILL");
+    await stopPosixSupervisorAfterSetupFailure(supervisor);
     throw new Error("POSIX owner watchdog has no ownership pipe");
   }
   // SIGKILL closes watchdog channels without a stream-level handshake.
@@ -244,8 +255,14 @@ async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
       anchorEstablished: false,
     };
   } catch (error) {
-    ownerPipe.destroy();
-    supervisor.kill("SIGKILL");
+    try {
+      await stopPosixSupervisorAfterSetupFailure(supervisor, ownerPipe);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "POSIX owner watchdog setup and cleanup failed",
+      );
+    }
     throw error;
   }
 }

@@ -47,6 +47,23 @@ if (mode === "fixture-runner") {
   await send({ type: "ready", descendantPid: descendant.pid });
   await write(process.stdout, "stdout-tail retained diagnostic\n");
   await write(process.stderr, "stderr-tail retained diagnostic\n");
+} else if (mode === "ipc-payloads") {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  for (let index = 0; index < messageCount; index += 1) {
+    await send({ type: "aggregate-noise", index, payload: "a".repeat(12 * 1024) });
+  }
+  let deep = { value: "leaf" };
+  for (let depth = 0; depth < 80; depth += 1) deep = { child: deep };
+  await send({ type: "deep-noise", deep });
+  await send({
+    type: "node-heavy-noise",
+    values: Array.from({ length: 5_000 }, (_, index) => index),
+  });
+  await send({
+    type: "oversized-noise",
+    payload: `${"x".repeat(outputBytes)}OVERSIZED-TERMINAL-MARKER`,
+  });
+  await send({ type: "control-ready", descendantPid: descendant.pid, value: "small" });
 } else {
   throw new Error(`Unknown fixture mode: ${String(mode)}`);
 }

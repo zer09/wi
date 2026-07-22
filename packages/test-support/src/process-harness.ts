@@ -5,14 +5,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export interface ServerProcessMessage {
-  readonly type: string;
-  readonly [key: string]: unknown;
-}
+import {
+  assertBoundedIpcValue,
+  BoundedIpcRetention,
+  PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS,
+  PROCESS_IPC_PENDING_MAX_MESSAGES,
+  type ProcessIpcDiagnostics,
+  type ServerProcessMessage,
+} from "./bounded-ipc.js";
+
+export {
+  PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
+  PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
+  PROCESS_IPC_MESSAGE_MAX_DEPTH,
+  PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES,
+  PROCESS_IPC_MESSAGE_MAX_NODES,
+  PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS,
+  PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS,
+  PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
+  PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_PENDING_MAX_MESSAGES,
+} from "./bounded-ipc.js";
+export type {
+  ProcessIpcDiagnostics,
+  ProcessIpcTruncationDiagnostics,
+  ProcessIpcTruncationReason,
+  ServerProcessMessage,
+} from "./bounded-ipc.js";
 
 export const PROCESS_OUTPUT_TAIL_MAX_BYTES = 64 * 1024;
-export const PROCESS_IPC_PENDING_MAX_MESSAGES = 128;
-export const PROCESS_IPC_HISTORY_MAX_MESSAGES = 256;
 export const PROCESS_READINESS_MARKER_MAX_BYTES = 4 * 1024;
 
 export interface ProcessOutputDiagnostics {
@@ -21,14 +43,6 @@ export interface ProcessOutputDiagnostics {
   readonly totalBytes: number;
   readonly truncated: boolean;
   readonly sha256: string;
-}
-
-export interface ProcessIpcDiagnostics {
-  readonly totalMessages: number;
-  readonly pendingRetainedMessages: number;
-  readonly historyRetainedMessages: number;
-  readonly pendingTruncated: boolean;
-  readonly historyTruncated: boolean;
 }
 
 export interface ServerProcessDiagnostics {
@@ -112,6 +126,14 @@ function formatOutputDiagnostics(
     ? `${String(diagnostics.retainedBytes)}-byte tail truncated after ${String(diagnostics.totalBytes)} total bytes`
     : `${String(diagnostics.totalBytes)} total bytes`;
   return `${stream}=${diagnostics.tail} (${retention}, sha256=${diagnostics.sha256})`;
+}
+
+function formatIpcDiagnostics(diagnostics: ProcessIpcDiagnostics): string {
+  const latest = diagnostics.latestTruncation;
+  const latestText = latest === null
+    ? "none"
+    : `${latest.reason}:${latest.originalType ?? "unknown"}:${latest.sha256}:${JSON.stringify(latest.preview)}`;
+  return `ipc=${String(diagnostics.totalMessages)} messages pending=${String(diagnostics.pendingRetainedMessages)}/${String(diagnostics.pendingRetainedEstimatedBytes)}B history=${String(diagnostics.historyRetainedMessages)}/${String(diagnostics.historyRetainedEstimatedBytes)}B rejected=${String(diagnostics.rejectedMessages)} latest=${latestText}`;
 }
 
 interface PosixSupervisorOwnership {
@@ -378,15 +400,15 @@ export async function spawnNodeProcessTree(
 }
 
 export class RealServerProcess {
-  private readonly messages: ServerProcessMessage[] = [];
-  private readonly messageHistory: ServerProcessMessage[] = [];
   private readonly awaitedMessageTypes = new Map<string, number>();
+  private readonly ipcRetention = new BoundedIpcRetention(
+    PROCESS_IPC_PENDING_MAX_MESSAGES,
+    PROCESS_IPC_HISTORY_MAX_MESSAGES,
+    (type) => this.awaitedMessageTypes.has(type),
+  );
   private readonly waiters = new Set<() => void>();
   private readonly stdoutOutput = new BoundedProcessOutput();
   private readonly stderrOutput = new BoundedProcessOutput();
-  private totalMessages = 0;
-  private pendingMessagesTruncated = false;
-  private messageHistoryTruncated = false;
   private readonly closed: Promise<ServerProcessExit>;
 
   private constructor(readonly child: ChildProcess) {
@@ -397,22 +419,9 @@ export class RealServerProcess {
       this.stderrOutput.append(chunk);
     });
     child.on("message", (value: unknown) => {
-      if (value === null || typeof value !== "object" || !("type" in value)) return;
-      const message = value as ServerProcessMessage;
-      this.totalMessages += 1;
-      this.messages.push(message);
-      if (this.messages.length > PROCESS_IPC_PENDING_MAX_MESSAGES) {
-        const unawaitedIndex = this.messages.findIndex(
-          (candidate) => !this.awaitedMessageTypes.has(candidate.type),
-        );
-        this.messages.splice(unawaitedIndex >= 0 ? unawaitedIndex : 0, 1);
-        this.pendingMessagesTruncated = true;
-      }
-      this.messageHistory.push(message);
-      if (this.messageHistory.length > PROCESS_IPC_HISTORY_MAX_MESSAGES) {
-        this.messageHistory.shift();
-        this.messageHistoryTruncated = true;
-      }
+      // Node object IPC deserializes before this callback. Reject over-limit values
+      // immediately and retain only a bounded summary; see the architecture docs.
+      this.ipcRetention.accept(value);
       for (const wake of this.waiters) wake();
       this.waiters.clear();
     });
@@ -461,26 +470,30 @@ export class RealServerProcess {
   }
 
   send(message: Serializable): void {
+    assertBoundedIpcValue(message);
     if (this.child.connected) this.child.send(message);
   }
 
   async waitForMessage(type: string, timeoutMs = 10_000): Promise<ServerProcessMessage> {
+    if (type.length === 0 || type.length > PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS) {
+      throw new RangeError("Server message type exceeds the process IPC limit");
+    }
     const deadline = Date.now() + timeoutMs;
     this.awaitedMessageTypes.set(type, (this.awaitedMessageTypes.get(type) ?? 0) + 1);
     try {
       while (true) {
-        const index = this.messages.findIndex((message) => message.type === type);
-        if (index >= 0) return this.messages.splice(index, 1)[0] as ServerProcessMessage;
+        const message = this.ipcRetention.take(type);
+        if (message !== null) return message;
         if (this.child.exitCode !== null || this.child.signalCode !== null) {
           const exit = await this.closed;
           throw new Error(
-            `Server exited before ${type}: code=${String(exit.code)} signal=${String(exit.signal)} ${formatOutputDiagnostics("stderr", exit.stderrDiagnostics)}`,
+            `Server exited before ${type}: code=${String(exit.code)} signal=${String(exit.signal)} ${formatOutputDiagnostics("stderr", exit.stderrDiagnostics)} ${formatIpcDiagnostics(exit.ipcDiagnostics)}`,
           );
         }
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
           throw new Error(
-            `Timed out waiting for server message ${type}. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())}`,
+            `Timed out waiting for server message ${type}. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())} ${formatIpcDiagnostics(this.ipcRetention.snapshot())}`,
           );
         }
         let wake = (): void => undefined;
@@ -492,7 +505,7 @@ export class RealServerProcess {
             }),
             remaining,
             () =>
-              `Timed out waiting for server message ${type}. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())}`,
+              `Timed out waiting for server message ${type}. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())} ${formatIpcDiagnostics(this.ipcRetention.snapshot())}`,
           );
         } finally {
           this.waiters.delete(wake);
@@ -511,7 +524,7 @@ export class RealServerProcess {
 
   waitForExit(timeoutMs = 10_000): Promise<ServerProcessExit> {
     return withTimeout(this.closed, timeoutMs, () =>
-      `Server process ${String(this.child.pid)} did not exit. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())}`,
+      `Server process ${String(this.child.pid)} did not exit. ${formatOutputDiagnostics("stderr", this.stderrOutput.snapshot())} ${formatIpcDiagnostics(this.ipcRetention.snapshot())}`,
     );
   }
 
@@ -519,18 +532,12 @@ export class RealServerProcess {
     return {
       stdout: this.stdoutOutput.snapshot(),
       stderr: this.stderrOutput.snapshot(),
-      ipc: {
-        totalMessages: this.totalMessages,
-        pendingRetainedMessages: this.messages.length,
-        historyRetainedMessages: this.messageHistory.length,
-        pendingTruncated: this.pendingMessagesTruncated,
-        historyTruncated: this.messageHistoryTruncated,
-      },
+      ipc: this.ipcRetention.snapshot(),
     };
   }
 
   get receivedMessages(): readonly ServerProcessMessage[] {
-    return [...this.messageHistory];
+    return this.ipcRetention.history;
   }
 
   async terminate(): Promise<void> {

@@ -1,7 +1,10 @@
 import { fileURLToPath } from "node:url";
 
 import {
+  PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
+  PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_PENDING_MAX_MESSAGES,
   PROCESS_OUTPUT_TAIL_MAX_BYTES,
   PROCESS_READINESS_MARKER_MAX_BYTES,
@@ -96,6 +99,75 @@ describe("bounded process-harness diagnostics", () => {
       await runner.terminateAll();
     }
     expect(runner.activeCount).toBe(0);
+    if (descendantPid === null) throw new Error("Missing descendant PID");
+    await expectProcessGone(descendantPid);
+  });
+
+  it("bounds oversized, aggregate, deep, and node-heavy IPC while preserving awaited control", async () => {
+    const processHandle = await RealServerProcess.start({
+      fixturePath,
+      arguments: ["ipc-payloads", String(outputBytes), "64"],
+      waitForReady: false,
+    });
+    let descendantPid: number | null = null;
+    try {
+      const ready = await processHandle.waitForMessage("control-ready", 10_000);
+      expect(ready.value).toBe("small");
+      if (typeof ready.descendantPid !== "number") {
+        throw new Error("IPC bounds fixture omitted its descendant PID");
+      }
+      descendantPid = ready.descendantPid;
+
+      const diagnostics = processHandle.diagnostics;
+      const ipc = diagnostics.ipc;
+      expect(ipc.totalMessages).toBe(68);
+      expect(ipc.pendingRetainedEstimatedBytes).toBeLessThanOrEqual(
+        PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES,
+      );
+      expect(ipc.historyRetainedEstimatedBytes).toBeLessThanOrEqual(
+        PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
+      );
+      expect(ipc.oversizedMessages).toBe(3);
+      expect(ipc.pendingTruncated).toBe(true);
+      expect(ipc.historyTruncated).toBe(true);
+      expect(ipc.latestTruncation).toMatchObject({
+        originalType: "oversized-noise",
+        reason: "string",
+        hashComplete: true,
+      });
+      expect(ipc.latestTruncation?.preview.length).toBeLessThanOrEqual(
+        PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
+      );
+      expect(ipc.latestTruncation?.sha256).toMatch(/^[a-f0-9]{64}$/u);
+
+      const retainedMessages = processHandle.receivedMessages;
+      const retainedHistory = JSON.stringify(retainedMessages);
+      expect(Buffer.byteLength(retainedHistory)).toBeLessThanOrEqual(
+        PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
+      );
+      expect(retainedHistory).not.toContain("OVERSIZED-TERMINAL-MARKER");
+      const truncationReasons = retainedMessages.flatMap((message) =>
+        message.type === "wi.test-support.ipc-truncated" && typeof message.reason === "string"
+          ? [message.reason]
+          : [],
+      );
+      expect(truncationReasons).toEqual(expect.arrayContaining(["depth", "nodes", "string"]));
+
+      let timeoutError: unknown;
+      try {
+        await processHandle.waitForMessage("never-sent", 50);
+      } catch (error) {
+        timeoutError = error;
+      }
+      expect(timeoutError).toBeInstanceOf(Error);
+      const timeoutMessage = timeoutError instanceof Error ? timeoutError.message : "";
+      expect(timeoutMessage).toContain("ipc=");
+      expect(Buffer.byteLength(timeoutMessage)).toBeLessThanOrEqual(
+        PROCESS_OUTPUT_TAIL_MAX_BYTES + 4 * 1024,
+      );
+    } finally {
+      await processHandle.terminate();
+    }
     if (descendantPid === null) throw new Error("Missing descendant PID");
     await expectProcessGone(descendantPid);
   });

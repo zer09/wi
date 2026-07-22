@@ -1,0 +1,383 @@
+import { createHash, type Hash } from "node:crypto";
+
+export interface ServerProcessMessage {
+  readonly type: string;
+  readonly [key: string]: unknown;
+}
+
+export const PROCESS_IPC_PENDING_MAX_MESSAGES = 128;
+export const PROCESS_IPC_HISTORY_MAX_MESSAGES = 256;
+export const PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES = 64 * 1024;
+export const PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES = 256 * 1024;
+export const PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES = 512 * 1024;
+export const PROCESS_IPC_MESSAGE_MAX_DEPTH = 32;
+export const PROCESS_IPC_MESSAGE_MAX_NODES = 4_096;
+export const PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS = 16 * 1024;
+export const PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS = 128;
+export const PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS = 512;
+
+export type ProcessIpcTruncationReason =
+  | "estimated_bytes"
+  | "depth"
+  | "nodes"
+  | "string"
+  | "protocol";
+
+export interface ProcessIpcTruncationDiagnostics {
+  readonly originalType: string | null;
+  readonly reason: ProcessIpcTruncationReason;
+  readonly observedEstimatedBytes: number;
+  readonly visitedNodes: number;
+  readonly maximumDepth: number;
+  readonly preview: string;
+  readonly sha256: string;
+  readonly hashComplete: boolean;
+}
+
+export interface ProcessIpcDiagnostics {
+  readonly totalMessages: number;
+  readonly rejectedMessages: number;
+  readonly oversizedMessages: number;
+  readonly pendingRetainedMessages: number;
+  readonly historyRetainedMessages: number;
+  readonly pendingRetainedEstimatedBytes: number;
+  readonly historyRetainedEstimatedBytes: number;
+  readonly pendingDroppedMessages: number;
+  readonly historyDroppedMessages: number;
+  readonly pendingTruncated: boolean;
+  readonly historyTruncated: boolean;
+  readonly latestTruncation: ProcessIpcTruncationDiagnostics | null;
+}
+
+interface Analysis {
+  readonly accepted: boolean;
+  readonly estimatedBytes: number;
+  readonly visitedNodes: number;
+  readonly maximumDepth: number;
+  readonly preview: string;
+  readonly sha256: string;
+  readonly hashComplete: boolean;
+  readonly reason: Exclude<ProcessIpcTruncationReason, "protocol"> | null;
+}
+
+interface AnalysisFrame {
+  readonly value: unknown;
+  readonly depth: number;
+  readonly label: string;
+}
+
+interface RetainedMessage {
+  readonly message: ServerProcessMessage;
+  readonly estimatedBytes: number;
+}
+
+function updateHashString(hash: Hash, value: string): void {
+  for (let offset = 0; offset < value.length; offset += 1_024) {
+    hash.update(value.slice(offset, offset + 1_024), "utf8");
+  }
+}
+
+function analyzeIpcValue(value: unknown): Analysis {
+  const hash = createHash("sha256");
+  const stack: AnalysisFrame[] = [{ value, depth: 0, label: "$" }];
+  let estimatedBytes = 0;
+  let visitedNodes = 0;
+  let maximumDepth = 0;
+  let preview = "";
+  let reason: Analysis["reason"] = null;
+  let hashComplete = true;
+
+  const appendPreview = (text: string): void => {
+    if (preview.length >= PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS) return;
+    const separator = preview.length === 0 ? "" : " ";
+    preview += `${separator}${text}`.slice(
+      0,
+      PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS - preview.length,
+    );
+  };
+  const addEstimatedBytes = (bytes: number): boolean => {
+    estimatedBytes += bytes;
+    if (estimatedBytes <= PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES) return true;
+    reason = "estimated_bytes";
+    hashComplete = false;
+    return false;
+  };
+
+  while (stack.length > 0 && reason === null) {
+    const frame = stack.pop();
+    if (frame === undefined) break;
+    if (frame.depth > PROCESS_IPC_MESSAGE_MAX_DEPTH) {
+      reason = "depth";
+      hashComplete = false;
+      break;
+    }
+    if (visitedNodes >= PROCESS_IPC_MESSAGE_MAX_NODES) {
+      reason = "nodes";
+      hashComplete = false;
+      break;
+    }
+    visitedNodes += 1;
+    maximumDepth = Math.max(maximumDepth, frame.depth);
+    if (!addEstimatedBytes(16)) break;
+
+    const current = frame.value;
+    if (current === null) {
+      hash.update("null;");
+      appendPreview(`${frame.label}=null`);
+      continue;
+    }
+    if (typeof current === "string") {
+      hash.update("string:");
+      updateHashString(hash, current);
+      hash.update(";");
+      const bytes = Buffer.byteLength(current);
+      estimatedBytes += bytes;
+      appendPreview(
+        `${frame.label}=${JSON.stringify(current.slice(0, 96))}${current.length > 96 ? "…" : ""}`,
+      );
+      if (current.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) {
+        reason = "string";
+        hashComplete = stack.length === 0;
+      } else if (estimatedBytes > PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES) {
+        reason = "estimated_bytes";
+        hashComplete = stack.length === 0;
+      }
+      continue;
+    }
+    if (typeof current === "number" || typeof current === "boolean") {
+      const encoded = String(current);
+      hash.update(`${typeof current}:${encoded};`);
+      appendPreview(`${frame.label}=${encoded}`);
+      continue;
+    }
+    if (typeof current !== "object") {
+      hash.update(`unsupported:${typeof current};`);
+      reason = "estimated_bytes";
+      hashComplete = false;
+      continue;
+    }
+
+    if (Array.isArray(current)) {
+      hash.update(`array:${String(current.length)};`);
+      appendPreview(`${frame.label}=<array:${String(current.length)}>`);
+      if (current.length + visitedNodes > PROCESS_IPC_MESSAGE_MAX_NODES) {
+        reason = "nodes";
+        hashComplete = false;
+        continue;
+      }
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: current[index], depth: frame.depth + 1, label: `${frame.label}[${String(index)}]` });
+      }
+      continue;
+    }
+
+    const record = current as Readonly<Record<string, unknown>>;
+    const keys: string[] = [];
+    for (const key in record) {
+      if (!Object.hasOwn(record, key)) continue;
+      if (keys.length + visitedNodes >= PROCESS_IPC_MESSAGE_MAX_NODES) {
+        reason = "nodes";
+        hashComplete = false;
+        break;
+      }
+      keys.push(key);
+    }
+    if (reason !== null) continue;
+    hash.update(`object:${String(keys.length)};`);
+    appendPreview(`${frame.label}=<object:${String(keys.length)}>`);
+    for (let index = keys.length - 1; index >= 0; index -= 1) {
+      const key = keys[index];
+      if (key === undefined) continue;
+      hash.update("key:");
+      updateHashString(hash, key);
+      hash.update(";");
+      estimatedBytes += Buffer.byteLength(key) + 8;
+      if (key.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) {
+        reason = "string";
+        hashComplete = false;
+        break;
+      }
+      if (estimatedBytes > PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES) {
+        reason = "estimated_bytes";
+        hashComplete = false;
+        break;
+      }
+      stack.push({
+        value: record[key],
+        depth: frame.depth + 1,
+        label: `${frame.label}.${key}`.slice(
+          0,
+          PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
+        ),
+      });
+    }
+  }
+
+  return {
+    accepted: reason === null,
+    estimatedBytes,
+    visitedNodes,
+    maximumDepth,
+    preview,
+    sha256: hash.digest("hex"),
+    hashComplete,
+    reason,
+  };
+}
+
+function safeMessageType(value: unknown): string | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(value, "type");
+  if (
+    descriptor === undefined ||
+    !("value" in descriptor) ||
+    typeof descriptor.value !== "string" ||
+    descriptor.value.length === 0 ||
+    descriptor.value.length > PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS
+  ) {
+    return null;
+  }
+  return descriptor.value;
+}
+
+function truncationDiagnostics(
+  value: unknown,
+  analysis: Analysis,
+): ProcessIpcTruncationDiagnostics {
+  return {
+    originalType: safeMessageType(value),
+    reason: analysis.reason ?? "protocol",
+    observedEstimatedBytes: analysis.estimatedBytes,
+    visitedNodes: analysis.visitedNodes,
+    maximumDepth: analysis.maximumDepth,
+    preview: analysis.preview,
+    sha256: analysis.sha256,
+    hashComplete: analysis.hashComplete,
+  };
+}
+
+function truncationMessage(
+  diagnostics: ProcessIpcTruncationDiagnostics,
+): RetainedMessage {
+  const message: ServerProcessMessage = {
+    type: "wi.test-support.ipc-truncated",
+    ...diagnostics,
+  };
+  const analysis = analyzeIpcValue(message);
+  return {
+    message,
+    estimatedBytes: analysis.accepted ? analysis.estimatedBytes : 2_048,
+  };
+}
+
+export function assertBoundedIpcValue(value: unknown): void {
+  const analysis = analyzeIpcValue(value);
+  if (!analysis.accepted) {
+    throw new Error(`Process IPC message exceeds the ${analysis.reason ?? "protocol"} limit`);
+  }
+}
+
+export class BoundedIpcRetention {
+  readonly #pending: RetainedMessage[] = [];
+  readonly #history: RetainedMessage[] = [];
+  #totalMessages = 0;
+  #rejectedMessages = 0;
+  #oversizedMessages = 0;
+  #pendingEstimatedBytes = 0;
+  #historyEstimatedBytes = 0;
+  #pendingDroppedMessages = 0;
+  #historyDroppedMessages = 0;
+  #pendingTruncated = false;
+  #historyTruncated = false;
+  #latestTruncation: ProcessIpcTruncationDiagnostics | null = null;
+
+  constructor(
+    private readonly pendingMaximumMessages: number,
+    private readonly historyMaximumMessages: number,
+    private readonly isAwaited: (type: string) => boolean,
+  ) {}
+
+  accept(value: unknown): void {
+    this.#totalMessages += 1;
+    const analysis = analyzeIpcValue(value);
+    const type = safeMessageType(value);
+    if (!analysis.accepted || type === null) {
+      const diagnostics = truncationDiagnostics(value, analysis);
+      this.#latestTruncation = diagnostics;
+      this.#rejectedMessages += 1;
+      if (diagnostics.reason !== "protocol") this.#oversizedMessages += 1;
+      this.#pendingDroppedMessages += 1;
+      this.#pendingTruncated = true;
+      this.#historyTruncated = true;
+      this.addHistory(truncationMessage(diagnostics));
+      return;
+    }
+
+    const retained: RetainedMessage = {
+      message: value as ServerProcessMessage,
+      estimatedBytes: analysis.estimatedBytes,
+    };
+    this.#pending.push(retained);
+    this.#pendingEstimatedBytes += retained.estimatedBytes;
+    while (
+      this.#pending.length > this.pendingMaximumMessages ||
+      this.#pendingEstimatedBytes > PROCESS_IPC_PENDING_MAX_ESTIMATED_BYTES
+    ) {
+      const unawaitedIndex = this.#pending.findIndex(
+        ({ message }) => !this.isAwaited(message.type),
+      );
+      const index = unawaitedIndex >= 0 ? unawaitedIndex : 0;
+      const [removed] = this.#pending.splice(index, 1);
+      if (removed === undefined) break;
+      this.#pendingEstimatedBytes -= removed.estimatedBytes;
+      this.#pendingDroppedMessages += 1;
+      this.#pendingTruncated = true;
+    }
+    this.addHistory(retained);
+  }
+
+  private addHistory(retained: RetainedMessage): void {
+    this.#history.push(retained);
+    this.#historyEstimatedBytes += retained.estimatedBytes;
+    while (
+      this.#history.length > this.historyMaximumMessages ||
+      this.#historyEstimatedBytes > PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES
+    ) {
+      const removed = this.#history.shift();
+      if (removed === undefined) break;
+      this.#historyEstimatedBytes -= removed.estimatedBytes;
+      this.#historyDroppedMessages += 1;
+      this.#historyTruncated = true;
+    }
+  }
+
+  take(type: string): ServerProcessMessage | null {
+    const index = this.#pending.findIndex(({ message }) => message.type === type);
+    if (index < 0) return null;
+    const [removed] = this.#pending.splice(index, 1);
+    if (removed === undefined) return null;
+    this.#pendingEstimatedBytes -= removed.estimatedBytes;
+    return removed.message;
+  }
+
+  get history(): readonly ServerProcessMessage[] {
+    return this.#history.map(({ message }) => message);
+  }
+
+  snapshot(): ProcessIpcDiagnostics {
+    return {
+      totalMessages: this.#totalMessages,
+      rejectedMessages: this.#rejectedMessages,
+      oversizedMessages: this.#oversizedMessages,
+      pendingRetainedMessages: this.#pending.length,
+      historyRetainedMessages: this.#history.length,
+      pendingRetainedEstimatedBytes: this.#pendingEstimatedBytes,
+      historyRetainedEstimatedBytes: this.#historyEstimatedBytes,
+      pendingDroppedMessages: this.#pendingDroppedMessages,
+      historyDroppedMessages: this.#historyDroppedMessages,
+      pendingTruncated: this.#pendingTruncated,
+      historyTruncated: this.#historyTruncated,
+      latestTruncation: this.#latestTruncation,
+    };
+  }
+}

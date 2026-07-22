@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 18
 
-Status: **ALIAS/RECONCILIATION FOLLOW-UP IMPLEMENTED — fresh independent WI-M7-H2 verification pending**
+Status: **RESOLVED — independently verified at `fcf5f9fd755d8bba6d441bcac7d758158d53d4ab`**
 
 Starting head: `27207689863b2cb8837aa2d6caa660c0af7eaf25` on `milestone-7-crash-recovery`.
 
@@ -165,6 +165,14 @@ Both findings are within the supported trusted-user model: neither requires host
 
 The first full storage-file run correctly exposed incomplete-creation recovery as a legitimate absent-row reconciliation path. It now uses a separate module-internal creation capability backed by the durable `creating` reservation; the retained injected catalog-failure test moved to a gated internal boundary rather than spying on the now-restricted public generic method. The full storage file and all later gates passed.
 
+## Final independent verification
+
+A fresh review-only verifier classified WI-M7-H2 **RESOLVED** at `fcf5f9fd755d8bba6d441bcac7d758158d53d4ab`.
+
+Independent probes covered both construction orders for a real home and static ancestor alias, final-component and lexical aliases, partial/final coordinator release, bounded canonicalization failure, both exact-path race orders, generic absent-row reconciliation with null/matching/forged expectations, all missing/unavailable combinations, incomplete-creation identity and failure behavior, runtime reflection/exports, and retained H1 substitution regressions. The verifier found no blocking, nonblocking, or informational code findings.
+
+Independent gates passed: 455 unit, 259 integration, 36 property, 90 process, 33 end-to-end, and 861 aggregate `pnpm check` tests with no skips. Final tracked state was clean; only the three permitted untracked workflow paths remained.
+
 ## Next action
 
-Create one atomic WI-M7-H2 alias/reconciliation follow-up, then obtain another fresh verification-only review that reruns the static-alias worker race, generic absent-row probe, both exact-path race orders, and earlier public-surface probes. Do not begin WI-M7-M1, merge PR #13, or begin Milestone 8 until H2 is independently resolved.
+Proceed to WI-M7-M1 bounded IPC payload memory. Do not merge PR #13 or begin Milestone 8 until all remaining remediation IDs pass independent verification.

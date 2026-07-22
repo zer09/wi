@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 23
 
-Status: **IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+Status: **RESOLVED**
 
 Starting head: `adcbf23a696468b1c3ae9b6eb9d98ca558c52e56` on `milestone-7-crash-recovery`.
 
@@ -80,8 +80,18 @@ The correction does not move, overwrite, delete, or chmod existing storage. Stat
 
 The first complete integration/check attempt exposed one retained test that constructed `WiRuntime` before asserting wrong-type startup failure. The corrected architecture rejects that path synchronously before runtime/server construction, so the regression was updated to assert the earlier boundary, fixed bounded error, redaction, and preserved file bytes. The focused test, full integration suite, and full `pnpm check` then passed.
 
-## Independent verification required
+## Independent verification closure
 
-A fresh review-only verifier must independently reproduce the old-head absent-home failure, verify creation precedes realpath coordination and worker construction, exercise missing default/configured homes, wrong-type/inaccessible paths, static aliases, restart persistence, and cleanup, then classify `WI-M7-H3` as `RESOLVED`, `PARTIALLY RESOLVED`, `NOT RESOLVED`, or `INSUFFICIENT PROBE`.
+A fresh review-only verifier classified `WI-M7-H3` as **RESOLVED** at `62d2de7b82aaff5e2bd7996007cb9fe823a0c7d5`, with no correctness, regression, scope, or test-quality finding.
 
-Do not begin `WI-M7-M5` until that independent H3 classification is recorded.
+Independent evidence included:
+
+- a full production build/probe of baseline `adcbf23` reproduced exit code 1 while the genuinely absent nested home remained absent;
+- a Worker-constructor probe proved creation and directory validation complete before worker construction, while a wrong-type home reaches no worker;
+- twelve concurrent clients across physical and static ancestor-alias paths converged on one canonical home and coordinator;
+- newly created directory components had mode `0700`, while an existing mode and sentinel bytes remained unchanged;
+- actual-production inaccessible-home startup returned the fixed redacted classification, started no listener, and disclosed no path;
+- all focused tests, 262 integration tests, 100 process tests, 880 `pnpm check` tests, and 33 browser E2E tests passed without complete-suite skips;
+- final cleanup found no server, fixture descendant, watchdog, listener, temporary home, probe directory, or tracked-tree mutation.
+
+The independent H3 gate is closed. The next release-gate action is the verification-first `WI-M7-M5` PGID-reuse probe; no process-ownership correction is permitted unless that probe reproduces the claimed reuse hazard.

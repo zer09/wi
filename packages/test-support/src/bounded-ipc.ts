@@ -17,6 +17,16 @@ export const PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS = 16 * 1024;
 export const PROCESS_IPC_MESSAGE_TYPE_MAX_CODE_UNITS = 128;
 export const PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS = 512;
 
+const arrayIsArray = Array.isArray;
+const plainObjectPrototype = Object.prototype;
+const createObject = Object.create;
+const defineObjectProperty = Object.defineProperty;
+const getObjectOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const getObjectPrototypeOf = Object.getPrototypeOf;
+const setObjectPrototypeOf = Object.setPrototypeOf;
+const isSafeInteger = Number.isSafeInteger;
+const stringifyJson = JSON.stringify;
+
 export type ProcessIpcTruncationReason =
   | "estimated_bytes"
   | "depth"
@@ -181,8 +191,8 @@ function analyzeIpcValue(value: unknown): Analysis {
       const encoded = String(current);
       hash.update(`${typeof current}:${encoded};`);
       appendPreview(`${frame.label}=${encoded}`);
-      const jsonEncoded = JSON.stringify(current) ?? "null";
-      if (!addEstimatedBytes(Buffer.byteLength(jsonEncoded))) break;
+      const jsonEncoded = stringifyJson(current) ?? "null";
+      if (!addEstimatedBytes(jsonEncoded.length)) break;
       continue;
     }
     if (typeof current !== "object") {
@@ -192,7 +202,7 @@ function analyzeIpcValue(value: unknown): Analysis {
       continue;
     }
 
-    if (Array.isArray(current)) {
+    if (arrayIsArray(current)) {
       hash.update(`array:${String(current.length)};`);
       appendPreview(`${frame.label}=<array:${String(current.length)}>`);
       if (current.length + visitedNodes > PROCESS_IPC_MESSAGE_MAX_NODES) {
@@ -206,8 +216,8 @@ function analyzeIpcValue(value: unknown): Analysis {
       continue;
     }
 
-    const prototype = Object.getPrototypeOf(current);
-    if (prototype !== Object.prototype && prototype !== null) {
+    const prototype = getObjectPrototypeOf(current);
+    if (prototype !== plainObjectPrototype && prototype !== null) {
       hash.update("unsupported:prototype;");
       reason = "protocol";
       hashComplete = false;
@@ -358,32 +368,49 @@ function snapshotIpcValue(
     return value;
   }
   if (typeof value === "number") {
-    addSnapshotBytes(state, Buffer.byteLength(JSON.stringify(value) ?? "null"));
+    addSnapshotBytes(state, (stringifyJson(value) ?? "null").length);
     return value;
   }
   if (typeof value !== "object") throwIpcLimit("protocol");
 
-  if (Array.isArray(value)) {
-    if (value.length + state.nodes > PROCESS_IPC_MESSAGE_MAX_NODES) throwIpcLimit("nodes");
+  if (arrayIsArray(value)) {
+    const lengthDescriptor = getObjectOwnPropertyDescriptor(value, "length");
+    if (
+      lengthDescriptor === undefined ||
+      !("value" in lengthDescriptor) ||
+      typeof lengthDescriptor.value !== "number" ||
+      !isSafeInteger(lengthDescriptor.value) ||
+      lengthDescriptor.value < 0
+    ) {
+      throwIpcLimit("protocol");
+    }
+    const length = lengthDescriptor.value;
+    if (length + state.nodes > PROCESS_IPC_MESSAGE_MAX_NODES) throwIpcLimit("nodes");
     const snapshot: IpcSnapshot[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    setObjectPrototypeOf(snapshot, null);
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = getObjectOwnPropertyDescriptor(value, String(index));
       if (descriptor === undefined || !("value" in descriptor)) throwIpcLimit("protocol");
-      snapshot.push(snapshotIpcValue(descriptor.value, depth + 1, state));
+      defineObjectProperty(snapshot, String(index), {
+        value: snapshotIpcValue(descriptor.value, depth + 1, state),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
     return snapshot;
   }
 
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) throwIpcLimit("protocol");
-  const snapshot = Object.create(null) as Record<string, IpcSnapshot>;
+  const prototype = getObjectPrototypeOf(value);
+  if (prototype !== plainObjectPrototype && prototype !== null) throwIpcLimit("protocol");
+  const snapshot = createObject(null) as Record<string, IpcSnapshot>;
   for (const key in value) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    const descriptor = getObjectOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !descriptor.enumerable) continue;
     if (!("value" in descriptor)) throwIpcLimit("protocol");
     if (key.length > PROCESS_IPC_MESSAGE_MAX_STRING_CODE_UNITS) throwIpcLimit("string");
     addSnapshotBytes(state, jsonEncodedStringByteLength(key) + 8);
-    Object.defineProperty(snapshot, key, {
+    defineObjectProperty(snapshot, key, {
       value: snapshotIpcValue(descriptor.value, depth + 1, state),
       enumerable: true,
       configurable: true,

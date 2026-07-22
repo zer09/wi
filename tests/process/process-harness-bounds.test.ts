@@ -264,6 +264,46 @@ describe("bounded process-harness diagnostics", () => {
       expect(dynamicControl.bytes).toBeLessThanOrEqual(PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES);
       expect(proxyReads).toBe(0);
 
+      const originalArrayToJson = Object.getOwnPropertyDescriptor(Array.prototype, "toJSON");
+      let arrayLengthReads = 0;
+      let arrayIndexReads = 0;
+      let arrayIndexDescriptorReads = 0;
+      const statefulArray = new Proxy([1, 2], {
+        get(target, property, receiver) {
+          if (property === "length") arrayLengthReads += 1;
+          if (property === "0" || property === "1") arrayIndexReads += 1;
+          return Reflect.get(target, property, receiver);
+        },
+        getOwnPropertyDescriptor(target, property) {
+          if (property === "0") {
+            arrayIndexDescriptorReads += 1;
+            Object.defineProperty(Array.prototype, "toJSON", {
+              value: () => "x".repeat(outputBytes),
+              configurable: true,
+            });
+          }
+          return Reflect.getOwnPropertyDescriptor(target, property);
+        },
+      });
+      try {
+        processHandle.send({ type: "stateful-array-control", value: statefulArray });
+      } finally {
+        if (originalArrayToJson === undefined) {
+          Reflect.deleteProperty(Array.prototype, "toJSON");
+        } else {
+          Object.defineProperty(Array.prototype, "toJSON", originalArrayToJson);
+        }
+      }
+      const arrayControl = await processHandle.waitForMessage("array-control-received");
+      expect(arrayControl).toMatchObject({ bytes: expect.any(Number), value: [1, 2] });
+      if (typeof arrayControl.bytes !== "number") {
+        throw new Error("Array control response omitted its encoded byte count");
+      }
+      expect(arrayControl.bytes).toBeLessThanOrEqual(PROCESS_IPC_MESSAGE_MAX_ESTIMATED_BYTES);
+      expect(arrayLengthReads).toBe(0);
+      expect(arrayIndexReads).toBe(0);
+      expect(arrayIndexDescriptorReads).toBe(1);
+
       const throwingProxy = new Proxy(
         { type: "throwing-proxy-control", value: "small" },
         {
@@ -276,7 +316,7 @@ describe("bounded process-harness diagnostics", () => {
 
       processHandle.send({ type: "report-control-count" });
       await expect(processHandle.waitForMessage("control-count")).resolves.toMatchObject({
-        receivedControls: 3,
+        receivedControls: 4,
       });
     } finally {
       await processHandle.terminate();

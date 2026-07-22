@@ -92,6 +92,13 @@ if (mode === "fixture-runner") {
         bytes: Buffer.byteLength(JSON.stringify(message)),
         value: message.value,
       });
+    } else if (message?.type === "stateful-array-control") {
+      receivedControls += 1;
+      void send({
+        type: "array-control-received",
+        bytes: Buffer.byteLength(JSON.stringify(message)),
+        value: message.value,
+      });
     } else if (message?.type === "report-control-count") {
       void send({ type: "control-count", receivedControls });
     }

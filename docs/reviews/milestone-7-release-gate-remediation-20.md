@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 20
 
-Status: **IMPLEMENTED — fresh independent WI-M7-M4 verification pending**
+Status: **RESOLVED**
 
 Starting head: `ff0a735a79372f84fe6dd795c48591d4352f01cc` on `milestone-7-crash-recovery`.
 
@@ -55,6 +55,19 @@ Test-only watchdog modes record bounded state outside the repository so assertio
 
 No assertion failure or unhandled rejection occurred in the successful runs. No fixture group or watchdog remained after the focused, process, full-check, or E2E gates.
 
+## Independent verification closure
+
+Fresh independent verification at `434e5952514a9e202363ec6197da7010b2649988` classified `WI-M7-M4` as **RESOLVED** with no blocking or nonblocking findings. The verifier independently reproduced the permanent cached-rejection defect at `ff0a735`, then used real fixture leaders, descendants, process groups, and watchdogs to confirm:
+
+- timeout and authenticated supervisor-error failures retain ownership and permit a second real release request;
+- disconnected IPC is not accepted as success and a later cleanup safely verifies group termination before watchdog escalation;
+- concurrent callers share exactly one active attempt, while a post-failure caller starts a new attempt;
+- temporary close, disconnect, error, and message listeners return to baseline on every outcome;
+- natural leader close, explicit cleanup, owner-pipe EOF reclamation, preload gating, and setup-failure behavior remain intact;
+- `FixtureProcessRunner` retains failed cleanup ownership and `terminateAll()` retries to verified success.
+
+The independent gates passed: 458 unit tests, 97 process tests, 871 tests under `pnpm check`, 33 browser E2E tests, and all lint, typecheck, build, package-export, and diff checks. No fixture, descendant, watchdog, state file, or unhandled rejection remained.
+
 ## Next action
 
-Obtain a fresh verification-only WI-M7-M4 review. Do not merge PR #13 or begin Milestone 8 until remaining remediation items receive independent resolution.
+Proceed to the documentation-only `WI-M7-L1` correction. Do not merge PR #13 or begin Milestone 8 until that correction receives fresh independent verification and the final full local review is complete.

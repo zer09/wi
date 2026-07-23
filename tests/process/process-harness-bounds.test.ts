@@ -195,6 +195,81 @@ describe("bounded process-harness diagnostics", () => {
     await expectProcessGone(descendantPid);
   });
 
+  it("isolates real-child waiter, history, and diagnostics from retained IPC state", async () => {
+    const processHandle = await RealServerProcess.start({
+      fixturePath,
+      arguments: ["ipc-alias", "0", "0"],
+      waitForReady: false,
+    });
+    let descendantPid: number | null = null;
+    try {
+      const ready = await processHandle.waitForMessage("alias-ready", 10_000);
+      if (typeof ready.descendantPid !== "number") {
+        throw new Error("IPC alias fixture omitted its descendant PID");
+      }
+      descendantPid = ready.descendantPid;
+      const diagnosticsDeadline = Date.now() + 10_000;
+      while (
+        processHandle.diagnostics.ipc.latestTruncation === null &&
+        Date.now() < diagnosticsDeadline
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const before = processHandle.diagnostics.ipc;
+      expect(before.latestTruncation).not.toBeNull();
+      const expectedTruncation = { ...before.latestTruncation };
+
+      const readyNested = ready.nested as {
+        value: string;
+        values: Array<string | { value: string }>;
+      };
+      readyNested.value = "x".repeat(2 * 1024 * 1024);
+      (readyNested.values[1] as { value: string }).value = "changed through waiter";
+
+      const firstHistory = processHandle.receivedMessages;
+      expect(firstHistory).toEqual([
+        expect.objectContaining({
+          type: "alias-ready",
+          nested: { value: "small", values: ["first", { value: "second" }] },
+        }),
+        expect.objectContaining({
+          type: "wi.test-support.ipc-truncated",
+          originalType: "alias-too-large",
+          reason: "string",
+        }),
+      ]);
+      const firstNested = firstHistory[0]?.nested as {
+        value: string;
+        values: Array<string | { value: string }>;
+      };
+      firstNested.value = "changed through history";
+      firstNested.values[0] = "changed through history array";
+
+      const firstDiagnostics = processHandle.diagnostics;
+      const mutableTruncation = firstDiagnostics.ipc
+        .latestTruncation as unknown as Record<string, unknown>;
+      mutableTruncation.preview = "changed externally";
+      mutableTruncation.reason = "protocol";
+      mutableTruncation.observedEstimatedBytes = Number.MAX_SAFE_INTEGER;
+
+      const secondHistory = processHandle.receivedMessages;
+      const secondDiagnostics = processHandle.diagnostics;
+      expect(secondHistory[0]).toMatchObject({
+        type: "alias-ready",
+        nested: { value: "small", values: ["first", { value: "second" }] },
+      });
+      expect(secondDiagnostics.ipc.latestTruncation).toEqual(expectedTruncation);
+      expect(secondDiagnostics.ipc).toEqual(before);
+      expect(Buffer.byteLength(JSON.stringify(secondHistory))).toBeLessThanOrEqual(
+        secondDiagnostics.ipc.historyRetainedEstimatedBytes,
+      );
+    } finally {
+      await processHandle.terminate();
+    }
+    if (descendantPid === null) throw new Error("Missing descendant PID");
+    await expectProcessGone(descendantPid);
+  });
+
   it("rejects oversized outbound controls before sending them to the child", async () => {
     const processHandle = await RealServerProcess.start({
       fixturePath,

@@ -72,6 +72,115 @@ describe("BoundedIpcRetention", () => {
     },
   );
 
+  it("retains a bounded snapshot instead of the accepted callback object", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    const source = {
+      type: "callback-message",
+      nested: { value: "small", values: ["first", { value: "second" }] },
+    };
+    retention.accept(source);
+    const before = retention.snapshot();
+
+    source.nested.value = "x".repeat(2 * 1024 * 1024);
+    source.nested.values[1] = { value: "changed through callback" };
+
+    expect(retention.take("callback-message")).toEqual({
+      type: "callback-message",
+      nested: { value: "small", values: ["first", { value: "second" }] },
+    });
+    expect(retention.history).toEqual([
+      {
+        type: "callback-message",
+        nested: { value: "small", values: ["first", { value: "second" }] },
+      },
+    ]);
+    expect(retention.snapshot()).toEqual({
+      ...before,
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+  });
+
+  it("isolates retained history from taken and history-returned message mutations", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    retention.accept({
+      type: "nested-message",
+      nested: { value: "small", values: ["first", { value: "second" }] },
+    });
+    const before = retention.snapshot();
+
+    const taken = retention.take("nested-message");
+    expect(taken).not.toBeNull();
+    const takenNested = taken?.nested as {
+      value: string;
+      values: Array<string | { value: string }>;
+    };
+    takenNested.value = "x".repeat(2 * 1024 * 1024);
+    (takenNested.values[1] as { value: string }).value = "changed through take";
+
+    const firstHistory = retention.history;
+    expect(firstHistory).toEqual([
+      {
+        type: "nested-message",
+        nested: { value: "small", values: ["first", { value: "second" }] },
+      },
+    ]);
+    const historyNested = firstHistory[0]?.nested as {
+      value: string;
+      values: Array<string | { value: string }>;
+    };
+    historyNested.value = "changed through history";
+    historyNested.values[0] = "changed through history array";
+
+    expect(retention.history).toEqual([
+      {
+        type: "nested-message",
+        nested: { value: "small", values: ["first", { value: "second" }] },
+      },
+    ]);
+    expect(retention.snapshot()).toEqual({
+      ...before,
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+    expect(serializedHistoryBytes(retention)).toBeLessThanOrEqual(
+      retention.snapshot().historyRetainedEstimatedBytes,
+    );
+  });
+
+  it("isolates latest truncation diagnostics from returned snapshot mutations", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    retention.accept({ type: "too-large", payload: "x".repeat(32 * 1_024) });
+    const first = retention.snapshot();
+    expect(first.latestTruncation).not.toBeNull();
+    const expectedTruncation = { ...first.latestTruncation };
+
+    const mutable = first.latestTruncation as unknown as Record<string, unknown>;
+    mutable.preview = "changed externally";
+    mutable.reason = "protocol";
+    mutable.observedEstimatedBytes = Number.MAX_SAFE_INTEGER;
+
+    const second = retention.snapshot();
+    expect(second.latestTruncation).toEqual(expectedTruncation);
+    expect(second).toMatchObject({
+      totalMessages: 1,
+      rejectedMessages: 1,
+      oversizedMessages: 1,
+    });
+  });
+
   it("evicts unawaited noise before an awaited control", () => {
     const retention = new BoundedIpcRetention(
       PROCESS_IPC_PENDING_MAX_MESSAGES,

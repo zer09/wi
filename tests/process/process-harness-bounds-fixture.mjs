@@ -75,6 +75,13 @@ if (mode === "fixture-runner") {
   await send({ type: 42, payload: "invalid type" });
   await send({ type: "t".repeat(129), payload: "overlong type" });
   await send({ type: "control-ready", descendantPid: descendant.pid, value: "small" });
+} else if (mode === "ipc-alias") {
+  await send({
+    type: "alias-ready",
+    descendantPid: descendant.pid,
+    nested: { value: "small", values: ["first", { value: "second" }] },
+  });
+  await send({ type: "alias-too-large", payload: "x".repeat(32 * 1024) });
 } else if (mode === "ipc-controls") {
   await send({ type: "control-fixture-ready", descendantPid: descendant.pid });
   let receivedControls = 0;

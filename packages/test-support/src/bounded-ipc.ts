@@ -349,6 +349,11 @@ interface IpcSnapshotState {
   nodes: number;
 }
 
+interface BoundedIpcSnapshot {
+  readonly value: IpcSnapshot;
+  readonly estimatedBytes: number;
+}
+
 function throwIpcLimit(reason: ProcessIpcTruncationReason): never {
   throw new Error(`Process IPC message exceeds the ${reason} limit`);
 }
@@ -434,8 +439,20 @@ function snapshotIpcValue(
   return snapshot;
 }
 
+function createBoundedIpcSnapshot(value: unknown): BoundedIpcSnapshot {
+  const state: IpcSnapshotState = { estimatedBytes: 0, nodes: 0 };
+  return {
+    value: snapshotIpcValue(value, 0, state),
+    estimatedBytes: state.estimatedBytes,
+  };
+}
+
+function cloneRetainedMessage(message: ServerProcessMessage): ServerProcessMessage {
+  return createBoundedIpcSnapshot(message).value as ServerProcessMessage;
+}
+
 export function snapshotBoundedIpcValue(value: unknown): Serializable {
-  return snapshotIpcValue(value, 0, { estimatedBytes: 0, nodes: 0 }) as Serializable;
+  return createBoundedIpcSnapshot(value).value as Serializable;
 }
 
 export class BoundedIpcRetention {
@@ -474,9 +491,13 @@ export class BoundedIpcRetention {
       return;
     }
 
+    // Retention owns one bounded representation. The callback value and every
+    // later outward read must stay detached from this accounting boundary.
+    const boundedSnapshot = createBoundedIpcSnapshot(value);
+    const message = boundedSnapshot.value as ServerProcessMessage;
     const retained: RetainedMessage = {
-      message: value as ServerProcessMessage,
-      estimatedBytes: analysis.estimatedBytes,
+      message,
+      estimatedBytes: boundedSnapshot.estimatedBytes,
     };
     this.#pending.push(retained);
     this.#pendingEstimatedBytes += retained.estimatedBytes;
@@ -518,11 +539,11 @@ export class BoundedIpcRetention {
     const [removed] = this.#pending.splice(index, 1);
     if (removed === undefined) return null;
     this.#pendingEstimatedBytes -= removed.estimatedBytes;
-    return removed.message;
+    return cloneRetainedMessage(removed.message);
   }
 
   get history(): readonly ServerProcessMessage[] {
-    return this.#history.map(({ message }) => message);
+    return this.#history.map(({ message }) => cloneRetainedMessage(message));
   }
 
   snapshot(): ProcessIpcDiagnostics {
@@ -538,7 +559,8 @@ export class BoundedIpcRetention {
       historyDroppedMessages: this.#historyDroppedMessages,
       pendingTruncated: this.#pendingTruncated,
       historyTruncated: this.#historyTruncated,
-      latestTruncation: this.#latestTruncation,
+      latestTruncation:
+        this.#latestTruncation === null ? null : { ...this.#latestTruncation },
     };
   }
 }

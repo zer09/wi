@@ -19,6 +19,9 @@ const posixOwnerDeathFixturePath = fileURLToPath(
 const setupSentinelFixturePath = fileURLToPath(
   new URL("./process-harness-setup-sentinel-fixture.mjs", import.meta.url),
 );
+const preanchorImportFixturePath = fileURLToPath(
+  new URL("./process-harness-preanchor-import-fixture.mjs", import.meta.url),
+);
 
 function processExists(pid: number): boolean {
   try {
@@ -385,7 +388,7 @@ describe("real process-tree cleanup", () => {
             fixturePath: setupSentinelFixturePath,
             arguments: [sentinelPath],
             environment: {
-              NODE_OPTIONS: "--import=/wi-test-support-owner-setup-does-not-exist.mjs",
+              WI_TEST_SUPPORT_POSIX_PRELOAD_TEST_MODE: "fail-before-anchor",
             },
             waitForReady: false,
           }),
@@ -393,6 +396,32 @@ describe("real process-tree cleanup", () => {
         await expect(stat(sentinelPath)).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         await rm(sentinelPath, { force: true });
+      }
+    },
+    10_000,
+  );
+
+  it(
+    "prevents caller NODE_OPTIONS from running before ownership setup",
+    async () => {
+      const statePath = join(tmpdir(), `wi-posix-preanchor-${randomUUID()}.json`);
+      const processHandle = await RealServerProcess.start({
+        fixturePath,
+        arguments: ["leader-exits-empty"],
+        environment: {
+          NODE_OPTIONS: `--import=${preanchorImportFixturePath}`,
+          WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH: statePath,
+        },
+        waitForReady: false,
+      });
+      try {
+        await processHandle.waitForMessage("ready");
+        await expect(processHandle.waitForExit()).resolves.toMatchObject({ code: 0 });
+        await processHandle.terminate();
+        await expect(stat(statePath)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await processHandle.terminate().catch(() => undefined);
+        await rm(statePath, { force: true });
       }
     },
     10_000,

@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 24
 
-Status: **SETUP-CLEANUP FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+Status: **PRE-READINESS BOOTSTRAP FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
 
 Starting head: `2b6e50a537034686a16e9c2baef633482fffe5cd` on `milestone-7-crash-recovery`.
 
@@ -71,13 +71,13 @@ Both probes checked the sentinel before fallback probe cleanup. Explicit target 
 | Corrected isolated owner-death probe | Reuse prevented; sentinel alive; watchdog gone |
 | Corrected isolated failed-release retry probe | Old group retained after rejection; forced allocation skipped PID/PGID 20 for sentinel 21; sentinel survived retry |
 | Focused anchor/retry regressions | 6 passed |
-| Setup-failure and accepted-watchdog-death follow-up | 3 passed |
-| Complete process-harness descendant suite | 15 passed |
+| Setup/pre-readiness and accepted-watchdog-death follow-up | 4 passed |
+| Complete process-harness descendant suite | 16 passed |
 | `pnpm test:unit` | 42 files; 461 passed |
 | `pnpm test:integration` | 6 files; 262 passed |
 | `pnpm test:property` | 10 files; 36 passed |
-| `pnpm test:process` | 9 files; 104 passed |
-| `pnpm check` | 69 files; 884 passed; no skips |
+| `pnpm test:process` | 9 files; 105 passed |
+| `pnpm check` | 69 files; 885 passed; no skips |
 | `pnpm test:e2e` | 33 passed |
 | Lint, typecheck, build, package exports, `git diff --check` | Passed |
 
@@ -113,5 +113,20 @@ The correction now routes failed setup through bounded anchored escalation:
 - cleanup failure is aggregated with the setup error and does not falsely delete ownership;
 - a real preload test hook records fixture/anchor identities and the harness injects failure immediately after anchor readiness; the regression requires fixture, anchor, group, and watchdog disappearance while proving fixture code remained gated;
 - a separate accepted-then-watchdog-death regression requires repeated cleanup to fail closed without numeric fallback while the group remains anchored, then uses explicit test fallback cleanup.
+
+Independent verification remains required before M5 can be closed.
+
+## Third independent verification and pre-readiness bootstrap follow-up
+
+The setup-cleanup verifier confirmed watchdog readiness cleanup, after-anchor setup cleanup, post-acceptance fail-closed behavior, and the exact-reuse correction, but classified M5 **PARTIALLY RESOLVED**. A caller-provided earlier `NODE_OPTIONS --import` could execute before the Wi preload, spawn a descendant in the fixture group, and throw. Because anchor readiness had not occurred, cleanup correctly avoided unsafe numeric group signalling but incorrectly assumed no descendant could exist; it verified only the leader/watchdog, deleted ownership, and returned while the descendant group remained.
+
+The correction removes that executable pre-readiness surface:
+
+- `spawnNodeProcessTree()` launches a fixed `posix-owner-bootstrap` as the actual fixture process;
+- the child `NODE_OPTIONS` value is replaced, so caller or inherited `--import`/`--require` hooks cannot run before ownership;
+- the bootstrap statically imports the ownership preload first, preserving the same native child PID, stdio, IPC, exit, and signal behavior;
+- only after the preload creates the anchor, the watchdog is registered, and the gate is acknowledged does the bootstrap dynamically import the requested fixture module with the original fixture `process.argv`;
+- a retained malicious caller-import fixture would spawn a descendant and throw if executed; the regression passes it through `NODE_OPTIONS`, requires the real fixture to run normally, and requires the malicious state file never to exist;
+- the pre-anchor failure regression now uses a harness-owned preload failpoint, keeping that path deterministic without executing caller code before ownership.
 
 Independent verification remains required before M5 can be closed.

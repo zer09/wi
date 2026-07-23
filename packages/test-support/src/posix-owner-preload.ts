@@ -35,6 +35,9 @@ if (process.platform === "linux" && readyDescriptor !== undefined) {
   if (acknowledgementDescriptor === undefined) {
     throw new Error("POSIX owner preload has no acknowledgement pipe");
   }
+  if (setupTestMode === "fail-before-anchor") {
+    throw new Error("Injected POSIX preload failure before anchor creation");
+  }
   // The anchor joins the detached fixture group before user code can run. As
   // long as ownership is retained, Linux cannot allocate its PGID as a PID.
   const anchorPid = await startProcessGroupAnchor();

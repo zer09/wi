@@ -548,19 +548,18 @@ export async function spawnNodeProcessTree(
   }
   let environment = { ...process.env, ...options.environment };
   const posixOwnership = await startPosixSupervisor();
-  const preloadUrl = new URL("./posix-owner-preload.js", import.meta.url).href;
-  const existingNodeOptions = environment.NODE_OPTIONS?.trim();
-  environment = environmentWithValue(
-    environment,
-    "NODE_OPTIONS",
-    `${existingNodeOptions === undefined || existingNodeOptions === "" ? "" : `${existingNodeOptions} `}--import=${preloadUrl}`,
+  const bootstrapPath = fileURLToPath(
+    new URL("./posix-owner-bootstrap.js", import.meta.url),
   );
+  // Caller preloads could execute before the anchor and create an unowned group.
+  // The fixed bootstrap is therefore the exclusive Node initialization boundary.
+  environment = environmentWithValue(environment, "NODE_OPTIONS", "");
   environment = environmentWithValue(environment, POSIX_READY_FD, "3");
   environment = environmentWithValue(environment, POSIX_ACKNOWLEDGEMENT_FD, "4");
 
   let child: ChildProcess | null = null;
   try {
-    child = spawn(process.execPath, [...arguments_], {
+    child = spawn(process.execPath, [bootstrapPath, ...arguments_], {
       env: environment,
       stdio: [
         "ignore",

@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+/* eslint-disable @typescript-eslint/no-require-imports, no-undef */
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
 
 const statePath = process.env.WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH;
-if (statePath === undefined) throw new Error("Missing pre-anchor import state path");
+if (statePath === undefined) throw new Error("Missing pre-anchor require state path");
 const descendant = spawn(
   process.execPath,
   ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],
@@ -13,4 +14,4 @@ writeFileSync(
   statePath,
   JSON.stringify({ fixturePid: process.pid, descendantPid: descendant.pid }),
 );
-throw new Error("Injected caller preload failure");
+throw new Error("Injected caller require failure");

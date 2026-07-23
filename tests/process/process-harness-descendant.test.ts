@@ -22,6 +22,9 @@ const setupSentinelFixturePath = fileURLToPath(
 const preanchorImportFixturePath = fileURLToPath(
   new URL("./process-harness-preanchor-import-fixture.mjs", import.meta.url),
 );
+const preanchorRequireFixturePath = fileURLToPath(
+  new URL("./process-harness-preanchor-require-fixture.cjs", import.meta.url),
+);
 
 function processExists(pid: number): boolean {
   try {
@@ -49,6 +52,20 @@ function processGroupExists(pid: number): boolean {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
     throw error;
   }
+}
+
+async function cleanupPreanchorState(path: string): Promise<void> {
+  try {
+    const leaked = JSON.parse(await readFile(path, "utf8")) as {
+      readonly fixturePid?: unknown;
+    };
+    if (typeof leaked.fixturePid === "number" && processGroupExists(leaked.fixturePid)) {
+      process.kill(-leaked.fixturePid, "SIGKILL");
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await rm(path, { force: true });
 }
 
 interface PosixReleaseTestState {
@@ -158,6 +175,8 @@ describe("real process-tree cleanup", () => {
         });
         const ready = await processHandle.waitForMessage("ready");
         if (typeof ready.pid !== "number") throw new Error("Missing fixture PID");
+        expect(ready).not.toHaveProperty("releaseTestMode");
+        expect(ready).not.toHaveProperty("releaseTestStatePath");
         try {
           await expect(processHandle.waitForExit()).resolves.toMatchObject({ code: 0 });
           const retained = await waitForReleaseTestEvent(statePath, "ignored-release");
@@ -422,6 +441,54 @@ describe("real process-tree cleanup", () => {
       } finally {
         await processHandle.terminate().catch(() => undefined);
         await rm(statePath, { force: true });
+      }
+    },
+    10_000,
+  );
+
+  it.each([
+    ["--import", preanchorImportFixturePath],
+    ["--require", preanchorRequireFixturePath],
+  ] as const)(
+    "prevents inherited %s hooks from running in harness-owned children",
+    async (option, preloadPath) => {
+      const statePath = join(tmpdir(), `wi-posix-inherited-preload-${randomUUID()}.json`);
+      const previousNodeOptions = process.env.NODE_OPTIONS;
+      const previousStatePath = process.env.WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH;
+      let processHandle: RealServerProcess | null = null;
+      let startError: unknown;
+      process.env.NODE_OPTIONS = `${option}=${preloadPath}`;
+      process.env.WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH = statePath;
+      try {
+        try {
+          processHandle = await RealServerProcess.start({
+            fixturePath,
+            arguments: ["leader-exits-empty"],
+            waitForReady: false,
+          });
+        } catch (error) {
+          startError = error;
+        }
+      } finally {
+        if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+        else process.env.NODE_OPTIONS = previousNodeOptions;
+        if (previousStatePath === undefined) {
+          delete process.env.WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH;
+        } else {
+          process.env.WI_TEST_SUPPORT_PREANCHOR_IMPORT_STATE_PATH = previousStatePath;
+        }
+      }
+
+      try {
+        if (startError !== undefined) throw startError;
+        if (processHandle === null) throw new Error("Harness child did not start");
+        await processHandle.waitForMessage("ready");
+        await expect(processHandle.waitForExit()).resolves.toMatchObject({ code: 0 });
+        await processHandle.terminate();
+        await expect(stat(statePath)).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await processHandle?.terminate().catch(() => undefined);
+        await cleanupPreanchorState(statePath);
       }
     },
     10_000,

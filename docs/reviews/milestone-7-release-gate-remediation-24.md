@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 24
 
-Status: **PRE-READINESS BOOTSTRAP FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+Status: **WATCHDOG ENVIRONMENT FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
 
 Starting head: `2b6e50a537034686a16e9c2baef633482fffe5cd` on `milestone-7-crash-recovery`.
 
@@ -72,12 +72,13 @@ Both probes checked the sentinel before fallback probe cleanup. Explicit target 
 | Corrected isolated failed-release retry probe | Old group retained after rejection; forced allocation skipped PID/PGID 20 for sentinel 21; sentinel survived retry |
 | Focused anchor/retry regressions | 6 passed |
 | Setup/pre-readiness and accepted-watchdog-death follow-up | 4 passed |
-| Complete process-harness descendant suite | 16 passed |
+| Watchdog environment and release-control isolation regressions | 3 passed |
+| Complete process-harness descendant suite | 18 passed |
 | `pnpm test:unit` | 42 files; 461 passed |
 | `pnpm test:integration` | 6 files; 262 passed |
 | `pnpm test:property` | 10 files; 36 passed |
-| `pnpm test:process` | 9 files; 105 passed |
-| `pnpm check` | 69 files; 885 passed; no skips |
+| `pnpm test:process` | 9 files; 107 passed |
+| `pnpm check` | 69 files; 887 passed; no skips |
 | `pnpm test:e2e` | 33 passed |
 | Lint, typecheck, build, package exports, `git diff --check` | Passed |
 
@@ -128,5 +129,19 @@ The correction removes that executable pre-readiness surface:
 - only after the preload creates the anchor, the watchdog is registered, and the gate is acknowledged does the bootstrap dynamically import the requested fixture module with the original fixture `process.argv`;
 - a retained malicious caller-import fixture would spawn a descendant and throw if executed; the regression passes it through `NODE_OPTIONS`, requires the real fixture to run normally, and requires the malicious state file never to exist;
 - the pre-anchor failure regression now uses a harness-owned preload failpoint, keeping that path deterministic without executing caller code before ownership.
+
+Independent verification remains required before M5 can be closed.
+
+## Fourth independent verification and watchdog-environment follow-up
+
+The pre-readiness bootstrap verifier independently reproduced the earlier-import baseline, confirmed the fixture bootstrap, native child semantics, exact-reuse correction, setup cleanup, and accepted-watchdog-death behavior, but classified M5 **PARTIALLY RESOLVED**. `startPosixSupervisor()` still spawned the detached watchdog from unsanitized `process.env`. An inherited parent `NODE_OPTIONS --import` or `--require` hook could therefore run in the watchdog before readiness, create a descendant in its detached group, and throw. Watchdog setup cleanup verified only the direct watchdog PID, so the descendant group survived unreported. The verifier also found that watchdog-only release-test controls reached anchor and fixture application code.
+
+The correction closes both environment boundaries:
+
+- `startPosixSupervisor()` receives the merged child environment but replaces `NODE_OPTIONS` before spawning the watchdog, so neither inherited nor caller-provided preload hooks execute in any harness-owned Node child;
+- the fixture bootstrap continues to replace `NODE_OPTIONS`, and its anchor inherits that sanitized application environment;
+- watchdog-only control-token and release-test variables are removed case-insensitively before the bootstrap, anchor, or requested fixture starts, while the watchdog retains its private copies;
+- retained malicious `--import` and `--require` fixtures each write a witness, spawn a descendant, and throw if they execute; regressions pass those hooks through inherited parent `NODE_OPTIONS`, require normal fixture completion, and require no witness;
+- the retry regression now also proves fixture application code cannot observe the watchdog release-test mode or state path.
 
 Independent verification remains required before M5 can be closed.

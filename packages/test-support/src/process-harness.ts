@@ -149,6 +149,8 @@ const posixSupervisors = new WeakMap<ChildProcess, PosixSupervisorOwnership>();
 const POSIX_CONTROL_TOKEN = "WI_TEST_SUPPORT_POSIX_CONTROL_TOKEN";
 const POSIX_READY_FD = "WI_TEST_SUPPORT_POSIX_READY_FD";
 const POSIX_ACKNOWLEDGEMENT_FD = "WI_TEST_SUPPORT_POSIX_ACKNOWLEDGEMENT_FD";
+const POSIX_RELEASE_TEST_MODE = "WI_TEST_SUPPORT_POSIX_RELEASE_TEST_MODE";
+const POSIX_RELEASE_TEST_STATE_PATH = "WI_TEST_SUPPORT_POSIX_RELEASE_TEST_STATE_PATH";
 
 function environmentWithValue(
   environment: NodeJS.ProcessEnv,
@@ -160,6 +162,18 @@ function environmentWithValue(
     if (key.toLowerCase() === name.toLowerCase()) delete result[key];
   }
   result[name] = value;
+  return result;
+}
+
+function environmentWithoutValues(
+  environment: NodeJS.ProcessEnv,
+  names: readonly string[],
+): NodeJS.ProcessEnv {
+  const result = { ...environment };
+  const normalizedNames = new Set(names.map((name) => name.toLowerCase()));
+  for (const key of Object.keys(result)) {
+    if (normalizedNames.has(key.toLowerCase())) delete result[key];
+  }
   return result;
 }
 
@@ -217,16 +231,17 @@ async function stopPosixSupervisorAfterSetupFailure(
   }
 }
 
-async function startPosixSupervisor(): Promise<PosixSupervisorOwnership> {
+async function startPosixSupervisor(
+  baseEnvironment: NodeJS.ProcessEnv,
+): Promise<PosixSupervisorOwnership> {
   const controlToken = randomUUID();
   const supervisorPath = fileURLToPath(
     new URL("./posix-process-supervisor.js", import.meta.url),
   );
-  const environment = environmentWithValue(
-    { ...process.env },
-    POSIX_CONTROL_TOKEN,
-    controlToken,
-  );
+  // The watchdog starts before fixture ownership exists, so no inherited or
+  // caller-provided Node preload may execute inside it.
+  let environment = environmentWithValue(baseEnvironment, "NODE_OPTIONS", "");
+  environment = environmentWithValue(environment, POSIX_CONTROL_TOKEN, controlToken);
   const supervisor = spawn(process.execPath, [supervisorPath], {
     env: environment,
     stdio: ["ignore", "ignore", "ignore", "pipe", "ipc"],
@@ -547,12 +562,18 @@ export async function spawnNodeProcessTree(
     throw new Error("The Wi v0.1 process harness supports Linux only");
   }
   let environment = { ...process.env, ...options.environment };
-  const posixOwnership = await startPosixSupervisor();
+  const posixOwnership = await startPosixSupervisor(environment);
   const bootstrapPath = fileURLToPath(
     new URL("./posix-owner-bootstrap.js", import.meta.url),
   );
   // Caller preloads could execute before the anchor and create an unowned group.
   // The fixed bootstrap is therefore the exclusive Node initialization boundary.
+  // Watchdog-only controls must not reach the anchor or fixture application.
+  environment = environmentWithoutValues(environment, [
+    POSIX_CONTROL_TOKEN,
+    POSIX_RELEASE_TEST_MODE,
+    POSIX_RELEASE_TEST_STATE_PATH,
+  ]);
   environment = environmentWithValue(environment, "NODE_OPTIONS", "");
   environment = environmentWithValue(environment, POSIX_READY_FD, "3");
   environment = environmentWithValue(environment, POSIX_ACKNOWLEDGEMENT_FD, "4");

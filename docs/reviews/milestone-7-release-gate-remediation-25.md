@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 25
 
-Status: IMPLEMENTED — PENDING INDEPENDENT VERIFICATION
+Status: RESOLVED
 
 Finding: `WI-M7-M1-F2` — inbound process-IPC retention exposed mutable internal message and diagnostic references.
 
@@ -65,4 +65,10 @@ pnpm check:                     69 files, 891/891 passed, no skips
 lint/typecheck/git diff check:  passed
 ```
 
-Independent verification remains required before push or merge.
+## Independent verification closure
+
+A fresh review-only verifier examined the complete `96ad7d4..c00b8c9` correction from external archives and classified `WI-M7-M1-F2` as **RESOLVED** with no correctness, regression, documentation, or cleanup findings.
+
+The verifier positively reproduced all three aliases at `96ad7d4`: waiter mutation changed retained history and exceeded the unchanged estimate, history mutation changed later reads including nested arrays, and truncation-record mutation changed later diagnostics. At `c00b8c9`, independent probes confirmed source, waiter, history, nested object/array, and diagnostics isolation; actual retained JSON bytes remained within the recorded estimate; and all existing depth, node, string, per-message, aggregate, eviction, outbound snapshot, readiness, output, timeout, and process-ownership bounds retained their prior meaning.
+
+Independent gate evidence matched the implementation run: 9/9 focused unit, 6/6 process-harness bounds, 464 unit, 262 integration, 36 property with `WI_FC_SEED=737373`, 108 process, 33 E2E, and 69 files / 891 tests under `pnpm check`, with no skips. Lint, typecheck, build, package exports, diff checks, and cleanup all passed. The next gate is the final independent local review before any push.

@@ -1,6 +1,6 @@
 # Milestone 7 release-gate remediation 24
 
-Status: **WATCHDOG ENVIRONMENT FOLLOW-UP IMPLEMENTED — PENDING INDEPENDENT VERIFICATION**
+Status: **RESOLVED**
 
 Starting head: `2b6e50a537034686a16e9c2baef633482fffe5cd` on `milestone-7-crash-recovery`.
 
@@ -144,4 +144,17 @@ The correction closes both environment boundaries:
 - retained malicious `--import` and `--require` fixtures each write a witness, spawn a descendant, and throw if they execute; regressions pass those hooks through inherited parent `NODE_OPTIONS`, require normal fixture completion, and require no witness;
 - the retry regression now also proves fixture application code cannot observe the watchdog release-test mode or state path.
 
-Independent verification remains required before M5 can be closed.
+## Final independent verification
+
+A fresh review-only verifier classified `WI-M7-M5` **RESOLVED** at `334e89325eb95654a07ae8f06931f7c757caff1b`, with no implementation defect found.
+
+The verifier independently:
+
+- reproduced both inherited watchdog preload defects at `88a778c` using `--import` and `--require`, proving the direct watchdog exited while a malicious detached-group descendant remained alive before fallback cleanup;
+- confirmed the watchdog receives only canonical empty `NODE_OPTIONS` plus its authenticated private controls, while bootstrap, anchor, and fixture receive cleared `NODE_OPTIONS` and no token, release mode, state path, or case variants;
+- exercised inherited and caller-environment preload hooks, mixed-case keys, all five release-test modes, setup failure, accepted watchdog death, owner-pipe EOF, native child PID/stdio/IPC/argv/exit/signal behavior, and complete cleanup;
+- repeated the isolated PID-namespace failed-release trace with a private `/proc`, custom PID-1 reaper, and writable `ns_last_pid`: the anchored old PID/PGID 20 remained allocated, the forced sentinel became 21/21, retry reclaimed only the owned group, and the sentinel survived unsignalled;
+- passed the focused selection 4/4, descendant suite 18/18, process suite 107/107, `pnpm check` 887/887, E2E 33/33, and all static checks;
+- left the tracked tree and index clean, only the four allowed workflow directories untracked, and no process, namespace helper, state file, witness, temporary archive, or listener leak.
+
+The verifier recorded one informational committed-test coverage limitation: fixture tests directly expose release mode and state-path isolation but not the control token or anchor environment. Independent `/proc` inspection and source analysis established both missing assertions through the same shared case-insensitive sanitizer. This does not block closure.

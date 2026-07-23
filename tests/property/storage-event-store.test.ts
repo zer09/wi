@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionEvent } from "@wi/protocol";
 import { SessionStoreManager } from "@wi/storage";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 
 const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "515151", 10);
 const propertyPath = process.env.WI_FC_PATH;
@@ -191,10 +192,10 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
       lastEventSequence: model.length,
       status: "ready",
     });
-    await expect(storage.sessions.testMutateEvent(sessionId, "update", 1)).rejects.toThrow(
+    await expect(sessionWorkerPoolForTest(storage).testMutateEvent(sessionId, "update", 1)).rejects.toThrow(
       "session events are immutable",
     );
-    await expect(storage.sessions.testMutateEvent(sessionId, "delete", 1)).rejects.toThrow(
+    await expect(sessionWorkerPoolForTest(storage).testMutateEvent(sessionId, "delete", 1)).rejects.toThrow(
       "session events are immutable",
     );
   } finally {

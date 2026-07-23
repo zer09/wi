@@ -7,6 +7,7 @@ import {
   sessionDatabaseRelativePath,
   SessionStoreManager,
 } from "@wi/storage";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 
 const [homeDirectory, sessionId, mode] = process.argv.slice(2);
 if (homeDirectory === undefined || sessionId === undefined || mode === undefined) process.exit(64);
@@ -74,10 +75,10 @@ if (
   const relativePath = sessionDatabaseRelativePath(sessionId);
   const databasePath = resolveStoragePath(homeDirectory, relativePath);
   if (mode === "after_session_schema_before_manifest") {
-    await storage.sessions.initializeSchemaOnlyForTest(sessionId, databasePath);
+    await sessionWorkerPoolForTest(storage).initializeSchemaOnlyForTest(sessionId, databasePath);
     process.exit(85);
   }
-  await storage.sessions.initialize(
+  await sessionWorkerPoolForTest(storage).initialize(
     {
       sessionId,
       projectId: null,
@@ -120,6 +121,15 @@ const input = {
 
 try {
   const session = await storage.openSession(sessionId);
+  if (mode === "failpoint_gate_probe") {
+    try {
+      await session.appendTransaction({ ...input, testFailpoint: "crash_before_commit" });
+      process.exit(87);
+    } catch (error) {
+      const stored = await session.getEventById(input.events[0].eventId);
+      process.exit(error?.code === "storage.worker_failed" && stored === null ? 0 : 88);
+    }
+  }
   if (mode === "after_session_commit_before_catalog") {
     await session.appendTransaction(input);
     await storage.drainCatalogObservations();

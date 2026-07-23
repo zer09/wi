@@ -1,4 +1,3 @@
-import { setTimeout as delay } from "node:timers/promises";
 import { WiRuntime, WiServer } from "../../apps/server/dist/index.js";
 import { FakeProviderAdapter } from "../../packages/provider-fake/dist/index.js";
 import { SessionStoreManager } from "../../packages/storage/dist/index.js";
@@ -16,10 +15,7 @@ process.on("unhandledRejection", (error) => {
   send("unhandled_rejection", { message });
 });
 
-let releaseResource = () => {};
-const resourceBlocker = new Promise((resolve) => {
-  releaseResource = resolve;
-});
+const resourceBlocker = new Promise(() => undefined);
 let activityCount = 0;
 let abortSeen = false;
 let postAbortReported = false;
@@ -61,7 +57,7 @@ function startNonCooperativeResource(runId, signal) {
       });
     }
   }, 10);
-  send("resource_started", { runId, scheduler: schedulerState() });
+  send("resource_started", { runId, sessionId, scheduler: schedulerState() });
 }
 
 class NonCooperativeProvider extends FakeProviderAdapter {
@@ -127,7 +123,7 @@ const created = await runtime.storage.createSession({
 });
 const sessionId = created.session.sessionId;
 let runId = null;
-const terminalSubscription = runtime.eventHub.subscribe(sessionId, (event) => {
+runtime.eventHub.subscribe(sessionId, (event) => {
   if (
     event.data?.runId !== runId ||
     !["run.interrupted", "run.cancelled", "run.failed"].includes(event.eventType)
@@ -159,8 +155,8 @@ runId = accepted.runId ?? null;
 if (runId === null) throw new Error("H2 probe did not create a run");
 
 let shutdownStarted = false;
-process.on("message", (message) => {
-  if (message !== "shutdown" || shutdownStarted) return;
+function beginShutdown() {
+  if (shutdownStarted) return;
   shutdownStarted = true;
   send("shutdown_started", { runId, scheduler: schedulerState() });
   void (async () => {
@@ -192,15 +188,12 @@ process.on("message", (message) => {
       unhandledRejections: [...unhandledRejections],
     });
   })();
-});
+}
 
-process.on("SIGTERM", () => {
-  if (resourceInterval !== null) globalThis.clearInterval(resourceInterval);
-  resourceInterval = null;
-  terminalSubscription.unsubscribe();
-  releaseResource();
-  void delay(0).then(() => process.exit(0));
+process.on("message", (message) => {
+  if (message === "shutdown") beginShutdown();
 });
+process.on("SIGTERM", beginShutdown);
 
 const watchdog = globalThis.setTimeout(() => {
   send("watchdog", { scheduler: schedulerState(), activityCount });

@@ -25,8 +25,8 @@ import {
   ToolExecutionStateSchema,
 } from "@wi/protocol";
 
-export const CATALOG_SCHEMA_VERSION = 2;
-export const SESSION_SCHEMA_VERSION = 3;
+export const CATALOG_SCHEMA_VERSION = 5;
+export const SESSION_SCHEMA_VERSION = 4;
 export const SESSION_FORMAT_VERSION = 1;
 
 export const HashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -65,8 +65,10 @@ export const SessionSummarySchema = z.strictObject({
   pendingApprovalCount: z.number().int().nonnegative().safe(),
   pendingInputCount: z.number().int().nonnegative().safe(),
   sessionSchemaVersion: z.number().int().positive().safe(),
+  recoveryCandidate: z.boolean().default(false),
 });
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+export type SessionSummaryInput = z.input<typeof SessionSummarySchema>;
 
 export const SessionCreationRequestSchema = z.strictObject({
   title: z.string(),
@@ -110,6 +112,7 @@ export const SessionCatalogObservationSchema = z.strictObject({
   projection: SessionCatalogProjectionSchema,
   pendingApprovalCount: z.number().int().nonnegative().safe(),
   pendingInputCount: z.number().int().nonnegative().safe(),
+  recoveryNeeded: z.boolean(),
 });
 export type SessionCatalogObservation = z.infer<typeof SessionCatalogObservationSchema>;
 
@@ -123,6 +126,16 @@ export const SessionManifestSchema = z.strictObject({
   lastEventSequence: z.number().int().nonnegative().safe(),
 });
 export type SessionManifest = z.infer<typeof SessionManifestSchema>;
+
+export const CreationProvenanceSchema = z.strictObject({
+  commandId: CommandIdSchema,
+  payloadHash: HashSchema,
+  commandMethod: z.literal("session.create"),
+  eventId: EventIdSchema,
+  result: z.strictObject({ sessionId: SessionIdSchema }),
+  acceptedAtMs: TimestampMsSchema,
+});
+export type CreationProvenance = z.infer<typeof CreationProvenanceSchema>;
 
 export const SESSION_EVENT_PAGE_BOUNDS = {
   maximumEvents: 256,
@@ -351,7 +364,13 @@ export type ProjectionMutation = z.infer<typeof ProjectionMutationSchema>;
 
 const TransactionProjectionFields = {
   projections: z.array(ProjectionMutationSchema).default([]),
-  testFailpoint: z.enum(["crash_before_commit", "crash_after_commit"]).optional(),
+  testFailpoint: z
+    .enum([
+      "crash_before_commit",
+      "crash_after_commit",
+      "after_command_event_insert_before_commit",
+    ])
+    .optional(),
 } as const;
 
 export const AppendTransactionInputSchema = z.strictObject({

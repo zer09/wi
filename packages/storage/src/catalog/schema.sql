@@ -27,10 +27,15 @@ CREATE TABLE sessions (
     requires_attention INTEGER NOT NULL DEFAULT 0,
     pending_approval_count INTEGER NOT NULL DEFAULT 0,
     pending_input_count INTEGER NOT NULL DEFAULT 0,
-    session_schema_version INTEGER NOT NULL
+    session_schema_version INTEGER NOT NULL,
+    recovery_candidate INTEGER NOT NULL DEFAULT 1,
+    unavailable_reason TEXT
+        CHECK (unavailable_reason IS NULL OR unavailable_reason = 'quarantined')
 ) STRICT;
 
 CREATE INDEX sessions_updated_idx ON sessions(updated_at_ms DESC);
+CREATE INDEX sessions_recovery_candidate_idx
+    ON sessions(recovery_candidate, status, updated_at_ms, session_id);
 
 CREATE TABLE catalog_commands (
     command_id TEXT PRIMARY KEY,

@@ -15,6 +15,7 @@ import {
 import {
   SessionStoreManager,
   validateSessionStoreManagerOptions,
+  type RecoveryCandidateCursor,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
 import {
@@ -27,6 +28,7 @@ import {
   nonThrowingLogger,
   type Logger,
 } from "./logging/logger.js";
+import type { TestFailpointController } from "./testing/failpoints.js";
 import { CommandRouter } from "./websocket/command-router.js";
 
 function randomIdSource(): string {
@@ -86,7 +88,9 @@ export interface WiRuntimeOptions {
   readonly toolCapacity?: number;
   readonly actorIdleTimeoutMs?: number;
   readonly actorEvictionIntervalMs?: number;
+  readonly shutdownDeadlineMs?: number;
   readonly storage?: RuntimeStorageOptions;
+  readonly testFailpoints?: TestFailpointController;
 }
 
 function parseStorageOptions(value: unknown): RuntimeStorageOptions | undefined {
@@ -113,10 +117,21 @@ export class WiRuntime {
   readonly diagnosticId = (): string => id("diagnostic");
   readonly now: () => number;
   private readonly evictionIntervalMs: number;
+  private readonly shutdownDeadlineMs: number;
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
+  private readyPromise: Promise<void> | null = null;
+  private closing = false;
   private closePromise: Promise<void> | null = null;
 
   constructor(options: WiRuntimeOptions) {
+    if (
+      options.testFailpoints !== undefined &&
+      (process.env.NODE_ENV !== "test" || process.env.WI_ALLOW_TEST_FAILPOINTS !== "1")
+    ) {
+      throw new Error(
+        "Runtime test failpoints require NODE_ENV=test and WI_ALLOW_TEST_FAILPOINTS=1",
+      );
+    }
     const limits = validateRuntimeLimits(options);
     const storageOptions = parseStorageOptions(options.storage);
     const now = options.now ?? Date.now;
@@ -126,6 +141,10 @@ export class WiRuntime {
       now,
     });
     this.evictionIntervalMs = limits.actorEvictionIntervalMs;
+    this.shutdownDeadlineMs = options.shutdownDeadlineMs ?? 15_000;
+    if (!Number.isSafeInteger(this.shutdownDeadlineMs) || this.shutdownDeadlineMs < 100) {
+      throw new RangeError("Shutdown deadline must be a safe integer of at least 100ms");
+    }
     this.now = now;
     this.logger = nonThrowingLogger(
       options.logger ?? new JsonLogger({ now: this.now }),
@@ -161,6 +180,13 @@ export class WiRuntime {
       ...storageOptions,
       homeDirectory: options.homeDirectory,
       now: this.now,
+      ...(options.testFailpoints === undefined
+        ? {}
+        : {
+            testFailpoints: {
+              hit: (name, fields) => options.testFailpoints?.hit(name, fields),
+            },
+          }),
       onCatalogObservationError: async (failure) => {
         const { error, ...fields } = failure;
         try {
@@ -192,6 +218,9 @@ export class WiRuntime {
       },
       sessionWorkers: {
         ...sessionWorkerOptions,
+        ...(options.testFailpoints?.is("after_command_event_insert_before_commit") === true
+          ? { allowTestOperations: true }
+          : {}),
         onWorkerReplacement: (workerIndex, replacementCount) => {
           const diagnosticId = this.diagnosticId();
           this.logger.warn("storage_worker_replaced", {
@@ -284,6 +313,20 @@ export class WiRuntime {
             const { error, ...fields } = diagnostic;
             this.logger.error("run_task_failed", error, fields);
           },
+          ...(options.testFailpoints === undefined
+            ? {}
+            : {
+                testFailpoints: {
+                  matches: (name, fields) =>
+                    options.testFailpoints?.matches(name, fields) === true,
+                  takeRunIdForCommand: (targetSessionId, commandId) =>
+                    options.testFailpoints?.takeRunIdForCommand(
+                      targetSessionId,
+                      commandId,
+                    ) ?? null,
+                  hit: (name, fields) => options.testFailpoints?.hit(name, fields),
+                },
+              }),
           onFault: (error) => {
             const diagnosticId = this.diagnosticId();
             this.logger.error("session_actor_fault", error, { diagnosticId, sessionId });
@@ -304,9 +347,39 @@ export class WiRuntime {
     );
   }
 
-  async ready(): Promise<void> {
-    await this.storage.ready();
-    if (this.evictionTimer === null) {
+  ready(): Promise<void> {
+    if (this.readyPromise !== null) return this.readyPromise;
+    this.readyPromise = this.finishReady();
+    return this.readyPromise;
+  }
+
+  private async finishReady(): Promise<void> {
+    try {
+      await this.storage.ready();
+      if (this.closing) return;
+      // Recovery ownership belongs to the backend. Read and adopt one bounded
+      // page at a time so startup can stop promptly without retaining the catalog.
+      let recoveryCursor: RecoveryCandidateCursor | null = null;
+      do {
+        if (this.closing) return;
+        const page = await this.storage.listRecoveryCandidatePage(recoveryCursor);
+        if (this.closing) return;
+        for (const sessionId of page.sessionIds) {
+          if (this.closing) return;
+          try {
+            const lease = await this.actors.acquire(sessionId);
+            lease.release();
+          } catch (error) {
+            if (this.closing) return;
+            this.logger.error("startup_recovery_candidate_failed", error, {
+              diagnosticId: this.diagnosticId(),
+              sessionId,
+            });
+          }
+        }
+        recoveryCursor = page.nextCursor;
+      } while (recoveryCursor !== null);
+      if (this.closing) return;
       this.evictionTimer = setInterval(() => {
         void this.actors.evictIdle().catch((error: unknown) => {
           const diagnosticId = this.diagnosticId();
@@ -314,6 +387,11 @@ export class WiRuntime {
         });
       }, this.evictionIntervalMs);
       this.evictionTimer.unref();
+    } catch (error) {
+      // Server-owned shutdown cancels startup. A storage/actor close caused by
+      // that shutdown is not an independent startup failure.
+      if (this.closing) return;
+      throw error;
     }
   }
 
@@ -321,34 +399,79 @@ export class WiRuntime {
     this.commandRouter.stopAccepting();
   }
 
-  close(): Promise<void> {
+  getShutdownDeadlineMs(): number {
+    return this.shutdownDeadlineMs;
+  }
+
+  close(deadlineAtMs = Date.now() + this.shutdownDeadlineMs): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
+    this.closing = true;
     this.stopAcceptingCommands();
     if (this.evictionTimer !== null) {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
     }
-    this.closePromise = this.finishClose();
+    this.closePromise = this.finishClose(deadlineAtMs);
     return this.closePromise;
   }
 
-  private async finishClose(): Promise<void> {
+  private async finishClose(deadlineAtMs: number): Promise<void> {
+    const startedAt = Date.now();
     const errors: unknown[] = [];
-    try {
-      await this.actors.close();
-    } catch (error) {
-      errors.push(error);
+    const diagnostics: Array<{ component: string; phase: string; elapsedMs: number; remainingMs: number; classification: string; error: string }> = [];
+    const run = async (phase: string, operation: () => Promise<void>): Promise<void> => {
+      const remaining = deadlineAtMs - Date.now();
+      if (remaining <= 0) {
+        const error = new Error(`Shutdown deadline elapsed before ${phase}`);
+        errors.push(error);
+        diagnostics.push({ component: phase === "storage" ? "storage" : "runtime", phase, elapsedMs: Date.now() - startedAt, remainingMs: 0, classification: "deadline_elapsed", error: error.message });
+        if (phase === "storage") {
+          // Storage owns hard worker boundaries; invoke it even after expiry so
+          // it can terminate workers rather than abandoning cleanup entirely.
+          try {
+            await operation();
+          } catch (cleanupError) {
+            errors.push(cleanupError);
+          }
+        }
+        return;
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          operation(),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error(`${phase} exceeded shutdown deadline`)), remaining);
+            timer.unref();
+          }),
+        ]);
+      } catch (error) {
+        errors.push(error);
+        diagnostics.push({
+          component: phase === "storage" ? "storage" : "runtime",
+          phase,
+          elapsedMs: Date.now() - startedAt,
+          remainingMs: Math.max(0, deadlineAtMs - Date.now()),
+          classification: Date.now() >= deadlineAtMs ? "timeout" : "failure",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    };
+    await run("actors", () => this.actors.close());
+    await run("scheduler", () => this.scheduler.shutdown());
+    await run("storage", () => this.storage.close(deadlineAtMs));
+    if (diagnostics.length > 0) {
+      this.logger.error("server_shutdown_diagnostic", new AggregateError(errors), {
+        diagnosticId: this.diagnosticId(),
+        shutdownDeadlineMs: this.shutdownDeadlineMs,
+        deadlineAtMs,
+        elapsedMs: Date.now() - startedAt,
+        classification: "server_shutdown_failure",
+        diagnostics,
+      });
+      throw new AggregateError(errors, "Wi runtime shutdown failed");
     }
-    try {
-      await this.scheduler.shutdown();
-    } catch (error) {
-      errors.push(error);
-    }
-    try {
-      await this.storage.close();
-    } catch (error) {
-      errors.push(error);
-    }
-    if (errors.length > 0) throw new AggregateError(errors, "Wi runtime shutdown failed");
   }
 }

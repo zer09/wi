@@ -17,6 +17,24 @@ const databasePath = resolveStoragePath(
   sessionDatabaseRelativePath(sessionId),
 );
 
+if (mode === "inspect-readonly") {
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    const userVersion = database.pragma("user_version", { simple: true });
+    const manifest = database
+      .prepare("SELECT schema_version AS schemaVersion FROM manifest WHERE singleton = 1")
+      .get();
+    const provenance = database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'creation_provenance'",
+      )
+      .get();
+    process.exit(userVersion === 1 && manifest?.schemaVersion === 1 && provenance === undefined ? 0 : 92);
+  } finally {
+    database.close();
+  }
+}
+
 if (mode === "inspect-conflict") {
   const database = new Database(databasePath, { readonly: true });
   try {

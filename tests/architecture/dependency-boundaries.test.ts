@@ -254,7 +254,9 @@ describe("workspace architecture", () => {
     ];
     const childOnlySqliteFixtures = new Set([
       join(root, "tests/process/catalog-v1-fixture.mjs"),
+      join(root, "tests/process/milestone7-provenance-mutation-fixture.mjs"),
       join(root, "tests/process/session-v1-fixture.mjs"),
+      join(root, "tests/process/session-v3-fixture.mjs"),
     ]);
     const files = [
       ...sourceFiles("tests").filter((file) => !childOnlySqliteFixtures.has(file)),

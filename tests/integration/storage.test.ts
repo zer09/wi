@@ -1,23 +1,55 @@
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { hashCommandContent, type SessionCreateCommand } from "@wi/protocol";
 import {
+  CatalogClient,
   resolveStoragePath,
   SessionStoreManager,
+  SESSION_SCHEMA_VERSION,
   StorageError,
   stableSessionWorkerIndex,
+  type AcceptCommandInput,
   type AppendTransactionInput,
   type CatalogObservationFailure,
   type ProjectionMutation,
   type SessionStoreManagerOptions,
 } from "@wi/storage";
+import { catalogSessionStatusCoordinator } from "../../packages/storage/dist/catalog/client.js";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
+
+type StorageTestManager = SessionStoreManager & {
+  readonly sessions: ReturnType<typeof sessionWorkerPoolForTest>;
+};
 
 const homes: string[] = [];
 const managers: SessionStoreManager[] = [];
+const originalFailpointGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
+
+beforeAll(() => {
+  process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+});
+
+afterAll(() => {
+  if (originalFailpointGate === undefined) delete process.env.WI_ALLOW_TEST_FAILPOINTS;
+  else process.env.WI_ALLOW_TEST_FAILPOINTS = originalFailpointGate;
+});
 
 async function temporaryHome(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), "wi-storage-"));
@@ -38,10 +70,10 @@ function sequenceGenerator(values: readonly string[]): () => string {
 async function manager(
   options: Partial<SessionStoreManagerOptions> = {},
   sessionIds: readonly string[] = ["ses_storageA"],
-): Promise<SessionStoreManager> {
+): Promise<StorageTestManager> {
   const homeDirectory = options.homeDirectory ?? (await temporaryHome());
   let eventNumber = 1;
-  const storage = new SessionStoreManager({
+  const core = new SessionStoreManager({
     homeDirectory,
     now: options.now ?? (() => 1_000),
     ids: options.ids ?? {
@@ -66,7 +98,19 @@ async function manager(
           catalogObservationShutdownTimeoutMs:
             options.catalogObservationShutdownTimeoutMs,
         }),
+    ...(options.sessionDiscoveryLimit === undefined
+      ? {}
+      : { sessionDiscoveryLimit: options.sessionDiscoveryLimit }),
+    ...(options.catalogRepair === undefined ? {} : { catalogRepair: options.catalogRepair }),
+    ...(options.testFailpoints === undefined ? {} : { testFailpoints: options.testFailpoints }),
   });
+  const storage = new Proxy(core, {
+    get(target, property) {
+      if (property === "sessions") return sessionWorkerPoolForTest(target);
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as StorageTestManager;
   managers.push(storage);
   return storage;
 }
@@ -117,12 +161,83 @@ function runAppend(
   };
 }
 
+function acceptRun(suffix: string): AcceptCommandInput {
+  const runId = `run_${suffix}`;
+  return {
+    commandId: `cmd_${suffix}`,
+    commandMethod: "message.submit",
+    payloadHash: suffix.padEnd(64, "0").slice(0, 64),
+    result: { runId },
+    acceptedAtMs: 1_010,
+    runId,
+    transaction: runAppend(`evt_${suffix}`, runId),
+  };
+}
+
 afterEach(async () => {
   await Promise.allSettled(managers.splice(0).map((storage) => storage.close()));
   await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
 describe("catalog and per-session storage workers", () => {
+  it("creates and canonicalizes a missing nested home before starting workers", async () => {
+    const root = await temporaryHome();
+    const homeDirectory = join(root, "new", "nested", ".wi");
+    const storage = await manager({ homeDirectory });
+
+    await expect(storage.ready()).resolves.toBeUndefined();
+    expect((await stat(homeDirectory)).isDirectory()).toBe(true);
+    expect((await stat(homeDirectory)).mode & 0o777).toBe(0o700);
+    await expect(storage.createSession(createCommand())).resolves.toMatchObject({
+      session: { status: "ready" },
+    });
+  });
+
+  it("rejects a non-directory home before starting workers", async () => {
+    const root = await temporaryHome();
+    const homeDirectory = join(root, "not-a-directory");
+    await writeFile(homeDirectory, "occupied", "utf8");
+
+    let failure: unknown;
+    try {
+      new CatalogClient({ homeDirectory });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
+    });
+    expect(JSON.stringify(failure)).not.toContain(root);
+    await expect(readFile(homeDirectory, "utf8")).resolves.toBe("occupied");
+  });
+
+  it("bounds and redacts an inaccessible-home startup failure", async () => {
+    const root = await temporaryHome();
+    const blockedParent = join(root, "blocked");
+    const homeDirectory = join(blockedParent, "home");
+    await mkdir(homeDirectory, { recursive: true });
+    await chmod(blockedParent, 0o000);
+
+    let failure: unknown;
+    try {
+      new CatalogClient({ homeDirectory });
+    } catch (error) {
+      failure = error;
+    } finally {
+      await chmod(blockedParent, 0o700);
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
+    });
+    const serialized = JSON.stringify(failure);
+    expect(serialized).not.toContain(root);
+    expect(serialized.length).toBeLessThan(1_024);
+  });
+
   it("creates a generated catalog-relative session database with a matching manifest", async () => {
     const homeDirectory = await temporaryHome();
     const storage = await manager({ homeDirectory });
@@ -152,7 +267,7 @@ describe("catalog and per-session storage workers", () => {
       projectId: "project_storageA",
       title: "Storage test",
       lastEventSequence: 1,
-      schemaVersion: 3,
+      schemaVersion: SESSION_SCHEMA_VERSION,
       formatVersion: 1,
     });
     await expect(
@@ -164,6 +279,23 @@ describe("catalog and per-session storage workers", () => {
     expect((await storage.catalog.listSessions()).map((item) => item.sessionId)).toEqual([
       created.session.sessionId,
     ]);
+  });
+
+  it("enforces the configured recoverable session count while preserving duplicates", async () => {
+    const storage = await manager(
+      { sessionDiscoveryLimit: 1 },
+      ["ses_capacityA", "ses_capacityDuplicate", "ses_capacityB"],
+    );
+    const firstCommand = createCommand("cmd_capacityA", "Capacity A");
+    const first = await storage.createSession(firstCommand);
+    await expect(storage.createSession(firstCommand)).resolves.toMatchObject({
+      duplicate: true,
+      session: { sessionId: first.session.sessionId },
+    });
+    await expect(
+      storage.createSession(createCommand("cmd_capacityB", "Capacity B")),
+    ).rejects.toMatchObject({ code: "storage.resource_limit" });
+    await expect(storage.catalog.countSessions()).resolves.toBe(1);
   });
 
   it("rejects unsupported catalog session lifecycle status", async () => {
@@ -223,6 +355,267 @@ describe("catalog and per-session storage workers", () => {
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "unavailable",
     });
+  });
+
+  it("makes unavailable and missing catalog status authoritative for every normal session API", async () => {
+    const homeDirectory = await temporaryHome();
+    const storage = await manager(
+      { homeDirectory },
+      ["ses_statusUnavailable", "ses_statusMissing", "ses_statusHealthy"],
+    );
+    const unavailable = await storage.createSession(
+      createCommand("cmd_createStatusUnavailable", "Unavailable status"),
+    );
+    const missing = await storage.createSession(
+      createCommand("cmd_createStatusMissing", "Missing status"),
+    );
+    const healthy = await storage.createSession(
+      createCommand("cmd_createStatusHealthy", "Healthy status"),
+    );
+    const unavailableClient = await storage.openSession(unavailable.session.sessionId);
+    const missingClient = await storage.openSession(missing.session.sessionId);
+    const before = new Map<string, { head: number; device: number; inode: number }>();
+    for (const created of [unavailable, missing]) {
+      const identity = await stat(resolveStoragePath(homeDirectory, created.session.dbRelativePath));
+      before.set(created.session.sessionId, {
+        head: await storage.sessions.getHeadSequence(created.session.sessionId),
+        device: identity.dev,
+        inode: identity.ino,
+      });
+    }
+    await storage.catalog.markSessionStatus({
+      sessionId: unavailable.session.sessionId,
+      status: "unavailable",
+    });
+    await storage.catalog.markSessionStatus({
+      sessionId: missing.session.sessionId,
+      status: "missing",
+    });
+
+    for (const [created, client, expectedStatus] of [
+      [unavailable, unavailableClient, "unavailable"],
+      [missing, missingClient, "missing"],
+    ] as const) {
+      const expectedCode = expectedStatus === "missing" ? "storage.session_missing" : "storage.corrupt";
+      await expect(storage.openSession(created.session.sessionId)).rejects.toMatchObject({
+        code: expectedCode,
+      });
+      await expect(client.getManifest()).rejects.toMatchObject({ code: expectedCode });
+      await expect(client.acceptCommand(acceptRun(`${expectedStatus}Client`))).rejects.toMatchObject({
+        code: expectedCode,
+      });
+      await expect(
+        storage.acceptCommand(created.session.sessionId, acceptRun(`${expectedStatus}Manager`)),
+      ).rejects.toMatchObject({ code: expectedCode });
+      await expect(
+        client.appendTransaction(runAppend(`evt_${expectedStatus}ClientAppend`, `run_${expectedStatus}ClientAppend`)),
+      ).rejects.toMatchObject({ code: expectedCode });
+      await expect(
+        storage.appendTransaction(
+          created.session.sessionId,
+          runAppend(`evt_${expectedStatus}ManagerAppend`, `run_${expectedStatus}ManagerAppend`),
+        ),
+      ).rejects.toMatchObject({ code: expectedCode });
+      await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: expectedStatus,
+      });
+      const identity = await stat(resolveStoragePath(homeDirectory, created.session.dbRelativePath));
+      expect({
+        head: await storage.sessions.getHeadSequence(created.session.sessionId),
+        device: identity.dev,
+        inode: identity.ino,
+      }).toEqual(before.get(created.session.sessionId));
+      await storage.sessions.closeSession(created.session.sessionId);
+    }
+
+    const openSessionIds = (await storage.sessions.getStats()).flatMap(
+      (worker) => worker.openSessionIds,
+    );
+    expect(openSessionIds).not.toContain(unavailable.session.sessionId);
+    expect(openSessionIds).not.toContain(missing.session.sessionId);
+    await expect(
+      storage.appendTransaction(
+        healthy.session.sessionId,
+        runAppend("evt_statusHealthyAppend", "run_statusHealthyAppend"),
+      ),
+    ).resolves.toMatchObject({ headSequence: 2 });
+
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+    const repaired = await manager(
+      { homeDirectory, catalogRepair: "force" },
+      ["ses_unusedStatusRepair"],
+    );
+    await repaired.ready();
+    for (const created of [unavailable, missing]) {
+      await expect(repaired.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      await expect(repaired.openSession(created.session.sessionId)).resolves.toBeDefined();
+    }
+  });
+
+  it("serializes a statically aliased catalog client's unavailable transition behind an in-flight commit", async () => {
+    const storageRoot = await temporaryHome();
+    const homeDirectory = join(storageRoot, "real", "home");
+    const aliasDirectory = join(storageRoot, "alias");
+    await mkdir(homeDirectory, { recursive: true });
+    await symlink(join(storageRoot, "real"), aliasDirectory, "dir");
+    const storage = await manager({ homeDirectory });
+    const created = await storage.createSession(createCommand());
+    const statusCatalog = new CatalogClient({ homeDirectory: join(aliasDirectory, "home") });
+    await statusCatalog.prepareOpen();
+    await statusCatalog.openPrepared();
+    await statusCatalog.getStartupState();
+    const client = await storage.openSession(created.session.sessionId);
+    const originalGetSession = storage.catalog.getSession.bind(storage.catalog);
+    let readinessChecks = 0;
+    vi.spyOn(storage.catalog, "getSession").mockImplementation(async (sessionId) => {
+      const summary = await originalGetSession(sessionId);
+      if (sessionId === created.session.sessionId) readinessChecks += 1;
+      return summary;
+    });
+    const barrier = await storage.sessions.blockWorkerForTest(created.session.sessionId);
+    const append = client.appendTransaction(
+      runAppend("evt_statusRaceAppend", "run_statusRaceAppend"),
+    );
+    let statusChange: ReturnType<typeof statusCatalog.markSessionStatus> | undefined;
+    try {
+      await vi.waitFor(() => expect(readinessChecks).toBeGreaterThanOrEqual(2));
+
+      statusChange = statusCatalog.markSessionStatus({
+        sessionId: created.session.sessionId,
+        status: "unavailable",
+      });
+      const firstCatalogResult = await Promise.race([
+        statusChange.then(() => "status-change" as const),
+        storage.catalog.getSession(created.session.sessionId).then(() => "independent-read" as const),
+      ]);
+
+      expect(firstCatalogResult).toBe("independent-read");
+      await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+      await barrier.release();
+      await expect(append).resolves.toMatchObject({ headSequence: 2 });
+      await expect(statusChange).resolves.toMatchObject({ status: "unavailable" });
+      await expect(
+        client.appendTransaction(runAppend("evt_statusRaceRejected", "run_statusRaceRejected")),
+      ).rejects.toMatchObject({ code: "storage.corrupt" });
+      await expect(storage.sessions.getHeadSequence(created.session.sessionId)).resolves.toBe(2);
+    } finally {
+      await barrier.release().catch(() => undefined);
+      await Promise.allSettled(statusChange === undefined ? [append] : [append, statusChange]);
+      await statusCatalog.close().catch(() => undefined);
+    }
+  });
+
+  it("serializes generic reconciliation and rejects absent-row insertion", async () => {
+    const homeDirectory = await temporaryHome();
+    const storage = await manager({ homeDirectory });
+    const created = await storage.createSession(createCommand());
+    const inspection = await storage.reconciler.inspectSession(created.session.sessionId);
+    const absentSessionId = "ses_absentReconcile";
+    const coordinator = catalogSessionStatusCoordinator(storage.catalog);
+    const reconciliationCatalog = new CatalogClient({ homeDirectory });
+    await reconciliationCatalog.prepareOpen();
+    await reconciliationCatalog.openPrepared();
+    await reconciliationCatalog.getStartupState();
+
+    let releaseBoundary = (): void => undefined;
+    let boundaryEntered = (): void => undefined;
+    const boundaryGate = new Promise<void>((resolve) => {
+      releaseBoundary = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      boundaryEntered = resolve;
+    });
+    const heldBoundary = coordinator.run([absentSessionId], async () => {
+      boundaryEntered();
+      await boundaryGate;
+    });
+    await entered;
+
+    const reconciliation = reconciliationCatalog.reconcileSession({
+      ...inspection,
+      manifest: {
+        ...inspection.manifest,
+        sessionId: absentSessionId,
+        title: "Absent reconciliation",
+      },
+      dbRelativePath: `sessions/ab/${absentSessionId}/session.sqlite3`,
+      expectedCatalogSequence: null,
+      expectedCatalogStatus: null,
+    });
+    const reconciliationOutcome = reconciliation.then(
+      () => "reconciliation" as const,
+      () => "reconciliation" as const,
+    );
+    try {
+      const firstCatalogResult = await Promise.race([
+        reconciliationOutcome,
+        reconciliationCatalog.getSession(absentSessionId).then(() => "independent-read" as const),
+      ]);
+      expect(firstCatalogResult).toBe("independent-read");
+      await expect(reconciliationCatalog.getSession(absentSessionId)).resolves.toBeNull();
+
+      releaseBoundary();
+      await expect(reconciliation).rejects.toMatchObject({ code: "storage.corrupt" });
+      await expect(reconciliationCatalog.getSession(absentSessionId)).resolves.toBeNull();
+    } finally {
+      releaseBoundary();
+      await Promise.allSettled([heldBoundary, reconciliation]);
+      await reconciliationCatalog.close().catch(() => undefined);
+    }
+  });
+
+  it("never lets generic reconciliation promote an unavailable session", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const inspection = await storage.reconciler.inspectSession(created.session.sessionId);
+    await storage.catalog.markSessionStatus({
+      sessionId: created.session.sessionId,
+      status: "unavailable",
+    });
+
+    await expect(
+      storage.catalog.reconcileSession({
+        ...inspection,
+        expectedCatalogStatus: "unavailable",
+      }),
+    ).resolves.toMatchObject({ status: "unavailable" });
+    await expect(
+      storage.catalog.createSessionIndex({ ...created.session, status: "ready" }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+  });
+
+  it("does not expose hookless session-worker access through the normal package API", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+    const client = await storage.openSession(created.session.sessionId);
+    const storagePackage = await import("@wi/storage");
+
+    expect(Object.hasOwn(storage, "sessions")).toBe(false);
+    expect(Object.hasOwn(storage.reconciler, "sessions")).toBe(false);
+    expect(Object.hasOwn(client, "pool")).toBe(false);
+    expect(storagePackage).not.toHaveProperty("SessionWorkerPool");
+    expect(storagePackage).not.toHaveProperty("SessionClient");
+    expect(storagePackage).not.toHaveProperty("reconcileCreationSession");
+    expect(storagePackage).not.toHaveProperty("reconcileValidatedRepairSession");
+  });
+
+  it("does not expose validated repair or its worker RPC through catalog reflection", async () => {
+    const storage = await manager();
+    const prototype = Object.getPrototypeOf(storage.catalog) as object;
+    const symbolDescriptions = Object.getOwnPropertySymbols(prototype).map(
+      (symbol) => symbol.description,
+    );
+
+    expect(symbolDescriptions).not.toContain("validatedRepairReconciliation");
+    expect(Object.hasOwn(storage.catalog, "rpc")).toBe(false);
   });
 
   it("rejects changed immutable session-creation identity", async () => {
@@ -310,6 +703,7 @@ describe("catalog and per-session storage workers", () => {
     ]);
 
     const rebuilt = await manager({ homeDirectory }, ["ses_unusedRebuild"]);
+    await rebuilt.ready();
     await expect(rebuilt.reconciler.reconcileSession(created.session.sessionId)).resolves.toMatchObject({
       sessionId: created.session.sessionId,
       projectId: "project_rebuildA",
@@ -916,6 +1310,27 @@ describe("catalog and per-session storage workers", () => {
     expect(await storage.catalog.listSessions()).toHaveLength(1);
   });
 
+  it("rejects contradictory accepted global-create provenance", async () => {
+    const storage = await manager({}, ["ses_provenanceA"]);
+    const created = await storage.createSession(createCommand("cmd_provenanceA", "Provenance"));
+    await expect(
+      storage.catalog.completeGlobalCommand({
+        commandId: created.command.commandId,
+        payloadHash: created.command.payloadHash,
+        result: { sessionId: "ses_conflictingResult" },
+        acceptedAtMs: created.command.acceptedAtMs ?? 0,
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(
+      storage.catalog.completeGlobalCommand({
+        commandId: created.command.commandId,
+        payloadHash: created.command.payloadHash,
+        result: created.command.result,
+        acceptedAtMs: (created.command.acceptedAtMs ?? 0) + 1,
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+  });
+
   it("resumes an incomplete global session reservation without changing its session identity", async () => {
     const storage = await manager({}, ["ses_unusedA"]);
     await storage.ready();
@@ -975,7 +1390,7 @@ describe("catalog and per-session storage workers", () => {
     ).rejects.toMatchObject({ code: "protocol.command_id_conflict" });
   });
 
-  it("isolates a corrupt incomplete creation without blocking healthy sessions", async () => {
+  it("preserves a corrupt incomplete creation without blocking healthy sessions", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_healthyA"]);
     const healthy = await original.createSession(createCommand("cmd_healthyA", "Healthy"));
@@ -1005,15 +1420,18 @@ describe("catalog and per-session storage workers", () => {
       reservedSessionId: "ses_corruptCreating",
       failureCode: "storage.corrupt",
       diagnosticId: expect.stringMatching(/^err_/),
-      quarantinedRelativePath: expect.stringContaining(".quarantine-"),
+      quarantinedRelativePath: null,
     });
     await expect(restarted.catalog.getSession("ses_corruptCreating")).resolves.toMatchObject({
       status: "unavailable",
       title: "Corrupt creating",
     });
+    await expect(
+      stat(resolveStoragePath(homeDirectory, "sessions/co/ses_corruptCreating/session.sqlite3")),
+    ).resolves.toBeDefined();
   });
 
-  it("does not claim quarantine when the atomic rename fails", async () => {
+  it("does not claim quarantine when a quarantine-style sibling already exists", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_unusedQuarantineSetup"]);
     await original.ready();
@@ -1057,9 +1475,12 @@ describe("catalog and per-session storage workers", () => {
       quarantinedRelativePath: null,
     });
     await expect(stat(join(sourceDirectory, "session.sqlite3"))).resolves.toBeDefined();
+    await expect(readFile(join(blockedDestination, "keep"), "utf8")).resolves.toBe(
+      "occupied",
+    );
   });
 
-  it("quarantines semantically corrupt stored data without blocking healthy sessions", async () => {
+  it("isolates semantically corrupt stored data without blocking healthy sessions", async () => {
     const storage = await manager({}, ["ses_corruptData", "ses_healthyData"]);
     const corrupt = await storage.createSession(createCommand("cmd_corruptData", "Corrupt"));
     const healthy = await storage.createSession(createCommand("cmd_healthyData", "Healthy"));
@@ -1107,11 +1528,14 @@ describe("catalog and per-session storage workers", () => {
     const restarted = new SessionStoreManager({
       homeDirectory,
       sessionWorkers: { size: 1, allowTestOperations: true },
+      testFailpoints: {
+        hit: () => undefined,
+        beforeCreationReconciliation: () => {
+          throw new StorageError("storage.disk_full", "injected catalog failure");
+        },
+      },
     });
     managers.push(restarted);
-    vi.spyOn(restarted.catalog, "reconcileSession").mockRejectedValue(
-      new StorageError("storage.disk_full", "injected catalog failure"),
-    );
 
     await expect(restarted.ready()).rejects.toMatchObject({ code: "storage.disk_full" });
     await expect(restarted.catalog.getGlobalCommand(command.commandId)).resolves.toMatchObject({
@@ -1119,7 +1543,7 @@ describe("catalog and per-session storage workers", () => {
     });
   });
 
-  it("fails startup on a non-quarantinable incomplete-creation error", async () => {
+  it("fails startup on a non-isolatable incomplete-creation error", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory }, ["ses_unusedDiskFull"]);
     await original.ready();
@@ -1139,7 +1563,7 @@ describe("catalog and per-session storage workers", () => {
       sessionWorkers: { size: 1, allowTestOperations: true },
     });
     managers.push(restarted);
-    vi.spyOn(restarted.sessions, "initialize").mockRejectedValue(
+    vi.spyOn(sessionWorkerPoolForTest(restarted), "initialize").mockRejectedValue(
       new StorageError("storage.disk_full", "injected session storage failure"),
     );
 
@@ -1574,7 +1998,9 @@ describe("catalog and per-session storage workers", () => {
       ),
     ).resolves.toMatchObject({ headSequence: 2, catalogObservationScheduled: true });
     await writerStarted;
-    await expect(storage.close()).resolves.toBeUndefined();
+    await expect(storage.close()).rejects.toMatchObject({
+      message: "Storage shutdown failed",
+    });
   });
 
   it("drains an accepted session creation before shutdown closes workers", async () => {
@@ -1726,9 +2152,17 @@ describe("catalog and per-session storage workers", () => {
 
   it("reports an unhealthy catalog when empty-event reconciliation loses a fault race", async () => {
     const homeDirectory = await temporaryHome();
+    let markFaultObserved = (): void => {};
+    const faultObserved = new Promise<void>((resolve) => {
+      markFaultObserved = resolve;
+    });
     const storage = await manager({
       homeDirectory,
       sessionWorkers: { size: 1, allowTestOperations: true },
+      testFailpoints: {
+        hit: () => undefined,
+        afterSessionFaultObserved: () => markFaultObserved(),
+      },
     });
     const created = await storage.createSession(createCommand());
     const session = await storage.openSession(created.session.sessionId);
@@ -1761,32 +2195,48 @@ describe("catalog and per-session storage workers", () => {
       return reconcileSession(reconcileInput);
     });
 
-    const retry = session.acceptCommand({ ...input, transaction });
+    const retry = expect(
+      session.acceptCommand({ ...input, transaction }),
+    ).rejects.toMatchObject({ code: "storage.session_missing" });
     await reconciliationStarted;
-    await expect(retry).resolves.toMatchObject({ duplicate: true });
     const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
     const movedDatabasePath = `${databasePath}.observation-fault-race`;
     await rename(databasePath, movedDatabasePath);
-    await expect(
+    const fault = expect(
       storage.sessions.getHeadSequence(created.session.sessionId),
     ).rejects.toMatchObject({ code: "storage.session_missing" });
+    await faultObserved;
     releaseReconciliation();
+    await fault;
+    await retry;
 
     await storage.drainCatalogObservations();
     await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
-      lastEventSequence: 1,
+      lastEventSequence: 2,
     });
 
     await rename(movedDatabasePath, databasePath);
-    await expect(session.getHeadSequence()).resolves.toBe(2);
-    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+    await expect(session.getHeadSequence()).rejects.toMatchObject({
+      code: "storage.session_missing",
+    });
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+    const repaired = await manager(
+      { homeDirectory, catalogRepair: "force" },
+      ["ses_unusedObservationFaultRepair"],
+    );
+    await repaired.ready();
+    await expect(
+      (await repaired.openSession(created.session.sessionId)).getHeadSequence(),
+    ).resolves.toBe(2);
+    await expect(repaired.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "ready",
       lastEventSequence: 2,
     });
   });
 
-  it("keeps quarantine sticky when a delayed observer races database removal", async () => {
+  it("keeps unavailable status sticky when a delayed observer races database removal", async () => {
     let releaseWriter = (): void => {};
     let markWriterStarted = (): void => {};
     const writerGate = new Promise<void>((resolve) => {
@@ -1833,16 +2283,26 @@ describe("catalog and per-session storage workers", () => {
     });
 
     await rename(movedDatabasePath, databasePath);
+    await expect(storage.openSession(created.session.sessionId)).rejects.toMatchObject({
+      code: "storage.session_missing",
+    });
+    await storage.close();
+    managers.splice(managers.indexOf(storage), 1);
+    const repaired = await manager(
+      { homeDirectory, catalogRepair: "force" },
+      ["ses_unusedDelayedObserverRepair"],
+    );
+    await repaired.ready();
     await expect(
-      (await storage.openSession(created.session.sessionId)).getHeadSequence(),
+      (await repaired.openSession(created.session.sessionId)).getHeadSequence(),
     ).resolves.toBe(2);
-    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+    await expect(repaired.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "ready",
       lastEventSequence: 2,
     });
   });
 
-  it("reapplies quarantine when a stale reconciliation races database removal", async () => {
+  it("reapplies unavailable status when stale reconciliation races database removal", async () => {
     const homeDirectory = await temporaryHome();
     const original = await manager({ homeDirectory });
     const created = await original.createSession(createCommand());
@@ -1850,7 +2310,20 @@ describe("catalog and per-session storage workers", () => {
     const movedDatabasePath = `${databasePath}.reconcile-race`;
     await original.close();
 
-    const restarted = await manager({ homeDirectory }, ["ses_unusedReconcileRace"]);
+    let markFaultObserved = (): void => {};
+    const faultObserved = new Promise<void>((resolve) => {
+      markFaultObserved = resolve;
+    });
+    const restarted = await manager(
+      {
+        homeDirectory,
+        testFailpoints: {
+          hit: () => undefined,
+          afterSessionFaultObserved: () => markFaultObserved(),
+        },
+      },
+      ["ses_unusedReconcileRace"],
+    );
     const reconcileSession = restarted.catalog.reconcileSession.bind(restarted.catalog);
     let releaseReconciliation = (): void => {};
     let markReconciliationStarted = (): void => {};
@@ -1867,27 +2340,40 @@ describe("catalog and per-session storage workers", () => {
     });
 
     const client = await restarted.openSession(created.session.sessionId);
-    const opening = client.getHeadSequence();
+    const opening = expect(client.getHeadSequence()).rejects.toMatchObject({
+      code: "storage.session_missing",
+    });
     await reconciliationStarted;
     await rename(databasePath, movedDatabasePath);
-    await expect(
+    const fault = expect(
       restarted.sessions.getHeadSequence(created.session.sessionId),
     ).rejects.toMatchObject({ code: "storage.session_missing" });
+    await faultObserved;
+    releaseReconciliation();
+    await fault;
     await expect(restarted.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
     });
-
-    releaseReconciliation();
-    await expect(opening).rejects.toMatchObject({ code: "storage.session_missing" });
+    await opening;
     await expect(restarted.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "missing",
     });
 
     await rename(movedDatabasePath, databasePath);
+    await expect(restarted.openSession(created.session.sessionId)).rejects.toMatchObject({
+      code: "storage.session_missing",
+    });
+    await restarted.close();
+    managers.splice(managers.indexOf(restarted), 1);
+    const repaired = await manager(
+      { homeDirectory, catalogRepair: "force" },
+      ["ses_unusedStaleReconciliationRepair"],
+    );
+    await repaired.ready();
     await expect(
-      (await restarted.openSession(created.session.sessionId)).getHeadSequence(),
+      (await repaired.openSession(created.session.sessionId)).getHeadSequence(),
     ).resolves.toBe(1);
-    await expect(restarted.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+    await expect(repaired.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
       status: "ready",
     });
   });
@@ -2512,10 +2998,10 @@ describe("catalog and per-session storage workers", () => {
       process.env.NODE_ENV = originalNodeEnv;
     }
     if (storage === null) throw new Error("Storage manager did not initialize");
-    const created = await storage.createSession(createCommand());
-    await expect(
-      storage.sessions.crashWorkerForTest(created.session.sessionId),
-    ).rejects.toThrow("Test operations are disabled");
+    await storage.createSession(createCommand());
+    expect(() => sessionWorkerPoolForTest(storage)).toThrow(
+      "Session worker test access was not enabled",
+    );
   });
 
   it("keeps a replacement worker healthy when its monitoring callback throws", async () => {
@@ -2542,6 +3028,269 @@ describe("catalog and per-session storage workers", () => {
     await expect(
       (await storage.openSession(created.session.sessionId)).getHeadSequence(),
     ).resolves.toBe(1);
+  });
+
+  it("fails closed when a durable incomplete repair is restarted with repair disabled", async () => {
+    const homeDirectory = await temporaryHome();
+    const first = new SessionStoreManager({ homeDirectory, catalogRepair: "off" });
+    managers.push(first);
+    await first.ready();
+    await first.catalog.beginRepair("catalog_new");
+    await first.close();
+    managers.splice(managers.indexOf(first), 1);
+
+    const restarted = new SessionStoreManager({ homeDirectory, catalogRepair: "off" });
+    managers.push(restarted);
+    await expect(restarted.ready()).rejects.toMatchObject({ code: "storage.corrupt" });
+  });
+
+  it("reconciles a healthy catalog in place without losing catalog-only state", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      now: () => 1_000,
+      ids: {
+        sessionId: () => "ses_forceHealthy",
+        eventId: () => "evt_forceHealthyCreated",
+      },
+    });
+    managers.push(original);
+    await original.createProject({
+      projectId: "project_forceHealthy",
+      name: "Force repair project",
+      rootPath: "/tmp/force-repair-project",
+      rootRealpath: "/tmp/force-repair-project",
+      createdAtMs: 900,
+      updatedAtMs: 900,
+      config: { retained: true },
+    });
+    const created = await original.createSession(
+      createCommand("cmd_forceHealthy", "Force repair", "project_forceHealthy"),
+    );
+    await original.catalog.createSessionIndex({
+      sessionId: "ses_forceUnavailable",
+      projectId: null,
+      dbRelativePath: "sessions/fo/ses_forceUnavailable/session.sqlite3",
+      title: "Unavailable before repair",
+      status: "unavailable",
+      createdAtMs: 950,
+      updatedAtMs: 950,
+      lastEventSequence: 0,
+      lastRunState: null,
+      lastMessagePreview: null,
+      requiresAttention: true,
+      pendingApprovalCount: 0,
+      pendingInputCount: 0,
+      sessionSchemaVersion: SESSION_SCHEMA_VERSION,
+      recoveryCandidate: false,
+      unavailableReason: "quarantined",
+    });
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    const catalogIdentity = await stat(join(homeDirectory, "catalog.sqlite3"));
+
+    const forced = new SessionStoreManager({ homeDirectory, catalogRepair: "force" });
+    managers.push(forced);
+    await forced.ready();
+
+    expect(forced.catalogRepairStatus()).toMatchObject({
+      triggered: true,
+      reason: "explicit",
+      repaired: 1,
+    });
+    expect((await stat(join(homeDirectory, "catalog.sqlite3"))).ino).toBe(catalogIdentity.ino);
+    await expect(forced.catalog.getGlobalCommand("cmd_forceHealthy")).resolves.toMatchObject({
+      state: "accepted",
+      reservedSessionId: created.session.sessionId,
+    });
+    await expect(forced.catalog.getSession("ses_forceUnavailable")).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Unavailable before repair",
+    });
+    expect((await readdir(homeDirectory)).some((name) => name.includes("quarantine"))).toBe(false);
+  });
+
+  it("rejects a noncanonical path for an existing catalog session", async () => {
+    const storage = await manager();
+    const created = await storage.createSession(createCommand());
+
+    await expect(
+      storage.catalog.createSessionIndex({
+        ...created.session,
+        dbRelativePath: "sessions/zz/ses_storageA/session.sqlite3",
+      }),
+    ).rejects.toMatchObject({ code: "storage.corrupt" });
+    await expect(storage.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      dbRelativePath: created.session.dbRelativePath,
+    });
+  });
+
+  it(
+    "rejects a healthy-catalog lazy open through a symlink outside WI_HOME",
+    async () => {
+      const homeDirectory = await temporaryHome();
+      const original = new SessionStoreManager({
+        homeDirectory,
+        ids: {
+          sessionId: () => "ses_lazySymlink",
+          eventId: () => "evt_lazySymlinkCreated",
+        },
+      });
+      managers.push(original);
+      const created = await original.createSession(
+        createCommand("cmd_lazySymlink", "Lazy symlink"),
+      );
+      await original.close();
+      managers.splice(managers.indexOf(original), 1);
+
+      const sessionDirectory = resolveStoragePath(
+        homeDirectory,
+        created.session.dbRelativePath.slice(0, -"/session.sqlite3".length),
+      );
+      const externalHome = await mkdtemp(join(tmpdir(), "wi-storage-external-"));
+      homes.push(externalHome);
+      const externalDirectory = join(externalHome, "moved-session");
+      await rename(sessionDirectory, externalDirectory);
+      await symlink(externalDirectory, sessionDirectory, "dir");
+      const externalSize = (await stat(join(externalDirectory, "session.sqlite3"))).size;
+
+      const restarted = new SessionStoreManager({ homeDirectory });
+      managers.push(restarted);
+      await restarted.ready();
+      expect(restarted.catalogRepairStatus()).toMatchObject({ triggered: false, reason: "none" });
+      const session = await restarted.openSession(created.session.sessionId);
+      await expect(session.getManifest()).rejects.toMatchObject({ code: "storage.corrupt" });
+      expect((await lstat(sessionDirectory)).isSymbolicLink()).toBe(true);
+      expect((await stat(join(externalDirectory, "session.sqlite3"))).size).toBe(externalSize);
+    },
+  );
+
+  it(
+    "retains repair intent and canonical files after an operational discovery failure",
+    async () => {
+      const homeDirectory = await temporaryHome();
+      const original = new SessionStoreManager({
+        homeDirectory,
+        ids: {
+          sessionId: () => "ses_operationalDiscovery",
+          eventId: () => "evt_operationalDiscoveryCreated",
+        },
+      });
+      managers.push(original);
+      const created = await original.createSession(
+        createCommand("cmd_operationalDiscovery", "Operational discovery"),
+      );
+      await original.close();
+      managers.splice(managers.indexOf(original), 1);
+      const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+      for (const suffix of ["", "-wal", "-shm"]) {
+        await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+      }
+      await chmod(databasePath, 0);
+
+      const blocked = new SessionStoreManager({ homeDirectory });
+      managers.push(blocked);
+      await expect(blocked.ready()).rejects.toMatchObject({ code: "storage.busy" });
+      expect((await stat(databasePath)).isFile()).toBe(true);
+      await expect(blocked.catalog.getSession(created.session.sessionId)).resolves.toBeNull();
+      await blocked.close().catch(() => undefined);
+      managers.splice(managers.indexOf(blocked), 1);
+
+      await chmod(databasePath, 0o600);
+      const retried = new SessionStoreManager({ homeDirectory });
+      managers.push(retried);
+      await retried.ready();
+      await expect(retried.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+        status: "ready",
+      });
+    },
+  );
+
+  it("bounds database-derived discovery data before parsing or isolation", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      ids: {
+        sessionId: () => "ses_oversizedDiscovery",
+        eventId: () => "evt_oversizedDiscoveryCreated",
+      },
+    });
+    managers.push(original);
+    const created = await original.createSession(
+      createCommand("cmd_oversizedDiscovery", "x".repeat(999_000)),
+    );
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+    }
+
+    const repairing = new SessionStoreManager({ homeDirectory });
+    managers.push(repairing);
+    await expect(repairing.ready()).rejects.toMatchObject({ code: "storage.busy" });
+    const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+    expect((await stat(databasePath)).isFile()).toBe(true);
+    await expect(repairing.catalog.getSession(created.session.sessionId)).resolves.toBeNull();
+  });
+
+  it("isolates an oversized session database without retaining installation repair", async () => {
+    const homeDirectory = await temporaryHome();
+    const original = new SessionStoreManager({
+      homeDirectory,
+      ids: {
+        sessionId: () => "ses_oversizedDatabase",
+        eventId: () => "evt_oversizedDatabaseCreated",
+      },
+    });
+    managers.push(original);
+    const created = await original.createSession(
+      createCommand("cmd_oversizedDatabase", "Oversized database"),
+    );
+    await original.close();
+    managers.splice(managers.indexOf(original), 1);
+    const databasePath = resolveStoragePath(homeDirectory, created.session.dbRelativePath);
+    await truncate(databasePath, 256 * 1_024 * 1_024 + 1);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await rm(join(homeDirectory, `catalog.sqlite3${suffix}`), { force: true });
+    }
+
+    const repairing = new SessionStoreManager({ homeDirectory });
+    managers.push(repairing);
+    await repairing.ready();
+    expect(repairing.catalogRepairStatus()).toMatchObject({
+      triggered: true,
+      repaired: 0,
+      quarantined: 0,
+    });
+    await expect(repairing.catalog.getSession(created.session.sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+      title: "Oversized recovered session",
+      dbRelativePath: created.session.dbRelativePath,
+    });
+    expect((await stat(databasePath)).size).toBe(256 * 1_024 * 1_024 + 1);
+    await expect(repairing.catalog.getStartupState()).resolves.toMatchObject({
+      repairReason: null,
+    });
+  });
+
+  it("bounds discovery work even when every session-directory entry is invalid", async () => {
+    const homeDirectory = await temporaryHome();
+    const prefixDirectory = join(homeDirectory, "sessions", "aa");
+    await mkdir(prefixDirectory, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        mkdir(join(prefixDirectory, `invalid-${String(index).padStart(3, "0")}`)),
+      ),
+    );
+    const storage = new SessionStoreManager({
+      homeDirectory,
+      catalogRepair: "force",
+      sessionDiscoveryLimit: 1,
+      sessionWorkers: { size: 1 },
+    });
+    managers.push(storage);
+
+    await expect(storage.ready()).rejects.toMatchObject({ code: "storage.resource_limit" });
   });
 
   it("fails an affected RPC on worker crash and reopens the session on its replacement", async () => {

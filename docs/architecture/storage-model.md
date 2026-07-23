@@ -32,7 +32,7 @@ $WI_HOME/
 
 Rules:
 
-- `WI_HOME` is resolved once at startup.
+- On first run, the configured `WI_HOME` directory chain is created synchronously with mode `0700` before any storage worker is constructed. Existing components are not moved, overwritten, deleted, or chmodded. The resulting directory is then canonicalized through its real path once at startup, so static symlink aliases converge before catalog or session paths are derived; a non-directory or inaccessible path fails with a bounded redacted storage error.
 - The backend generates session paths; browser input never supplies them.
 - Catalog paths are relative to `WI_HOME`.
 - Session-directory prefixes are derived from session IDs to avoid oversized directories.
@@ -61,7 +61,7 @@ session transaction commit
 
 If the catalog update fails, the session remains valid and the catalog is reconciled later.
 
-“Rebuildable” means that the session-index rows needed to locate and summarize sessions can be reconstructed from session manifests. Normal startup does not scan or open every session database. Complete session-directory discovery is an explicit catalog-repair operation delivered with the Milestone 7 startup recovery scanner; it is not part of the ordinary startup path.
+“Rebuildable” means that the session-index rows needed to locate and summarize sessions can be reconstructed from session manifests. Normal startup does not scan or open every session database. The Milestone 7 bounded session-directory scanner runs only for a new/missing catalog with surviving session directories or explicit `WI_CATALOG_REPAIR=1`; see [the failure and recovery matrix](failure-recovery-matrix.md). An existing catalog is first copied with its WAL/SHM sidecars to a private worker-owned probe directory. SQLite recovery, integrity checking, and migration validation run only against that disposable copy, with source directory and file identities checked before and after the copy probe. The manager and worker use a two-phase startup handshake: after validation, SQLite acquires the canonical handle with `fileMustExist`, then synchronously rechecks the prepared directory and DB/WAL/SHM path identities before any recovery-capable PRAGMA or query. This detects substitutions still visible at that check; it does not pin SQLite's acquired or lazily opened handles against a hostile process running as the same user. A missing catalog is reserved with final-component no-follow and no-overwrite creation, but parent components are trusted under [ADR-0012](../adr/0012-trusted-local-user-storage-boundary.md). Startup filesystem errors are reclassified into fixed bounded messages before worker RPC, so neither `WI_HOME` nor the private probe path is exposed. Ordinary validation failure leaves the canonical database and sidecars unopened and unchanged and startup fails closed. Node exposes no cross-platform handle-relative, no-follow, no-overwrite move that could safely clear a corrupt canonical path. With Wi stopped, an operator may restore the catalog or deliberately relocate it outside Wi; the next missing-catalog startup can then rebuild session-index rows.
 
 Project registration metadata is different from session-index metadata. In v0.1, project names, canonical paths, realpaths, and configuration exist only in the catalog. After complete project-catalog loss, the supported recovery path is explicit project re-registration. A future project manifest may make that metadata independently recoverable.
 
@@ -109,7 +109,7 @@ A catalog command stores:
 - current `creating`, `accepted`, or terminal `failed` state
 - reserved session ID and path
 - durable success or safe failure result
-- failure category, safe message, diagnostic ID, and quarantine path when failed
+- failure category, safe message, diagnostic ID, and any retained historical quarantine path
 - timestamps
 
 ## 5. Session database responsibilities
@@ -308,7 +308,7 @@ catalog says creating + no DB exists
 
 catalog says creating + corrupt or irreconcilable partial DB exists
   -> persist command state `failed`, retain a visible unavailable session row,
-     and best-effort atomically rename the partial directory to a quarantine path
+     and preserve the partial directory at its canonical path
 
 session DB exists + no catalog row
   -> explicit catalog repair discovers it and reconstructs the session row from its manifest
@@ -346,16 +346,15 @@ This protects against:
 
 The reconciler compares catalog summary data with session manifests and heads.
 
-It may repair:
+For a catalog row already in `ready`, ordinary reconciliation may repair:
 
 - last event sequence
-- status
 - title and preview
 - pending attention counts
 - schema version
 - orphaned session entries
 
-It never rewrites canonical session events.
+It never rewrites canonical session events. Catalog status is authoritative at the storage boundary: normal open, read, recovery, command acceptance, and append paths reject `unavailable` or `missing` rows and close any retained lazy handle. Per-session coordination shared by catalog clients for the same canonical home serializes status transitions with manager-created client use; existing homes are realpath-canonicalized before the coordinator key, catalog path, and manager session paths are derived, so static ancestor aliases cannot split the boundary. A read or mutation holds that coordination boundary from its final readiness check through the session-worker response; a competing status transition waits for earlier work and blocks later work, which must recheck the committed status. Generic reconciliation requires an existing trusted `ready` row and cannot insert an absent row or promote `unavailable` or `missing` to `ready`. During reconciliation, an absent row may be reconstructed only by the module-internal incomplete-creation capability after a durable `creating` reservation, or by the bounded repair scanner's separate internal capability after complete worker-contained path, manifest, schema, size, creation-provenance, and projection validation. The capability is a module-closure operation backed by a `WeakMap`; it is absent from `CatalogClient` instance fields and prototype symbols. `SessionStoreManager` keeps its worker pool in a JavaScript private field, `SessionClient` keeps its pool and hooks in JavaScript private fields, and the normal `@wi/storage` runtime entry point exports neither class. Test fixtures use a separate internal, `NODE_ENV=test`-gated accessor that is not a package export. Hookless worker access and validated promotion are therefore not public catalog or session mutation modes.
 
 Reconciliation runs:
 
@@ -363,7 +362,7 @@ Reconciliation runs:
 - when opening a catalog-known session whose summary appears stale
 - through an explicit maintenance operation
 
-Ordinary startup intentionally does not walk `$WI_HOME/sessions`. Milestone 7 adds the explicit complete-discovery scanner used when catalog repair is required. That scanner reconstructs session-index data only; project metadata still requires re-registration in v0.1.
+Ordinary startup intentionally does not walk `$WI_HOME/sessions`. The bounded complete-discovery scanner is used only when catalog repair is required. Fresh catalog schema initialization atomically includes a catalog-local repair marker, which is cleared only after complete reconciliation and creation-command restoration, so a crash during reconstruction triggers another idempotent scan. The worker streams bounded directory entries into a compact session-ID inventory, then returns database-derived records through bounded pages from a read-only non-migrating reader. Discovery error codes and messages are truncated to fixed limits before worker serialization and validated again on receipt. The manager retains only compact creation-command ownership and constant-size fault classifications between its provenance and reconciliation passes; full records and diagnostic text remain page-scoped rather than accumulating in main-thread memory. The scanner validates the exact generated layout and symlink/realpath/file-identity boundaries, reconstructs session-index data, and marks proven structural corruption unavailable without blocking healthy sessions. Corrupt session storage is preserved in place because Node does not expose a cross-platform handle-relative directory rename; Wi never substitutes a pathname-based rename that could follow a swapped ancestor. Repair also performs a bounded catalog complement pass. The manager keeps the already bounded discovered-ID set locally, reads lightweight catalog status/provenance records in pages of at most 1,000, and submits missing path repairs in bounded batches; it never sends the complete 10,000-ID inventory through one worker RPC. A catalog session ID not represented by discovery is marked `missing`, including when its entire generated directory is absent. Existing `missing` and explicitly quarantined `unavailable` classifications are preserved. Unsupported and oversized rows are unavailable only while their canonical database remains present; deleting that preserved file or directory makes the next explicit repair classify the row as `missing`. Reconstruction applies canonical manifest/path data and the same event-sequence-derived update time, run state, and 200-character message preview as normal catalog observation. A newer unsupported session schema or a database file above the 256 MiB discovery budget is marked unavailable, preserved in place, and does not retain installation-wide repair intent. Every discovery classification repairs the catalog to the strict generated database path. A missing database preserves any existing catalog-only metadata and remaining directory while changing only the path and status to `missing`; corrupt and unsupported classifications likewise preserve existing metadata while applying their fault status and observed schema information. Operational scanner errors retain repair intent for a later restart. Normal session creation and recovery use one matching default 1,000-session installation bound; production can intentionally raise both to at most 10,000 with `WI_SESSION_DISCOVERY_LIMIT`, preventing normal writes from creating a catalog that its configured scanner cannot enumerate. Project metadata still requires re-registration in v0.1.
 
 ## 14. SQLite configuration
 
@@ -391,10 +390,10 @@ Requirements:
 - tests from every retained prior version
 - no eager opening/migration of every session database at server startup
 - session migration occurs when that session is opened or through explicit maintenance
-- a failed session migration quarantines only that session
+- a failed session migration marks only that session unavailable and preserves it in place
 - a failed catalog migration prevents normal server startup because session discovery cannot be trusted
 
-The first vertical slice begins at schema version 1 but still implements the migration framework. The current session schema is version 3; migrations from retained v1/v2 databases add tool-call occurrences and provider-step diagnostic IDs transactionally without rewriting canonical events.
+The first vertical slice begins at schema version 1 but still implements the migration framework. The current session schema is version 4; migrations from retained v1/v2 databases add tool-call occurrences and provider-step diagnostic IDs transactionally without rewriting canonical events. Version 4 adds immutable creation provenance for newly initialized sessions, allowing catalog reconstruction to restore a lost `session.create` idempotency record. A process regression constructs a populated database from the frozen exact v3 schema emitted by commit `1b9c4f0`, verifies transactional migration and unchanged raw events, and proves an injected v4 failure leaves a readable version-3 database that succeeds once the injection is removed. Retained v1-v3 databases may rebuild their session rows but cannot safely reconstruct an already-lost creation command ID. Catalog schema version 5 adds nullable unavailable provenance. The `quarantined` value remains readable for databases produced by earlier binaries, but the current path-safe policy does not create new session-directory quarantine provenance: corrupt, unsupported, oversized, and other unavailable rows are preserved in place with null provenance. Repair clears historical provenance whenever a row becomes ready or missing.
 
 ## 16. Recovery states
 

@@ -1,9 +1,10 @@
 # Wi
 
-Wi is a local, single-user, browser-based coding-agent harness. This repository currently contains the Milestone 0 workspace bootstrap and architecture guardrails for v0.1.0.
+Wi is a local, single-user, Linux-only browser-based coding-agent harness. This repository currently contains the Milestone 0 workspace bootstrap and architecture guardrails for v0.1.0.
 
 ## Requirements
 
+- Linux
 - Node.js 24 LTS
 - pnpm 11
 

@@ -49,7 +49,7 @@ Positive:
 
 - session listing opens only the catalog
 - different sessions can progress on separate database workers
-- session corruption can be quarantined independently
+- session corruption can be marked unavailable independently and preserved for recovery
 - session export/backup is naturally scoped
 - inactive session databases stay closed
 

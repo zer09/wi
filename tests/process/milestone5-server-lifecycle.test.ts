@@ -1,11 +1,17 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConnection, createServer as createNetServer, type Socket } from "node:net";
+import { createConnection, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  signalProcessTree,
+  spawnNodeProcessTree,
+  terminateProcessTree,
+} from "@wi/test-support";
 
 const fixturePath = fileURLToPath(
   new URL("./milestone5-startup-shutdown-fixture.mjs", import.meta.url),
@@ -16,23 +22,13 @@ const activeFixturePath = fileURLToPath(
 const children = new Set<ChildProcess>();
 const homes = new Set<string>();
 
-async function availablePort(): Promise<number> {
-  const reservation = createNetServer();
-  await new Promise<void>((resolve, reject) => {
-    reservation.once("error", reject);
-    reservation.listen(0, "127.0.0.1", resolve);
-  });
-  const address = reservation.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("Port reservation returned no address");
+function startedServerPort(output: string): number | null {
+  for (const line of output.split("\n")) {
+    if (!line.includes('"event":"server_started"')) continue;
+    const record = JSON.parse(line) as { readonly port?: unknown };
+    if (typeof record.port === "number" && Number.isInteger(record.port)) return record.port;
   }
-  await new Promise<void>((resolve, reject) => {
-    reservation.close((error) => {
-      if (error === undefined) resolve();
-      else reject(error);
-    });
-  });
-  return address.port;
+  return null;
 }
 
 async function halfOpenRejectedUpgrade(port: number, suffix: number): Promise<Socket> {
@@ -83,9 +79,7 @@ async function within<T>(operation: Promise<T>, timeoutMs: number, message: () =
 }
 
 afterEach(async () => {
-  for (const child of children) {
-    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-  }
+  await Promise.all([...children].map((child) => terminateProcessTree(child)));
   children.clear();
   await Promise.all(
     [...homes].map((home) => rm(home, { recursive: true, force: true })),
@@ -97,11 +91,9 @@ describe("Milestone 5 server process lifecycle", () => {
   it("exits with an active WebSocket and rejected half-open upgrades", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-milestone5-process-main-"));
     homes.add(homeDirectory);
-    const port = await availablePort();
     const mainPath = fileURLToPath(new URL("../../apps/server/dist/main.js", import.meta.url));
-    const child = spawn(process.execPath, [mainPath], {
-      env: { ...process.env, WI_HOME: homeDirectory, WI_PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
+    const child = await spawnNodeProcessTree([mainPath], {
+      environment: { ...process.env, WI_HOME: homeDirectory, WI_PORT: "0" },
     });
     children.add(child);
     if (child.stdout === null || child.stderr === null) {
@@ -111,18 +103,23 @@ describe("Milestone 5 server process lifecycle", () => {
     child.stderr.setEncoding("utf8");
     let stdout = "";
     let stderr = "";
-    let signalStarted = (): void => {};
-    const started = new Promise<void>((resolve) => {
+    let signalStarted: (port: number) => void = () => undefined;
+    const started = new Promise<number>((resolve) => {
       signalStarted = resolve;
     });
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
-      if (stdout.includes('"event":"server_started"')) signalStarted();
+      const port = startedServerPort(stdout);
+      if (port !== null) signalStarted(port);
     });
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
-    await within(started, 8_000, () => `Production main did not start: ${stderr}`);
+    const port = await within(
+      started,
+      8_000,
+      () => `Production main did not start: ${stderr}`,
+    );
 
     const origin = `http://127.0.0.1:${port}`;
     const bootstrap = await fetch(`${origin}/bootstrap`);
@@ -166,7 +163,7 @@ describe("Milestone 5 server process lifecycle", () => {
       Array.from({ length: 3 }, (_, index) => halfOpenRejectedUpgrade(port, index)),
     );
     const socketClosed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
-    child.kill("SIGTERM");
+    await signalProcessTree(child, "SIGTERM");
     let result: { code: number | null; signal: NodeJS.Signals | null };
     try {
       result = await within(
@@ -193,11 +190,9 @@ describe("Milestone 5 server process lifecycle", () => {
   it("keeps production running when its stdout consumer closes", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-milestone5-stdout-epipe-"));
     homes.add(homeDirectory);
-    const port = await availablePort();
     const mainPath = fileURLToPath(new URL("../../apps/server/dist/main.js", import.meta.url));
-    const child = spawn(process.execPath, [mainPath], {
-      env: { ...process.env, WI_HOME: homeDirectory, WI_PORT: String(port) },
-      stdio: ["ignore", "pipe", "pipe"],
+    const child = await spawnNodeProcessTree([mainPath], {
+      environment: { ...process.env, WI_HOME: homeDirectory, WI_PORT: "0" },
     });
     children.add(child);
     if (child.stdout === null || child.stderr === null) {
@@ -207,13 +202,14 @@ describe("Milestone 5 server process lifecycle", () => {
     child.stderr.setEncoding("utf8");
     let stdout = "";
     let stderr = "";
-    let signalStarted = (): void => {};
-    const started = new Promise<void>((resolve) => {
+    let signalStarted: (port: number) => void = () => undefined;
+    const started = new Promise<number>((resolve) => {
       signalStarted = resolve;
     });
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
-      if (stdout.includes('"event":"server_started"')) signalStarted();
+      const port = startedServerPort(stdout);
+      if (port !== null) signalStarted(port);
     });
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
@@ -221,7 +217,11 @@ describe("Milestone 5 server process lifecycle", () => {
     const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
       (resolve) => child.once("close", (code, signal) => resolve({ code, signal })),
     );
-    await within(started, 8_000, () => `Production EPIPE fixture did not start: ${stderr}`);
+    const port = await within(
+      started,
+      8_000,
+      () => `Production EPIPE fixture did not start: ${stderr}`,
+    );
 
     child.stdout.destroy();
     const response = await new Promise<string>((resolve, reject) => {
@@ -246,7 +246,7 @@ describe("Milestone 5 server process lifecycle", () => {
       status: 200,
     });
 
-    child.kill("SIGTERM");
+    await signalProcessTree(child, "SIGTERM");
     const result = await within(closed, 12_000, () => `Production EPIPE fixture did not exit: ${stderr}`);
     children.delete(child);
     expect(result).toEqual({ code: 0, signal: null });
@@ -260,9 +260,7 @@ describe("Milestone 5 server process lifecycle", () => {
     const fixturePath = fileURLToPath(
       new URL("./milestone5-invalid-runtime-fixture.mjs", import.meta.url),
     );
-    const child = spawn(process.execPath, [fixturePath, homeDirectory], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = await spawnNodeProcessTree([fixturePath, homeDirectory]);
     children.add(child);
     if (child.stdout === null || child.stderr === null) {
       throw new Error("Invalid-runtime fixture did not expose output pipes");
@@ -310,9 +308,7 @@ describe("Milestone 5 server process lifecycle", () => {
   it("closes an active WebSocket and run on SIGTERM without leaking work", async () => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-milestone5-process-active-"));
     homes.add(homeDirectory);
-    const child = spawn(process.execPath, [activeFixturePath, homeDirectory], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = await spawnNodeProcessTree([activeFixturePath, homeDirectory]);
     children.add(child);
     if (child.stdout === null || child.stderr === null) {
       throw new Error("Active shutdown fixture did not expose output pipes");
@@ -334,7 +330,7 @@ describe("Milestone 5 server process lifecycle", () => {
     });
 
     await within(active, 8_000, () => `Active shutdown fixture did not block: ${stderr}`);
-    child.kill("SIGTERM");
+    await signalProcessTree(child, "SIGTERM");
     const result = await within(
       new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         child.once("close", (code, signal) => resolve({ code, signal }));
@@ -355,12 +351,32 @@ describe("Milestone 5 server process lifecycle", () => {
     expect(stderr).not.toContain("Error");
   }, 15_000);
 
-  it("handles SIGTERM while startup is blocked without leaking its listener", async () => {
+  it.each([
+    {
+      name: "after storage readiness before recovery adoption",
+      mode: "storage-ready",
+      marker: "startup-blocked\n",
+      pageCalls: 0,
+      adoptedCandidates: 0,
+    },
+    {
+      name: "after adopting recovery candidates across a full page boundary",
+      mode: "candidate-pages",
+      marker: "candidates-adopted\n",
+      pageCalls: 2,
+      adoptedCandidates: 1_001,
+    },
+    {
+      name: "while the second recovery-candidate page is blocked",
+      mode: "candidate-page-blocked",
+      marker: "candidate-page-blocked\n",
+      pageCalls: 2,
+      adoptedCandidates: 1_000,
+    },
+  ])("handles SIGTERM $name", async ({ mode, marker, pageCalls, adoptedCandidates }) => {
     const homeDirectory = await mkdtemp(join(tmpdir(), "wi-milestone5-process-startup-"));
     homes.add(homeDirectory);
-    const child = spawn(process.execPath, [fixturePath, homeDirectory], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = await spawnNodeProcessTree([fixturePath, homeDirectory, mode]);
     children.add(child);
     if (child.stdout === null || child.stderr === null) {
       throw new Error("Startup fixture did not expose output pipes");
@@ -375,14 +391,14 @@ describe("Milestone 5 server process lifecycle", () => {
     });
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
-      if (stdout.includes("startup-blocked\n")) signalBlocked();
+      if (stdout.includes(marker)) signalBlocked();
     });
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
 
-    await within(blocked, 5_000, () => `Startup fixture did not block: ${stderr}`);
-    child.kill("SIGTERM");
+    await within(blocked, 5_000, () => `Startup fixture did not reach ${mode}: ${stderr}`);
+    await signalProcessTree(child, "SIGTERM");
     const result = await within(
       new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         child.once("close", (code, signal) => resolve({ code, signal }));
@@ -394,7 +410,13 @@ describe("Milestone 5 server process lifecycle", () => {
 
     expect(result).toEqual({ code: 0, signal: null });
     const summaryLine = stdout.trim().split("\n").at(-1);
-    expect(JSON.parse(summaryLine ?? "null")).toEqual({ fulfilled: true, address: null });
+    expect(JSON.parse(summaryLine ?? "null")).toEqual({
+      fulfilled: true,
+      address: null,
+      mode,
+      pageCalls,
+      adoptedCandidates,
+    });
     expect(stderr).not.toContain("Error");
   });
 });

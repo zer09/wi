@@ -43,6 +43,11 @@ export default defineWorkspace([
       name: "process",
       environment: "node",
       include: ["tests/process/**/*.test.ts"],
+      // Process fixtures already exercise concurrency internally. Explicitly select
+      // one project thread so process files cannot overlap under the workspace gate.
+      pool: "threads",
+      poolOptions: { threads: { singleThread: true } },
+      testTimeout: 15_000,
     },
   },
 ]);

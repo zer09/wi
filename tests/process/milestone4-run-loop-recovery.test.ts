@@ -235,11 +235,8 @@ describe("Milestone 4 real process run-loop recovery", () => {
     }
 
     expect(timeoutError).not.toBeNull();
-    expect(timeoutError?.result).toMatchObject({
-      code: null,
-      signal: "SIGKILL",
-      stdout: "hang-ready\n",
-    });
+    expect(timeoutError?.result.stdout).toBe("hang-ready\n");
+    expect(timeoutError?.result).toMatchObject({ code: null, signal: "SIGKILL" });
     expect(fixtureProcesses.activeCount).toBe(0);
     const pid = timeoutError?.result.pid;
     if (pid === null || pid === undefined) throw new Error("Hanging fixture did not report its PID");

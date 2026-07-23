@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { request as createHttpRequest } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -30,6 +30,7 @@ import {
   type SessionClient,
   type SessionWorkerBarrier,
 } from "@wi/storage";
+import { sessionWorkerPoolForTest } from "../../packages/storage/dist/testing.js";
 import { EchoInputSchema, ToolRegistry } from "@wi/tools";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +79,10 @@ interface Fixture {
 const PROVIDER_SECRET = "AUDIT_PROVIDER_BEARER_SECRET";
 const TOOL_SECRET = "AUDIT_TOOL_BEARER_SECRET";
 const HTTP_SECRET = "AUDIT_HTTP_BEARER_SECRET";
+
+function sessionWorkers(storage: SessionStoreManager) {
+  return sessionWorkerPoolForTest(storage);
+}
 
 class ThrowingSecretProvider extends FakeProviderAdapter {
   override async *stream(
@@ -744,7 +749,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     expect(JSON.stringify(parsed)).not.toContain("sqlite");
   });
 
-  it("bounds bootstrap rows and text inside the catalog worker query", async () => {
+  it("bounds bootstrap rows and recovery candidates inside catalog worker queries", async () => {
     const fixture = await startFixture();
     const oversizedTitle = "😀".repeat(1_000);
     const oversizedPreview = "p".repeat(300_000);
@@ -764,8 +769,21 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         pendingApprovalCount: 0,
         pendingInputCount: 0,
         sessionSchemaVersion: 1,
+        recoveryCandidate: true,
       });
     }
+
+    const firstRecoveryPage = await fixture.runtime.storage.listRecoveryCandidatePage();
+    expect(firstRecoveryPage.sessionIds).toHaveLength(1_000);
+    expect(firstRecoveryPage.nextCursor).not.toBeNull();
+    const secondRecoveryPage = await fixture.runtime.storage.listRecoveryCandidatePage(
+      firstRecoveryPage.nextCursor,
+    );
+    expect(secondRecoveryPage.sessionIds).toHaveLength(2);
+    expect(secondRecoveryPage.nextCursor).not.toBeNull();
+    await expect(
+      fixture.runtime.storage.listRecoveryCandidatePage(secondRecoveryPage.nextCursor),
+    ).resolves.toEqual({ sessionIds: [], nextCursor: null });
 
     const response = await bootstrap(fixture.server);
     expect(response.response.status).toBe(200);
@@ -1307,20 +1325,28 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     ).toThrow(/HTTP shutdown timeout must be a positive safe integer/u);
   });
 
-  it("fails startup cleanly when canonical storage cannot initialize", async () => {
+  it("fails before server construction when canonical storage cannot initialize", async () => {
     const base = await mkdtemp(join(tmpdir(), "wi-milestone5-invalid-home-"));
     homes.add(base);
     const invalidHome = join(base, "not-a-directory");
     await writeFile(invalidHome, "occupied");
-    const records: LogRecord[] = [];
-    const runtime = new WiRuntime({
-      homeDirectory: invalidHome,
-      logger: new JsonLogger({ write: (record) => records.push(record) }),
+
+    let failure: unknown;
+    try {
+      new WiRuntime({
+        homeDirectory: invalidHome,
+        logger: new JsonLogger({ write: () => undefined }),
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      code: "storage.operational",
+      message: "Catalog storage is unavailable",
+      retryable: true,
     });
-    const server = new WiServer({ runtime, port: 0 });
-    servers.add(server);
-    await expect(server.start()).rejects.toBeDefined();
-    expect(server.address).toBeNull();
+    expect(JSON.stringify(failure)).not.toContain(base);
+    await expect(readFile(invalidHome, "utf8")).resolves.toBe("occupied");
   });
 
   it("reuses a durable failed session.create diagnostic on every WebSocket retry", async () => {
@@ -1490,6 +1516,83 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         code: "storage.corrupt",
       }),
     );
+    await client.close();
+  });
+
+  it("rechecks catalog readiness after the command-router precheck before actor construction", async () => {
+    const fixture = await startFixture();
+    const created = await fixture.runtime.storage.createSession({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_create_statusRace",
+      method: "session.create",
+      params: { title: "Status race" },
+    });
+    const sessionId = created.session.sessionId;
+    const databasePath = resolveStoragePath(fixture.homeDirectory, created.session.dbRelativePath);
+    const identityBefore = await stat(databasePath);
+    const headBefore = await sessionWorkers(fixture.runtime.storage).getHeadSequence(sessionId);
+    const getSession = fixture.runtime.storage.catalog.getSession.bind(
+      fixture.runtime.storage.catalog,
+    );
+    let targetReads = 0;
+    const getSessionSpy = vi
+      .spyOn(fixture.runtime.storage.catalog, "getSession")
+      .mockImplementation(async (candidateId) => {
+        const summary = await getSession(candidateId);
+        if (candidateId === sessionId && targetReads === 0) {
+          targetReads += 1;
+          await fixture.runtime.storage.catalog.markSessionStatus({
+            sessionId,
+            status: "unavailable",
+          });
+          return summary;
+        }
+        return summary;
+      });
+
+    const { cookie } = await bootstrap(fixture.server);
+    const client = await connect(fixture.server, cookie);
+    await hello(client, "statusRace");
+    client.send({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_statusRace",
+      sessionId,
+      method: "message.submit",
+      params: { text: "Do not construct an actor after isolation." },
+    });
+    const rejected = await client.take(
+      (message): message is CommandRejectedFrame =>
+        message.kind === "command.rejected" && message.commandId === "cmd_statusRace",
+    );
+    getSessionSpy.mockRestore();
+
+    expect(rejected).toMatchObject({
+      code: "storage.corrupt",
+      message: "The requested session storage is unavailable.",
+      recoverable: false,
+    });
+    expect(targetReads).toBe(1);
+    expect(fixture.runtime.actors.states().some((state) => state.sessionId === sessionId)).toBe(
+      false,
+    );
+    expect(
+      (await sessionWorkers(fixture.runtime.storage).getStats()).flatMap(
+        (worker) => worker.openSessionIds,
+      ),
+    ).not.toContain(sessionId);
+    await expect(fixture.runtime.storage.catalog.getSession(sessionId)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    await expect(sessionWorkers(fixture.runtime.storage).getHeadSequence(sessionId)).resolves.toBe(
+      headBefore,
+    );
+    const identityAfter = await stat(databasePath);
+    expect({ dev: identityAfter.dev, ino: identityAfter.ino }).toEqual({
+      dev: identityBefore.dev,
+      ino: identityBefore.ino,
+    });
     await client.close();
   });
 
@@ -2693,7 +2796,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
     if (created.sessionId === undefined) throw new Error("Session creation failed");
 
     await expect(
-      fixture.runtime.storage.sessions.malformedResponseForTest(created.sessionId),
+      sessionWorkers(fixture.runtime.storage).malformedResponseForTest(created.sessionId),
     ).rejects.toBeDefined();
     await eventually(() => {
       expect(fixture.records).toContainEqual(
@@ -3958,7 +4061,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       gateway: {
         replayHooks: {
           afterHeadCaptured: async (sessionId) => {
-            await fixture.runtime.storage.sessions.corruptManifestForTest(sessionId);
+            await sessionWorkers(fixture.runtime.storage).corruptManifestForTest(sessionId);
           },
         },
       },
@@ -4279,7 +4382,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
         replayHooks: {
           afterHeadCaptured: async (sessionId) => {
             barrier.current =
-              await fixture.runtime.storage.sessions.blockWorkerForTest(sessionId);
+              await sessionWorkers(fixture.runtime.storage).blockWorkerForTest(sessionId);
             blocked();
           },
         },
@@ -4334,15 +4437,15 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       const candidate = await createSession(client, `busyWorkerOther${attempt}`);
       if (
         candidate.sessionId !== undefined &&
-        fixture.runtime.storage.sessions.workerIndexFor(candidate.sessionId) !==
-          fixture.runtime.storage.sessions.workerIndexFor(first.sessionId)
+        sessionWorkers(fixture.runtime.storage).workerIndexFor(candidate.sessionId) !==
+          sessionWorkers(fixture.runtime.storage).workerIndexFor(first.sessionId)
       ) {
         secondSessionId = candidate.sessionId;
       }
     }
     if (secondSessionId === null) throw new Error("Could not create sessions on distinct workers");
 
-    const barrier = await fixture.runtime.storage.sessions.blockWorkerForTest(first.sessionId);
+    const barrier = await sessionWorkers(fixture.runtime.storage).blockWorkerForTest(first.sessionId);
     try {
       const accepted = await submitMessage(client, secondSessionId, "busyWorkerResponsive");
       const runId = accepted.runId;

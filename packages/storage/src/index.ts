@@ -1,12 +1,16 @@
 export { CatalogClient } from "./catalog/client.js";
 export type {
   CatalogClientOptions,
+  CatalogStartupState,
   CompleteGlobalCommandInput,
   ReconcileSessionInput,
+  RecoveryCandidateCursor,
+  RecoveryCandidatePage,
   ReserveGlobalCommandInput,
 } from "./catalog/client.js";
 export type {
   CatalogProjectionUpdateResult,
+  CatalogRepairReason,
   FailGlobalCommandInput,
   MarkSessionStatusInput,
   ReconcileSessionResult,
@@ -22,8 +26,10 @@ export type {
 } from "./common/worker-rpc.js";
 export { CatalogReconciler } from "./manager/catalog-reconciler.js";
 export {
+  isValidSessionPrefix,
   resolveStoragePath,
   sessionDatabaseRelativePath,
+  sessionPrefixFromId,
   stableSessionWorkerIndex,
 } from "./manager/paths.js";
 export {
@@ -32,17 +38,21 @@ export {
 } from "./manager/session-store-manager.js";
 export type {
   CatalogObservationFailure,
+  CatalogRepairReport,
   CreateSessionStorageResult,
   DrainCatalogObservationsOptions,
   ManagedAcceptCommandResult,
   ManagedAppendResult,
   SessionStoreManagerOptions,
   StorageIdGenerators,
+  StorageTestFailpoints,
 } from "./manager/session-store-manager.js";
-export { SessionClient } from "./session/client.js";
-export { SessionWorkerPool } from "./session/worker-pool.js";
+export type { SessionClient } from "./session/client.js";
 export type {
+  DiscoveredSession,
   InitializeSessionInput,
+  SessionDiscoveryInventory,
+  SessionDiscoveryPage,
   SessionSqlitePragmas,
   SessionWorkerBarrier,
   SessionWorkerPoolOptions,
@@ -80,6 +90,7 @@ export type {
   ToolExecutionRecord,
   SessionCatalogObservation,
   SessionCatalogProjection,
+  CreationProvenance,
   SessionCreationRequest,
   SessionEventPage,
   SessionEventPageInput,

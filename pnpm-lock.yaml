@@ -32,6 +32,9 @@ importers:
       '@wi/storage':
         specifier: workspace:*
         version: link:packages/storage
+      '@wi/test-support':
+        specifier: workspace:*
+        version: link:packages/test-support
       '@wi/tools':
         specifier: workspace:*
         version: link:packages/tools

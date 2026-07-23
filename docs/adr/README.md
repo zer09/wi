@@ -33,6 +33,8 @@ This avoids duplicate ADRs that would give Codex two files for the same decision
 | [0008](0008-tool-effect-ledger.md) | Durable tool-effect ledger and recovery semantics | Accepted | Yes |
 | [0009](0009-host-unrestricted-filesystem.md) | Host-unrestricted personal filesystem policy | Accepted, deferred | No real file tools yet |
 | [0010](0010-plugin-specific-integration.md) | Plugin-specific integration behind the Wi tool contract | Accepted, deferred | No plugins yet |
+| [0011](0011-linux-only-v0.1.md) | Linux-only v0.1 runtime and release gate | Accepted | Yes |
+| [0012](0012-trusted-local-user-storage-boundary.md) | Trusted local operating-system user storage boundary | Accepted | Yes |
 
 ## ADR rules
 

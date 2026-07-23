@@ -49,7 +49,7 @@ Action:
 - reject the message with a typed safe error
 - when a global command already has a durable terminal failure, reuse its safe code, message, and diagnostic ID on every identical retry
 - for rejected WebSocket upgrades and direct HTTP errors, return the same opaque diagnostic ID in the bounded response and redacted server record
-- classify a quarantined actor during subscription setup as non-recoverable `storage.corrupt`, not a retryable replay query
+- classify an unavailable corrupt actor during subscription setup as non-recoverable `storage.corrupt`, not a retryable replay query
 - do not mutate session state
 - keep the connection open for ordinary recoverable mistakes
 - close the connection for repeated abuse, severe size violations, or authentication/origin failure
@@ -162,11 +162,13 @@ Examples:
 Action:
 
 - stop accepting mutations for that session
-- quarantine or mark the session unavailable
+- mark the session unavailable
 - close its actor and database handle
-- preserve the file for diagnostics/recovery
+- preserve the file in place for diagnostics/recovery
 - update catalog status when possible
 - keep other sessions running
+
+Catalog `unavailable` and `missing` states are authoritative, not UI hints. Normal storage clients hold a per-session coordination boundary from the final status check through each read, recovery, or command/append worker response. Existing homes are realpath-canonicalized before coordinator and database paths are derived, so static symlink aliases share that boundary. Catalog status transitions use the same boundary, so they wait for earlier work and block later work until it rechecks the committed state; rejection closes retained worker handles. Generic lazy reconciliation requires an existing `ready` session: it cannot insert an absent row or restore an isolated row. Reconciliation may reconstruct an absent row only through module-internal incomplete-creation recovery backed by a durable `creating` reservation, or through the complete-discovery repair path after validating the canonical database, schema, size, identity, projection, and creation provenance; unrelated sessions remain usable throughout. The validated-repair RPC is reachable only through module-closure state, not client fields or prototype symbols. Worker pools and client hooks are JavaScript-private, and their constructors are absent from the normal package runtime exports; internal test-only access is environment-gated and not exported by the package.
 
 ## 10. Database-worker failure
 
@@ -194,11 +196,12 @@ Examples:
 - catalog corruption
 - catalog path unavailable
 
-Because catalog discovery is foundational, normal startup may stop.
+Because catalog discovery is foundational, normal startup may stop. A first run creates the missing configured `WI_HOME` directory chain synchronously with mode `0700` before catalog-worker construction, then realpath-canonicalizes the created or existing directory. Existing components are not moved, overwritten, deleted, or chmodded. A non-directory, inaccessible component, or other creation/canonicalization failure maps to a fixed bounded `storage.operational` error before any storage worker or HTTP listener starts. Before an existing catalog is opened read-write, SQLite recovery, integrity checking, and migration validation run on a disposable copy of the database and WAL/SHM sidecars. Startup then uses a two-phase handshake: SQLite acquires the canonical handle without running project configuration, the worker synchronously compares current directory and DB/WAL/SHM path identities with the validated snapshot, and only a visible match may proceed to recovery-capable PRAGMAs or queries. A visible mismatch closes the raw handle. Missing bootstrap uses final-component no-follow/no-overwrite reservation before the same prepared-open flow. These checks are defense-in-depth; [ADR-0012](../adr/0012-trusted-local-user-storage-boundary.md) explicitly excludes hostile concurrent same-user TOCTOU/ABA substitution. Fixed catalog-startup classifications replace raw filesystem messages before RPC, preventing canonical-home and probe-path disclosure. Ordinary validation failure leaves the canonical files unopened and unchanged. Automatic quarantine/replacement is forbidden because Node exposes no cross-platform handle-relative, no-follow, no-overwrite move. With Wi stopped, an operator may restore the catalog or deliberately relocate it outside Wi before using the missing-catalog rebuild path.
 
 Action:
 
 - emit a clear fatal diagnostic
+- close the catalog handle without renaming, deleting, overwriting, or recreating the corrupt pathname
 - avoid mutating session databases during uncertain discovery
 - provide a maintenance/rebuild path from session manifests
 - terminate the Wi server when safe operation cannot be guaranteed
@@ -240,9 +243,9 @@ Before graceful termination, Wi attempts to:
 - close handles
 - write final redacted diagnostics
 
-Startup and shutdown use one explicit lifecycle. All runtime and nested worker scalar bounds are validated before any provider, scheduler, storage worker, or actor registry is constructed. Shutdown begins closing the HTTP listener immediately; non-upgraded sockets drain only until the configured HTTP deadline, then incomplete or stalled connections are force-closed. Every socket entering the HTTP upgrade path transfers to gateway ownership before validation; rejected sockets have a fixed bounded response-drain window and are force-destroyed on its expiry or immediately during gateway shutdown. Accepted WebSockets remain under the same gateway deadline. A rejected WebSocket connection cleanup is treated like a timeout: remaining transports are terminated before errors are reported, custom logger failures cannot block isolation, and WebSocket-server close is attempted through an unconditional bounded path. If startup fails after the HTTP listener opens, Wi applies the same bounded listener cleanup, stops the WebSocket gateway, and then closes runtime storage before rejecting startup. Concurrent close waits for startup cleanup without awaiting itself. During graceful cancellation, the actor preserves a run task's diagnostic-bearing terminal result; a provider-step interruption and its resulting run interruption therefore share one causal diagnostic ID instead of replacing it with a synthetic stop result.
+Startup and shutdown use one explicit lifecycle. Runtime readiness is memoized. Recovery candidates are requested and adopted in cursor pages of at most 1,000 IDs rather than accumulated installation-wide, and server-owned closing state is checked before and after every page request and at each adoption boundary. If shutdown wins, remaining startup adoption is cancelled before closed actors or storage are used; close-induced failures from work already crossing an asynchronous boundary are treated as cancellation rather than a second fatal startup failure. All runtime and nested worker scalar bounds are validated before any provider, scheduler, storage worker, or actor registry is constructed. Shutdown begins under one server-owned absolute deadline; each actor, scheduler, storage, listener, and worker phase receives only the remaining budget. A deadline that leaves an in-process operation, worker, or other non-isolatable component unresolved is accumulated into one redacted `server_shutdown_diagnostic` with a diagnostic ID and causes nonzero process exit; a final watchdog covers bugs outside the bounded paths. A transport drain timeout is instead a successful bounded isolation when Wi force-closes every owned socket and listener at that hard boundary. It emits a component warning such as `http_shutdown_forced`, later shutdown phases continue, and the process may exit zero. Failure to complete that forced isolation remains an aggregated shutdown failure. Shutdown begins closing the HTTP listener immediately; non-upgraded sockets drain only until the configured HTTP deadline, then incomplete or stalled connections are force-closed. Every socket entering the HTTP upgrade path transfers to gateway ownership before validation; rejected sockets have a fixed bounded response-drain window and are force-destroyed on its expiry or immediately during gateway shutdown. Accepted WebSockets remain under the same gateway deadline. A rejected WebSocket connection cleanup is treated like a timeout: remaining transports are terminated before errors are reported, custom logger failures cannot block isolation, and WebSocket-server close is attempted through an unconditional bounded path. If startup fails after the HTTP listener opens, Wi applies the same bounded listener cleanup, stops the WebSocket gateway, and then closes runtime storage before rejecting startup. Concurrent close waits for startup cleanup without awaiting itself. During graceful cancellation, the actor preserves a run task's diagnostic-bearing terminal result; a provider-step interruption and its resulting run interruption therefore share one causal diagnostic ID instead of replacing it with a synthetic stop result.
 
-A sudden crash may bypass these steps; recovery tests cover durable consequences. When restart recovery terminalizes related provider-step, tool, and run state as one causal boundary, those events share one diagnostic ID and one redacted `session_recovery_interrupted` server record. When a provider-step terminal event committed before the crash but its run terminal event did not, the provider-step projection retains the canonical diagnostic ID and run adoption reuses it.
+A sudden crash may bypass these steps; recovery tests cover durable consequences. The complete process project is a required Linux CI job, including owner-death cleanup and directory-symlink scanner containment. Process fixtures share bounded process-tree cleanup through detached Linux process groups, escalation, verified group disappearance, and temporary-home deletion only after cleanup settles. Linux uses operating-system signals plus a test-support-only owner watchdog. The harness clears inherited and caller-provided `NODE_OPTIONS` for every harness-owned Node child. The watchdog therefore installs its inherited owner-pipe watcher without executing preload hooks, and a fixed bootstrap remains the actual fixture process so caller `--import`/`--require` code cannot run ahead of ownership. Watchdog-only release-test controls are removed from the anchor and fixture application environment. The bootstrap's gated preload releases the requested fixture module only after watchdog registration. The preload starts a minimal process-group anchor before fixture code; its kernel-held membership keeps the detached group identity allocated after direct-leader exit, preventing numeric PGID reuse from retargeting cleanup to an unrelated group. Owner EOF reclaims this anchored fixture group. Normal completion releases the watchdog after verified group cleanup, and setup failure leaves fixture code gated and fails closed. A signal requested through a watchdog-owned fixture handle targets its direct leader while the anchor and descendants remain under watchdog ownership. Explicit cleanup delegates anchored-group reclamation to the watchdog before any direct group signal. Watchdog release caches only one active attempt: a timeout or supervisor error clears that attempt but retains ownership and the anchor-held identity, so later cleanup retries cannot target a reused PGID; ownership is removed only after the fixture group and watchdog are both verified gone. A disconnected live watchdog that has not accepted reclamation is stopped while the anchor still reserves the group, then the harness reclaims that exact group and verifies both boundaries gone. Watchdog acceptance is authenticated and precedes its first group signal; once accepted, the harness refuses numeric fallback and fails closed unless watchdog-owned reclamation can be verified. Watchdog readiness failure verifies watchdog disappearance before returning. If setup fails after the anchor starts, bounded escalation verifies the group, leader, and watchdog are gone before the ownership record is deleted and the setup error is returned. Generic fixture runners likewise verify and release their owned Linux process group after normal leader exit instead of dropping ownership from cleanup tracking. Both fixture harnesses retain only fixed 64-KiB stdout/stderr diagnostic tails plus total-byte, truncation, and streaming-hash metadata. Real-server object IPC has fixed per-message estimated-byte, depth, node, string, and type limits plus independent pending/history message and estimated-aggregate caps. Its conservative estimate charges complete JSON string/key escaping and finite-number encodings plus structural overhead, keeping retained UTF-8 JSON size at or below the charged aggregate. Non-finite numbers are protocol-invalid and are summarized on retention or rejected by outbound preflight before JSON-mode IPC can coerce them to `null`. Over-limit values are never placed in pending/history as full objects: the harness retains only a bounded type/reason/preview/hash summary and exact monotonic message counters, while pending eviction prefers awaited small controls over unawaited noise. Accepted callback values are copied into bounded plain-data snapshots before retention, and their exact retained representation is charged to pending/history. Waiters and history readers receive fresh bounded copies, and each diagnostics read copies its bounded truncation record, so external mutation cannot alter retained memory, evidence, or counters. Timeout diagnostics remain bounded. Parent controls are copied through data descriptors into a bounded plain-data snapshot; arrays capture one own length descriptor and are rebuilt with a null prototype, accessors and unsupported values fail before send, and the exact captured snapshot—not the dynamic source object—is passed to `child.send()`. This bounds each trusted parent control representation, not aggregate in-flight buffering across repeated `child.send()` calls. Because Node deserializes object IPC before invoking JavaScript, this guarantee starts at the receive callback and assumes trusted test fixtures; a future untrusted child boundary must replace object IPC with bounded framing. Readiness matching remains streaming with a fixed marker bound rather than a search over accumulated output. Output volume alone never triggers child termination; existing deadlines and verified process-tree cleanup remain authoritative. A graceful-shutdown-during-tool probe proves that a noncooperative pure tool exits fail-closed and that restart safely retries the same durable ledger row rather than inventing a terminal outcome. Separate retained-gate probes show that replay is isolated cleanly while a noncooperative catalog observation reaches the shared deadline, reports failure, and recovers after restart. When restart recovery terminalizes related provider-step, tool, and run state as one causal boundary, those events share one diagnostic ID and one redacted `session_recovery_interrupted` server record. When a provider-step terminal event committed before the crash but its run terminal event did not, the provider-step projection retains the canonical diagnostic ID and run adoption reuses it. The complete failpoint inventory, scanner trigger policy, catalog/project limitations, and shutdown order are documented in [the Milestone 7 failure and recovery matrix](failure-recovery-matrix.md).
 
 ## 14. Error categories
 
@@ -336,19 +339,20 @@ A documented, same-adapter pre-output transport retry may occur under the retry 
 Test-only failpoints are placed at critical crash windows:
 
 ```text
-after command reservation before commit
-after command commit before acknowledgement
-after event commit before publication
-after provider text commit
-after provider terminal commit before tool promotion publication
-after tool request commit
-after tool started commit
-after tool result commit before provider continuation
-after run terminal commit
-after session database initialization before catalog ready
+after_command_event_insert_before_commit
+after_command_commit_before_ack
+after_event_commit_before_publish
+after_tool_requested_commit
+after_tool_started_commit
+after_tool_result_commit_before_provider_continue
+after_provider_text_commit
+after_run_terminal_commit
+after_session_create_before_catalog_ready
+after_catalog_session_repair
+after_catalog_replacement_before_repair
 ```
 
-A process test starts Wi, triggers the failpoint, kills/exits the child process, restarts using the same `WI_HOME`, and verifies the exact durable outcome.
+A process test starts Wi, arms the failpoint with a strict test-only session/command/run or catalog-global selector, triggers the boundary, restarts using the same `WI_HOME`, and verifies the exact durable outcome. Run-scoped selectors bind in two stages: `commandId` and `sessionId` identify the target command when its deterministic selected `runId` is assigned, then committed publication/provider/tool/run boundaries match `sessionId + runId` before consuming the crash one-shot; they do not recheck `commandId` at that later boundary. Concurrent-session cases hold target A before the boundary, let unrelated B cross it without terminating Wi, then release A and require the documented exit. Unrelated sessions or commands cannot acquire the selected run ID or consume the one-shot.
 
 ## 19. Recovery expectations
 
@@ -386,7 +390,7 @@ Automated tests must prove:
 - one malformed browser message does not crash the gateway
 - slow browser A does not delay browser B or the run
 - database-worker death does not terminate the server
-- corrupt session A is quarantined without blocking session B
+- corrupt session A is marked unavailable and preserved without blocking session B
 - provider protocol failure never invokes a fallback
 - diagnostic logs are redacted and bounded
 - fatal catalog failure prevents unsafe startup

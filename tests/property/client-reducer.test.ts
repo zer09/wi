@@ -15,10 +15,10 @@ import {
   replaySessionEvents,
 } from "../../packages/client-state/src/replay.js";
 
-const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "313131", 10);
+const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
 const propertyPath = process.env.WI_FC_PATH;
 const propertyOptions = {
-  numRuns: 250,
+  numRuns: 1_000,
   seed: propertySeed,
   ...(propertyPath === undefined ? {} : { path: propertyPath }),
 } as const;

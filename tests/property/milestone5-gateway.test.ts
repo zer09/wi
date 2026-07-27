@@ -15,6 +15,16 @@ import {
   type OutboundTransport,
 } from "../../apps/server/src/websocket/outbound-queue.js";
 
+const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
+const propertyPath = process.env.WI_FC_PATH;
+function propertyOptions(numRuns: number): fc.Parameters<unknown> {
+  return {
+    numRuns,
+    seed: propertySeed,
+    ...(propertyPath === undefined ? {} : { path: propertyPath }),
+  };
+}
+
 class BlockingTransport implements OutboundTransport {
   readonly closes: Array<{ code: number; reason: string }> = [];
 
@@ -82,7 +92,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           }
         },
       ),
-      { numRuns: 1_000 },
+      propertyOptions(1_000),
     );
   });
 
@@ -139,7 +149,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           expect(boundaries).toEqual([historicalCount]);
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -183,7 +193,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           );
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -207,7 +217,7 @@ describe("Milestone 5 bounded gateway properties", () => {
         expect(queue.state.closeReason).toBe("slow_consumer");
         expect(transport.closes.at(-1)?.code).toBe(SLOW_CONSUMER_CLOSE_CODE);
       }),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -230,7 +240,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           expect(transport.closes.at(-1)?.code).toBe(SLOW_CONSUMER_CLOSE_CODE);
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -261,7 +271,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           }
         },
       ),
-      { numRuns: 1_000 },
+      propertyOptions(1_000),
     );
   }, 10_000);
 });

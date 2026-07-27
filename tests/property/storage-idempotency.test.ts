@@ -17,11 +17,13 @@ const propertyOptions = {
 const operation = fc.record({
   slot: fc.integer({ min: 0, max: 3 }),
   variant: fc.integer({ min: 0, max: 2 }),
+  delivery: fc.constantFrom("normal" as const, "lost_ack" as const, "reconnect" as const),
 });
 
 interface CommandOperation {
   readonly slot: number;
   readonly variant: number;
+  readonly delivery: "normal" | "lost_ack" | "reconnect";
 }
 
 function sequenceId(prefix: "ses" | "evt"): () => string {
@@ -71,15 +73,21 @@ async function checkStorageModel(
   globalOperations: readonly CommandOperation[],
 ): Promise<void> {
   const homeDirectory = await mkdtemp(join(tmpdir(), "wi-storage-property-"));
-  const storage = new SessionStoreManager({
-    homeDirectory,
-    now: () => 1_000,
-    ids: {
-      sessionId: sequenceId("ses"),
-      eventId: sequenceId("evt"),
-    },
-    sessionWorkers: { size: 1, maxOpenHandlesPerWorker: 4 },
-  });
+  const sessionId = sequenceId("ses");
+  const eventId = sequenceId("evt");
+  const openStorage = (): SessionStoreManager =>
+    new SessionStoreManager({
+      homeDirectory,
+      now: () => 1_000,
+      ids: { sessionId, eventId },
+      sessionWorkers: { size: 1, maxOpenHandlesPerWorker: 4 },
+    });
+  let storage = openStorage();
+  const restart = async (): Promise<void> => {
+    await storage.close();
+    storage = openStorage();
+    await storage.ready();
+  };
 
   try {
     const base = await storage.createSession({
@@ -96,6 +104,7 @@ async function checkStorageModel(
     let expectedHead = 1;
 
     for (const item of sessionOperations) {
+      if (item.delivery === "reconnect") await restart();
       const input = sessionCommandInput(item.slot, item.variant);
       const existing = sessionModel.get(item.slot);
       if (existing === undefined) {
@@ -111,6 +120,15 @@ async function checkStorageModel(
           acceptedSequence: expectedHead,
           result: input.result,
         });
+        if (item.delivery === "lost_ack") {
+          await restart();
+          await expect(storage.acceptCommand(base.session.sessionId, input)).resolves.toMatchObject({
+            duplicate: true,
+            acceptedSequence: expectedHead,
+            result: input.result,
+            events: [],
+          });
+        }
       } else if (existing.variant === item.variant) {
         const duplicate = await storage.acceptCommand(base.session.sessionId, input);
         expect(duplicate).toMatchObject({
@@ -133,6 +151,7 @@ async function checkStorageModel(
 
     const globalModel = new Map<number, { variant: number; sessionId: string }>();
     for (const item of globalOperations) {
+      if (item.delivery === "reconnect") await restart();
       const command = globalCommand(item.slot, item.variant);
       const existing = globalModel.get(item.slot);
       if (existing === undefined) {
@@ -142,6 +161,14 @@ async function checkStorageModel(
           variant: item.variant,
           sessionId: created.session.sessionId,
         });
+        if (item.delivery === "lost_ack") {
+          await restart();
+          await expect(storage.createSession(command)).resolves.toMatchObject({
+            duplicate: true,
+            session: { sessionId: created.session.sessionId },
+            events: [],
+          });
+        }
       } else if (existing.variant === item.variant) {
         const duplicate = await storage.createSession(command);
         expect(duplicate).toMatchObject({
@@ -191,6 +218,6 @@ describe("storage command idempotency properties", () => {
   it(
     "matches a model for arbitrary duplicate and conflicting command sequences",
     assertStorageProperty,
-    60_000,
+    120_000,
   );
 });

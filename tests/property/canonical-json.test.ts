@@ -7,7 +7,13 @@ import {
   canonicalJsonHash,
 } from "../../packages/protocol/src/canonical-json.js";
 
-const propertyOptions = { numRuns: 250 } as const;
+const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
+const propertyPath = process.env.WI_FC_PATH;
+const propertyOptions = {
+  numRuns: 1_000,
+  seed: propertySeed,
+  ...(propertyPath === undefined ? {} : { path: propertyPath }),
+} as const;
 
 function permuteObjectKeys(
   value: unknown,

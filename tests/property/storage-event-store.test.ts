@@ -28,11 +28,33 @@ const eventStoreOperation = fc.oneof(
   fc.constant({ kind: "restart" } as const),
   fc.constant({ kind: "reconcile" } as const),
   fc.constant({ kind: "rollback" } as const),
+  fc.constant({ kind: "equalHeadConflict" } as const),
 );
 
 type EventStoreOperation =
-  | { readonly kind: "append" | "lagAppend" | "restart" | "reconcile" | "rollback" }
+  | {
+      readonly kind:
+        | "append"
+        | "lagAppend"
+        | "restart"
+        | "reconcile"
+        | "rollback"
+        | "equalHeadConflict";
+    }
   | { readonly kind: "read"; readonly afterSequence: number; readonly width: number };
+
+function expectedSessionCreatedEvent(): SessionEvent {
+  return {
+    v: 1,
+    kind: "event",
+    sessionId: "ses_propertyEventStore",
+    sequence: 1,
+    eventId: "evt_propertyEventStoreCreated",
+    eventType: "session.created",
+    createdAtMs: 1_000,
+    data: { eventVersion: 1, title: "Event-store property" },
+  };
+}
 
 function runAppend(eventNumber: number) {
   const runId = `run_propertyEvent${eventNumber}`;
@@ -61,6 +83,21 @@ function runAppend(eventNumber: number) {
         activeProviderStepId: null,
       },
     ],
+  };
+}
+
+function expectedRunCreatedEvent(eventNumber: number, sequence: number): SessionEvent {
+  const requested = runAppend(eventNumber).events[0];
+  if (requested === undefined) throw new Error("Generated append has no event");
+  return {
+    v: 1,
+    kind: "event",
+    sessionId: "ses_propertyEventStore",
+    sequence,
+    eventId: requested.eventId,
+    eventType: requested.eventType,
+    createdAtMs: requested.createdAtMs,
+    data: requested.data,
   };
 }
 
@@ -98,7 +135,8 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
       params: { title: "Event-store property" },
     });
     const sessionId = created.session.sessionId;
-    const model: SessionEvent[] = [...created.events];
+    const model: SessionEvent[] = [expectedSessionCreatedEvent()];
+    expect(created.events).toEqual(model);
 
     for (const operation of operations) {
       switch (operation.kind) {
@@ -106,10 +144,11 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
         case "lagAppend": {
           allowCatalogProjection = operation.kind !== "lagAppend";
           try {
+            const expectedEvent = expectedRunCreatedEvent(eventNumber, model.length + 1);
             const result = await storage.appendTransaction(sessionId, runAppend(eventNumber));
-            expect(result.headSequence).toBe(model.length + 1);
-            expect(result.events).toHaveLength(1);
-            model.push(...result.events);
+            expect(result.headSequence).toBe(expectedEvent.sequence);
+            expect(result.events).toEqual([expectedEvent]);
+            model.push(expectedEvent);
             expect(result.catalogObservationScheduled).toBe(true);
             await storage.drainCatalogObservations();
             if (operation.kind === "lagAppend") {
@@ -180,6 +219,25 @@ async function checkEventStoreModel(operations: readonly EventStoreOperation[]):
           );
           break;
         }
+        case "equalHeadConflict": {
+          const before = await storage.catalog.getSession(sessionId);
+          if (before === null) throw new Error("Generated catalog session disappeared");
+          await expect(
+            storage.catalog.updateSessionProjection({
+              sessionId,
+              updatedAtMs: before.updatedAtMs + 1,
+              lastEventSequence: before.lastEventSequence,
+              lastRunState: before.lastRunState,
+              lastMessagePreview: before.lastMessagePreview,
+              requiresAttention: before.requiresAttention,
+              pendingApprovalCount: before.pendingApprovalCount,
+              pendingInputCount: before.pendingInputCount,
+              recoveryNeeded: before.recoveryCandidate,
+            }),
+          ).rejects.toMatchObject({ code: "storage.catalog_projection_conflict" });
+          await expect(storage.catalog.getSession(sessionId)).resolves.toEqual(before);
+          break;
+        }
       }
     }
 
@@ -226,7 +284,7 @@ async function assertEventStoreProperty(): Promise<void> {
 
 describe("storage event-store properties", () => {
   it(
-    "matches append, read, restart, rollback, lag, and reconciliation operations",
+    "matches append, read, restart, rollback, lag, equal-head conflict, and reconciliation operations",
     assertEventStoreProperty,
     120_000,
   );

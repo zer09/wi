@@ -5,6 +5,15 @@ import { writeFuzzFailureArtifact } from "./fuzz-artifact.js";
 const DEFAULT_SEED = 737_373;
 const MAXIMUM_FAST_CHECK_SEED = 2_147_483_647;
 const DEFAULT_RUNS = 1_000;
+export const MAXIMUM_MILESTONE8_RUNS = 1_000;
+
+export function parseMilestone8RunCount(raw: string | undefined): number {
+  const value = raw === undefined ? DEFAULT_RUNS : Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAXIMUM_MILESTONE8_RUNS) {
+    throw new RangeError(`WI_FC_NUM_RUNS must be an integer between 1 and ${MAXIMUM_MILESTONE8_RUNS}`);
+  }
+  return value;
+}
 
 function integerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -22,7 +31,8 @@ function integerEnvironment(name: string, fallback: number): number {
 export const milestone8Seed = integerEnvironment("WI_FC_SEED", DEFAULT_SEED);
 export const milestone8Path = process.env.WI_FC_PATH;
 export const milestone8Profile = process.env.WI_FUZZ_PROFILE ?? "property";
-export const milestone8OperationCount = integerEnvironment("WI_FC_NUM_RUNS", DEFAULT_RUNS);
+// Validate before importing suites can construct arbitraries or start durable model work.
+export const milestone8OperationCount = parseMilestone8RunCount(process.env.WI_FC_NUM_RUNS);
 
 export function milestone8Parameters(propertyCount: number): fc.Parameters<unknown> {
   const common = {

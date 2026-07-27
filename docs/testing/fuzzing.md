@@ -6,7 +6,7 @@ Status: Milestone 8 release-gate documentation
 
 | Command | Purpose | Default budget |
 |---|---|---:|
-| `pnpm test:property` | Deterministic PR profile: 1,000 runs for each stateless core property and one 1,000-operation history for each durable core model | Run/operation-count bounded |
+| `pnpm test:property` | Deterministic PR profile: 1,000 runs for each stateless core property and one 1,000-operation history for each durable core model | 1,000 runs/operations maximum |
 | `pnpm test:fuzz` | Time-bounded local fuzz profile | 60 seconds |
 | `pnpm test:fuzz:extended` | Manual/nightly extended profile | 10 minutes |
 
@@ -27,12 +27,19 @@ timed loop.
 
 - `WI_FC_SEED=<1..2147483647>` selects the fast-check seed. The default is `737373`; later rounds wrap within that range.
 - `WI_FC_PATH=<fast-check path>` selects a minimized counterexample path.
-- `WI_FC_NUM_RUNS=<positive integer>` overrides normal deterministic property runs and the meaningful operation count
-  in each durable history. Durable properties still execute one self-contained history so path replay remains exact.
+- `WI_FC_NUM_RUNS=<1..1000>` overrides normal deterministic property runs and the meaningful operation count in each
+  durable history. Durable properties still execute one self-contained history so path replay remains exact. The shared
+  support module rejects invalid or excessive values before importing suites can construct arbitraries or enter
+  predicates that create SQLite homes, workers, or failure artifacts.
 - `WI_FUZZ_DURATION_MS=<1000..86400000>` overrides a timed profile's minimum measured execution duration. A normal
   fast-check time interruption is a clean stop and does not create a counterexample artifact.
 - `pnpm test:fuzz -- --duration=60s` is the equivalent command-line form; `ms`, `s`, and `m` units are accepted. Other
   arguments after the optional pnpm `--` are passed to Vitest, so `-t "test title"` selects one property correctly.
+
+The run-count maximum is deliberately the 1,000-run/operation release profile. A durable operation performs real SQLite
+work and retains a generated history in memory, so larger values multiply both worker time and shrink-replay cost.
+Use rotating seeds in the timed profiles for additional breadth instead of constructing oversized deterministic runs or
+durable arrays.
 
 The duration is a minimum fuzz-execution budget, not a process deadline. Build, collection, worker startup, cleanup, and
 fixed-run companion properties add wall-clock overhead. Very short budgets can therefore overshoot materially; use the

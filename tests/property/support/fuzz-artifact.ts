@@ -56,12 +56,12 @@ export interface FuzzFailureArtifact {
   readonly reproduction: string;
 }
 
-export function writeFuzzFailureArtifact(options: {
+export function writeFuzzFailureArtifact<T>(options: {
   readonly suite: string;
   readonly test: string;
   readonly testFile: string;
   readonly profile: string;
-  readonly details: fc.RunDetails<unknown>;
+  readonly details: fc.RunDetails<T>;
   readonly identifiers?: unknown;
   readonly seedEnvironment?: string;
   readonly pathEnvironment?: string;

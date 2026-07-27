@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      seed:
+        description: "Optional exact fast-check seed (1..2147483647)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -14,7 +19,6 @@ concurrency:
 
 env:
   CI: "true"
-  WI_FC_SEED: "737373"
 
 jobs:
   extended-fuzz:
@@ -31,6 +35,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Select reproducible fuzz seed
+        id: fuzz-seed
+        env:
+          WI_MANUAL_FUZZ_SEED: ${{ inputs.seed }}
+        run: node scripts/select-nightly-fuzz-seed.mjs
+
       - name: Install pinned pnpm
         run: npm install --global pnpm@11.11.0
 
@@ -38,6 +48,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run extended fuzz profile
+        env:
+          WI_FC_SEED: ${{ steps.fuzz-seed.outputs.seed }}
         run: pnpm test:fuzz:extended
 
       - name: Upload minimized counterexamples

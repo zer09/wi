@@ -23,6 +23,22 @@ mutated state. Shrinking is capped at one candidate: this bounds a near-operatio
 history executions before artifact writing. Fixed process and browser crash-window regressions remain outside the
 timed loop.
 
+## Nightly seed selection
+
+Scheduled nightly runs do not reuse a fixed starting seed. `scripts/select-nightly-fuzz-seed.mjs` hashes the recorded
+GitHub Actions run ID and run attempt into the fast-check range `1..2147483647`. The same recorded identity produces the
+same seed, while distinct scheduled runs produce different deterministic starting seeds. The selector uses no secret,
+clock read, or random source.
+
+Manual `workflow_dispatch` accepts an optional decimal seed in the same range. A supplied valid seed is used exactly;
+an invalid value fails in the selector step before dependency installation or fuzz execution. A dispatch without a seed
+uses the same recorded-run derivation as a schedule.
+
+The selector prints the chosen seed and its recorded run identity, writes it to one workflow output, and only that output
+is passed to `run-fuzz.mjs` as `WI_FC_SEED`. The runner prints the starting seed again, then retains its existing
+one-by-one deterministic seed rotation for later rounds. Failure artifacts record the exact failing round seed and emit
+that seed in their reproduction command.
+
 ## Overrides and reproduction
 
 - `WI_FC_SEED=<1..2147483647>` selects the fast-check seed. The default is `737373`; later rounds wrap within that range.

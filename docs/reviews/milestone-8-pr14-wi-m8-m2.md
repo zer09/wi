@@ -1,12 +1,16 @@
 # Milestone 8 PR #14 remediation — `WI-M8-M2`
 
-Status: AWAITING INDEPENDENT VERIFICATION
+Status: RESOLVED
 
 Milestone 8 base: `908777ebfb161144ed4119e1222fc96a14cffb09`
 
 Reviewed PR head before remediation: `116d976bc88d24fccd605d5ca183961260885632`
 
 Implementation parent: `b9a6b3ee39ce42abb859db3cc29339c54cac15e0`
+
+Implementation commit: `61a6fcdea345e4660b00df7019af0dcba6b1505d`
+
+Independent verification verdict: RESOLVED
 
 This record documents the run-count resource-bound correction requested by the independent remote review of PR #14.
 It follows the resolved [`WI-M8-H1` record](milestone-8-pr14-wi-m8-h1.md).
@@ -117,6 +121,25 @@ lint/typecheck/build/exports:       passed
 git diff check:                     passed
 ```
 
-Independent verification must classify this correction using
-`Wi_M8_PR14_Remediation_Handoff/31_WI_M8_M2_VERIFICATION_ONLY.md`. Do not mark this record RESOLVED until that review is
-complete.
+## Independent verification closure
+
+A fresh review-only agent verified the exact parent and implementation identities, inspected the complete correction,
+and classified `WI-M8-M2` as RESOLVED with no blocking defect.
+
+```text
+boundary suite:                    1 file, 11/11 passed in 456ms
+minimum 1, stateless + durable:    2 files, 9/9 passed in 2.38s
+maximum 1000, stateless + durable: 2 files, 9/9 passed in 30.23s
+invalid 1001 durable probe:        exit 1; zero tests in 800ms
+invalid MAX_SAFE durable probe:    exit 1; zero tests in 829ms
+invalid 1001 hardening probe:      exit 1; zero tests in 1.35s
+invalid-probe resource snapshots:  no homes, artifacts, or surviving Vitest processes
+complete property project:         13 files, 58/58 passed in 53.04s
+parent-to-implementation check:    passed
+tracked working tree:              clean
+classification:                    RESOLVED
+```
+
+The independent review did not rerun `pnpm check`, timed fuzz profiles, process tests, or Playwright. The implementation
+gate supplied the green `pnpm check` result above; all aggregate and timed gates will be rerun after the remaining
+`WI-M8-M1` correction.

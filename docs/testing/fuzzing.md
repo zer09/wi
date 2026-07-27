@@ -82,8 +82,13 @@ preview is truncated.
 - **Actor:** the timed companion suite drives the real `SessionActor` through generated
   submit/queue/cancel/outcome/approval/input/subscriber/recovery histories. Fixed integration tests own simultaneous
   approval/input race windows.
-- **Replay/live:** the timed gateway companion compares production replay-subscription delivery with independently
-  generated ordered sequences and cursors; reducer suites add duplicates, chunks, gaps, and conflicts.
+- **Replay/live:** `preserves replay/live equivalence across generated race boundaries` and `merges replay and
+  concurrently published live events into exact database order` compare every delivered event field with independently
+  generated multi-family committed events. `duplicates produce the independently modeled browser state` and `replay
+  and reconnect grouping produces the independently modeled browser state` compare the production reducer with an
+  independently constructed complete browser projection. Retained mutation coverage changes event ID, type, timestamp,
+  and payload without changing sequence and requires the complete-event oracle and reducer integrity checks to reject
+  every mutation; cursor, duplicate, disconnect, gap, and conflict coverage remains active.
 - **Tool ledger:** one reproducible 1,000-operation durable SQLite history invokes production recovery for started
   pure and non-idempotent effects, then verifies identity stability and transition rejection. Production agent-loop and process
   companions cover promotion, execution, approval, cancellation, crash, and restart boundaries.

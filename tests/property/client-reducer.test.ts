@@ -1,12 +1,18 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
+import { canonicalJson } from "../../packages/protocol/src/canonical-json.js";
 import {
   SessionEventSchema,
   type SessionEvent,
   type SessionEventType,
 } from "../../packages/protocol/src/events.js";
-import { createBrowserSessionState } from "../../packages/client-state/src/model.js";
+import {
+  createBrowserSessionState,
+  type BrowserApproval,
+  type BrowserPendingInput,
+  type BrowserSessionState,
+} from "../../packages/client-state/src/model.js";
 import { reduceSessionEvent } from "../../packages/client-state/src/reducer.js";
 import {
   beginReplay,
@@ -14,6 +20,10 @@ import {
   replaySessionEventChunks,
   replaySessionEvents,
 } from "../../packages/client-state/src/replay.js";
+import {
+  COMPLETE_EVENT_MUTATIONS,
+  mutateCompleteEvent,
+} from "./support/replay-oracle.js";
 
 const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
 const propertyPath = process.env.WI_FC_PATH;
@@ -41,35 +51,185 @@ function event(
   });
 }
 
-const validOrderedEvents = fc
-  .array(fc.boolean(), { maxLength: 12 })
-  .map((waits) => {
-    const events: SessionEvent[] = [];
-    let sequence = 1;
-    waits.forEach((wait, index) => {
-      const runId = `run_${index}`;
-      events.push(event(sequence, `evt_${sequence}`, "run.created", { eventVersion: 1, runId }));
-      sequence += 1;
-      events.push(event(sequence, `evt_${sequence}`, "run.started", { eventVersion: 1, runId }));
-      sequence += 1;
-      if (wait) {
-        events.push(
-          event(sequence, `evt_${sequence}`, "run.waiting_for_user", {
-            eventVersion: 1,
-            runId,
-            reason: "input",
-            inputId: `input_${index}`,
-          }),
-        );
-        sequence += 1;
-        events.push(event(sequence, `evt_${sequence}`, "run.started", { eventVersion: 1, runId }));
-        sequence += 1;
-      }
-      events.push(event(sequence, `evt_${sequence}`, "run.completed", { eventVersion: 1, runId }));
-      sequence += 1;
+type ReplayInteraction = "none" | "approval" | "input";
+type ReplayPayload = "providerText" | "toolResult";
+
+interface ReplayRunInput {
+  readonly interaction: ReplayInteraction;
+  readonly leavePending: boolean;
+  readonly messageText: string;
+  readonly payload: ReplayPayload;
+}
+
+interface ReplayScenario {
+  readonly events: readonly SessionEvent[];
+  readonly expectedState: BrowserSessionState;
+}
+
+const replayRunInput = fc.record({
+  interaction: fc.constantFrom<ReplayInteraction>("none", "approval", "input"),
+  leavePending: fc.boolean(),
+  messageText: fc.string({ maxLength: 64 }),
+  payload: fc.constantFrom<ReplayPayload>("providerText", "toolResult"),
+});
+
+function buildReplayScenario(input: {
+  readonly title: string;
+  readonly runs: readonly ReplayRunInput[];
+}): ReplayScenario {
+  const events: SessionEvent[] = [];
+  let sequence = 1;
+  let lastMessagePreview: string | null = null;
+  let activeRun: BrowserSessionState["activeRun"] = null;
+  const pendingApprovals: Record<string, BrowserApproval> = {};
+  const pendingInputs: Record<string, BrowserPendingInput> = {};
+  const append = (eventType: SessionEventType, data: unknown): void => {
+    events.push(event(sequence, `evt_replay${sequence}`, eventType, data));
+    sequence += 1;
+  };
+
+  append("session.created", { eventVersion: 1, title: input.title });
+  input.runs.forEach((run, index) => {
+    const runId = `run_replay${index}`;
+    const messageId = `msg_replay${index}`;
+    const unresolved =
+      index === input.runs.length - 1 && run.leavePending && run.interaction !== "none";
+
+    append("user.message.appended", {
+      eventVersion: 1,
+      messageId,
+      runId,
+      text: run.messageText,
     });
-    return events;
+    lastMessagePreview = run.messageText;
+    append("run.created", { eventVersion: 1, runId });
+    append("run.started", { eventVersion: 1, runId });
+    activeRun = { runId, state: "running" };
+
+    if (run.payload === "providerText") {
+      append("provider.text.delta", {
+        eventVersion: 1,
+        runId,
+        stepId: `step_replay${index}`,
+        messageId,
+        partId: `part_replay${index}`,
+        text: `Assistant ${run.messageText}`,
+      });
+    } else {
+      append("tool.execution.completed", {
+        eventVersion: 1,
+        runId,
+        callId: `call_replay${index}`,
+        result: { message: run.messageText, runIndex: index },
+      });
+    }
+
+    if (run.interaction === "approval") {
+      const approvalId = `approval_replay${index}`;
+      const callId = `call_replay${index}`;
+      const summary = `Approve run ${index}`;
+      append("tool.approval.requested", {
+        eventVersion: 1,
+        runId,
+        callId,
+        approvalId,
+        toolName: "guarded_echo",
+        actionDigest: "a".repeat(64),
+        summary,
+      });
+      append("run.waiting_for_user", {
+        eventVersion: 1,
+        runId,
+        reason: "approval",
+        approvalId,
+      });
+      activeRun = { runId, state: "waiting_for_user" };
+      if (unresolved) {
+        pendingApprovals[approvalId] = {
+          approvalId,
+          runId,
+          callId,
+          toolName: "guarded_echo",
+          summary,
+        };
+      } else {
+        append("tool.approval.resolved", {
+          eventVersion: 1,
+          runId,
+          callId,
+          approvalId,
+          resolution: "approved",
+        });
+        append("run.started", { eventVersion: 1, runId });
+        activeRun = { runId, state: "running" };
+      }
+    } else if (run.interaction === "input") {
+      const inputId = `input_replay${index}`;
+      const prompt = `Input for run ${index}?`;
+      append("input.requested", { eventVersion: 1, runId, inputId, prompt });
+      append("run.waiting_for_user", {
+        eventVersion: 1,
+        runId,
+        reason: "input",
+        inputId,
+      });
+      activeRun = { runId, state: "waiting_for_user" };
+      if (unresolved) {
+        pendingInputs[inputId] = { inputId, runId, prompt };
+      } else {
+        append("input.resolved", {
+          eventVersion: 1,
+          runId,
+          inputId,
+          value: { answer: run.messageText },
+        });
+        append("run.started", { eventVersion: 1, runId });
+        activeRun = { runId, state: "running" };
+      }
+    }
+
+    if (!unresolved) {
+      append("run.completed", { eventVersion: 1, runId });
+      activeRun = { runId, state: "completed" };
+    }
   });
+
+  const appliedEvents: Record<number, SessionEvent> = {};
+  const appliedEventSequencesById: Record<string, number> = {};
+  let retainedEventCodeUnits = 0;
+  for (const replayEvent of events) {
+    appliedEvents[replayEvent.sequence] = replayEvent;
+    appliedEventSequencesById[replayEvent.eventId] = replayEvent.sequence;
+    retainedEventCodeUnits += canonicalJson(replayEvent).length;
+  }
+
+  return {
+    events,
+    expectedState: {
+      sessionId: "ses_A",
+      title: input.title,
+      lastMessagePreview,
+      lastAppliedSequence: events.length,
+      status: "live",
+      timeline: events,
+      activeRun,
+      queuedRuns: [],
+      pendingApprovals,
+      pendingInputs,
+      appliedEvents,
+      appliedEventSequencesById,
+      retainedEventCodeUnits,
+      errorCode: null,
+    },
+  };
+}
+
+const validReplayScenario = fc
+  .record({
+    title: fc.string({ maxLength: 40 }),
+    runs: fc.array(replayRunInput, { maxLength: 6 }),
+  })
+  .map(buildReplayScenario);
 
 const terminalEventTypes = [
   "run.completed",
@@ -128,13 +288,13 @@ async function runProperty(name: string, property: fc.IProperty<unknown>): Promi
 }
 
 describe("client reducer replay properties", () => {
-  it("duplicates produce the same state as unique ordered events", async () => {
+  it("duplicates produce the independently modeled browser state", async () => {
     await runProperty(
-      "duplicates produce the same state as unique ordered events",
+      "duplicates produce the independently modeled browser state",
       fc.property(
-        validOrderedEvents,
+        validReplayScenario,
         fc.array(fc.array(fc.nat(), { maxLength: 4 }), { maxLength: 60 }),
-        (events, duplicateSlots) => {
+        ({ events, expectedState }, duplicateSlots) => {
           const withDuplicates: SessionEvent[] = [];
           events.forEach((item, eventIndex) => {
             withDuplicates.push(item);
@@ -143,33 +303,57 @@ describe("client reducer replay properties", () => {
               if (duplicate !== undefined) withDuplicates.push(structuredClone(duplicate));
             }
           });
-          const initial = createBrowserSessionState("ses_A");
-          expect(replaySessionEvents(initial, withDuplicates)).toEqual(
-            replaySessionEvents(initial, events),
+          const replayed = replaySessionEvents(
+            beginReplay(createBrowserSessionState("ses_A")),
+            withDuplicates,
           );
+          expect(completeReplay(replayed, events.length)).toEqual(expectedState);
         },
       ),
     );
-  });
+  }, 30_000);
 
-  it("replay and reconnect grouping equals one complete replay", async () => {
+  it("replay and reconnect grouping produces the independently modeled browser state", async () => {
     await runProperty(
-      "replay and reconnect grouping equals one complete replay",
+      "replay and reconnect grouping produces the independently modeled browser state",
       fc.property(
-        validOrderedEvents,
+        validReplayScenario,
         fc.array(fc.integer({ min: 1, max: 50 }), { maxLength: 60 }),
-        (events, sizes) => {
+        ({ events, expectedState }, sizes) => {
           const initial = beginReplay(createBrowserSessionState("ses_A"));
           const chunked = replaySessionEventChunks(initial, chunkEvents(events, sizes));
-          const complete = replaySessionEvents(initial, events);
-          expect(chunked).toEqual(complete);
-          expect(completeReplay(chunked, events.length)).toEqual(
-            completeReplay(complete, events.length),
-          );
+          expect(completeReplay(chunked, events.length)).toEqual(expectedState);
         },
       ),
     );
-  });
+  }, 30_000);
+
+  it("rejects same-sequence mutations to every complete event field", async () => {
+    await runProperty(
+      "same-sequence complete event mutations are fatal",
+      fc.property(
+        validReplayScenario,
+        fc.nat(),
+        fc.constantFrom(...COMPLETE_EVENT_MUTATIONS),
+        ({ events }, eventSelector, mutation) => {
+          const trusted = replaySessionEvents(
+            beginReplay(createBrowserSessionState("ses_A")),
+            events,
+          );
+          const original = events[eventSelector % events.length];
+          expect(original).toBeDefined();
+          if (original === undefined) return;
+          const mutated = mutateCompleteEvent(original, mutation);
+          expect(mutated.sequence).toBe(original.sequence);
+          expect(mutated).not.toEqual(original);
+          expect(reduceSessionEvent(trusted, mutated)).toMatchObject({
+            status: "error",
+            errorCode: "event_conflict",
+          });
+        },
+      ),
+    );
+  }, 30_000);
 
   it("leaves no pending interaction belonging to a terminal run", async () => {
     await runProperty(

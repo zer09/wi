@@ -1,12 +1,14 @@
 # Milestone 8 PR #14 remediation — `WI-M8-M1`
 
-Status: AWAITING INDEPENDENT VERIFICATION
+Status: INSUFFICIENT PROBE — HOSTED DISPATCH UNAVAILABLE BEFORE MERGE
 
 Milestone 8 base: `908777ebfb161144ed4119e1222fc96a14cffb09`
 
 Reviewed PR head before remediation: `116d976bc88d24fccd605d5ca183961260885632`
 
 Implementation parent: `3619173e2a18b19f89db341b6d6756c6863f0795`
+
+Implementation commit: `cada38aa22907aa66f0cd9209552820e02a2b40d`
 
 This record documents the nightly seed-diversity correction requested by the independent remote review of PR #14. It
 follows the resolved [`WI-M8-H1`](milestone-8-pr14-wi-m8-h1.md) and
@@ -80,9 +82,21 @@ with the workflow run, so persisting another seed registry would add state witho
 The nightly schedule, permissions, concurrency policy, timeout, and failure-only hidden artifact upload are unchanged.
 No secret or repository write permission is required.
 
-An actual `workflow_dispatch` run is intentionally deferred until the correction commit is pushed and the workflow is
-available to GitHub Actions. That hosted probe is mandatory before final local/remote closure and must use an exact
-manual seed visible in the selector log, runner log, and resulting run metadata.
+### Hosted availability boundary
+
+The correction commit was pushed to the PR branch, but GitHub rejected the authorized manual dispatch attempt:
+
+```text
+HTTP 404: workflow .github/workflows/nightly-fuzz.yml not found on the default branch
+```
+
+`nightly-fuzz.yml` was introduced by PR #14 and is absent from `origin/master`. Publishing the branch therefore makes
+the implementation and ordinary PR CI available, but does not register this dispatch-only workflow on GitHub's default
+branch. The hosted `workflow_dispatch` probe cannot run until the workflow reaches the default branch.
+
+No temporary default-branch change, extra trigger, duplicate workflow, or premature merge was added to manufacture this
+evidence. Those options would either weaken the requested probe or violate the review gate. The actual manual dispatch
+remains a post-merge attestation unless the remote reviewer explicitly approves another safe ordering.
 
 ## Recurrence checklist
 
@@ -112,9 +126,25 @@ complete property project:         13 files, 58/58 passed in 50.67s
 pnpm check:                         73 files, 926/926 passed in 208.76s
 lint/typecheck/build/exports:       passed
 git diff check:                     passed
-hosted workflow_dispatch:           deferred until the workflow commit is pushed
+exact-commit PR CI 30307918559:     checks, e2e, and required passed
+hosted workflow_dispatch:           rejected before run with default-branch 404
 ```
 
-Independent verification must classify this correction using
-`Wi_M8_PR14_Remediation_Handoff/21_WI_M8_M1_VERIFICATION_ONLY.md`. Do not mark this record RESOLVED until that review and
-the required hosted workflow execution are complete.
+## Independent verification result
+
+The fresh verification-only review correctly classified `WI-M8-M1` as `INSUFFICIENT PROBE` rather than substituting
+local or PR-CI evidence for a hosted dispatch. It independently confirmed:
+
+- exact implementation and parent identities;
+- the former fixed-seed behavior;
+- deterministic scheduled diversity and exact repeated-identity reproduction;
+- exact manual minimum, default, and maximum seeds;
+- invalid-value exit 64 before output or fuzz work;
+- independent seed calculations, including the signed-range wrap boundary;
+- workflow output propagation and retained child-failure propagation;
+- artifact seed and reproduction-command fidelity; and
+- unchanged security, timeout, concurrency, and artifact-upload behavior.
+
+All local evidence is sufficient to validate the implementation itself. The only missing evidence is selector and
+runner behavior inside an actual GitHub-hosted manual run. Keep this record `INSUFFICIENT PROBE` until that hosted
+execution exists or the remote reviewer explicitly accepts post-merge attestation for this new default-branch workflow.

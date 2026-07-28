@@ -14,6 +14,7 @@
   "scripts": {
     "preinstall": "node scripts/check-node-version.mjs",
     "build": "pnpm -r build && node scripts/check-package-exports.mjs",
+    "start": "node apps/server/dist/main.js",
     "build:test-deps": "pnpm --filter @wi/test-support build && pnpm --filter @wi/protocol build && pnpm --filter @wi/client-state build && pnpm --filter @wi/provider-contract build && pnpm --filter @wi/tools build && pnpm --filter @wi/provider-fake build && pnpm --filter @wi/storage build && pnpm --filter @wi/harness-core build && pnpm --filter @wi/server build",
     "typecheck": "pnpm build:test-deps && tsc -p tsconfig.json && pnpm -r typecheck",
     "lint": "eslint .",

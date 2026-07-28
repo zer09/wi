@@ -72,6 +72,26 @@ describe("BoundedIpcRetention", () => {
     },
   );
 
+  it("takes the first pending message matching a predicate", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    retention.accept({ type: "response", requestId: "first" });
+    retention.accept({ type: "response", requestId: "second" });
+
+    expect(retention.takeWhere((message) => message.requestId === "second")).toEqual({
+      type: "response",
+      requestId: "second",
+    });
+    expect(retention.take("response")).toEqual({ type: "response", requestId: "first" });
+    expect(retention.snapshot()).toMatchObject({
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+  });
+
   it("retains a bounded snapshot instead of the accepted callback object", () => {
     const retention = new BoundedIpcRetention(
       PROCESS_IPC_PENDING_MAX_MESSAGES,

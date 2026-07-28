@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test as base, expect } from "@playwright/test";
+import {
+  BoundedIpcRetention,
+  BoundedProcessOutput,
+  PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_PENDING_MAX_MESSAGES,
+  type ServerProcessMessage,
+} from "@wi/test-support";
 
-interface FixtureMessage {
-  readonly type: string;
-  readonly [key: string]: unknown;
-}
+type FixtureMessage = ServerProcessMessage;
 
 export interface WiTestServer {
   readonly origin: string;
@@ -111,16 +115,16 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     throw error;
   }
   const runningChild = child;
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString();
-  });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
-  });
+  const stdout = new BoundedProcessOutput();
+  const stderr = new BoundedProcessOutput();
+  child.stdout?.on("data", (chunk: Buffer) => stdout.append(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));
 
-  const messages: FixtureMessage[] = [];
+  const messages = new BoundedIpcRetention(
+    PROCESS_IPC_PENDING_MAX_MESSAGES,
+    PROCESS_IPC_HISTORY_MAX_MESSAGES,
+    () => false,
+  );
   const wakeups = new Set<() => void>();
   child.on("exit", () => {
     for (const wake of wakeups) wake();
@@ -128,7 +132,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   });
   child.on("message", (message) => {
     if (message !== null && typeof message === "object" && "type" in message) {
-      messages.push(message as FixtureMessage);
+      messages.accept(message);
       for (const wake of wakeups) wake();
       wakeups.clear();
     }
@@ -140,11 +144,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   ): Promise<FixtureMessage> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const index = messages.findIndex(predicate);
-      if (index >= 0) return messages.splice(index, 1)[0] as FixtureMessage;
+      const retained = messages.takeWhere(predicate);
+      if (retained !== null) return structuredClone(retained);
       if (runningChild.exitCode !== null) {
         throw new Error(
-          `Wi E2E server exited early (${runningChild.exitCode})\n${stdout}\n${stderr}`,
+          `Wi E2E server exited early (${runningChild.exitCode})\n${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
         );
       }
       await Promise.race([
@@ -152,7 +156,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
         new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, deadline - Date.now()))),
       ]);
     }
-    throw new Error(`Timed out waiting for Wi E2E server message\n${stdout}\n${stderr}`);
+    throw new Error(
+      `Timed out waiting for Wi E2E server message\n${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
+    );
   }
 
   let ready: FixtureMessage;
@@ -364,7 +370,9 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       }
       if (cleanupError !== null) throw cleanupError;
       if (child.exitCode !== 0) {
-        throw new Error(`Wi E2E server cleanup failed (${child.exitCode})\n${stdout}\n${stderr}`);
+        throw new Error(
+          `Wi E2E server cleanup failed (${child.exitCode})\n${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
+        );
       }
     },
   };

@@ -534,7 +534,11 @@ export class BoundedIpcRetention {
   }
 
   take(type: string): ServerProcessMessage | null {
-    const index = this.#pending.findIndex(({ message }) => message.type === type);
+    return this.takeWhere((message) => message.type === type);
+  }
+
+  takeWhere(predicate: (message: ServerProcessMessage) => boolean): ServerProcessMessage | null {
+    const index = this.#pending.findIndex(({ message }) => predicate(message));
     if (index < 0) return null;
     const [removed] = this.#pending.splice(index, 1);
     if (removed === undefined) return null;

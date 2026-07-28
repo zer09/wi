@@ -1,5 +1,7 @@
 # Property and fuzz testing
 
+See [`docs/testing/strategy.md`](strategy.md) for the complete unit/integration/property/process/browser release matrix. This document is authoritative for property and fuzz profiles, reproduction, and artifacts.
+
 Status: Milestone 8 release-gate documentation
 
 ## Profiles

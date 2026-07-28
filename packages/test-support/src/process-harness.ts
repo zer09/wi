@@ -16,6 +16,7 @@ import {
 } from "./bounded-ipc.js";
 
 export {
+  BoundedIpcRetention,
   PROCESS_IPC_DIAGNOSTIC_PREVIEW_MAX_CODE_UNITS,
   PROCESS_IPC_HISTORY_MAX_ESTIMATED_BYTES,
   PROCESS_IPC_MESSAGE_MAX_DEPTH,

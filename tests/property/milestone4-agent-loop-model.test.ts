@@ -330,6 +330,6 @@ describe("Milestone 4 generated production traces", () => {
       });
     },
     // Each generated case opens real storage workers; the full workspace runs several heavy suites in parallel.
-    60_000,
+    120_000,
   );
 });

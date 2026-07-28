@@ -1,5 +1,7 @@
 # Wi v0.1 failure and recovery matrix
 
+Operational recovery procedures are in [`docs/reference/migrations.md`](../reference/migrations.md) and [`docs/troubleshooting.md`](../troubleshooting.md). This matrix remains the canonical behavior summary.
+
 Status: canonical for Milestone 7
 
 ## Recovery ownership

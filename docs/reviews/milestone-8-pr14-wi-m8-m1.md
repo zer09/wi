@@ -1,6 +1,8 @@
 # Milestone 8 PR #14 remediation — `WI-M8-M1`
 
-Status: INSUFFICIENT PROBE — HOSTED DISPATCH UNAVAILABLE BEFORE MERGE
+Status: RESOLVED — TECHNICAL IMPLEMENTATION
+
+Post-merge attestations: PENDING — HOSTED FAILURE/ARTIFACT PROBE AND CLEAN EXTENDED RUN
 
 Milestone 8 base: `908777ebfb161144ed4119e1222fc96a14cffb09`
 
@@ -130,9 +132,9 @@ exact-commit PR CI 30307918559:     checks, e2e, and required passed
 hosted workflow_dispatch:           rejected before run with default-branch 404
 ```
 
-## Independent verification result
+## Independent verification and availability decision
 
-The fresh verification-only review correctly classified `WI-M8-M1` as `INSUFFICIENT PROBE` rather than substituting
+The fresh verification-only review initially classified `WI-M8-M1` as `INSUFFICIENT PROBE` rather than substituting
 local or PR-CI evidence for a hosted dispatch. It independently confirmed:
 
 - exact implementation and parent identities;
@@ -145,6 +147,35 @@ local or PR-CI evidence for a hosted dispatch. It independently confirmed:
 - artifact seed and reproduction-command fidelity; and
 - unchanged security, timeout, concurrency, and artifact-upload behavior.
 
-All local evidence is sufficient to validate the implementation itself. The only missing evidence is selector and
-runner behavior inside an actual GitHub-hosted manual run. Keep this record `INSUFFICIENT PROBE` until that hosted
-execution exists or the remote reviewer explicitly accepts post-merge attestation for this new default-branch workflow.
+The independent gate owner subsequently accepted the implementation as technically `RESOLVED` and explicitly moved the
+unavailable hosted evidence to mandatory post-merge attestation. This is justified because:
+
+- GitHub's official manual-run documentation requires a `workflow_dispatch` workflow to exist on the default branch;
+- PR #14 introduces the workflow, so it cannot be registered before the approved PR reaches `master`;
+- exact implementation and documentation-head CI both passed `checks`, `e2e`, and `required`; and
+- manufacturing a temporary trigger, duplicate workflow, direct default-branch mutation, or premature merge would test
+  a different object or bypass the review gate.
+
+This decision closes the original fixed-nightly-seed defect without pretending the hosted evidence exists. It does not
+approve PR #14 by itself.
+
+## Accepted remaining gates
+
+Before merge:
+
+1. complete all local intentional-failure probes and the full independent exact-head PR re-review;
+2. confirm all Milestone 8 findings, not only M1, remain resolved;
+3. merge only the independently approved head and prospective tree.
+
+Immediately after merge, before Milestone 9:
+
+1. attest merge parents, merged tree, `master`, and ordinary post-merge CI;
+2. from a disposable test-only branch, run the controlled failure without an explicit seed so GitHub-hosted
+   run-identity derivation and hidden artifact upload are exercised;
+3. verify the uploaded artifact's seed, path, identifiers, digest, reproduction command, pre-upload mode `0600`,
+   redaction, and replay, then delete the disposable branch without changing `master`;
+4. dispatch the clean extended workflow on exact `master` with manual seed `811009` and verify deterministic rounds,
+   the 600-second minimum budget, success, no unexpected artifact, and resource cleanup.
+
+A failure in either hosted probe blocks Milestone 9 and requires a focused corrective PR. It reopens M1 only if the
+failure trace points to the selector, validation, or seed propagation implementation.

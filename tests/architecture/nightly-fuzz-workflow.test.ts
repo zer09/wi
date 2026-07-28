@@ -209,7 +209,7 @@ describe("nightly fuzz seed workflow", () => {
     expect(details.failed).toBe(true);
     const artifact = writeFuzzFailureArtifact({
       suite: "Nightly seed architecture probe",
-      test: "records selected workflow seed",
+      test: `records selected workflow seed "$HOME" 'quoted'`,
       testFile: "tests/architecture/nightly-fuzz-workflow.test.ts",
       profile: "extended",
       details,
@@ -222,6 +222,9 @@ describe("nightly fuzz seed workflow", () => {
       };
       expect(stored.seed).toBe(seed);
       expect(stored.reproduction).toContain(`WI_FC_SEED=${seed} `);
+      expect(stored.reproduction).toContain(
+        `-t 'records selected workflow seed "\\$HOME" '"'"'quoted'"'"''`,
+      );
       expect(artifact.reproduction).toBe(stored.reproduction);
     } finally {
       removeArtifact(artifact.artifactPath);

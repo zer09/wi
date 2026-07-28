@@ -10,6 +10,14 @@ function artifactName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
 }
 
+function literalTestNamePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function shellArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 function counterexampleText(value: unknown): {
   readonly preview: string;
   readonly sha256: string;
@@ -72,7 +80,7 @@ export function writeFuzzFailureArtifact<T>(options: {
   const reproduction =
     `${seedEnvironment}=${options.details.seed} ${pathEnvironment}=${path} ` +
     `pnpm exec vitest run --workspace vitest.workspace.ts --project property ` +
-    `${options.testFile} -t ${JSON.stringify(options.test)}`;
+    `${options.testFile} -t ${shellArgument(literalTestNamePattern(options.test))}`;
   const artifactDirectory = join(process.cwd(), ".artifacts", "fuzz");
   const artifactPath = join(
     artifactDirectory,

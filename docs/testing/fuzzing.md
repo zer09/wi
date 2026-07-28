@@ -62,13 +62,15 @@ fixed-run companion properties add wall-clock overhead. Very short budgets can t
 60-second and 10-minute defaults for release evidence.
 
 A failure prints the suite and test, seed, minimized path, discovered command/session/run/call identifiers, artifact
-path, and an exact single-test reproduction command. Example:
+path, and an exact single-test reproduction command. The generated `-t` argument escapes regular-expression
+metacharacters and is then POSIX-shell quoted, so spaces, quotes, dollar signs, and backticks remain literal test-title
+text instead of changing selection or executing shell expansion. Example:
 
 ```text
 WI_FC_SEED=737373 WI_FC_PATH=12:4:0 pnpm exec vitest run \
   --workspace vitest.workspace.ts --project property \
   tests/property/milestone8-hardening.test.ts \
-  -t "never routes generated invalid raw frames and logs only bounded fingerprints"
+  -t 'never routes generated invalid raw frames and logs only bounded fingerprints'
 ```
 
 ## Counterexample artifacts

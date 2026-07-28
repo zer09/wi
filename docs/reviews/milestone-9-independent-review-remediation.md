@@ -1,10 +1,11 @@
 # Milestone 9 independent-review remediation
 
-- **Status:** AWAITING INDEPENDENT VERIFICATION
+- **Status:** RESOLVED AT IMMUTABLE-CANDIDATE REVIEW
 - **Review date:** 2026-07-28
 - **Branch:** `milestone-9-final-acceptance`
 - **Base:** `e8fc2a30730025f3108cd41d8225876297ad8f90`
-- **Candidate form:** uncommitted Milestone 9 working-tree overlay
+- **Candidate form at this remediation step:** uncommitted Milestone 9 working-tree overlay
+- **Immutable implementation candidate verified later:** `328866ac236d8054072eb33821afe2effd037f68`
 - **Follow-up:** [Milestone 9 independent-review remediation 2](milestone-9-independent-review-remediation-2.md) records bounded E2E diagnostics, credential-based export auditing, and the remaining hosted release gates.
 
 ## Findings validated
@@ -14,7 +15,7 @@ The independent review verdict `PASS WITH REQUIRED FIXES — do not tag` was mat
 | Finding | Classification | Resolution |
 |---|---|---|
 | Final acceptance directly forced a `4409` disconnect instead of overflowing a production queue | Valid, release-blocking | Corrected in the acceptance fixture and scenario |
-| No immutable candidate SHA or candidate CI | Valid process gate | Pending an explicit commit/push/PR boundary after local remediation and independent verification |
+| No immutable candidate SHA or candidate CI | Valid process gate | Immutable local candidate and detached proof later completed at `328866ac`; exact-candidate hosted CI remains a post-push gate |
 | Catalog-corruption troubleshooting implied `WI_CATALOG_REPAIR=1` could repair an unopenable catalog | Valid | Corrected in troubleshooting and migration operations |
 | The 1,000-operation tool-ledger property timed out under aggregate resource contention | Valid stability risk | Kept full coverage and raised that test's aggregate-safe timeout from 120 to 180 seconds; the aggregate rerun exposed and corrected two smaller pre-existing load ceilings |
 | Current topology diagrams showed deferred plugin/project-service boundaries and classified fake components as workers | Valid | Corrected to the implemented in-process fake provider/tool topology and SQLite-only worker boundary |
@@ -90,15 +91,15 @@ The README now places `logs/` and `tmp/` at `WI_HOME` root and states that curre
 
 ## Candidate identity closure
 
-The immutable-identity finding remains a required next process boundary, not a reason to manufacture a local tag. After this remediation receives independent local verification:
+This section records the later closure of the process gate; the remediation step itself was intentionally uncommitted.
 
-1. commit only the Milestone 9 candidate and this remediation record;
-2. exclude `prompts/` and `Wi_M8_PR14_Remediation_Handoff/`;
-3. push/open the normal PR;
-4. require `CI / required` on the exact candidate SHA;
-5. tag only after Milestone 9 review and hosted CI pass.
+- implementation candidate `328866ac236d8054072eb33821afe2effd037f68` contains exactly 31 intended files;
+- `prompts/` and `Wi_M8_PR14_Remediation_Handoff/` are excluded;
+- frozen install, `pnpm check` (74 files/928 tests), 8 package-export checks, and focused acceptance passed from a detached worktree at that exact commit;
+- an independent exact-candidate review verified the identity, scope, detached proof, and active `protect-master` ruleset;
+- push/PR creation, exact-candidate hosted `CI / required`, merge verification, and tagging remain later explicit boundaries.
 
-Suggested post-review marker command, not yet authorized for execution:
+Suggested post-review marker command, not authorized by this historical remediation step:
 
 ```sh
 git tag -a v0.1.0-vertical-slice -m "Wi v0.1.0 vertical slice"
@@ -147,4 +148,5 @@ Completed during remediation:
 - source hygiene scan: no focused/skipped tests or TODO/FIXME markers in remediation paths;
 - artifact scan: no SQLite databases, WAL/SHM files, E2E logs, or fuzz artifacts retained;
 - detached `e8fc2a3` overlay: frozen install passed, `pnpm check` passed 74 files/927 tests in 251.42 seconds, and focused acceptance passed in 9.1 seconds;
-- local 60-second fuzz profile: 8 files/36 tests passed at seed 737373, with 72,986 ms measured elapsed time.
+- local 60-second fuzz profile: 8 files/36 tests passed at seed 737373, with 72,986 ms measured elapsed time;
+- later immutable-candidate verification at `328866ac`: frozen install passed, `pnpm check` passed 74 files/928 tests with 8 package exports, and focused acceptance passed in 8.4 seconds.

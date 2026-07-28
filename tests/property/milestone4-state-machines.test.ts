@@ -24,29 +24,12 @@ const propertyOptions = {
   ...(propertyPath === undefined ? {} : { path: propertyPath }),
 } as const;
 
-function propertyFailure(error: unknown): Error {
-  return new Error(
-    `${error instanceof Error ? error.message : String(error)}\n` +
-      `Reproduce with: WI_M4_FC_SEED=${propertySeed} WI_M4_FC_PATH=<path> ` +
-      "pnpm test:property -- milestone4-state-machines",
-    { cause: error },
-  );
-}
-
 function assertProperty(property: Parameters<typeof fc.assert>[0]): void {
-  try {
-    fc.assert(property, propertyOptions);
-  } catch (error) {
-    throw propertyFailure(error);
-  }
+  fc.assert(property, propertyOptions);
 }
 
 async function assertAsyncProperty(property: Parameters<typeof fc.assert>[0]): Promise<void> {
-  try {
-    await fc.assert(property, { ...propertyOptions, numRuns: 50 });
-  } catch (error) {
-    throw propertyFailure(error);
-  }
+  await fc.assert(property, { ...propertyOptions, numRuns: 50 });
 }
 
 const toolStates = [

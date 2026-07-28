@@ -16,6 +16,7 @@ concurrency:
 
 env:
   CI: "true"
+  WI_FC_SEED: "737373"
 
 jobs:
   checks:

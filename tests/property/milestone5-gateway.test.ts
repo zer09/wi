@@ -14,6 +14,21 @@ import {
   SLOW_CONSUMER_CLOSE_CODE,
   type OutboundTransport,
 } from "../../apps/server/src/websocket/outbound-queue.js";
+import {
+  COMPLETE_EVENT_MUTATIONS,
+  generatedReplayEvent,
+  mutateCompleteEvent,
+} from "./support/replay-oracle.js";
+
+const propertySeed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
+const propertyPath = process.env.WI_FC_PATH;
+function propertyOptions(numRuns: number): fc.Parameters<unknown> {
+  return {
+    numRuns,
+    seed: propertySeed,
+    ...(propertyPath === undefined ? {} : { path: propertyPath }),
+  };
+}
 
 class BlockingTransport implements OutboundTransport {
   readonly closes: Array<{ code: number; reason: string }> = [];
@@ -35,31 +50,15 @@ function heartbeat(): ServerMessage {
   return { v: 1, kind: "heartbeat", serverTimeMs: 1 };
 }
 
-function durableEvent(sequence: number): DurableEvent {
-  const envelope = {
-    v: 1 as const,
-    kind: "event" as const,
-    sessionId: "ses_propertyQueue",
-    sequence,
-    eventId: `evt_propertyQueue${sequence}`,
-    createdAtMs: sequence,
-  };
-  if (sequence % 2 === 0) {
-    return {
-      ...envelope,
-      eventType: "run.completed",
-      data: { eventVersion: 1, runId: "run_propertyQueue" },
-    };
-  }
-  return {
-    ...envelope,
-    eventType: "tool.execution.started",
-    data: {
-      eventVersion: 1,
-      runId: "run_propertyQueue",
-      callId: "call_propertyQueue",
-    },
-  };
+function durableEvent(sequence: number, variant = sequence): DurableEvent {
+  return generatedReplayEvent("ses_propertyQueue", sequence, variant) as DurableEvent;
+}
+
+function expectCompleteReplay(
+  delivered: readonly SessionEvent[],
+  expected: readonly SessionEvent[],
+): void {
+  expect(delivered).toEqual(expected);
 }
 
 describe("Milestone 5 bounded gateway properties", () => {
@@ -82,19 +81,19 @@ describe("Milestone 5 bounded gateway properties", () => {
           }
         },
       ),
-      { numRuns: 1_000 },
+      propertyOptions(1_000),
     );
   });
 
   it("preserves replay/live equivalence across generated race boundaries", async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.integer({ min: 1, max: 32 }),
+        fc.array(fc.integer({ min: 0, max: 4 }), { minLength: 1, maxLength: 32 }),
         fc.nat(),
-        async (eventCount, splitSeed) => {
-          const historicalCount = splitSeed % (eventCount + 1);
-          const events = Array.from({ length: eventCount }, (_, index) =>
-            durableEvent(index + 1),
+        async (eventVariants, splitSeed) => {
+          const historicalCount = splitSeed % (eventVariants.length + 1);
+          const events = eventVariants.map((variant, index) =>
+            durableEvent(index + 1, variant),
           );
           const hub = new CommittedEventHub();
           for (const event of events.slice(0, historicalCount)) {
@@ -127,31 +126,42 @@ describe("Milestone 5 bounded gateway properties", () => {
                 boundaries.push(throughSequence);
               },
             },
-            maxBufferedLiveEvents: eventCount,
+            maxBufferedLiveEvents: eventVariants.length,
           });
 
           await subscription.ready;
           subscription.unsubscribe();
           await subscription.drain();
-          expect(delivered.map((event) => event.sequence)).toEqual(
-            events.map((event) => event.sequence),
-          );
+          expectCompleteReplay(delivered, events);
           expect(boundaries).toEqual([historicalCount]);
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
+  });
+
+  it("rejects same-sequence mutations that the former sequence-only oracle missed", () => {
+    const expectedEvent = durableEvent(1, 0);
+    const expected = [expectedEvent];
+    for (const mutation of COMPLETE_EVENT_MUTATIONS) {
+      const transformed = [mutateCompleteEvent(expectedEvent, mutation)];
+      expect(transformed.map((event) => event.sequence)).toEqual(
+        expected.map((event) => event.sequence),
+      );
+      expect(() => expectCompleteReplay(transformed, expected)).toThrow();
+    }
   });
 
   it("reconstructs generated reconnect suffixes from the last trusted cursor", async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.integer({ min: 1, max: 32 }),
+        fc.array(fc.integer({ min: 0, max: 4 }), { minLength: 1, maxLength: 32 }),
         fc.nat(),
-        async (eventCount, cursorSeed) => {
+        async (eventVariants, cursorSeed) => {
+          const eventCount = eventVariants.length;
           const cursor = cursorSeed % (eventCount + 1);
-          const events = Array.from({ length: eventCount }, (_, index) =>
-            durableEvent(index + 1),
+          const events = eventVariants.map((variant, index) =>
+            durableEvent(index + 1, variant),
           );
           const delivered: SessionEvent[] = [];
           const subscription = beginReplaySubscription({
@@ -178,12 +188,10 @@ describe("Milestone 5 bounded gateway properties", () => {
           await subscription.ready;
           subscription.unsubscribe();
           await subscription.drain();
-          expect(delivered.map((event) => event.sequence)).toEqual(
-            events.slice(cursor).map((event) => event.sequence),
-          );
+          expectCompleteReplay(delivered, events.slice(cursor));
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -207,7 +215,7 @@ describe("Milestone 5 bounded gateway properties", () => {
         expect(queue.state.closeReason).toBe("slow_consumer");
         expect(transport.closes.at(-1)?.code).toBe(SLOW_CONSUMER_CLOSE_CODE);
       }),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -230,7 +238,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           expect(transport.closes.at(-1)?.code).toBe(SLOW_CONSUMER_CLOSE_CODE);
         },
       ),
-      { numRuns: 100 },
+      propertyOptions(1_000),
     );
   });
 
@@ -261,7 +269,7 @@ describe("Milestone 5 bounded gateway properties", () => {
           }
         },
       ),
-      { numRuns: 1_000 },
+      propertyOptions(1_000),
     );
   }, 10_000);
 });

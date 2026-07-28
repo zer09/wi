@@ -27,6 +27,7 @@ import {
   type SessionActorIds,
   type SessionActorStorage,
 } from "../../packages/harness-core/src/index.js";
+import { generatedReplayEvent } from "./support/replay-oracle.js";
 
 const seed = Number.parseInt(process.env.WI_FC_SEED ?? "737373", 10);
 const path = process.env.WI_FC_PATH;
@@ -318,17 +319,8 @@ function propertySubmit(sessionId: string, commandId: string, text: string) {
   };
 }
 
-function event(sequence: number): SessionEvent {
-  return {
-    v: 1,
-    kind: "event",
-    sessionId: "ses_propertyReplay",
-    sequence,
-    eventId: `evt_propertyReplay${sequence}`,
-    eventType: "run.started",
-    createdAtMs: 1_000 + sequence,
-    data: { eventVersion: 1, runId: "run_propertyReplay" },
-  };
+function event(sequence: number, variant = sequence): SessionEvent {
+  return generatedReplayEvent("ses_propertyReplay", sequence, variant);
 }
 
 type ModelOperation =
@@ -622,21 +614,22 @@ describe("Milestone 3 property models", () => {
     await runProperty(
       "replay + live equals complete ordered database replay",
       fc.asyncProperty(
-        fc.integer({ min: 0, max: 20 }),
+        fc.array(fc.integer({ min: 0, max: 4 }), { maxLength: 20 }),
         fc.nat(),
         fc.nat(),
         fc.constantFrom("beforeHead" as const, "duringHistory" as const, "afterReplay" as const),
         fc.boolean(),
-        async (total, headSelector, cursorSelector, publicationTiming, publishDuplicate) => {
-          const initialHead = headSelector % (total + 1);
-          const capturedHead = publicationTiming === "beforeHead" ? total : initialHead;
+        async (eventVariants, headSelector, cursorSelector, publicationTiming, publishDuplicate) => {
+          const events = eventVariants.map((variant, index) => event(index + 1, variant));
+          const initialHead = headSelector % (events.length + 1);
+          const capturedHead = publicationTiming === "beforeHead" ? events.length : initialHead;
           const cursor = cursorSelector % (capturedHead + 1);
           const hub = new CommittedEventHub();
-          const observed: number[] = [];
+          const observed: SessionEvent[] = [];
           let completedThrough = -1;
           const publishLiveSuffix = (): void => {
-            for (let sequence = initialHead + 1; sequence <= total; sequence += 1) {
-              hub.publishCommitted(event(sequence));
+            for (const liveEvent of events.slice(initialHead)) {
+              hub.publishCommitted(liveEvent);
             }
           };
           const subscription = beginReplaySubscription({
@@ -650,15 +643,15 @@ describe("Milestone 3 property models", () => {
               },
               getEventsAfter: async (after, through) => {
                 if (publicationTiming === "duringHistory") publishLiveSuffix();
-                return Array.from(
-                  { length: Math.max(0, through - after) },
-                  (_, index) => event(after + index + 1),
+                return events.filter(
+                  (storedEvent) =>
+                    storedEvent.sequence > after && storedEvent.sequence <= through,
                 );
               },
             },
             callbacks: {
               deliver: (value) => {
-                observed.push(value.sequence);
+                observed.push(value);
               },
               replayComplete: (through) => {
                 completedThrough = through;
@@ -667,13 +660,14 @@ describe("Milestone 3 property models", () => {
           });
           await subscription.ready;
           if (publicationTiming === "afterReplay") publishLiveSuffix();
-          if (publishDuplicate && total > initialHead) hub.publishCommitted(event(total));
+          const finalEvent = events.at(-1);
+          if (publishDuplicate && finalEvent !== undefined && events.length > initialHead) {
+            hub.publishCommitted(finalEvent);
+          }
           await subscription.drain();
 
           expect(completedThrough).toBe(capturedHead);
-          expect(observed).toEqual(
-            Array.from({ length: total - cursor }, (_, index) => cursor + index + 1),
-          );
+          expect(observed).toEqual(events.slice(cursor));
         },
       ),
     );
@@ -683,15 +677,17 @@ describe("Milestone 3 property models", () => {
     await runProperty(
       "disconnect during replay drops buffered live events without blocking publication",
       fc.asyncProperty(
-        fc.integer({ min: 1, max: 20 }),
+        fc.array(fc.integer({ min: 0, max: 4 }), { minLength: 1, maxLength: 20 }),
         fc.nat(),
         fc.nat(),
         fc.boolean(),
-        async (total, headSelector, cursorSelector, disconnectDuringQuery) => {
-          const head = headSelector % (total + 1);
+        async (eventVariants, headSelector, cursorSelector, disconnectDuringQuery) => {
+          const events = eventVariants.map((variant, index) => event(index + 1, variant));
+          const head = headSelector % (events.length + 1);
           const cursor = cursorSelector % (head + 1);
           const hub = new CommittedEventHub();
-          const observed: string[] = [];
+          const observed: SessionEvent[] = [];
+          const replayBoundaries: number[] = [];
           let markQueryStarted = (): void => {};
           const queryStarted = new Promise<void>((resolve) => {
             markQueryStarted = resolve;
@@ -709,24 +705,24 @@ describe("Milestone 3 property models", () => {
               getEventsAfter: async (after, through) => {
                 markQueryStarted();
                 await queryGate;
-                return Array.from(
-                  { length: through - after },
-                  (_, index) => event(after + index + 1),
+                return events.filter(
+                  (storedEvent) =>
+                    storedEvent.sequence > after && storedEvent.sequence <= through,
                 );
               },
             },
             callbacks: {
               deliver: (value) => {
-                observed.push(`event:${value.sequence}`);
+                observed.push(value);
               },
               replayComplete: (through) => {
-                observed.push(`complete:${through}`);
+                replayBoundaries.push(through);
               },
             },
           });
           await queryStarted;
-          for (let sequence = head + 1; sequence <= total; sequence += 1) {
-            hub.publishCommitted(event(sequence));
+          for (const liveEvent of events.slice(head)) {
+            hub.publishCommitted(liveEvent);
           }
           if (disconnectDuringQuery) replay.unsubscribe();
           releaseQuery();
@@ -735,23 +731,15 @@ describe("Milestone 3 property models", () => {
             await expect(replay.ready).rejects.toMatchObject({ code: "replay.disconnected" });
             await replay.drain();
             expect(observed).toEqual([]);
+            expect(replayBoundaries).toEqual([]);
             expect(hub.subscriberCount("ses_propertyReplay")).toBe(0);
             return;
           }
 
           await replay.ready;
           await replay.drain();
-          expect(observed).toEqual([
-            ...Array.from(
-              { length: head - cursor },
-              (_, index) => `event:${cursor + index + 1}`,
-            ),
-            `complete:${head}`,
-            ...Array.from(
-              { length: total - head },
-              (_, index) => `event:${head + index + 1}`,
-            ),
-          ]);
+          expect(observed).toEqual(events.slice(cursor));
+          expect(replayBoundaries).toEqual([head]);
           replay.unsubscribe();
         },
       ),

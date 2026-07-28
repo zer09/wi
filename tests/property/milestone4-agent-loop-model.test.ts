@@ -323,20 +323,11 @@ describe("Milestone 4 generated production traces", () => {
   it(
     "matches the reference outcome across provider, ledger, approval, cancel, commit, and recovery traces",
     async () => {
-      try {
-        await fc.assert(fc.asyncProperty(generatedTrace, runTrace), {
-          numRuns: 30,
-          seed: propertySeed,
-          ...(propertyPath === undefined ? {} : { path: propertyPath }),
-        });
-      } catch (error) {
-        throw new Error(
-          `${error instanceof Error ? error.message : String(error)}\n` +
-            `Reproduce with: WI_M4_AGENT_FC_SEED=${propertySeed} ` +
-            "WI_M4_AGENT_FC_PATH=<path> pnpm test:property -- milestone4-agent-loop-model",
-          { cause: error },
-        );
-      }
+      await fc.assert(fc.asyncProperty(generatedTrace, runTrace), {
+        numRuns: 30,
+        seed: propertySeed,
+        ...(propertyPath === undefined ? {} : { path: propertyPath }),
+      });
     },
     // Each generated case opens real storage workers; the full workspace runs several heavy suites in parallel.
     60_000,

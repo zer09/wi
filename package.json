@@ -21,6 +21,8 @@
     "test:unit": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts --project unit",
     "test:integration": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts --project integration --passWithNoTests",
     "test:property": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts --project property --passWithNoTests",
+    "test:fuzz": "node scripts/run-fuzz.mjs local",
+    "test:fuzz:extended": "node scripts/run-fuzz.mjs extended",
     "test:process": "pnpm build:test-deps && vitest run --workspace vitest.workspace.ts --project process --passWithNoTests",
     "test:e2e": "pnpm build && playwright test",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"

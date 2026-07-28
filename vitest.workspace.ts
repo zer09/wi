@@ -36,6 +36,7 @@ export default defineWorkspace([
       name: "property",
       environment: "node",
       include: ["tests/property/**/*.test.ts"],
+      setupFiles: ["tests/property/support/fuzz-artifacts-setup.ts"],
     },
   },
   {

@@ -80,7 +80,7 @@ A failed property artifact records:
 - run/shrink counts;
 - shell-quoted exact reproduction command.
 
-Process and E2E harnesses use the shared test-support bounds: each stdout/stderr tail retains at most 64 KiB, pending IPC retains at most 128 messages/256 KiB, and diagnostic IPC history retains at most 256 messages/512 KiB. Oversized or excess fixture messages are not retained indefinitely. Cleanup then terminates descendants and removes temporary homes. Browser traces are disabled because they can retain the HttpOnly bootstrap cookie.
+Process and E2E harnesses use the shared test-support bounds: each stdout/stderr tail retains at most 64 KiB, pending IPC retains at most 128 messages/256 KiB, and diagnostic IPC history retains at most 256 messages/512 KiB. Predicate matching receives bounded defensive copies, and matched values and history reads receive separate clones, so caller mutation cannot rewrite retained history or its byte accounting. Oversized or excess fixture messages are not retained indefinitely. Cleanup then terminates descendants and removes temporary homes. Browser traces are disabled because they can retain the HttpOnly bootstrap cookie.
 
 ## Release command matrix
 

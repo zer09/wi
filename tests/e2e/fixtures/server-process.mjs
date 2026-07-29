@@ -1,12 +1,18 @@
-import { WiRuntime, WiServer } from "../../../apps/server/dist/index.js";
+import { appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { JsonLogger, WiRuntime, WiServer } from "../../../apps/server/dist/index.js";
 import { FakeProviderAdapter, fakeProviderGateLabel } from "../../../packages/provider-fake/dist/index.js";
 import { MAXIMUM_BOOTSTRAP_SESSIONS } from "../../../packages/protocol/dist/index.js";
+import { sessionWorkerPoolForTest } from "../../../packages/storage/dist/testing.js";
+import { ToolExecutor } from "../../../packages/tools/dist/index.js";
 
 const [
   homeDirectory,
   frameMaximumBytesArgument,
   fixedPortArgument,
   frameMaximumDepthArgument,
+  replayLiveEventsArgument,
 ] = process.argv.slice(2);
 if (homeDirectory === undefined || typeof process.send !== "function") process.exit(64);
 const optionalNumber = (value) =>
@@ -14,18 +20,32 @@ const optionalNumber = (value) =>
 const frameMaximumBytes = optionalNumber(frameMaximumBytesArgument);
 const fixedPort = optionalNumber(fixedPortArgument);
 const frameMaximumDepth = optionalNumber(frameMaximumDepthArgument);
+const replayLiveEvents = optionalNumber(replayLiveEventsArgument);
 if (
   (frameMaximumBytes !== undefined &&
     (!Number.isSafeInteger(frameMaximumBytes) || frameMaximumBytes < 1)) ||
   (fixedPort !== undefined && (!Number.isSafeInteger(fixedPort) || fixedPort < 1)) ||
   (frameMaximumDepth !== undefined &&
-    (!Number.isSafeInteger(frameMaximumDepth) || frameMaximumDepth < 1))
+    (!Number.isSafeInteger(frameMaximumDepth) || frameMaximumDepth < 1)) ||
+  (replayLiveEvents !== undefined &&
+    (!Number.isSafeInteger(replayLiveEvents) || replayLiveEvents < 1))
 ) {
   process.exit(65);
 }
 
 const send = (message) => process.send?.(message);
+const auditSecret = "AUDIT_MILESTONE9_SECRET";
+const logPath = join(homeDirectory, "e2e-server.log");
+const toolExecutionPath = join(homeDirectory, "e2e-tool-executions.log");
+const logger = new JsonLogger({
+  write: (record) => appendFileSync(logPath, `${JSON.stringify(record)}\n`, "utf8"),
+});
+logger.info("e2e_secret_probe", {
+  authorization: `Bearer ${auditSecret}`,
+  cookie: auditSecret,
+});
 const providerRequests = [];
+const acceptedMessages = new Map();
 const acknowledgementGates = new Map();
 const blockedAcknowledgementCommands = new Set();
 const beforeRouteGates = new Map();
@@ -81,11 +101,24 @@ class E2EProvider extends FakeProviderAdapter {
 const provider = new E2EProvider();
 const runtime = new WiRuntime({
   homeDirectory,
+  logger,
   provider,
+  toolExecutor: new ToolExecutor({
+    onExecutionStart: ({ sessionId, runId, callId }) => {
+      appendFileSync(
+        toolExecutionPath,
+        `${JSON.stringify({ sessionId, runId, callId })}\n`,
+        "utf8",
+      );
+    },
+  }),
+  storage: { sessionWorkers: { allowTestOperations: true } },
   selectProviderConfiguration: (command) => {
     const text = command.params.text;
     if (text.startsWith("[slow]")) return { scenario: "slow-stream" };
+    if (text.startsWith("[echo]")) return { scenario: "echo-tool-round-trip" };
     if (text.startsWith("[approval]")) return { scenario: "approval-round-trip" };
+    if (text.startsWith("[partial]")) return { scenario: "partial-tool-call-without-terminal" };
     if (text.startsWith("[interrupt]")) return { scenario: "failure-after-visible-output" };
     return { scenario: "plain-text" };
   },
@@ -94,18 +127,25 @@ const server = new WiServer({
   runtime,
   port: fixedPort ?? 0,
   gateway: {
-    ...(frameMaximumBytes === undefined && frameMaximumDepth === undefined
+    ...(frameMaximumBytes === undefined &&
+    frameMaximumDepth === undefined &&
+    replayLiveEvents === undefined
       ? {}
       : {
           limits: {
-            frame: {
-              ...(frameMaximumBytes === undefined
-                ? {}
-                : { maximumBytes: frameMaximumBytes }),
-              ...(frameMaximumDepth === undefined
-                ? {}
-                : { maximumDepth: frameMaximumDepth }),
-            },
+            ...(frameMaximumBytes === undefined && frameMaximumDepth === undefined
+              ? {}
+              : {
+                  frame: {
+                    ...(frameMaximumBytes === undefined
+                      ? {}
+                      : { maximumBytes: frameMaximumBytes }),
+                    ...(frameMaximumDepth === undefined
+                      ? {}
+                      : { maximumDepth: frameMaximumDepth }),
+                  },
+                }),
+            ...(replayLiveEvents === undefined ? {} : { replayLiveEvents }),
           },
         }),
     commandHooks: {
@@ -132,7 +172,13 @@ const server = new WiServer({
           await new Promise((resolve) => approvalRaceGates.set(command.commandId, resolve));
         }
       },
-      afterRouteBeforeSend: async (command) => {
+      afterRouteBeforeSend: async (command, accepted) => {
+        if (command.method === "message.submit" && accepted.runId !== undefined) {
+          acceptedMessages.set(command.params.text, {
+            commandId: command.commandId,
+            runId: accepted.runId,
+          });
+        }
         if (
           command.method === "message.submit" &&
           command.params.text.startsWith("[lost-ack]") &&
@@ -194,6 +240,7 @@ process.on("message", (message) => {
       case "disconnect":
         send({
           type: "disconnected",
+          requestId: message.requestId,
           count: server.gateway.disconnectActiveConnections(
             message.code ?? 1012,
             message.reason ?? "E2E forced reconnect",
@@ -220,8 +267,16 @@ process.on("message", (message) => {
         const release = replayGates.get(message.sessionId);
         replayGates.delete(message.sessionId);
         release?.();
+        send({ type: "replay-released", requestId: message.requestId });
         return;
       }
+      case "connection-snapshots":
+        send({
+          type: "connection-snapshots",
+          requestId: message.requestId,
+          snapshots: server.gateway.connectionSnapshots,
+        });
+        return;
       case "arm-approval-acknowledgement":
         approvalAcknowledgementArmed = true;
         send({ type: "approval-acknowledgement-armed", requestId: message.requestId });
@@ -241,15 +296,17 @@ process.on("message", (message) => {
         for (const release of approvalRaceGates.values()) release();
         approvalRaceGates.clear();
         return;
-      case "release-provider":
+      case "release-provider": {
+        const scenario = message.gate === "partial" ? "partial-tool-call-without-terminal" : "slow-stream";
         for (const request of providerRequests) {
-          if (request.providerConfig?.scenario !== "slow-stream") continue;
+          if (request.providerConfig?.scenario !== scenario) continue;
           const label = fakeProviderGateLabel(request.runId, message.gate);
           await provider.controller.waitUntilBlocked(label);
           provider.controller.release(label);
         }
         send({ type: "provider-released", requestId: message.requestId });
         return;
+      }
       case "seed-bounded-session-index": {
         const title = "Omitted durable target";
         const omitted = await runtime.storage.createSession({
@@ -331,6 +388,115 @@ process.on("message", (message) => {
           count: routedCommandCount,
         });
         return;
+      case "accepted-message":
+        send({
+          type: "accepted-message",
+          requestId: message.requestId,
+          value: acceptedMessages.get(message.text) ?? null,
+        });
+        return;
+      case "create-idle-session": {
+        const created = await runtime.storage.createSession({
+          v: 1,
+          kind: "command",
+          commandId: message.commandId,
+          method: "session.create",
+          params: { title: message.title },
+        });
+        send({
+          type: "idle-session-created",
+          requestId: message.requestId,
+          sessionId: created.session.sessionId,
+        });
+        return;
+      }
+      case "tool-executions": {
+        let executions = [];
+        try {
+          executions = readFileSync(toolExecutionPath, "utf8")
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        send({ type: "tool-executions", requestId: message.requestId, executions });
+        return;
+      }
+      case "acceptance-storage": {
+        const summaries = await runtime.storage.catalog.listSessions();
+        const stats = await sessionWorkerPoolForTest(runtime.storage).getStats();
+        send({
+          type: "acceptance-storage",
+          requestId: message.requestId,
+          sessions: summaries.map(({ sessionId, dbRelativePath, title }) => ({
+            sessionId,
+            dbRelativePath,
+            title,
+          })),
+          openSessionIds: stats.flatMap((value) => value.openSessionIds),
+        });
+        return;
+      }
+      case "mutate-event": {
+        await runtime.storage.openSession(message.sessionId);
+        let errorMessage = null;
+        try {
+          await sessionWorkerPoolForTest(runtime.storage).testMutateEvent(
+            message.sessionId,
+            message.action,
+            1,
+          );
+        } catch (error) {
+          errorMessage = error instanceof Error ? error.message : String(error);
+        }
+        send({
+          type: "event-mutation",
+          requestId: message.requestId,
+          action: message.action,
+          errorMessage,
+        });
+        return;
+      }
+      case "security-audit": {
+        if (
+          !Array.isArray(message.credentials) ||
+          message.credentials.length === 0 ||
+          message.credentials.some((value) => typeof value !== "string" || value.length === 0)
+        ) {
+          throw new Error("Security audit requires at least one browser credential");
+        }
+        const exportedSessions = [];
+        for (const sessionId of message.sessionIds) {
+          const session = await runtime.storage.openSession(sessionId);
+          exportedSessions.push(await session.getEventsAfter(0));
+        }
+        const exportedCatalog = await runtime.storage.catalog.listSessions();
+        let logs = "";
+        let toolExecutions = "";
+        try {
+          logs = readFileSync(logPath, "utf8");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        try {
+          toolExecutions = readFileSync(toolExecutionPath, "utf8");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        const exports = JSON.stringify({ catalog: exportedCatalog, sessions: exportedSessions });
+        const retainedArtifacts = `${logs}\n${toolExecutions}`;
+        const containsCredential = (value) =>
+          message.credentials.some((credential) => value.includes(credential));
+        send({
+          type: "security-audit",
+          requestId: message.requestId,
+          logsContainAuditSecret: logs.includes(auditSecret),
+          exportsContainCredential: containsCredential(exports),
+          retainedArtifactsContainCredential: containsCredential(retainedArtifacts),
+        });
+        return;
+      }
       case "session-head": {
         const session = await runtime.storage.openSession(message.sessionId);
         send({

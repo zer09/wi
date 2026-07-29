@@ -4,20 +4,72 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-interface ReadyMessage {
-  readonly type: "ready";
-  readonly origin: string;
-}
+import {
+  BoundedIpcRetention,
+  BoundedProcessOutput,
+  PROCESS_IPC_HISTORY_MAX_MESSAGES,
+  PROCESS_IPC_PENDING_MAX_MESSAGES,
+  type ServerProcessMessage,
+} from "@wi/test-support";
+
+type FixtureMessage = ServerProcessMessage;
 
 interface RunningChild {
   readonly child: ChildProcess;
   readonly origin: string;
   readonly output: () => string;
+  send(message: Readonly<Record<string, unknown>>): void;
+  waitFor(predicate: (message: FixtureMessage) => boolean, timeoutMs?: number): Promise<FixtureMessage>;
+}
+
+export interface AcceptedMessage {
+  readonly commandId: string;
+  readonly runId: string;
+}
+
+export interface ToolExecutionEvidence {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly callId: string;
+}
+
+export interface AcceptanceStorageSnapshot {
+  readonly sessions: readonly {
+    readonly sessionId: string;
+    readonly dbRelativePath: string;
+    readonly title: string;
+  }[];
+  readonly openSessionIds: readonly string[];
+}
+
+export interface ConnectionSnapshotEvidence {
+  readonly subscriptions: number;
+  readonly closed: boolean;
 }
 
 export interface RestartableServer {
   readonly origin: string;
+  readonly homeDirectory: string;
   restart(): Promise<void>;
+  disconnect(code: number, reason: string): Promise<number>;
+  armReplay(sessionId: string): Promise<void>;
+  waitForReplayBlock(sessionId: string): Promise<void>;
+  releaseReplay(sessionId: string): Promise<void>;
+  connectionSnapshots(): Promise<readonly ConnectionSnapshotEvidence[]>;
+  waitForProviderRequest(count?: number): Promise<void>;
+  waitForProviderScenario(scenario: string): Promise<void>;
+  releaseProvider(gate: "slow" | "partial"): Promise<void>;
+  acceptedMessage(text: string): Promise<AcceptedMessage>;
+  createIdleSession(title: string): Promise<string>;
+  sessionHead(sessionId: string): Promise<number>;
+  toolExecutions(): Promise<readonly ToolExecutionEvidence[]>;
+  acceptanceStorage(): Promise<AcceptanceStorageSnapshot>;
+  mutateEvent(sessionId: string, action: "update" | "delete"): Promise<string | null>;
+  securityAudit(sessionIds: readonly string[], credentials: readonly string[]): Promise<{
+    readonly logsContainAuditSecret: boolean;
+    readonly exportsContainCredential: boolean;
+    readonly retainedArtifactsContainCredential: boolean;
+  }>;
   close(): Promise<void>;
 }
 
@@ -48,62 +100,88 @@ async function stopChild(child: ChildProcess): Promise<void> {
     });
   }
   if (child.exitCode !== 0) {
-    throw new Error(`Restartable Wi server exited with code ${child.exitCode}`);
+    throw new Error(`Restartable Wi server exited with code ${String(child.exitCode)}`);
   }
 }
 
-async function launch(homeDirectory: string, fixedPort?: number): Promise<RunningChild> {
+async function launch(
+  homeDirectory: string,
+  fixedPort?: number,
+  replayLiveEvents?: number,
+): Promise<RunningChild> {
   const script = fileURLToPath(new URL("./server-process.mjs", import.meta.url));
   const child = fork(
     script,
-    [homeDirectory, "-", ...(fixedPort === undefined ? [] : [String(fixedPort)])],
-    { stdio: ["ignore", "pipe", "pipe", "ipc"] },
+    [
+      homeDirectory,
+      "-",
+      fixedPort === undefined ? "-" : String(fixedPort),
+      "-",
+      replayLiveEvents === undefined ? "-" : String(replayLiveEvents),
+    ],
+    {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      env: { ...process.env, NODE_ENV: "test" },
+    },
   );
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdout += chunk.toString();
+  const stdout = new BoundedProcessOutput();
+  const stderr = new BoundedProcessOutput();
+  child.stdout?.on("data", (chunk: Buffer) => stdout.append(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));
+
+  const messages = new BoundedIpcRetention(
+    PROCESS_IPC_PENDING_MAX_MESSAGES,
+    PROCESS_IPC_HISTORY_MAX_MESSAGES,
+    () => false,
+  );
+  const wakeups = new Set<() => void>();
+  child.on("message", (message) => {
+    if (message !== null && typeof message === "object" && "type" in message) {
+      messages.accept(message);
+      for (const wake of wakeups) wake();
+      wakeups.clear();
+    }
   });
-  child.stderr?.on("data", (chunk: Buffer) => {
-    stderr += chunk.toString();
+  child.on("exit", () => {
+    for (const wake of wakeups) wake();
+    wakeups.clear();
   });
 
-  try {
-    const ready = await new Promise<ReadyMessage>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        cleanup();
-        reject(new Error(`Timed out starting restartable Wi server\n${stdout}\n${stderr}`));
-      }, 30_000);
-      const onMessage = (message: unknown): void => {
-        if (
-          message !== null &&
-          typeof message === "object" &&
-          "type" in message &&
-          message.type === "ready" &&
-          "origin" in message &&
-          typeof message.origin === "string"
-        ) {
-          cleanup();
-          resolve(message as ReadyMessage);
-        }
-      };
-      const onExit = (): void => {
-        cleanup();
-        reject(
-          new Error(
-            `Restartable Wi server exited before ready (${child.exitCode})\n${stdout}\n${stderr}`,
-          ),
+  const waitFor = async (
+    predicate: (message: FixtureMessage) => boolean,
+    timeoutMs = 10_000,
+  ): Promise<FixtureMessage> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const retained = messages.takeWhere(predicate);
+      if (retained !== null) return structuredClone(retained);
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(
+          `Restartable Wi server exited early (${String(child.exitCode ?? child.signalCode)})\n${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
         );
-      };
-      const cleanup = (): void => {
-        clearTimeout(timer);
-        child.off("message", onMessage);
-        child.off("exit", onExit);
-      };
-      child.on("message", onMessage);
-      child.once("exit", onExit);
-    });
-    return { child, origin: ready.origin, output: () => `${stdout}\n${stderr}` };
+      }
+      await Promise.race([
+        new Promise<void>((resolve) => wakeups.add(resolve)),
+        new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, deadline - Date.now()))),
+      ]);
+    }
+    throw new Error(
+      `Timed out waiting for restartable Wi server message\n${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
+    );
+  };
+
+  try {
+    const ready = await waitFor((message) => message.type === "ready", 30_000);
+    if (typeof ready.origin !== "string") throw new Error("Restartable Wi server returned no origin");
+    return {
+      child,
+      origin: ready.origin,
+      output: () => `${stdout.snapshot().tail}\n${stderr.snapshot().tail}`,
+      send(message) {
+        child.send(message);
+      },
+      waitFor,
+    };
   } catch (error) {
     child.kill("SIGKILL");
     await waitForExit(child).catch(() => undefined);
@@ -111,11 +189,13 @@ async function launch(homeDirectory: string, fixedPort?: number): Promise<Runnin
   }
 }
 
-export async function startRestartableServer(): Promise<RestartableServer> {
+export async function startRestartableServer(
+  options: { readonly replayLiveEvents?: number } = {},
+): Promise<RestartableServer> {
   const homeDirectory = await mkdtemp(join(tmpdir(), "wi-e2e-restart-"));
   let current: RunningChild;
   try {
-    current = await launch(homeDirectory);
+    current = await launch(homeDirectory, undefined, options.replayLiveEvents);
   } catch (error) {
     await rm(homeDirectory, { recursive: true, force: true });
     throw error;
@@ -123,19 +203,147 @@ export async function startRestartableServer(): Promise<RestartableServer> {
   const origin = current.origin;
   const port = Number(new URL(origin).port);
   let closed = false;
+  let requestNumber = 0;
+
+  const request = async (
+    type: string,
+    fields: Readonly<Record<string, unknown>>,
+    responseType: string,
+  ): Promise<FixtureMessage> => {
+    requestNumber += 1;
+    const requestId = `restartable-${requestNumber}`;
+    current.send({ type, requestId, ...fields });
+    const response = await current.waitFor(
+      (message) =>
+        message.requestId === requestId &&
+        (message.type === responseType || message.type === "control-error"),
+    );
+    if (response.type === "control-error") {
+      throw new Error(
+        typeof response.message === "string" ? response.message : `Control request ${type} failed`,
+      );
+    }
+    return response;
+  };
 
   return {
     origin,
+    homeDirectory,
     async restart() {
       if (closed) throw new Error("Restartable Wi server is closed");
       const previous = current;
       await stopChild(previous.child).catch((error: unknown) => {
-        throw new Error(`${error instanceof Error ? error.message : String(error)}\n${previous.output()}`);
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}\n${previous.output()}`,
+        );
       });
-      current = await launch(homeDirectory, port);
+      current = await launch(homeDirectory, port, options.replayLiveEvents);
       if (current.origin !== origin) {
         throw new Error(`Restart changed origin from ${origin} to ${current.origin}`);
       }
+    },
+    async disconnect(code, reason) {
+      const response = await request("disconnect", { code, reason }, "disconnected");
+      if (typeof response.count !== "number") throw new Error("Disconnect count is missing");
+      return response.count;
+    },
+    async armReplay(sessionId) {
+      await request("arm-replay", { sessionId }, "replay-armed");
+    },
+    async waitForReplayBlock(sessionId) {
+      await current.waitFor(
+        (message) => message.type === "replay-blocked" && message.sessionId === sessionId,
+      );
+    },
+    async releaseReplay(sessionId) {
+      await request("release-replay", { sessionId }, "replay-released");
+    },
+    async connectionSnapshots() {
+      const response = await request("connection-snapshots", {}, "connection-snapshots");
+      if (!Array.isArray(response.snapshots)) throw new Error("Connection snapshots are missing");
+      return response.snapshots as unknown as readonly ConnectionSnapshotEvidence[];
+    },
+    async waitForProviderRequest(count = 1) {
+      for (let index = 0; index < count; index += 1) {
+        await current.waitFor((message) => message.type === "provider-request");
+      }
+    },
+    async waitForProviderScenario(scenario) {
+      await current.waitFor(
+        (message) => message.type === "provider-request" && message.scenario === scenario,
+      );
+    },
+    async releaseProvider(gate) {
+      await request("release-provider", { gate }, "provider-released");
+    },
+    async acceptedMessage(text) {
+      const response = await request("accepted-message", { text }, "accepted-message");
+      if (
+        response.value === null ||
+        typeof response.value !== "object" ||
+        !("commandId" in response.value) ||
+        !("runId" in response.value) ||
+        typeof response.value.commandId !== "string" ||
+        typeof response.value.runId !== "string"
+      ) {
+        throw new Error(`No accepted message was recorded for ${text}`);
+      }
+      return { commandId: response.value.commandId, runId: response.value.runId };
+    },
+    async createIdleSession(title) {
+      const response = await request(
+        "create-idle-session",
+        { commandId: "cmd_finalAcceptanceCatalogSentinel", title },
+        "idle-session-created",
+      );
+      if (typeof response.sessionId !== "string") throw new Error("Idle session ID is missing");
+      return response.sessionId;
+    },
+    async sessionHead(sessionId) {
+      const response = await request("session-head", { sessionId }, "session-head");
+      if (typeof response.sequence !== "number") throw new Error("Session head is missing");
+      return response.sequence;
+    },
+    async toolExecutions() {
+      const response = await request("tool-executions", {}, "tool-executions");
+      if (!Array.isArray(response.executions)) throw new Error("Tool execution evidence is missing");
+      return response.executions as unknown as readonly ToolExecutionEvidence[];
+    },
+    async acceptanceStorage() {
+      const response = await request("acceptance-storage", {}, "acceptance-storage");
+      if (!Array.isArray(response.sessions) || !Array.isArray(response.openSessionIds)) {
+        throw new Error("Acceptance storage evidence is missing");
+      }
+      return {
+        sessions: response.sessions as AcceptanceStorageSnapshot["sessions"],
+        openSessionIds: response.openSessionIds as readonly string[],
+      };
+    },
+    async mutateEvent(sessionId, action) {
+      const response = await request("mutate-event", { sessionId, action }, "event-mutation");
+      if (response.errorMessage !== null && typeof response.errorMessage !== "string") {
+        throw new Error("Mutation result is missing");
+      }
+      return response.errorMessage as string | null;
+    },
+    async securityAudit(sessionIds, credentials) {
+      const response = await request(
+        "security-audit",
+        { sessionIds, credentials },
+        "security-audit",
+      );
+      if (
+        typeof response.logsContainAuditSecret !== "boolean" ||
+        typeof response.exportsContainCredential !== "boolean" ||
+        typeof response.retainedArtifactsContainCredential !== "boolean"
+      ) {
+        throw new Error("Security audit result is missing");
+      }
+      return {
+        logsContainAuditSecret: response.logsContainAuditSecret,
+        exportsContainCredential: response.exportsContainCredential,
+        retainedArtifactsContainCredential: response.retainedArtifactsContainCredential,
+      };
     },
     async close() {
       if (closed) return;

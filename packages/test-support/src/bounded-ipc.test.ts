@@ -72,6 +72,147 @@ describe("BoundedIpcRetention", () => {
     },
   );
 
+  it("takes the first pending message matching a predicate", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    retention.accept({ type: "response", requestId: "first" });
+    retention.accept({ type: "response", requestId: "second" });
+
+    expect(retention.takeWhere((message) => message.requestId === "second")).toEqual({
+      type: "response",
+      requestId: "second",
+    });
+    expect(retention.take("response")).toEqual({ type: "response", requestId: "first" });
+    expect(retention.snapshot()).toMatchObject({
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+  });
+
+  it("isolates retained messages from mutating matching predicates", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    const messages = [
+      {
+        type: "response",
+        requestId: "first",
+        nested: { value: "first", values: ["one", { value: "first nested" }] },
+      },
+      {
+        type: "response",
+        requestId: "second",
+        nested: { value: "second", values: ["two", { value: "second nested" }] },
+      },
+      {
+        type: "response",
+        requestId: "third",
+        nested: { value: "third", values: ["three", { value: "third nested" }] },
+      },
+      {
+        type: "response",
+        requestId: "target",
+        nested: { value: "target", values: ["four", { value: "target nested" }] },
+      },
+    ];
+    for (const message of messages) retention.accept(message);
+    const before = retention.snapshot();
+
+    const targetOnly = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    targetOnly.accept(messages[3]);
+    const targetEstimatedBytes = targetOnly.snapshot().pendingRetainedEstimatedBytes;
+
+    const examinedRequestIds: unknown[] = [];
+    const taken = retention.takeWhere((message) => {
+      examinedRequestIds.push(message.requestId);
+      const nested = message.nested as {
+        value: string;
+        values: Array<string | { value: string }>;
+      };
+      nested.value = "x".repeat(2 * 1_024 * 1_024);
+      nested.values[0] = "changed through predicate";
+      (nested.values[1] as { value: string }).value = "changed through predicate";
+      return message.requestId === "target";
+    });
+
+    expect(examinedRequestIds).toEqual(["first", "second", "third", "target"]);
+    expect(taken).toEqual(messages[3]);
+    expect(retention.history).toEqual(messages);
+    expect(retention.snapshot()).toEqual({
+      ...before,
+      pendingRetainedMessages: 3,
+      pendingRetainedEstimatedBytes:
+        before.pendingRetainedEstimatedBytes - targetEstimatedBytes,
+    });
+
+    const takenNested = taken?.nested as {
+      value: string;
+      values: Array<string | { value: string }>;
+    };
+    takenNested.value = "changed after takeWhere";
+    takenNested.values[0] = "changed after takeWhere";
+    expect(retention.history).toEqual(messages);
+
+    expect(retention.takeWhere((message) => message.requestId === "first")).toEqual(messages[0]);
+    expect(retention.takeWhere((message) => message.requestId === "second")).toEqual(messages[1]);
+    expect(retention.takeWhere((message) => message.requestId === "third")).toEqual(messages[2]);
+    expect(retention.snapshot()).toEqual({
+      ...before,
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+    expect(serializedHistoryBytes(retention)).toBeLessThanOrEqual(
+      retention.snapshot().historyRetainedEstimatedBytes,
+    );
+  });
+
+  it("isolates retained messages from mutating nonmatching predicates", () => {
+    const retention = new BoundedIpcRetention(
+      PROCESS_IPC_PENDING_MAX_MESSAGES,
+      PROCESS_IPC_HISTORY_MAX_MESSAGES,
+      () => false,
+    );
+    const message = {
+      type: "response",
+      requestId: "kept",
+      nested: { value: "small", values: ["first", { value: "second" }] },
+    };
+    retention.accept(message);
+    const before = retention.snapshot();
+
+    expect(
+      retention.takeWhere((candidate) => {
+        const nested = candidate.nested as {
+          value: string;
+          values: Array<string | { value: string }>;
+        };
+        nested.value = "x".repeat(2 * 1_024 * 1_024);
+        nested.values[0] = "changed through predicate";
+        (nested.values[1] as { value: string }).value = "changed through predicate";
+        return false;
+      }),
+    ).toBeNull();
+
+    expect(retention.snapshot()).toEqual(before);
+    expect(retention.history).toEqual([message]);
+    expect(retention.takeWhere((candidate) => candidate.requestId === "kept")).toEqual(message);
+    expect(retention.snapshot()).toEqual({
+      ...before,
+      pendingRetainedMessages: 0,
+      pendingRetainedEstimatedBytes: 0,
+    });
+    expect(retention.history).toEqual([message]);
+  });
+
   it("retains a bounded snapshot instead of the accepted callback object", () => {
     const retention = new BoundedIpcRetention(
       PROCESS_IPC_PENDING_MAX_MESSAGES,

@@ -534,7 +534,14 @@ export class BoundedIpcRetention {
   }
 
   take(type: string): ServerProcessMessage | null {
-    const index = this.#pending.findIndex(({ message }) => message.type === type);
+    return this.takeWhere((message) => message.type === type);
+  }
+
+  takeWhere(predicate: (message: ServerProcessMessage) => boolean): ServerProcessMessage | null {
+    // Predicates are caller code, so they receive bounded copies instead of retention-owned history.
+    const index = this.#pending.findIndex(({ message }) =>
+      predicate(cloneRetainedMessage(message)),
+    );
     if (index < 0) return null;
     const [removed] = this.#pending.splice(index, 1);
     if (removed === undefined) return null;

@@ -538,6 +538,8 @@ replay.subscriber_overflow
 
 An already-active subscribe and an already-absent unsubscribe are successful retry states, not subscription failures.
 
+The complete durable event-type/data reference is [`docs/reference/event-catalog.md`](../reference/event-catalog.md).
+
 ## 17. Protocol tests
 
 Required tests include:

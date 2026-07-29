@@ -381,7 +381,7 @@ Databases are expected on local storage. Network filesystems are outside the sup
 
 ## 15. Migrations
 
-Catalog and session databases have separate migration sequences.
+Catalog and session databases have separate migration sequences. The version-by-version operator guide is [`docs/reference/migrations.md`](../reference/migrations.md).
 
 Requirements:
 
@@ -434,7 +434,7 @@ The first slice can keep outputs small but should preserve the abstraction bound
 
 ## 18. Backup and export
 
-A session export uses a consistent SQLite backup or snapshot operation and optionally includes session artifacts.
+A future session export must use a consistent SQLite backup or snapshot operation and optionally include session artifacts. No production export API, UI, or backup command is implemented in this slice; the stopped-filesystem backup limitation is documented in [`docs/reference/migrations.md`](../reference/migrations.md).
 
 It never includes:
 

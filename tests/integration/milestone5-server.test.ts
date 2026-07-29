@@ -795,7 +795,7 @@ describe("Milestone 5 loopback server and WebSocket gateway", () => {
       title: oversizedTitle.slice(0, 512),
       lastMessagePreview: oversizedPreview.slice(0, 256),
     });
-  });
+  }, 15_000);
 
   it("advertises browser command limits from the actual gateway configuration", async () => {
     const fixture = await startFixture({

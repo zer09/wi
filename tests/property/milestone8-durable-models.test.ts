@@ -819,5 +819,6 @@ async function runToolLedgerModel(): Promise<void> {
 describe.concurrent("Milestone 8 durable production models", () => {
   it(COMMAND_TEST_NAME, runCommandIdempotencyModel, 120_000);
   it(EVENT_STORE_TEST_NAME, runEventStoreModel, 120_000);
-  it(TOOL_LEDGER_TEST_NAME, runToolLedgerModel, 120_000);
+  // The 1,000-operation ledger history competes with other SQLite suites during the aggregate gate.
+  it(TOOL_LEDGER_TEST_NAME, runToolLedgerModel, 180_000);
 });

@@ -43,7 +43,7 @@ Do not redirect production logs to a world-readable path. Diagnostic IDs are cor
 
 `WI_HOME` and generated subdirectories are private to the local user when Wi creates them. Wi does not chmod pre-existing parent directories. Browser input never supplies a session database path; paths derive from validated session IDs under the canonicalized home.
 
-Session databases intentionally contain user messages, assistant output, tool arguments/results, approvals, and other session history. They must not contain provider credentials, browser credentials, OAuth material, authorization headers, or credential-vault data.
+Session databases intentionally contain user messages, assistant output, tool arguments/results, approvals, and other session history. They must not contain provider credentials, browser credentials, OAuth material, authorization headers, or planned [`CredentialStore`](adr/0014-wsl-file-credential-store.md) data. The released v0.1 slice has no provider credential store.
 
 The catalog contains summaries and location/index data, not provider secrets. Session event history is append-only. Corrupt or unsupported evidence is preserved in place rather than automatically deleted or overwritten.
 
@@ -63,7 +63,7 @@ Every tool call is validated and recorded in the durable ledger. A partial, fail
 
 ## Backup/export
 
-No production session-export API or UI exists. A future export must use a consistent SQLite snapshot and exclude API keys, OAuth tokens, browser credentials, and credential-vault material. Current manual backups should be performed while Wi is stopped and treated as sensitive because session content is included.
+No production session-export API or UI exists. A future export must use a consistent SQLite snapshot and exclude API keys, OAuth tokens, browser credentials, and planned `CredentialStore` material. Current v0.1 manual backups should be performed while Wi is stopped and treated as sensitive because session content is included; planned v0.2 credentials live outside the `WI_HOME` backup boundary.
 
 ## Reporting a local diagnostic
 

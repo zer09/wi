@@ -1,6 +1,6 @@
 # Wi architecture decision records
 
-This directory is the canonical ADR index for Wi v0.1.
+This directory is the canonical ADR index for Wi.
 
 ## Canonical numbering
 
@@ -17,11 +17,11 @@ The reconciled mapping is:
 | ADR-013 | Host-unrestricted filesystem | [ADR-0009](0009-host-unrestricted-filesystem.md) |
 | ADR-014 | Plugin-specific integration | [ADR-0010](0010-plugin-specific-integration.md) |
 
-This avoids duplicate ADRs that would give Codex two files for the same decision.
+This avoids duplicate ADRs that would give Codex two files for the same decision. ADR-0011 and ADR-0012 are existing v0.1 decisions; the v0.2 provider architecture therefore begins at ADR-0013 and does not reuse temporary conversational numbering from planning inputs.
 
 ## Index
 
-| ADR | Title | Status | First-slice implementation |
+| ADR | Title | Status | Implementation |
 |---|---|---|---|
 | [0001](0001-node-typescript.md) | Node.js and TypeScript runtime | Accepted | Yes |
 | [0002](0002-browser-websocket.md) | HTTP plus multiplexed browser WebSocket | Accepted | Yes |
@@ -35,6 +35,11 @@ This avoids duplicate ADRs that would give Codex two files for the same decision
 | [0010](0010-plugin-specific-integration.md) | Plugin-specific integration behind the Wi tool contract | Accepted, deferred | No plugins yet |
 | [0011](0011-linux-only-v0.1.md) | Linux-only v0.1 runtime and release gate | Accepted | Yes |
 | [0012](0012-trusted-local-user-storage-boundary.md) | Trusted local operating-system user storage boundary | Accepted | Yes |
+| [0013](0013-multiple-provider-connections.md) | Multiple provider connections with explicit account selection | Accepted | Planned: Milestones 11 and 13 |
+| [0014](0014-wsl-file-credential-store.md) | WSL-safe file CredentialStore with optional keyring later | Accepted | Planned: Milestone 11 |
+| [0015](0015-provider-chain-and-cache-affinity.md) | Provider-chain identity, run pinning, and cache-affinity boundaries | Accepted | Planned: Milestones 11 and 14 |
+| [0016](0016-automatic-routing-gate.md) | Telemetry-gated, opt-in automatic routing | Accepted | Explicit only in Milestone 11; gate in Milestone 15 |
+| [0017](0017-openai-state-reasoning-and-transport.md) | OpenAI state, reasoning, and HTTP/SSE-first transport | Accepted | Planned: Milestones 12–14 |
 
 ## ADR rules
 

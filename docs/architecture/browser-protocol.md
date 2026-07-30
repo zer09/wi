@@ -160,6 +160,10 @@ Each browser tab also owns a version-1 unresolved-command and draft journal in `
 
 A per-tab owner identity kept outside `sessionStorage` detects opener-cloned storage: the new tab discards the cloned journal rather than sharing hidden command authority, while reload in the original tab preserves it. Corrupt, unsupported, duplicate, invalid-ID, noncanonical, or over-budget entries are removed without blocking startup. The journal never contains the HttpOnly browser credential, provider/OAuth credentials, replay events, or canonical backend state; committed session events remain authoritative.
 
+Milestone 11 catalog-loss credential recovery is a narrow planned exception to full-envelope journaling because its one-time `recoveryRef` may not enter persistent browser storage. Before sending that command, the browser stores a separate bounded safe reconciliation entry containing only `commandId`, operation kind, nonclaiming `recoveryEpochId`/expiry, and nonsecret expected display metadata. The complete canonical command and reference remain memory-only and are cleared on acceptance/rejection, expiry, navigation/reload/tab close, or terminalization. The safe entry is not sendable command content, and the epoch ID cannot select or claim a credential.
+
+After reload or lost acknowledgement, the browser performs the bounded authenticated non-mutating recovery-command status read defined by the v0.2 provider-connections architecture. Ingress/admission, open-epoch unobserved state, and `validating`/`prepared`/`file_observed` remain safely pending. Final `not_accepted` is possible only after the epoch closes and every registered ingress drains, proving no old command may later prepare; it discards the entry and requires a fresh scan/new command ID. Terminal returns the original durable safe result. Repeated reads cannot submit, resume, claim, or infer recovery and contain no reference/path/secret. This exception does not change the complete-envelope retry contract for any other state-changing browser command.
+
 ### Client heartbeat
 
 An application-level heartbeat carries the client timestamp and is not a durable event.

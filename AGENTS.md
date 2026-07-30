@@ -75,6 +75,7 @@ Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit am
 - Environment-backed runs pin a nonpersisted credential fingerprint before acknowledgement and interrupt on backend restart rather than accepting a changed value.
 - Credential files stay outside `WI_HOME` and its backup/export boundary.
 - Complete catalog loss never auto-imports credentials; explicit recovery claims one backend-issued opaque reference and restores only the envelope's original connection and generation after fail-closed conflict checks.
+- Browser recovery references remain memory-only; safe command identity plus a nonclaiming recovery epoch reconcile lost acknowledgements/reloads, and final non-acceptance is reported only after epoch closure and drained command ingress prove no later claim can occur.
 - Explicit connection selection is the only active routing policy until a later accepted ADR or telemetry gate authorizes another policy.
 - Opaque provider state, provider cursors, and cache identity are not portable across connections by default.
 

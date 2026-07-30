@@ -23,6 +23,8 @@ Loopback is not a substitute for hostile-user isolation. Other processes owned b
 
 The browser is a temporary view, not the owner of runs or credentials. It keeps only a bounded unresolved-command/draft journal in `sessionStorage`. Provider/model/tool output is rendered as untrusted text; it is not inserted as active HTML. The browser stores no API keys, OAuth tokens, provider tokens, or durable backend state in localStorage, IndexedDB, or application-managed cookies.
 
+Planned Milestone 11 catalog-loss recovery never persists its one-time `recoveryRef` or complete recovery command in that journal. It stores only bounded nonsecret command/epoch reconciliation metadata and, after reload or lost acknowledgement, uses an authenticated non-mutating status read to obtain admission/validation pending, final not-accepted after epoch closure and drained ingress, or the original safe terminal result. The read cannot execute recovery or reveal/infer a reference, and final absence proves the old command cannot later claim evidence.
+
 A socket failure removes subscriptions only. It never implicitly cancels a run.
 
 ## Logs and diagnostics

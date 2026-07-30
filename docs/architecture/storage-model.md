@@ -441,7 +441,7 @@ It never includes:
 - API keys
 - OAuth tokens
 - browser session secrets
-- credential-vault material
+- planned [`CredentialStore`](../adr/0014-wsl-file-credential-store.md) material (no provider credential store exists in v0.1)
 
 Session-index rows are rebuildable from discovered session manifests, but project registration metadata is not independently reconstructable in v0.1. A complete installation backup should therefore include both catalog and session directories.
 

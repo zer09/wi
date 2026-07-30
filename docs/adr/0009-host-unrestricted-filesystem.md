@@ -37,7 +37,7 @@ Generic model tools must not read or directly mutate:
 - browser-session secrets
 - credential-encryption keys
 - temporary OAuth authorization material
-- credential-vault storage
+- planned [`CredentialStore`](0014-wsl-file-credential-store.md) storage (no provider credential store exists in v0.1)
 - live Wi catalog/session database files through generic file tools
 
 Dedicated Wi APIs manage session export, backup, and maintenance.

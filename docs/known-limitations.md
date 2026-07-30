@@ -7,8 +7,9 @@ These are intentional first-vertical-slice boundaries, not hidden roadmap promis
 - The only provider is deterministic fake.
 - There are no OpenAI Platform calls or API-key configuration.
 - There is no ChatGPT/Codex OAuth adapter.
+- There is no provider-connection catalog, provider credential store, multiple-account management, connection-specific model discovery, provider-state persistence, or prompt-cache telemetry.
 - Wi does not invoke or fall back to `codex app-server`.
-- There is no automatic provider, model, endpoint, account, transport, or billing switch.
+- There is no automatic provider, model, endpoint, account, workspace, authentication-mode, transport, or billing switch.
 
 ## Tools and projects
 
@@ -61,6 +62,15 @@ These are intentional first-vertical-slice boundaries, not hidden roadmap promis
 - Browser E2E targets Chromium; cross-browser compatibility is not a v0.1 release gate.
 - The final acceptance uses deterministic fake provider scenarios and test-only inspection controls; it does not validate any real provider or real host tool.
 
-## Deferred next work
+## Planned v0.2 work (not implemented)
 
-Only after the vertical-slice marker and review may later milestones consider direct provider adapters. Deferred work must preserve the established provider boundary, backend ownership, durable event/tool semantics, local security rules, and no-fallback decisions.
+The accepted [v0.2 provider-integration plan](plans/v0.2-openai-provider-integration.md) and [provider-connections architecture](architecture/v0.2-provider-connections.md) require later milestones to add, in order:
+
+- isolated multiple provider connections, explicit selection, and a file/environment `CredentialStore` in Milestone 11;
+- OpenAI Platform Responses HTTP/SSE in Milestone 12;
+- ChatGPT/Codex multi-account OAuth in Milestone 13;
+- connection-scoped provider state, caching metrics, and provider WebSocket optimization in Milestone 14;
+- telemetry collection and an explicit automatic-routing go/no-go gate in Milestone 15;
+- real projects/tools and project services only in Milestones 16–17.
+
+None of that behavior is present in the released v0.1 product. Future implementation must preserve the established provider boundary, backend ownership, durable event/tool semantics, local security rules, explicit account/billing identity, and no-fallback decisions. Automatic routing remains optional after its named gate; it is not a current capability or presumed v0.2 requirement.

@@ -6,7 +6,9 @@ Wi is a local, single-operating-system-user, Linux-only browser-based coding-age
 
 The browser is a temporary GUI. The Node.js backend owns sessions, runs, provider requests, tool execution, approvals, pending questions, project services, and persistence. Browser refresh, disconnect, tab closure, or Wi UI sign-out must not cancel backend work.
 
-The first vertical slice uses a deterministic fake provider and safe built-in test tools only. It intentionally excludes OpenAI integration, ChatGPT/Codex OAuth, `codex app-server`, CodeGraph, Context Mode, real shell commands, real file mutation tools, browser SSE, remote deployment, and multi-user hosting.
+The released v0.1 vertical slice uses a deterministic fake provider and safe built-in test tools only. It intentionally excludes OpenAI integration, ChatGPT/Codex OAuth, `codex app-server`, CodeGraph, Context Mode, real shell commands, real file mutation tools, browser SSE, remote deployment, and multi-user hosting.
+
+The planned v0.2 provider-integration phase is governed by `docs/plans/v0.2-openai-provider-integration.md`. Architecture planning does not mean OpenAI connections, OAuth, credentials, or routing are already implemented.
 
 ## Required reading
 
@@ -17,6 +19,13 @@ Before changing code, read:
 3. The architecture document relevant to the milestone
 4. `docs/adr/README.md`
 5. Every ADR relevant to the files being changed
+
+For Milestone 11 onward, also read completely:
+
+1. `docs/plans/v0.2-openai-provider-integration.md`
+2. `docs/architecture/v0.2-provider-connections.md`
+3. `docs/reference/source-snapshots.md` when provider, authentication, transport, CodeGraph, or Context Mode references are relevant
+4. ADR-0013 through ADR-0017 as applicable
 
 Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit amendment when a decision must change.
 
@@ -52,11 +61,23 @@ Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit am
 - Do not import Fastify, React, SQLite-driver, or worker implementation types into domain packages.
 - Do not invoke or add a fallback to `codex app-server`.
 - Do not add OpenAI integration during the first vertical slice.
+- Milestone 11 is fake/no-network only; OpenAI requests, endpoint probes, OAuth exchanges, and live capability discovery begin no earlier than their Milestone 12 or 13 scope.
 - Do not add browser SSE; use the multiplexed WebSocket protocol.
 - Fail the smallest reasonable fault domain and log a redacted diagnostic.
 - Treat the local operating-system user as trusted; hostile concurrent same-user mutation of `WI_HOME` is outside v0.1's threat model.
 - Do not add Windows support or Windows CI without a new ADR.
-- Do not silently switch provider, endpoint, transport, model, account, or billing source.
+- Do not silently switch provider, endpoint, transport, model, account, workspace, authentication mode, or billing source.
+- Future OAuth callbacks retain strict loopback Host validation; attempt state/PKCE/redirect identity—not WebSocket Origin or the Wi browser cookie—authorizes completion.
+- Multiple provider connections are isolated; refresh, logout, disable, deletion, or failure of one connection must not mutate another.
+- One durable per-connection lifecycle owner serializes credential and administrative mutations through terminal catalog commit; conflicting commands cannot supersede it or resurrect credentials.
+- Active runs are pinned to a provider connection and credential generation.
+- Provider secrets stay outside catalog and session databases and never enter browser payloads; file API keys enter only through backend-local staged provisioning outside `WI_HOME`.
+- Environment-backed runs pin a nonpersisted credential fingerprint before acknowledgement and interrupt on backend restart rather than accepting a changed value.
+- Credential files stay outside `WI_HOME` and its backup/export boundary.
+- Complete catalog loss never auto-imports credentials; explicit recovery claims one backend-issued opaque reference and restores only the envelope's original connection and generation after fail-closed conflict checks.
+- Browser recovery references remain memory-only; safe command identity plus a nonclaiming recovery epoch reconcile lost acknowledgements/reloads, and final non-acceptance is reported only after epoch closure and drained command ingress prove no later claim can occur.
+- Explicit connection selection is the only active routing policy until a later accepted ADR or telemetry gate authorizes another policy.
+- Opaque provider state, provider cursors, and cache identity are not portable across connections by default.
 
 ## Dependency boundaries
 

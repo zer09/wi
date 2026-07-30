@@ -318,7 +318,7 @@ Mandatory redaction:
 - cookies
 - authorization codes
 - sensitive callback query values
-- credential-vault references when they reveal paths or handles
+- planned [`CredentialStore`](../adr/0014-wsl-file-credential-store.md) references when they reveal paths or handles (no provider credential store exists in v0.1)
 - arbitrary provider/tool payloads beyond bounded reviewed previews
 
 ## 17. No hidden fallback

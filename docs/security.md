@@ -11,6 +11,7 @@ This boundary is defined by [ADR-0012](adr/0012-trusted-local-user-storage-bound
 - Production binds exactly to `127.0.0.1`.
 - HTTP validates `Host` against the listening loopback origin.
 - WebSocket upgrades validate method/path, Host, Origin, `wi.v1` subprotocol, and the local browser credential.
+- Planned OAuth callback/tombstone HTTP routes retain strict exact-loopback single-Host and parser/size validation. Top-level provider redirects may omit Origin or carry a cross-site Origin, and may lack a valid Wi browser cookie; neither Origin nor cookie authorizes callback completion. Exact backend attempt state, PKCE, expiry, and redirect contract provide the Milestone 13 authorization boundary.
 - Bootstrap establishes an HttpOnly, same-origin credential.
 - Provider credentials never enter browser storage, HTML, bootstrap JSON, or WebSocket payloads.
 - Browser traces are disabled in E2E because they can retain HttpOnly cookies.
@@ -21,6 +22,8 @@ Loopback is not a substitute for hostile-user isolation. Other processes owned b
 ## Browser handling
 
 The browser is a temporary view, not the owner of runs or credentials. It keeps only a bounded unresolved-command/draft journal in `sessionStorage`. Provider/model/tool output is rendered as untrusted text; it is not inserted as active HTML. The browser stores no API keys, OAuth tokens, provider tokens, or durable backend state in localStorage, IndexedDB, or application-managed cookies.
+
+Planned Milestone 11 catalog-loss recovery never persists its one-time `recoveryRef` or complete recovery command in that journal. It stores only bounded nonsecret command/epoch reconciliation metadata and, after reload or lost acknowledgement, uses an authenticated non-mutating status read to obtain admission/validation pending, final not-accepted after epoch closure and drained ingress, or the original safe terminal result. The read cannot execute recovery or reveal/infer a reference, and final absence proves the old command cannot later claim evidence.
 
 A socket failure removes subscriptions only. It never implicitly cancels a run.
 
@@ -43,9 +46,9 @@ Do not redirect production logs to a world-readable path. Diagnostic IDs are cor
 
 `WI_HOME` and generated subdirectories are private to the local user when Wi creates them. Wi does not chmod pre-existing parent directories. Browser input never supplies a session database path; paths derive from validated session IDs under the canonicalized home.
 
-Session databases intentionally contain user messages, assistant output, tool arguments/results, approvals, and other session history. They must not contain provider credentials, browser credentials, OAuth material, authorization headers, or credential-vault data.
+Session databases intentionally contain user messages, assistant output, tool arguments/results, approvals, and other session history. They must not contain provider credentials, browser credentials, OAuth material, authorization headers, or planned [`CredentialStore`](adr/0014-wsl-file-credential-store.md) data. The released v0.1 slice has no provider credential store.
 
-The catalog contains summaries and location/index data, not provider secrets. Session event history is append-only. Corrupt or unsupported evidence is preserved in place rather than automatically deleted or overwritten.
+The catalog contains summaries and location/index data, not provider secrets. Session event history is append-only. Corrupt or unsupported evidence is preserved in place rather than automatically deleted or overwritten. Planned complete-catalog-loss credential recovery exposes only bounded safe metadata and a backend-issued opaque one-time recovery reference to the authenticated local administration flow; it never exposes or accepts a credential path, generated filename, secret, or credential-derived fingerprint.
 
 ## Provider and tools
 
@@ -63,7 +66,7 @@ Every tool call is validated and recorded in the durable ledger. A partial, fail
 
 ## Backup/export
 
-No production session-export API or UI exists. A future export must use a consistent SQLite snapshot and exclude API keys, OAuth tokens, browser credentials, and credential-vault material. Current manual backups should be performed while Wi is stopped and treated as sensitive because session content is included.
+No production session-export API or UI exists. A future export must use a consistent SQLite snapshot and exclude API keys, OAuth tokens, browser credentials, and planned `CredentialStore` material. Current v0.1 manual backups should be performed while Wi is stopped and treated as sensitive because session content is included; planned v0.2 credentials live outside the `WI_HOME` backup boundary.
 
 ## Reporting a local diagnostic
 

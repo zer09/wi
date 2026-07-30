@@ -7,6 +7,7 @@
 - **Candidate form:** uncommitted Milestone 10 documentation overlay
 - **Follow-up verdict:** PASS WITH REQUIRED FIXES — do not begin Milestone 11
 - **Earlier record:** [Milestone 10 architecture-review remediation](milestone-10-architecture-review-remediation.md)
+- **Later remote review:** [PR #16 remote-review remediation](milestone-10-pr16-remote-review-remediation.md)
 
 The follow-up review reused finding IDs from the first review for different findings. This record calls them **review round 2** findings so later audits do not conflate them with the resolved round 1 entries.
 
@@ -111,7 +112,7 @@ Completed against the corrected working-tree candidate:
 
 ## Independent closure review
 
-A later independent working-tree review examined the candidate after both remediation rounds and returned **PASS — safe to begin Milestone 11**.
+A later independent working-tree review examined the candidate after both remediation rounds and returned **PASS — safe to begin Milestone 11**. PR #16 subsequently received a stricter remote REQUEST CHANGES review; its additional findings and corrections supersede this closure verdict and are recorded separately.
 
 - **Finding:** none; no Critical, High, Medium, or Low architecture issue remained.
 - **Correction:** none to canonical architecture, ADRs, plan, source ledger, security boundary, or milestone order. Changing an accepted decision without a finding would add churn rather than reduce risk.

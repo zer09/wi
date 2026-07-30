@@ -39,3 +39,4 @@ Review/remediation records under `docs/reviews/` preserve historical evidence. T
 
 - [Milestone 10 architecture-review remediation](reviews/milestone-10-architecture-review-remediation.md)
 - [Milestone 10 architecture-review remediation 2](reviews/milestone-10-architecture-review-remediation-2.md)
+- [Milestone 10 PR #16 remote-review remediation](reviews/milestone-10-pr16-remote-review-remediation.md)

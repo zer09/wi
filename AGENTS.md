@@ -67,11 +67,14 @@ Do not silently reinterpret an accepted ADR. Propose a new ADR or an explicit am
 - Treat the local operating-system user as trusted; hostile concurrent same-user mutation of `WI_HOME` is outside v0.1's threat model.
 - Do not add Windows support or Windows CI without a new ADR.
 - Do not silently switch provider, endpoint, transport, model, account, workspace, authentication mode, or billing source.
+- Future OAuth callbacks retain strict loopback Host validation; attempt state/PKCE/redirect identity—not WebSocket Origin or the Wi browser cookie—authorizes completion.
 - Multiple provider connections are isolated; refresh, logout, disable, deletion, or failure of one connection must not mutate another.
+- One durable per-connection lifecycle owner serializes credential and administrative mutations through terminal catalog commit; conflicting commands cannot supersede it or resurrect credentials.
 - Active runs are pinned to a provider connection and credential generation.
 - Provider secrets stay outside catalog and session databases and never enter browser payloads; file API keys enter only through backend-local staged provisioning outside `WI_HOME`.
 - Environment-backed runs pin a nonpersisted credential fingerprint before acknowledgement and interrupt on backend restart rather than accepting a changed value.
 - Credential files stay outside `WI_HOME` and its backup/export boundary.
+- Complete catalog loss never auto-imports credentials; explicit recovery claims one backend-issued opaque reference and restores only the envelope's original connection and generation after fail-closed conflict checks.
 - Explicit connection selection is the only active routing policy until a later accepted ADR or telemetry gate authorizes another policy.
 - Opaque provider state, provider cursors, and cache identity are not portable across connections by default.
 

@@ -11,6 +11,7 @@ This boundary is defined by [ADR-0012](adr/0012-trusted-local-user-storage-bound
 - Production binds exactly to `127.0.0.1`.
 - HTTP validates `Host` against the listening loopback origin.
 - WebSocket upgrades validate method/path, Host, Origin, `wi.v1` subprotocol, and the local browser credential.
+- Planned OAuth callback/tombstone HTTP routes retain strict exact-loopback single-Host and parser/size validation. Top-level provider redirects may omit Origin or carry a cross-site Origin, and may lack a valid Wi browser cookie; neither Origin nor cookie authorizes callback completion. Exact backend attempt state, PKCE, expiry, and redirect contract provide the Milestone 13 authorization boundary.
 - Bootstrap establishes an HttpOnly, same-origin credential.
 - Provider credentials never enter browser storage, HTML, bootstrap JSON, or WebSocket payloads.
 - Browser traces are disabled in E2E because they can retain HttpOnly cookies.
@@ -45,7 +46,7 @@ Do not redirect production logs to a world-readable path. Diagnostic IDs are cor
 
 Session databases intentionally contain user messages, assistant output, tool arguments/results, approvals, and other session history. They must not contain provider credentials, browser credentials, OAuth material, authorization headers, or planned [`CredentialStore`](adr/0014-wsl-file-credential-store.md) data. The released v0.1 slice has no provider credential store.
 
-The catalog contains summaries and location/index data, not provider secrets. Session event history is append-only. Corrupt or unsupported evidence is preserved in place rather than automatically deleted or overwritten.
+The catalog contains summaries and location/index data, not provider secrets. Session event history is append-only. Corrupt or unsupported evidence is preserved in place rather than automatically deleted or overwritten. Planned complete-catalog-loss credential recovery exposes only bounded safe metadata and a backend-issued opaque one-time recovery reference to the authenticated local administration flow; it never exposes or accepts a credential path, generated filename, secret, or credential-derived fingerprint.
 
 ## Provider and tools
 

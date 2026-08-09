@@ -83,6 +83,25 @@ describe("environment credential leases", () => {
     manager.close();
   });
 
+  it("validates a restored environment value without exposing it or creating a lease", () => {
+    let value: string | undefined;
+    const manager = new EnvironmentCredentialLeaseManager(
+      () => value,
+      { processEpoch: "process_revalidate", hmacKey: new Uint8Array(32).fill(9) },
+    );
+    expect(() => manager.validate("REVALIDATE_KEY")).toThrowError(expect.objectContaining({
+      code: "credential.environment_missing",
+    }));
+    value = "restored-private-value";
+    expect(() => manager.validate("REVALIDATE_KEY")).not.toThrow();
+    expect(manager.get("run_revalidate")).toBeNull();
+    value = "a".repeat(MAXIMUM_API_KEY_BYTES + 1);
+    expect(() => manager.validate("REVALIDATE_KEY")).toThrowError(expect.objectContaining({
+      code: "credential.environment_invalid",
+    }));
+    manager.close();
+  });
+
   it("discards a fingerprint reservation after failed run acceptance", () => {
     const manager = new EnvironmentCredentialLeaseManager(
       () => "secret",

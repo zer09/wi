@@ -109,3 +109,27 @@ A twenty-ninth fresh independent review is required. This record does not self-a
 | Default `${XDG_STATE_HOME:-$HOME/.local/state}/wi/credentials` root | 0 entries |
 
 A twenty-ninth fresh independent review is required; this evidence does not self-approve Milestone 11 or authorize Milestone 12.
+
+## WI-M11-H1 environment revalidation correction
+
+The remote review found that an environment-backed connection could become `unavailable` without any accepted operation to restore the same connection after its variable became valid. The old traces left both an initially absent connection and a post-use invalidated connection unavailable. The deterministic pre-fix assertions were `Expected lifecycleStatus: "ready"; Received lifecycleStatus: "unavailable"` and `provider.connection_unavailable` before credential resolution.
+
+The correction adds `providerConnection.environment.revalidate` as a strict backend-only command. The command contains only `commandId`, `connectionId`, expected lifecycle revision, and expected generation. The service validates the existing environment reference without exposing the value, then admits the existing connection through the durable `enable` lifecycle kind. A successful commit changes only `unavailable` to `ready`, increments lifecycle revision once, preserves connection ID, generation, identity, capabilities, and defaults, and stores a safe terminal result before acknowledgement. Identical retries return the stored result. Changed content conflicts. Conflicting lifecycle commands receive `provider.operation_in_progress`. Prepared operations revalidate the same target during restart recovery.
+
+The retained regressions cover initial absence, request invalidation, missing/oversized input, durable retry/conflict, lifecycle races, restart recovery, two-tab convergence, zero provider requests, and synthetic-secret scans across catalog/home data. The operation creates no credential file, connection, generation, identity claim, provider request, or secret-bearing browser value.
+
+### Round-29 verification evidence
+
+| Command | Result |
+| --- | --- |
+| `pnpm test:unit` | 56 files, 568 tests passed |
+| `pnpm test:integration` | 9 files, 298 tests passed |
+| `WI_FC_SEED=737373 pnpm test:property` | 16 files, 65 tests passed |
+| `pnpm test:process` | 68 files, 108 tests passed in the complete gate |
+| `pnpm test:e2e` | 44 tests passed |
+| `WI_FC_SEED=737373 pnpm test:fuzz` | Two local rounds passed; 11 files and 43 tests per round, seeds 737373 and 737374 |
+| `pnpm check` | 75 files, 938 tests passed |
+| Markdown link validation | 82 files, 115 local targets resolved |
+| `git diff --check` | Passed |
+
+The tree remains intentionally uncommitted and unpushed. No hosted service or Git transition changed. A fresh independent exact-tree review remains required, and this report does not authorize Milestone 12.

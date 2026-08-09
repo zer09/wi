@@ -24,6 +24,7 @@ const orphanLifecycleFixture = fileURLToPath(
 );
 const mutationFixture = fileURLToPath(new URL("./provider-lifecycle-mutation-fixture.mjs", import.meta.url));
 const environmentRestartFixture = fileURLToPath(new URL("./provider-environment-restart-fixture.mjs", import.meta.url));
+const environmentRevalidationFixture = fileURLToPath(new URL("./provider-environment-revalidation-fixture.mjs", import.meta.url));
 const provisioningFixture = fileURLToPath(new URL("./provider-provisioning-fixture.mjs", import.meta.url));
 const noNetworkFixture = fileURLToPath(new URL("./provider-no-network-fixture.mjs", import.meta.url));
 const specialFileFixture = fileURLToPath(
@@ -1044,6 +1045,82 @@ describe("Milestone 11 provider lifecycle process recovery", () => {
       runState: "interrupted",
       providerRequests: 0,
       backendProcessEpoch: expect.stringMatching(/^process_/u),
+    });
+  });
+
+  it("revalidates an unavailable environment connection during restart recovery", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wi-environment-revalidation-prepared-"));
+    homes.push(home);
+    const crashed = await processes.run(
+      process.execPath,
+      [environmentRevalidationFixture, home, "execute-prepared"],
+      20_000,
+      {
+        NODE_ENV: "test",
+        WI_ALLOW_TEST_FAILPOINTS: "1",
+        WI_TEST_FAILPOINT: "after_provider_lifecycle_prepare",
+        WI_TEST_FAILPOINT_COMMAND_ID: "cmd_environmentRevalidateProcess",
+      },
+    );
+    expect(crashed.code).toBe(
+      90 + TEST_FAILPOINTS.indexOf("after_provider_lifecycle_prepare"),
+    );
+    const inspected = await processes.run(
+      process.execPath,
+      [environmentRevalidationFixture, home, "inspect"],
+      20_000,
+      {
+        NODE_ENV: "test",
+        WI_ALLOW_TEST_FAILPOINTS: "1",
+        WI_REVALIDATE_PROCESS_KEY: "process-environment-revalidated",
+      },
+    );
+    expect(inspected.code, inspected.stderr).toBe(0);
+    expect(JSON.parse(inspected.stdout.trim().split("\n").at(-1)!) as unknown).toMatchObject({
+      lifecycleStatus: "ready",
+      lifecycleRevision: 2,
+      credentialGeneration: 1,
+      lifecycleOwnerKind: null,
+      operationPhase: "succeeded",
+      providerRequests: 0,
+    });
+  });
+
+  it("persists a successful environment revalidation across restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "wi-environment-revalidation-success-"));
+    homes.push(home);
+    const executed = await processes.run(
+      process.execPath,
+      [environmentRevalidationFixture, home, "execute-success"],
+      20_000,
+      { NODE_ENV: "test", WI_ALLOW_TEST_FAILPOINTS: "1" },
+    );
+    expect(executed.code, executed.stderr).toBe(0);
+    expect(JSON.parse(executed.stdout.trim().split("\n").at(-1)!) as unknown).toMatchObject({
+      accepted: true,
+      lifecycleStatus: "ready",
+      lifecycleRevision: 2,
+      credentialGeneration: 1,
+      providerRequests: 0,
+    });
+    const inspected = await processes.run(
+      process.execPath,
+      [environmentRevalidationFixture, home, "inspect"],
+      20_000,
+      {
+        NODE_ENV: "test",
+        WI_ALLOW_TEST_FAILPOINTS: "1",
+        WI_REVALIDATE_PROCESS_KEY: "process-environment-revalidated",
+      },
+    );
+    expect(inspected.code, inspected.stderr).toBe(0);
+    expect(JSON.parse(inspected.stdout.trim().split("\n").at(-1)!) as unknown).toMatchObject({
+      lifecycleStatus: "ready",
+      lifecycleRevision: 2,
+      credentialGeneration: 1,
+      lifecycleOwnerKind: null,
+      operationPhase: "succeeded",
+      providerRequests: 0,
     });
   });
 

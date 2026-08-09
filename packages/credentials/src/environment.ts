@@ -68,6 +68,10 @@ export class EnvironmentCredentialLeaseManager {
     this.#leases.delete(runId);
   }
 
+  validate(variableName: string): void {
+    this.value(variableName);
+  }
+
   get(runId: string): EnvironmentCredentialLease | null {
     return this.#leases.get(runId) ?? null;
   }

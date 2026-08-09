@@ -118,7 +118,7 @@ export interface WiRuntimeOptions {
       kind: "capabilities" | "recovery_availability",
     ) => void;
     readonly afterLifecyclePrepare?: (
-      operationKind: "create" | "replace" | "logout" | "delete",
+      operationKind: "create" | "replace" | "logout" | "delete" | "enable",
       commandId: string,
       connectionId: string,
     ) => Promise<void>;

@@ -166,7 +166,7 @@ const runtime = new WiRuntime({
             ? {}
             : { providerConfiguration: { scenario: providerScenarioArgument } }),
           afterLifecyclePrepare: async (operationKind, commandId, connectionId) => {
-            if (!lifecyclePrepareArmed || operationKind !== "replace") return;
+            if (!lifecyclePrepareArmed || !["replace", "enable"].includes(operationKind)) return;
             lifecyclePrepareArmed = false;
             send({ type: "lifecycle-prepare-blocked", commandId, connectionId });
             await new Promise((resolve) => lifecyclePrepareGates.set(commandId, resolve));
@@ -222,6 +222,9 @@ const runtime = new WiRuntime({
     return { scenario: "plain-text" };
   },
 });
+if (process.env.WI_E2E_REVALIDATE_INITIAL === "1") {
+  delete process.env.WI_E2E_REVALIDATE_KEY;
+}
 const server = new WiServer({
   runtime,
   port: fixedPort ?? 0,
@@ -349,6 +352,14 @@ process.on("message", (message) => {
   if (message === null || typeof message !== "object") return;
   void (async () => {
     switch (message.type) {
+      case "restore-provider-environment": {
+        if (typeof message.requestId !== "string") {
+          throw new Error("Provider environment restore request is invalid");
+        }
+        process.env.WI_E2E_REVALIDATE_KEY = "e2e-restored-environment-value";
+        send({ type: "provider-environment-restored", requestId: message.requestId });
+        return;
+      }
       case "stage-provider-key": {
         if (typeof message.requestId !== "string" || typeof message.label !== "string") {
           throw new Error("Provider stage request is invalid");

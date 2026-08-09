@@ -58,6 +58,7 @@ export interface RestartableServer {
   readonly homeDirectory: string;
   restart(): Promise<void>;
   restartAfterCrash(): Promise<void>;
+  restoreProviderEnvironment(): Promise<void>;
   stageProviderKey(label: string): Promise<string>;
   armProviderFailpoint(name: ProviderRecoveryFailpoint): Promise<void>;
   armLifecyclePrepare(): Promise<void>;
@@ -307,6 +308,13 @@ export async function startRestartableServer(
       if (current.origin !== origin) {
         throw new Error(`Restart changed origin from ${origin} to ${current.origin}`);
       }
+    },
+    async restoreProviderEnvironment() {
+      await request(
+        "restore-provider-environment",
+        {},
+        "provider-environment-restored",
+      );
     },
     async stageProviderKey(label) {
       const response = await request("stage-provider-key", { label }, "provider-key-staged");

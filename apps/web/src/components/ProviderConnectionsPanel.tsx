@@ -313,6 +313,23 @@ export function ProviderConnectionsPanel(props: ProviderConnectionsPanelProps) {
     });
   };
 
+  const revalidateEnvironment = (
+    connection: NonNullable<ProviderConnectionList>["connections"][number],
+  ): void => {
+    if (connection.credentialBackend.kind !== "environment") return;
+    send({
+      v: 1,
+      kind: "command",
+      commandId: createId("command", idSource),
+      method: "providerConnection.environment.revalidate",
+      params: {
+        connectionId: connection.connectionId,
+        expectedLifecycleRevision: connection.lifecycleRevision,
+        expectedGeneration: connection.credentialGeneration,
+      },
+    });
+  };
+
   const lifecycle = (
     method: "providerConnection.disable" | "providerConnection.logout" | "providerConnection.delete",
     connection: NonNullable<ProviderConnectionList>["connections"][number],
@@ -394,6 +411,7 @@ export function ProviderConnectionsPanel(props: ProviderConnectionsPanelProps) {
             <strong>{connection.displayName}</strong> — {connection.lifecycleStatus} · {connection.credentialBackend.kind} · generation {connection.credentialGeneration} · {connection.providerId} · {connection.authMode} · {connectionIdentityContext(connection)}
             <span className="provider-panel__actions">
               <button type="button" disabled={props.disabled || connection.lifecycleOwnerKind !== null} onClick={() => lifecycle("providerConnection.disable", connection)}>Disable</button>
+              <button type="button" disabled={props.disabled || connection.credentialBackend.kind !== "environment" || connection.lifecycleStatus !== "unavailable" || connection.deleted || connection.lifecycleOwnerKind !== null} onClick={() => revalidateEnvironment(connection)}>Revalidate environment</button>
               <button type="button" disabled={props.disabled || connection.lifecycleOwnerKind !== null} onClick={() => lifecycle("providerConnection.logout", connection)}>Logout</button>
               <button type="button" disabled={props.disabled || connection.lifecycleOwnerKind !== null} onClick={() => lifecycle("providerConnection.delete", connection)}>Delete</button>
             </span>

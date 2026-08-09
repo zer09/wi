@@ -425,6 +425,125 @@ describe("provider connection catalog storage", () => {
     }
   });
 
+  it("revalidates only an unavailable environment connection without changing generation", async () => {
+    const client = await catalog();
+    const input = {
+      commandId: "cmd_environmentRevalidateStorage",
+      commandMethod: "providerConnection.environment.revalidate",
+      contentHash: "e".repeat(64),
+      operationKind: "enable" as const,
+      connectionId: "pconn_a",
+      expectedLifecycleRevision: 1,
+      expectedGeneration: 1,
+      credentialBackendKind: "environment" as const,
+      credentialInternalRef: null,
+      targetEnvelopeId: null,
+      provisioningId: null,
+      stagingInternalRef: null,
+      stagingFileIdentity: null,
+      recoveryEpochId: null,
+      expectedSafeMetadata: null,
+      createdAtMs: 2_000,
+    };
+    try {
+      await client.registerEnvironmentConnection({
+        ...registration("a"),
+        initialStatus: "unavailable",
+      });
+      const prepared = await client.prepareProviderLifecycle(input);
+      expect(prepared).toMatchObject({
+        duplicate: false,
+        connection: {
+          lifecycleStatus: "unavailable",
+          lifecycleRevision: 2,
+          credentialGeneration: 1,
+          lifecycleOwnerKind: "enable",
+        },
+        operation: { phase: "prepared", operationKind: "enable" },
+      });
+      const completed = await client.completeProviderLifecycle({
+        commandId: input.commandId,
+        contentHash: input.contentHash,
+        observedEnvelopeId: null,
+        credentialInternalRef: null,
+        terminalPhase: "succeeded",
+        lifecycleStatus: "ready",
+        result: { connectionId: input.connectionId },
+        failureCode: null,
+        failureMessage: null,
+        diagnosticId: null,
+        updatedAtMs: 2_001,
+      });
+      expect(completed).toMatchObject({
+        duplicate: false,
+        connection: {
+          lifecycleStatus: "ready",
+          lifecycleRevision: 2,
+          credentialGeneration: 1,
+          lifecycleOwnerKind: null,
+        },
+        operation: { phase: "succeeded", operationKind: "enable" },
+      });
+      await expect(client.prepareProviderLifecycle(input)).resolves.toMatchObject({
+        duplicate: true,
+        connection: { lifecycleStatus: "ready", lifecycleRevision: 2, credentialGeneration: 1 },
+        operation: { phase: "succeeded" },
+      });
+      await expect(client.prepareProviderLifecycle({
+        ...input,
+        contentHash: "f".repeat(64),
+      })).rejects.toMatchObject({ code: "protocol.command_id_conflict" });
+      await expect(client.prepareProviderLifecycle({
+        ...input,
+        commandId: "cmd_enableReadyStorage",
+        contentHash: "1".repeat(64),
+        expectedLifecycleRevision: 2,
+      })).rejects.toMatchObject({ code: "provider.connection_unavailable" });
+
+      const fileInput = {
+        commandId: "cmd_fileBackedRevalidateCreate",
+        commandMethod: "providerConnection.file.create" as const,
+        contentHash: "2".repeat(64),
+        connectionId: "pconn_fileBackedRevalidate",
+        providerId: "openai_platform" as const,
+        authMode: "api_key" as const,
+        displayName: "File-backed revalidation",
+        identity: { status: "unverified" as const },
+        credentialInternalRef: "credref_fileBackedRevalidate",
+        targetEnvelopeId: "envl_fileBackedRevalidate",
+        provisioningId: "prov_fileBackedRevalidate",
+        stagingInternalRef: "stage_fileBackedRevalidate",
+        stagingFileIdentity: { device: "1", inode: "2", size: "3", ctimeNs: "4" },
+        createdAtMs: 3_000,
+      };
+      await client.reserveFileProviderConnection(fileInput);
+      await client.completeProviderLifecycle({
+        commandId: fileInput.commandId,
+        contentHash: fileInput.contentHash,
+        observedEnvelopeId: null,
+        credentialInternalRef: fileInput.credentialInternalRef,
+        terminalPhase: "failed",
+        lifecycleStatus: "unavailable",
+        result: null,
+        failureCode: "credential.test_failure",
+        failureMessage: "test failure",
+        diagnosticId: null,
+        updatedAtMs: 3_001,
+      });
+      await expect(client.prepareProviderLifecycle({
+        ...input,
+        commandId: "cmd_enableFileBackedStorage",
+        contentHash: "3".repeat(64),
+        connectionId: fileInput.connectionId,
+        credentialBackendKind: "file",
+        credentialInternalRef: fileInput.credentialInternalRef,
+        targetEnvelopeId: fileInput.targetEnvelopeId,
+      })).rejects.toMatchObject({ code: "provider.connection_unavailable" });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("enforces one transactional total limit across every connection insertion path", async () => {
     const client = await catalog();
     const registrationAt = (index: number) => ({

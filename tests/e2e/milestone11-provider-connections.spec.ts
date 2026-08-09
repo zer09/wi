@@ -164,6 +164,58 @@ test("manages a safe environment connection and exposes explicit session selecti
   }
 });
 
+test("revalidates an unavailable environment connection across two tabs", async ({ page, context }) => {
+  const previousFlag = process.env.WI_E2E_REVALIDATE_INITIAL;
+  const previousValue = process.env.WI_E2E_REVALIDATE_KEY;
+  process.env.WI_E2E_REVALIDATE_INITIAL = "1";
+  process.env.WI_E2E_REVALIDATE_KEY = "e2e-initial-environment-value";
+  const restartable = await startRestartableServer({ providerScenario: "plain-text" });
+  delete process.env.WI_E2E_REVALIDATE_INITIAL;
+  try {
+    await page.goto(restartable.origin);
+    await expect(page.locator(".connection")).toContainText("Connected");
+    await page.getByText("Provider connections", { exact: true }).click();
+    await page.getByLabel("Connection display name", { exact: true }).fill("Environment revalidation");
+    await page.getByLabel("Environment variable name").fill("WI_E2E_REVALIDATE_KEY");
+    await page.getByRole("button", { name: "Add environment" }).click();
+    const row = page.locator(".provider-panel__list li").filter({ hasText: "Environment revalidation" });
+    await expect(row).toContainText("unavailable", { timeout: 10_000 });
+
+    const second = await context.newPage();
+    await second.goto(restartable.origin);
+    await expect(second.locator(".connection")).toContainText("Connected");
+    await second.getByText("Provider connections", { exact: true }).click();
+    const secondRow = second.locator(".provider-panel__list li").filter({ hasText: "Environment revalidation" });
+    await expect(secondRow).toContainText("unavailable", { timeout: 10_000 });
+
+    await restartable.restoreProviderEnvironment();
+    await restartable.armLifecyclePrepare();
+    await row.getByRole("button", { name: "Revalidate environment" }).click();
+    const firstCommand = await restartable.waitForProviderCommand(
+      "providerConnection.environment.revalidate",
+    );
+    const blocked = await restartable.waitForLifecyclePrepareBlock();
+    await secondRow.getByRole("button", { name: "Revalidate environment" }).click();
+    const secondCommand = await restartable.waitForProviderCommand(
+      "providerConnection.environment.revalidate",
+    );
+    await expect.poll(async () => restartable.providerOperation(secondCommand)).toMatchObject({
+      phase: "failed",
+      targetConnectionId: blocked.connectionId,
+      failureCode: "provider.operation_in_progress",
+    });
+    restartable.releaseLifecyclePrepare(firstCommand);
+    await expect(row).toContainText("ready", { timeout: 10_000 });
+    await expect(secondRow).toContainText("ready", { timeout: 10_000 });
+  } finally {
+    await restartable.close();
+    if (previousFlag === undefined) delete process.env.WI_E2E_REVALIDATE_INITIAL;
+    else process.env.WI_E2E_REVALIDATE_INITIAL = previousFlag;
+    if (previousValue === undefined) delete process.env.WI_E2E_REVALIDATE_KEY;
+    else process.env.WI_E2E_REVALIDATE_KEY = previousValue;
+  }
+});
+
 test("shows a lifecycle-owner conflict and converges after the initiating tab closes", async ({ page, context }) => {
   const restartable = await startRestartableServer({ providerScenario: "plain-text" });
   try {

@@ -153,7 +153,7 @@ export interface ProviderConnectionFixtureOptions {
   readonly afterRecoveryStatusInitialLookup?: () => Promise<void>;
   readonly beforePostCommitMaintenance?: (kind: ProviderMaintenanceKind) => void;
   readonly afterLifecyclePrepare?: (
-    operationKind: "create" | "replace" | "logout" | "delete",
+    operationKind: "create" | "replace" | "logout" | "delete" | "enable",
     commandId: string,
     connectionId: string,
   ) => Promise<void>;
@@ -372,6 +372,10 @@ export class ProviderConnectionService implements ProviderConnectionCommandHandl
       ) {
         return await this.runLifecycleTask(command, () =>
           this.applyAdministrativeLifecycle(command));
+      }
+      if (command.method === "providerConnection.environment.revalidate") {
+        return await this.runLifecycleTask(command, () =>
+          this.revalidateEnvironmentConnection(command));
       }
       if (command.method === "providerConnection.environment.create") {
         const variableValue = this.environment[command.params.variableName];
@@ -1026,6 +1030,145 @@ export class ProviderConnectionService implements ProviderConnectionCommandHandl
     return accepted(command.commandId, completed.connection.connectionId, completed.duplicate);
   }
 
+  private async revalidateEnvironmentConnection(
+    command: Extract<ProviderConnectionCommand, {
+      readonly method: "providerConnection.environment.revalidate";
+    }>,
+  ): Promise<CommandAcceptedMessage> {
+    const contentHash = await canonicalJsonHash(command);
+    const existingOperation = await this.storage.catalog.getProviderLifecycleOperation(
+      command.commandId,
+    );
+    if (
+      existingOperation !== null &&
+      (
+        existingOperation.contentHash !== contentHash ||
+        existingOperation.commandMethod !== command.method
+      )
+    ) {
+      throw new CommandRoutingError(
+        "protocol.command_id_conflict",
+        "The provider connection command ID was reused with different content.",
+      );
+    }
+    const current = await this.storage.catalog.getProviderConnection(
+      existingOperation?.targetConnectionId ?? command.params.connectionId,
+    );
+    if (current === null) {
+      throw new CommandRoutingError(
+        "provider.connection_not_found",
+        "The provider connection does not exist.",
+      );
+    }
+    if (existingOperation !== null && ["succeeded", "failed", "failed_after_effect"].includes(existingOperation.phase)) {
+      if (existingOperation.phase === "succeeded") {
+        await this.publishCapabilitiesAfterCommit(current);
+        return accepted(command.commandId, current.connectionId, true);
+      }
+      this.throwTerminalOperation(existingOperation);
+    }
+    if (existingOperation === null && current.lifecycleOwnerKind === null) {
+      if (
+        current.deleted ||
+        current.credentialBackend.kind !== "environment" ||
+        current.lifecycleStatus !== "unavailable"
+      ) {
+        throw new CommandRoutingError(
+          "provider.connection_unavailable",
+          "Environment revalidation requires an undeleted unavailable environment connection.",
+        );
+      }
+      if (
+        current.lifecycleRevision !== command.params.expectedLifecycleRevision ||
+        current.credentialGeneration !== command.params.expectedGeneration
+      ) {
+        throw new CommandRoutingError(
+          "provider.stale_revision",
+          "Provider connection revision is stale.",
+        );
+      }
+      try {
+        this.environmentLeases.validate(current.credentialBackend.variableName);
+      } catch (error) {
+        if (error instanceof CredentialError) {
+          throw new CommandRoutingError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+
+    const prepared = await this.storage.catalog.prepareProviderLifecycle({
+      commandId: command.commandId,
+      commandMethod: command.method,
+      contentHash,
+      operationKind: "enable",
+      connectionId: current.connectionId,
+      expectedLifecycleRevision: command.params.expectedLifecycleRevision,
+      expectedGeneration: command.params.expectedGeneration,
+      credentialBackendKind: current.credentialBackend.kind,
+      credentialInternalRef: current.credentialInternalRef,
+      targetEnvelopeId: current.envelopeId,
+      provisioningId: null,
+      stagingInternalRef: null,
+      stagingFileIdentity: null,
+      recoveryEpochId: null,
+      expectedSafeMetadata: null,
+      createdAtMs: this.now(),
+    });
+    if (prepared.operation.phase === "succeeded") {
+      await this.publishCapabilitiesAfterCommit(prepared.connection);
+      return accepted(command.commandId, prepared.connection.connectionId, true);
+    }
+    if (prepared.operation.phase === "failed" || prepared.operation.phase === "failed_after_effect") {
+      this.throwTerminalOperation(prepared.operation);
+    }
+    if (!prepared.duplicate) {
+      this.hitFailpoint("after_provider_lifecycle_prepare", command.commandId);
+      await this.fixtures.afterLifecyclePrepare?.(
+        "enable",
+        command.commandId,
+        current.connectionId,
+      );
+    }
+    if (current.credentialBackend.kind !== "environment") {
+      const error = new CommandRoutingError(
+        "provider.connection_unavailable",
+        "Environment revalidation requires an environment credential.",
+      );
+      await this.failOwnedOperation(prepared.operation, false, error);
+      throw error;
+    }
+    try {
+      this.environmentLeases.validate(current.credentialBackend.variableName);
+    } catch (error) {
+      await this.failOwnedOperation(prepared.operation, false, error);
+      if (error instanceof CredentialError) {
+        throw new CommandRoutingError(error.code, error.message);
+      }
+      throw error;
+    }
+    const completed = await this.storage.catalog.completeProviderLifecycle({
+      commandId: command.commandId,
+      contentHash,
+      observedEnvelopeId: null,
+      credentialInternalRef: null,
+      terminalPhase: "succeeded",
+      lifecycleStatus: "ready",
+      result: { connectionId: current.connectionId },
+      failureCode: null,
+      failureMessage: null,
+      diagnosticId: null,
+      updatedAtMs: this.now(),
+    });
+    this.hitFailpoint("after_provider_lifecycle_terminal_before_ack", command.commandId);
+    await this.publishCapabilitiesAfterCommit(completed.connection);
+    return accepted(
+      command.commandId,
+      completed.connection.connectionId,
+      completed.duplicate,
+    );
+  }
+
   private async applyAdministrativeLifecycle(
     command: Extract<ProviderConnectionCommand, {
       readonly method:
@@ -1538,7 +1681,8 @@ export class ProviderConnectionService implements ProviderConnectionCommandHandl
         operation.operationKind === "replace" ||
         operation.operationKind === "reauthenticate" ||
         operation.operationKind === "refresh" ||
-        operation.operationKind === "credential_recovery"
+        operation.operationKind === "credential_recovery" ||
+        operation.operationKind === "enable"
       ) {
         lifecycleStatus = "ready";
       } else if (operation.operationKind === "disable") {
@@ -1547,6 +1691,16 @@ export class ProviderConnectionService implements ProviderConnectionCommandHandl
         lifecycleStatus = "reauth_required";
       }
       try {
+        if (operation.operationKind === "enable") {
+          if (
+            connection.deleted ||
+            connection.credentialBackend.kind !== "environment" ||
+            connection.lifecycleStatus !== "unavailable"
+          ) {
+            throw new Error("Environment revalidation target is no longer unavailable.");
+          }
+          this.environmentLeases.validate(connection.credentialBackend.variableName);
+        }
         if (operation.credentialBackendKind === "file" && operation.credentialInternalRef !== null) {
           const roots = await this.credentialRoots();
           const store = this.fileStore(roots.credentialRoot, operation.commandId);
@@ -1666,9 +1820,11 @@ export class ProviderConnectionService implements ProviderConnectionCommandHandl
             .deleteClaimedInternal(operation.stagingInternalRef);
         }
       } catch (error) {
-        let afterEffect = true;
+        let afterEffect = operation.operationKind !== "enable";
         try {
-          afterEffect = !(await this.canProveLifecycleEffectAbsent(operation, connection));
+          if (operation.operationKind !== "enable") {
+            afterEffect = !(await this.canProveLifecycleEffectAbsent(operation, connection));
+          }
         } catch {
           // Unprovable evidence remains an after-effect failure.
         }

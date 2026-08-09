@@ -253,6 +253,7 @@ function durablePayloadBytes(command: CommandMessage): number {
       return 0;
     case "providerConnection.file.create":
     case "providerConnection.environment.create":
+    case "providerConnection.environment.revalidate":
     case "providerConnection.file.replace":
     case "providerConnection.rename":
     case "providerConnection.disable":

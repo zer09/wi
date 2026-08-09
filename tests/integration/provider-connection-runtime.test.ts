@@ -30,6 +30,8 @@ const previousGate = process.env.WI_ALLOW_TEST_FAILPOINTS;
 const previousNodeEnv = process.env.NODE_ENV;
 const previousKey = process.env.WI_TEST_PROVIDER_KEY;
 const previousChangedKey = process.env.WI_CHANGED_PROVIDER_KEY;
+const previousRevalidateInitialKey = process.env.WI_REVALIDATE_INITIAL_KEY;
+const previousRevalidateChangedKey = process.env.WI_REVALIDATE_CHANGED_KEY;
 
 afterEach(async () => {
   await Promise.allSettled(runtimes.splice(0).map((runtime) => runtime.close()));
@@ -42,6 +44,10 @@ afterEach(async () => {
   else process.env.WI_TEST_PROVIDER_KEY = previousKey;
   if (previousChangedKey === undefined) delete process.env.WI_CHANGED_PROVIDER_KEY;
   else process.env.WI_CHANGED_PROVIDER_KEY = previousChangedKey;
+  if (previousRevalidateInitialKey === undefined) delete process.env.WI_REVALIDATE_INITIAL_KEY;
+  else process.env.WI_REVALIDATE_INITIAL_KEY = previousRevalidateInitialKey;
+  if (previousRevalidateChangedKey === undefined) delete process.env.WI_REVALIDATE_CHANGED_KEY;
+  else process.env.WI_REVALIDATE_CHANGED_KEY = previousRevalidateChangedKey;
   vi.restoreAllMocks();
 });
 
@@ -1741,6 +1747,291 @@ describe("provider connection runtime fixture", () => {
     await expect(session.getNonterminalRuns()).resolves.toEqual([]);
   });
 
+  it("restores an environment connection that started unavailable after its value returns", async () => {
+    delete process.env.WI_REVALIDATE_INITIAL_KEY;
+    const home = await mkdtemp(join(tmpdir(), "wi-provider-environment-revalidate-initial-"));
+    homes.push(home);
+    const runtime = new WiRuntime({ homeDirectory: home });
+    runtimes.push(runtime);
+    await runtime.ready();
+
+    const created = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateInitialCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Initially unavailable",
+        variableName: "WI_REVALIDATE_INITIAL_KEY",
+      },
+    });
+    const connectionId = String((created.result as { readonly connectionId: string }).connectionId);
+    await expect(runtime.storage.catalog.getProviderConnection(connectionId)).resolves.toMatchObject({
+      lifecycleStatus: "unavailable",
+      credentialGeneration: 1,
+      lifecycleRevision: 1,
+    });
+
+    process.env.WI_REVALIDATE_INITIAL_KEY = "restored-initial-value";
+    const revalidate = {
+      v: 1 as const,
+      kind: "command" as const,
+      commandId: "cmd_revalidateInitial",
+      method: "providerConnection.environment.revalidate" as const,
+      params: {
+        connectionId,
+        expectedLifecycleRevision: 1,
+        expectedGeneration: 1,
+      },
+    };
+    await expect(runtime.providerConnections.route(revalidate)).resolves.toMatchObject({
+      duplicate: false,
+      result: { connectionId },
+    });
+    await expect(runtime.storage.catalog.getProviderConnection(connectionId)).resolves.toMatchObject({
+      lifecycleStatus: "ready",
+      credentialGeneration: 1,
+      lifecycleRevision: 2,
+    });
+    await expect(runtime.providerConnections.route(revalidate)).resolves.toMatchObject({
+      duplicate: true,
+      result: { connectionId },
+    });
+    await expect(runtime.providerConnections.route({
+      ...revalidate,
+      params: { ...revalidate.params, expectedGeneration: 2 },
+    })).rejects.toMatchObject({ code: "protocol.command_id_conflict" });
+    const secret = "restored-initial-value";
+    expect(JSON.stringify(await runtime.storage.catalog.getProviderLifecycleOperation(
+      revalidate.commandId,
+    ))).not.toContain(secret);
+    for (const path of await filesBelow(home)) {
+      expect((await readFile(path)).includes(Buffer.from(secret))).toBe(false);
+    }
+  });
+
+  it("restores the same environment connection after request invalidation", async () => {
+    process.env.WI_REVALIDATE_CHANGED_KEY = "original-revalidate-value";
+    const home = await mkdtemp(join(tmpdir(), "wi-provider-environment-revalidate-request-"));
+    homes.push(home);
+    const runtime = new WiRuntime({ homeDirectory: home });
+    runtimes.push(runtime);
+    await runtime.ready();
+
+    const created = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateChangedCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Invalidated environment",
+        variableName: "WI_REVALIDATE_CHANGED_KEY",
+      },
+    });
+    const connectionId = String((created.result as { readonly connectionId: string }).connectionId);
+    const connection = await runtime.storage.catalog.getProviderConnection(connectionId);
+    expect(connection).not.toBeNull();
+    await runtime.storage.catalog.markEnvironmentConnectionUnavailable({
+      connectionId,
+      expectedGeneration: connection!.credentialGeneration,
+      expectedLifecycleRevision: connection!.lifecycleRevision,
+      updatedAtMs: Date.now(),
+    });
+    process.env.WI_REVALIDATE_CHANGED_KEY = "restored-revalidate-value";
+
+    const revalidate = {
+      v: 1 as const,
+      kind: "command" as const,
+      commandId: "cmd_revalidateChanged",
+      method: "providerConnection.environment.revalidate" as const,
+      params: {
+        connectionId,
+        expectedLifecycleRevision: connection!.lifecycleRevision + 1,
+        expectedGeneration: connection!.credentialGeneration,
+      },
+    };
+    await expect(runtime.providerConnections.route(revalidate)).resolves.toMatchObject({
+      duplicate: false,
+      result: { connectionId },
+    });
+    await expect(runtime.storage.catalog.getProviderConnection(connectionId)).resolves.toMatchObject({
+      lifecycleStatus: "ready",
+      credentialGeneration: connection!.credentialGeneration,
+      lifecycleRevision: connection!.lifecycleRevision + 2,
+    });
+  });
+
+  it("rejects environment revalidation for invalid states and lifecycle conflicts", async () => {
+    process.env.NODE_ENV = "test";
+    process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
+    delete process.env.WI_REVALIDATE_INITIAL_KEY;
+    const home = await mkdtemp(join(tmpdir(), "wi-provider-environment-revalidate-states-"));
+    homes.push(home);
+    let markPrepared!: () => void;
+    let releasePrepared!: () => void;
+    const prepared = new Promise<void>((resolve) => { markPrepared = resolve; });
+    const prepareGate = new Promise<void>((resolve) => { releasePrepared = resolve; });
+    const runtime = new WiRuntime({
+      homeDirectory: home,
+      providerConnectionFixture: {
+        provider: new FakeProviderAdapter({ id: "openai_platform" }),
+        capabilitiesForConnection: () => null,
+        afterLifecyclePrepare: async (kind) => {
+          if (kind !== "enable") return;
+          markPrepared();
+          await prepareGate;
+        },
+      },
+    });
+    runtimes.push(runtime);
+    await runtime.ready();
+
+    process.env.WI_REVALIDATE_INITIAL_KEY = "ready-environment-value";
+    const readyResult = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateReadyCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Ready environment",
+        variableName: "WI_REVALIDATE_INITIAL_KEY",
+      },
+    });
+    const readyConnectionId = String((readyResult.result as { readonly connectionId: string }).connectionId);
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateReady",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: readyConnectionId, expectedLifecycleRevision: 1, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "provider.connection_unavailable" });
+    await expect(runtime.storage.catalog.getProviderLifecycleOperation("cmd_revalidateReady"))
+      .resolves.toBeNull();
+
+    const disabled = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateDisabledCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Disabled environment",
+        variableName: "WI_REVALIDATE_INITIAL_KEY",
+      },
+    });
+    const disabledConnectionId = String((disabled.result as { readonly connectionId: string }).connectionId);
+    await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateDelete",
+      method: "providerConnection.delete",
+      params: { connectionId: disabledConnectionId, expectedLifecycleRevision: 1, expectedGeneration: 1 },
+    });
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateDeletedState",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: disabledConnectionId, expectedLifecycleRevision: 2, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "provider.connection_unavailable" });
+
+    const unavailable = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateWrongRevisionCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Unavailable environment",
+        variableName: "WI_REVALIDATE_INITIAL_KEY",
+      },
+    });
+    const unavailableConnectionId = String((unavailable.result as { readonly connectionId: string }).connectionId);
+    await runtime.storage.catalog.markEnvironmentConnectionUnavailable({
+      connectionId: unavailableConnectionId,
+      expectedGeneration: 1,
+      expectedLifecycleRevision: 1,
+      updatedAtMs: Date.now(),
+    });
+    delete process.env.WI_REVALIDATE_INITIAL_KEY;
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateMissingValue",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: unavailableConnectionId, expectedLifecycleRevision: 2, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "credential.environment_missing" });
+    await expect(runtime.storage.catalog.getProviderConnection(unavailableConnectionId))
+      .resolves.toMatchObject({ lifecycleStatus: "unavailable", lifecycleRevision: 2, credentialGeneration: 1 });
+    process.env.WI_REVALIDATE_INITIAL_KEY = "a".repeat(16_385);
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateOversizedValue",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: unavailableConnectionId, expectedLifecycleRevision: 2, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "credential.environment_invalid" });
+    await expect(runtime.storage.catalog.getProviderConnection(unavailableConnectionId))
+      .resolves.toMatchObject({ lifecycleStatus: "unavailable", lifecycleRevision: 2, credentialGeneration: 1 });
+    process.env.WI_REVALIDATE_INITIAL_KEY = "ready-after-invalid-values";
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateWrongRevision",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: unavailableConnectionId, expectedLifecycleRevision: 1, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "provider.stale_revision" });
+
+    delete process.env.WI_REVALIDATE_INITIAL_KEY;
+    const conflict = await runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateConflictCreate",
+      method: "providerConnection.environment.create",
+      params: {
+        providerId: "openai_platform",
+        authMode: "api_key",
+        displayName: "Conflict environment",
+        variableName: "WI_REVALIDATE_INITIAL_KEY",
+      },
+    });
+    const conflictConnectionId = String((conflict.result as { readonly connectionId: string }).connectionId);
+    process.env.WI_REVALIDATE_INITIAL_KEY = "conflict-restored-value";
+    const revalidate = runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateConflict",
+      method: "providerConnection.environment.revalidate" as const,
+      params: { connectionId: conflictConnectionId, expectedLifecycleRevision: 1, expectedGeneration: 1 },
+    });
+    await prepared;
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_disableDuringRevalidate",
+      method: "providerConnection.disable",
+      params: { connectionId: conflictConnectionId, expectedLifecycleRevision: 1, expectedGeneration: 1 },
+    })).rejects.toMatchObject({ code: "provider.operation_in_progress" });
+    await expect(runtime.storage.catalog.getProviderLifecycleOperation("cmd_disableDuringRevalidate"))
+      .resolves.toMatchObject({ phase: "failed", failureCode: "provider.operation_in_progress" });
+    releasePrepared();
+    await expect(revalidate).resolves.toMatchObject({ duplicate: false, result: { connectionId: conflictConnectionId } });
+    await expect(runtime.storage.catalog.getProviderConnection(conflictConnectionId)).resolves.toMatchObject({
+      lifecycleStatus: "ready",
+      lifecycleRevision: 2,
+      credentialGeneration: 1,
+    });
+    expect(runtime.provider.requests).toHaveLength(0);
+  });
+
   it("pins an explicit environment connection snapshot before acknowledgement", async () => {
     process.env.NODE_ENV = "test";
     process.env.WI_ALLOW_TEST_FAILPOINTS = "1";
@@ -2004,6 +2295,23 @@ describe("provider connection runtime fixture", () => {
     expect(issuedCredentialMatches).toEqual([true, true, true]);
     await expect(runtime.storage.catalog.getProviderConnection(changedConnectionId))
       .resolves.toMatchObject({ lifecycleStatus: "unavailable", lifecycleRevision: 2 });
+    process.env.WI_CHANGED_PROVIDER_KEY = "first-value";
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateAfterToolResult",
+      method: "providerConnection.environment.revalidate" as const,
+      params: {
+        connectionId: changedConnectionId,
+        expectedLifecycleRevision: 2,
+        expectedGeneration: 1,
+      },
+    })).resolves.toMatchObject({
+      duplicate: false,
+      result: { connectionId: changedConnectionId },
+    });
+    await expect(runtime.storage.catalog.getProviderConnection(changedConnectionId))
+      .resolves.toMatchObject({ lifecycleStatus: "ready", lifecycleRevision: 3, credentialGeneration: 1 });
 
     process.env.WI_CHANGED_PROVIDER_KEY = "a".repeat(16_385);
     const oversizedResult = await runtime.providerConnections.route({
@@ -2053,5 +2361,22 @@ describe("provider connection runtime fixture", () => {
     }, "client_fixture")).rejects.toMatchObject({ code: "credential.environment_invalid" });
     await expect(runtime.storage.catalog.getProviderConnection(oversizedConnectionId))
       .resolves.toMatchObject({ lifecycleStatus: "unavailable", lifecycleRevision: 2 });
+    process.env.WI_CHANGED_PROVIDER_KEY = "restored-after-oversized";
+    await expect(runtime.providerConnections.route({
+      v: 1,
+      kind: "command",
+      commandId: "cmd_revalidateAfterOversized",
+      method: "providerConnection.environment.revalidate" as const,
+      params: {
+        connectionId: oversizedConnectionId,
+        expectedLifecycleRevision: 2,
+        expectedGeneration: 1,
+      },
+    })).resolves.toMatchObject({
+      duplicate: false,
+      result: { connectionId: oversizedConnectionId },
+    });
+    await expect(runtime.storage.catalog.getProviderConnection(oversizedConnectionId))
+      .resolves.toMatchObject({ lifecycleStatus: "ready", lifecycleRevision: 3, credentialGeneration: 1 });
   });
 });

@@ -1615,6 +1615,19 @@ export class CatalogRepository {
       ) {
         throw new StorageError("provider.stale_revision", "Provider connection revision is stale");
       }
+      if (
+        input.operationKind === "enable" &&
+        (
+          connection.credentialBackend.kind !== "environment" ||
+          connection.deleted ||
+          connection.lifecycleStatus !== "unavailable"
+        )
+      ) {
+        throw new StorageError(
+          "provider.connection_unavailable",
+          "Environment revalidation requires an undeleted unavailable environment connection",
+        );
+      }
       const incrementsRevision = input.operationKind !== "refresh";
       const incrementsGeneration = input.operationKind === "replace" || input.operationKind === "reauthenticate";
       const reservedLifecycleRevision = connection.lifecycleRevision + (incrementsRevision ? 1 : 0);

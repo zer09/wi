@@ -73,6 +73,31 @@ describe("provider connection lifecycle ownership", () => {
     },
   );
 
+  it("restores an unavailable environment through enable without changing generation", () => {
+    const unavailable: LifecycleState = {
+      ...ready(),
+      status: "unavailable",
+    };
+    const owner = acquireLifecycleOwner(
+      unavailable,
+      "cmd_enable",
+      "a".repeat(64),
+      "enable",
+    );
+    expect(owner).toMatchObject({
+      outcome: "acquired",
+      state: { lifecycleRevision: 2, credentialGeneration: 1 },
+    });
+    if (owner.outcome !== "acquired") return;
+    expect(advanceLifecycleOwner(owner.state, "succeeded")).toMatchObject({
+      status: "ready",
+      lifecycleRevision: 2,
+      credentialGeneration: 1,
+      owner: null,
+      deleted: false,
+    });
+  });
+
   it("rejects changed-content reuse without mutation", () => {
     const owner = acquireLifecycleOwner(ready(), "cmd_replace", "a".repeat(64), "replace");
     if (owner.outcome !== "acquired") throw new Error("owner missing");

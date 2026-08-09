@@ -778,3 +778,49 @@ Review target: the uncommitted Milestone 11 tree after independent finding `WI-M
 - Default `${XDG_STATE_HOME:-$HOME/.local/state}/wi/credentials` root — 0 entries.
 
 A twenty-ninth fresh independent review is required. This record does not self-approve Milestone 11, clear release, or authorize Milestone 12.
+
+## WI-M11-H1 correction evidence
+
+Review target: the uncommitted tree after the remote-review blocker `WI-M11-H1`.
+
+| Finding | Disposition |
+| --- | --- |
+| `WI-M11-H1` an environment-backed connection that started unavailable, or became unavailable after a missing, changed, or oversized variable, had no accepted path to revalidate the same connection after the value returned | **Fixed.** Added the strict `providerConnection.environment.revalidate` command. The command carries only `commandId`, `connectionId`, expected lifecycle revision, and expected generation. Backend validation resolves the existing environment reference without returning or persisting the value. Catalog `enable` admission accepts only the same undeleted unavailable environment connection, advances lifecycle revision once, preserves generation and identity, and owns the connection until terminal commit. Successful retries return the original durable result. Changed command content conflicts. Competing lifecycle commands receive a durable `provider.operation_in_progress` result. Restart recovery validates the same target before completing a prepared operation. |
+
+### Deterministic old/new traces
+
+The pre-fix traces reproduced both remote failures. The deterministic assertion results were `Expected lifecycleStatus: "ready"; Received lifecycleStatus: "unavailable"` for initial absence, and `provider.connection_unavailable` before credential resolution for post-use invalidation.
+
+- Initial absence: create while the variable was absent, set a valid value, and retry normal work. The connection remained `unavailable` and no existing operation could restore readiness.
+- Post-use invalidation: change or oversize the variable after a request boundary, restore the accepted value, and retry. The connection remained `unavailable` and the request was rejected before credential resolution.
+
+The retained corrected regressions now prove the inverse:
+
+- `tests/integration/provider-connection-runtime.test.ts` restores an initially unavailable connection and an invalidated connection, preserves the original ID and generation, rejects missing/invalid input, checks durable duplicate/conflict behavior, and scans catalog/home files for the synthetic value.
+- `tests/integration/provider-connections-storage.test.ts` proves `enable` changes only unavailable environment state, increments lifecycle revision once, preserves generation, and rejects ready reuse.
+- `tests/process/provider-lifecycle-recovery.test.ts` proves prepared and successful revalidation across child-process restart with zero provider requests.
+- `tests/e2e/milestone11-provider-connections.spec.ts` proves two tabs race revalidation, receive durable owner conflict, and converge on the same ready connection.
+
+### Changed files and safety evidence
+
+- Protocol and routing: `packages/protocol/src/commands.ts`, `apps/server/src/websocket/command-router.ts`, `apps/server/src/websocket/durable-command-limits.ts`, and `apps/web/src/socket/command-size.ts`.
+- State and service: `packages/credentials/src/environment.ts`, `packages/storage/src/catalog/repository.ts`, `apps/server/src/provider-connections/service.ts`, and `apps/server/src/composition.ts`.
+- Browser and tests: `apps/web/src/components/ProviderConnectionsPanel.tsx`, the protocol/credential/lifecycle unit tests, provider runtime/storage integration tests, process fixture/test, and M11 E2E fixture/spec.
+- The command creates no credential file, generation, connection, identity claim, or provider request. The runtime test observed zero fake-provider requests. SQLite, `WI_HOME`, browser payloads, and operation results contain no synthetic environment value or fingerprint.
+
+### Verification
+
+- `pnpm --filter @wi/protocol typecheck && pnpm --filter @wi/server typecheck` — passed.
+- Focused unit suite — 3 files, 41 tests passed.
+- Focused revalidation integration suite — 2 files, 3 tests passed, 29 skipped.
+- `pnpm test:unit` — 56 files, 568 tests passed.
+- `pnpm test:integration` — 9 files, 298 tests passed.
+- `WI_FC_SEED=737373 pnpm test:property` — 16 files, 65 tests passed.
+- `pnpm test:process` — 68 files, 108 tests passed in the complete gate.
+- `pnpm test:e2e` — 44 tests passed.
+- `WI_FC_SEED=737373 pnpm test:fuzz` — two local rounds passed; each round ran 11 files and 43 tests, with seeds 737373 and 737374.
+- `pnpm check` — 75 files, 938 tests passed.
+- Markdown link validation — 82 files, 115 local targets resolved.
+- `git diff --check` — passed.
+
+The tree remains uncommitted and unpushed. No Git transition or hosted-service mutation occurred. A fresh independent exact-tree review remains required; this evidence does not self-approve Milestone 11 or authorize Milestone 12.

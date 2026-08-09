@@ -33,6 +33,7 @@ export const COMMAND_METHODS = [
   "input.respond",
   "providerConnection.file.create",
   "providerConnection.environment.create",
+  "providerConnection.environment.revalidate",
   "providerConnection.file.replace",
   "providerConnection.rename",
   "providerConnection.disable",
@@ -80,6 +81,12 @@ const EnvironmentConnectionCreateParamsSchema = z.strictObject({
   authMode: z.literal("api_key"),
   displayName: ProviderConnectionDisplayNameSchema,
   variableName: EnvironmentVariableNameSchema,
+});
+
+const EnvironmentConnectionRevalidateParamsSchema = z.strictObject({
+  connectionId: ProviderConnectionIdSchema,
+  expectedLifecycleRevision: z.number().int().positive().safe(),
+  expectedGeneration: z.number().int().positive().safe(),
 });
 
 const FileConnectionReplaceParamsSchema = z.strictObject({
@@ -155,6 +162,10 @@ export const EnvironmentConnectionCreateCommandSchema = CommandBaseSchema.extend
   method: z.literal("providerConnection.environment.create"),
   params: EnvironmentConnectionCreateParamsSchema,
 });
+export const EnvironmentConnectionRevalidateCommandSchema = CommandBaseSchema.extend({
+  method: z.literal("providerConnection.environment.revalidate"),
+  params: EnvironmentConnectionRevalidateParamsSchema,
+});
 export const FileConnectionReplaceCommandSchema = CommandBaseSchema.extend({
   method: z.literal("providerConnection.file.replace"),
   params: FileConnectionReplaceParamsSchema,
@@ -193,6 +204,7 @@ export const CommandMessageSchema = z.discriminatedUnion("method", [
   InputRespondCommandSchema,
   FileConnectionCreateCommandSchema,
   EnvironmentConnectionCreateCommandSchema,
+  EnvironmentConnectionRevalidateCommandSchema,
   FileConnectionReplaceCommandSchema,
   ProviderConnectionRenameCommandSchema,
   ProviderConnectionDisableCommandSchema,
@@ -250,6 +262,7 @@ export type ApprovalResolveCommand = z.infer<typeof ApprovalResolveCommandSchema
 export type InputRespondCommand = z.infer<typeof InputRespondCommandSchema>;
 export type FileConnectionCreateCommand = z.infer<typeof FileConnectionCreateCommandSchema>;
 export type EnvironmentConnectionCreateCommand = z.infer<typeof EnvironmentConnectionCreateCommandSchema>;
+export type EnvironmentConnectionRevalidateCommand = z.infer<typeof EnvironmentConnectionRevalidateCommandSchema>;
 export type FileConnectionReplaceCommand = z.infer<typeof FileConnectionReplaceCommandSchema>;
 export type ProviderConnectionRenameCommand = z.infer<typeof ProviderConnectionRenameCommandSchema>;
 export type ProviderConnectionDisableCommand = z.infer<typeof ProviderConnectionDisableCommandSchema>;

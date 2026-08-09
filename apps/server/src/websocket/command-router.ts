@@ -23,6 +23,7 @@ export type ProviderConnectionCommand = Extract<
   { readonly method:
       | "providerConnection.file.create"
       | "providerConnection.environment.create"
+      | "providerConnection.environment.revalidate"
       | "providerConnection.file.replace"
       | "providerConnection.rename"
       | "providerConnection.disable"
@@ -74,6 +75,7 @@ export class CommandRouter {
     if (
       command.method === "providerConnection.file.create" ||
       command.method === "providerConnection.environment.create" ||
+      command.method === "providerConnection.environment.revalidate" ||
       command.method === "providerConnection.file.replace" ||
       command.method === "providerConnection.rename" ||
       command.method === "providerConnection.disable" ||

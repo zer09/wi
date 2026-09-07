@@ -1,0 +1,52 @@
+Harness Gateway 0.2.0 — consolidated local-agent handoff
+Root directory: harness-gateway-0.2.0-handoff
+Start with START_HERE.md, then paste LOCAL_AGENT_PROMPT.md into Pi.
+All paths below are relative to this root.
+
+.github/workflows/ci.yml
+.gitignore
+AGENTS.md
+CHANGELOG.md
+Cargo.toml
+LICENSE
+LOCAL_AGENT_PROMPT.md
+README.md
+START_HERE.md
+docs/ARCHITECTURE.md
+docs/EVENTS.md
+docs/LOCAL_AGENT_HANDOFF.md
+docs/LOCAL_VERIFICATION_TEMPLATE.md
+docs/PACKAGING_AUDIT.md
+docs/REVIEW_CHECKLIST.md
+docs/SOURCES.md
+docs/VERIFICATION.md
+docs/build-attempt.txt
+docs/local-verification.template.json
+docs/original-v0.2.0-files.json
+docs/packaging-audit.json
+docs/verification-status.json
+examples/two_turns.rs
+rust-toolchain.toml
+scripts/verify.py
+src/error.rs
+src/gateway.rs
+src/lib.rs
+src/main.rs
+src/provider.rs
+src/providers/mod.rs
+src/providers/openai_codex/auth.rs
+src/providers/openai_codex/codec.rs
+src/providers/openai_codex/mod.rs
+src/providers/openai_codex/session.rs
+src/providers/openai_codex/sse.rs
+src/providers/openai_codex/state.rs
+src/providers/openai_codex/tests.rs
+src/providers/openai_codex/wire.rs
+src/tools.rs
+tests/fixtures/advanced_output.jsonl
+tests/fixtures/text_response.jsonl
+tests/fixtures/tool_request.jsonl
+tests/fixtures/tool_response.jsonl
+tests/provider_contract.rs
+BUNDLE_CONTENTS.txt
+MANIFEST.sha256

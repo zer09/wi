@@ -1,0 +1,36 @@
+{
+  "prepared_on": "2026-09-08",
+  "bundle_kind": "documentation_and_local_agent_handoff",
+  "source_version": "0.2.0",
+  "original_archive_sha256": "bc6d2e8366aea5386fcfc11431ea429726fcef9393a5467b56c1d71d44ce6e69",
+  "original_zip_integrity": "passed",
+  "original_files_preserved_byte_for_byte": 35,
+  "original_documents": [
+    {
+      "path": "README.md",
+      "present_in_original_v020_zip": true,
+      "matches_separate_chat_attachment": true
+    },
+    {
+      "path": "docs/VERIFICATION.md",
+      "present_in_original_v020_zip": true,
+      "matches_separate_chat_attachment": true
+    },
+    {
+      "path": "docs/EVENTS.md",
+      "present_in_original_v020_zip": true,
+      "matches_separate_chat_attachment": true
+    }
+  ],
+  "original_files_modified": [],
+  "static_gate": {
+    "command": "python3 scripts/verify.py --static-only",
+    "exit_code": 0,
+    "stdout": "Source inventory / TOML / JSON checks: {\"source_files\": 17, \"rust_test_definitions\": 56, \"fixture_events\": 25}\nStatic checks only. Rust syntax, compilation and test behavior are NOT verified."
+  },
+  "rust_compilation": "not_run_in_handoff_preparation",
+  "rust_tests": "not_run_in_handoff_preparation",
+  "live_provider_tests": "not_run_in_handoff_preparation",
+  "real_credentials_read": false,
+  "local_report_templates_are_evidence": false
+}

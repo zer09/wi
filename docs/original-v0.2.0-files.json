@@ -1,0 +1,148 @@
+{
+  "description": "Original v0.2.0 baseline only. New handoff documents are intentionally not part of this baseline.",
+  "archive": "harness-gateway-0.2.0.zip",
+  "archive_sha256": "bc6d2e8366aea5386fcfc11431ea429726fcef9393a5467b56c1d71d44ce6e69",
+  "original_file_count": 35,
+  "files": {
+    ".github/workflows/ci.yml": {
+      "bytes": 748,
+      "sha256": "cd19ba5f947d1c12a76e264b4407e2483bca9b8dd05629a1ada755ed5503e258"
+    },
+    ".gitignore": {
+      "bytes": 167,
+      "sha256": "99768fd0a58f573467190ec71fefa85dcd093868c09ec49c55c272d6442714ed"
+    },
+    "CHANGELOG.md": {
+      "bytes": 2029,
+      "sha256": "7270f60618719afd8d252057b76da6a0526a42e4bfe770fd1a8d903929588ab1"
+    },
+    "Cargo.toml": {
+      "bytes": 1189,
+      "sha256": "7dda27e5dd23b7aa4610cae37d771db265faf9ee88206935752f18d718c60ce7"
+    },
+    "LICENSE": {
+      "bytes": 1085,
+      "sha256": "bc682721512bbd3aab7bde46223475ca4ea095f3dc2191d08db96362747f170f"
+    },
+    "README.md": {
+      "bytes": 9430,
+      "sha256": "24fa05e810f08450e4fe79c540b783a42a6df90847f01ef182900c9fdbd67ba4"
+    },
+    "docs/ARCHITECTURE.md": {
+      "bytes": 4747,
+      "sha256": "bffffad9d1d15f91c88e9d81a48ad7898f00bb5057299dcb9a5355b4e65d8c74"
+    },
+    "docs/EVENTS.md": {
+      "bytes": 4732,
+      "sha256": "e5efa36fb9f1ffdd3822273d70e217ce9f01e136607827b05d3d9095866419a6"
+    },
+    "docs/SOURCES.md": {
+      "bytes": 2210,
+      "sha256": "b9d15292bce17b24e02bb87127d5643c54278c4665a0c30e8455f6bbd32a7c85"
+    },
+    "docs/VERIFICATION.md": {
+      "bytes": 3674,
+      "sha256": "8b743140b7d34a8331a275ccfd034e95e8c9d69b1e587f2afeaedecdea098b10"
+    },
+    "docs/build-attempt.txt": {
+      "bytes": 174,
+      "sha256": "d9d174227b3efb45db2f67ed8e7612059d21faa2fdceae876948e8a34ab81c3f"
+    },
+    "docs/verification-status.json": {
+      "bytes": 752,
+      "sha256": "01a160362196550307afa28491074cfd351e2eae8c8b3926241444b66cd4c6fa"
+    },
+    "examples/two_turns.rs": {
+      "bytes": 1953,
+      "sha256": "18296bdeebc51c1e665460527528a0e43cac45af511bd28302638bd80a635883"
+    },
+    "rust-toolchain.toml": {
+      "bytes": 86,
+      "sha256": "7458b2d74495e6fb1c1edeea4d5a793705476431dadb60627187111f91441e13"
+    },
+    "scripts/verify.py": {
+      "bytes": 2702,
+      "sha256": "e2197f6a852ea1d2ec33248e5c313cf547aef06fb2d481489c71eb8601e9d8e6"
+    },
+    "src/error.rs": {
+      "bytes": 4849,
+      "sha256": "764e64f6eb2772ef3a6b9cf45f2ff0ea630815207daf7e6f776030de1f3ab05e"
+    },
+    "src/gateway.rs": {
+      "bytes": 1063,
+      "sha256": "6b24d81ff56c1d8f9043a4ec8aa2ce6a930572f98ec2454374c8c6f383786e86"
+    },
+    "src/lib.rs": {
+      "bytes": 332,
+      "sha256": "f4ed8e1db184f81c24775eadbca71f3595b74448b1c9c7fb186d6b61c2957f23"
+    },
+    "src/main.rs": {
+      "bytes": 9340,
+      "sha256": "6b63c7aa8ddb10beca062f8916e3455f96f1297328839579d0c15aed1efcdf7c"
+    },
+    "src/provider.rs": {
+      "bytes": 10670,
+      "sha256": "223b08b36bc9f08b751bd2b98de83d1246008ab3f3dbeeee89aac66eb362ce5c"
+    },
+    "src/providers/mod.rs": {
+      "bytes": 22,
+      "sha256": "691b668172b6c371d63d5ef3dcfe90da554679f359fa50db1ad05b8e35a3d62f"
+    },
+    "src/providers/openai_codex/auth.rs": {
+      "bytes": 13336,
+      "sha256": "a91676bc581b1309f5dcc6580c4ad467d3f2c921ef1fe134b44054c59f2d392e"
+    },
+    "src/providers/openai_codex/codec.rs": {
+      "bytes": 15606,
+      "sha256": "0ef4913f353eb6de563969cd8c79cc44af54d8c2032da3c3fbb88fe16da4fd51"
+    },
+    "src/providers/openai_codex/mod.rs": {
+      "bytes": 3485,
+      "sha256": "99b04b9976126378600a2437e14e23b667e1131b84d5895820defb3a49fa93fa"
+    },
+    "src/providers/openai_codex/session.rs": {
+      "bytes": 10771,
+      "sha256": "ae232e360805b8c3827386fffeb096f90aff9210f38378c2c7ff74aea8269a4d"
+    },
+    "src/providers/openai_codex/sse.rs": {
+      "bytes": 4084,
+      "sha256": "13657484f11c5b99d9534af21dd720015ea4ecee6b037840bbb690c3c4286fc2"
+    },
+    "src/providers/openai_codex/state.rs": {
+      "bytes": 8333,
+      "sha256": "82142da698699f0a0aa55185982cb4f21f4f63af2d6aaf63cfce16461349fbb9"
+    },
+    "src/providers/openai_codex/tests.rs": {
+      "bytes": 20057,
+      "sha256": "e326c6870113d5b61db3d837d7dec5e2dad8fc9500ac648d4ac7b05aa37e9e01"
+    },
+    "src/providers/openai_codex/wire.rs": {
+      "bytes": 9811,
+      "sha256": "d0ead1343073d0a88323df347f51d3ce341ced98779749a6f01c6b90289827da"
+    },
+    "src/tools.rs": {
+      "bytes": 10707,
+      "sha256": "a9b7220903818b883ec5890a56c5af00ca0a6d467e999f4777798e935cf5d77d"
+    },
+    "tests/fixtures/advanced_output.jsonl": {
+      "bytes": 616,
+      "sha256": "c7991f9becd745e2f7dbbe04048bd24b7d24da4a2f45c0985ed34b9d0e554ff8"
+    },
+    "tests/fixtures/text_response.jsonl": {
+      "bytes": 2102,
+      "sha256": "e9ab79884895639134b684dada7ab826dbd2443bef41920424fff6be8c2b84c7"
+    },
+    "tests/fixtures/tool_request.jsonl": {
+      "bytes": 1249,
+      "sha256": "18a2501f47a64702be2d53443b91fea7c7a8f01d815d47074857d896c43c06cf"
+    },
+    "tests/fixtures/tool_response.jsonl": {
+      "bytes": 895,
+      "sha256": "3a783c6a9fb389370688e4ae9e1df40404d226c258cb293a7a6b8caee0b2edb7"
+    },
+    "tests/provider_contract.rs": {
+      "bytes": 3368,
+      "sha256": "cb31f7463c766f309cfaac8dd2d66cd12340691f1bb2b4969b2bd1c5e1b69426"
+    }
+  }
+}

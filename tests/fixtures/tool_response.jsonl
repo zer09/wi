@@ -1,0 +1,5 @@
+{"type":"response.created","response":{"id":"fixture_tool_r2","status":"in_progress"},"sequence_number":0}
+{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"fixture_msg","role":"assistant","status":"in_progress","content":[]},"sequence_number":1}
+{"type":"response.output_text.delta","item_id":"fixture_msg","output_index":0,"content_index":0,"delta":"42","sequence_number":2}
+{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"fixture_msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"42","annotations":[]}]},"sequence_number":3}
+{"type":"response.completed","response":{"id":"fixture_tool_r2","status":"completed","output":[{"type":"message","id":"fixture_msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"42","annotations":[]}]}]},"sequence_number":4}

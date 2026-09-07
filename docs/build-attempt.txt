@@ -1,0 +1,2 @@
+BLOCKED: cargo is not installed. No Rust checks were executed.
+Source inventory / TOML / JSON checks: {"source_files": 17, "rust_test_definitions": 56, "fixture_events": 25}

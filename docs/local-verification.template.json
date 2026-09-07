@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "report_kind": "template_not_evidence",
+  "milestone": "gateway_communication_and_ordinary_tool_round_trip",
+  "source_version": "0.2.0",
+  "checked_at": null,
+  "environment": {
+    "os": null,
+    "architecture": null,
+    "rustc": null,
+    "cargo": null,
+    "pi": null
+  },
+  "selected_provider": "openai-codex",
+  "selected_auth_source": "pi",
+  "selected_model": null,
+  "overall_status": "not_run",
+  "commands": [],
+  "offline": {
+    "compile": "not_run",
+    "rustfmt": "not_run",
+    "clippy": "not_run",
+    "tests": "not_run",
+    "passed_tests": null,
+    "failed_tests": null,
+    "ignored_tests": null,
+    "filtered_tests": null,
+    "cargo_lock_generated": false,
+    "other_platforms_tested": []
+  },
+  "security_gate": {
+    "status": "not_run",
+    "findings": []
+  },
+  "live": {
+    "authorization": "bounded_synthetic_smoke_tests_after_offline_and_security_gates",
+    "max_gateway_generation_submissions": 10,
+    "gateway_generation_submissions_attempted": 0,
+    "scope_excludes_pi_authoring_conversation": true,
+    "cases": [
+      {
+        "id": "W1",
+        "transport": "websocket",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      },
+      {
+        "id": "W2",
+        "transport": "websocket",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      },
+      {
+        "id": "W3",
+        "transport": "websocket",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      },
+      {
+        "id": "S1",
+        "transport": "sse",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      },
+      {
+        "id": "S2",
+        "transport": "sse",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      },
+      {
+        "id": "S3",
+        "transport": "sse",
+        "status": "not_run",
+        "submissions": 0,
+        "assertions_observed": [],
+        "blocker": null
+      }
+    ]
+  },
+  "fixes": [],
+  "remaining_risks": [],
+  "changed_files": [],
+  "advanced_features_enabled": [],
+  "notes": [
+    "No secret values or native response dumps belong in this report."
+  ]
+}

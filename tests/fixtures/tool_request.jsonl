@@ -1,0 +1,7 @@
+{"type":"response.created","response":{"id":"fixture_tool_r1","status":"in_progress"},"sequence_number":0}
+{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fixture_item_call","call_id":"fixture_call","name":"add_numbers","arguments":"","status":"in_progress"},"sequence_number":1}
+{"type":"response.function_call_arguments.delta","item_id":"fixture_item_call","output_index":0,"delta":"{\"a\":17,","sequence_number":2}
+{"type":"response.function_call_arguments.delta","item_id":"fixture_item_call","output_index":0,"delta":"\"b\":25}","sequence_number":3}
+{"type":"response.function_call_arguments.done","item_id":"fixture_item_call","output_index":0,"arguments":"{\"a\":17,\"b\":25}","sequence_number":4}
+{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fixture_item_call","call_id":"fixture_call","name":"add_numbers","arguments":"{\"a\":17,\"b\":25}","status":"completed"},"sequence_number":5}
+{"type":"response.completed","response":{"id":"fixture_tool_r1","status":"completed","output":[{"type":"function_call","id":"fixture_item_call","call_id":"fixture_call","name":"add_numbers","arguments":"{\"a\":17,\"b\":25}","status":"completed"}]},"sequence_number":6}

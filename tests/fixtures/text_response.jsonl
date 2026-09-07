@@ -1,0 +1,10 @@
+{"type":"response.created","response":{"id":"fixture_r1","status":"in_progress"},"sequence_number":0}
+{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"fixture_reason","summary":[]},"sequence_number":1}
+{"type":"response.reasoning_summary_text.delta","item_id":"fixture_reason","output_index":0,"summary_index":0,"delta":"Checking the request.","sequence_number":2}
+{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"fixture_reason","summary":[{"type":"summary_text","text":"Checking the request."}],"encrypted_content":"SYNTHETIC_OPAQUE_CONTINUATION"},"sequence_number":3}
+{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"fixture_msg","role":"assistant","content":[]},"sequence_number":4}
+{"type":"response.output_text.delta","item_id":"fixture_msg","output_index":1,"content_index":0,"delta":"Hello ","sequence_number":5}
+{"type":"response.output_text.delta","item_id":"fixture_msg","output_index":1,"content_index":0,"delta":"世界","sequence_number":6}
+{"type":"response.output_text.annotation.added","item_id":"fixture_msg","output_index":1,"content_index":0,"annotation_index":0,"annotation":{"type":"url_citation","url":"https://example.invalid/synthetic","title":"Synthetic fixture","start_index":0,"end_index":5},"sequence_number":7}
+{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"fixture_msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello 世界","annotations":[]}]},"sequence_number":8}
+{"type":"response.completed","response":{"id":"fixture_r1","status":"completed","model":"synthetic-model","output":[{"type":"reasoning","id":"fixture_reason","summary":[{"type":"summary_text","text":"Checking the request."}],"encrypted_content":"SYNTHETIC_OPAQUE_CONTINUATION"},{"type":"message","id":"fixture_msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello 世界","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":3,"total_tokens":13}},"sequence_number":9}

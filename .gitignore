@@ -1,0 +1,11 @@
+/target/
+/.codegraph/
+.env
+.env.*
+!.env.example
+**/auth.json
+**/credentials.json
+*.pem
+*.key
+/session-output/
+# Commit Cargo.lock after the first successful dependency resolution.

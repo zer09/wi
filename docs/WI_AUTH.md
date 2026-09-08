@@ -199,7 +199,9 @@ This is observed login evidence, separate from the synthetic tests. A second
 profile login passed at `2026-09-08T21:36:47Z`. Fresh Wi status confirmed both
 profiles logged in without reauthentication. A reviewed read-only metadata checker
 confirmed distinct provider accounts and login incarnations without displaying
-identifiers or tokens. No generation or model entitlement is claimed.
+identifiers or tokens. W1 managed-auth WebSocket text subsequently passed with
+gpt-6-astra and wi-experiment at `2026-09-08T21:45:23Z`; this does not establish
+other-profile model access or the remaining generation cases.
 The real renewal adapter also has offline loopback/temp-store evidence for form
 encoding, request count, bounds, sanitized failures, identity/expiry validation,
 explicit rotation, concurrent automatic preparation, cancellation, and restart
@@ -209,8 +211,22 @@ generation. A fresh status process confirmed the same local profile remained
 logged in without reauthentication and had the same updated expiry as the refresh
 result. Identity preservation is enforced by the reviewed manager; provider IDs
 and tokens were not exposed. Other-profile preservation remains synthetic evidence.
-L0 two-account login and L1 explicit renewal are complete. TODO: obtain separate
-authorization for the managed-auth generation matrix. Existing Pi/Codex credential
+L0 two-account login, L1 explicit renewal, W1 WebSocket text and W2 continuation
+are complete. W2 randomly selected wi-experiment and verified same-socket reuse,
+prior-response linkage and correct remembered text at `2026-09-08T21:50:25Z`.
+W3 also passed at `2026-09-08T21:54:09Z`, randomly selecting wi-secondary for the
+same-WebSocket add_numbers(17,25) round trip, correlated result and final42.
+Model access is now observed on both profiles for these bounded cases.
+S1 SSE text passed on explicit wi-secondary at `2026-09-08T21:57:38Z`.
+The existing strict SSE prolog check admitted HTTP 200 with missing Content-Type.
+S2 SSE continuation passed at `2026-09-08T22:01:09Z`, randomly selecting
+wi-experiment. Native replay and both expected answers passed; no opaque items
+were emitted, so live opaque replay remains untested.
+S3 SSE add_numbers(17,25) passed at `2026-09-08T22:05:23Z`, randomly selecting
+wi-experiment. One correlated execution/result, native replay and final42 passed.
+L0, L1 and all W1-W3/S1-S3 cases are complete on local Linux. No further live test
+is planned. The [combined design-conversation report](COMBINED_DESIGN_REPORT.md)
+is complete and includes the evidence boundaries and remaining limits. Existing Pi/Codex credential
 files remain read-only and are not consulted by managed login or renewal.
 The parent-owned matrix and verification reports remain the authority for acceptance
 and the generation ledger.

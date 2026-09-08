@@ -1,6 +1,16 @@
 # Wi: naming and managed-auth matrix
 
-Status: **L0 two-account login and L1 explicit live renewal PASS**.
+Status: **L0, L1, W1-W3 and S1-S3 PASS. The bounded live matrix is complete.**
+
+S3 passed once at `2026-09-08T22:05:23Z` on commit `17ba3c3`. Random selection
+chose wi-experiment. The gpt-6-astra add_numbers(17,25) call, one correlated local
+execution/result, native SSE replay and final42 passed. Both HTTP 200 responses
+with missing Content-Type passed existing strict SSE prolog admission.
+Opaque items were not emitted; live opaque replay remains untested.
+Current ledger: **27/40 used, 13 remaining**. All six generation cases used their
+planned 10 submissions, without retries or fallback. No further live tests are
+planned. The [combined design-conversation report](COMBINED_DESIGN_REPORT.md) is
+complete. The user authorized committing and pushing the report and Wi work.
 
 Second login completed at `2026-09-08T21:36:47Z`. Both profiles passed fresh Wi
 status checks; a reviewed read-only checker confirmed distinct provider accounts
@@ -11,7 +21,7 @@ After separate user authorization, L1 completed once at `2026-09-08T21:23:21Z`.
 Refresh returned exit 0; fresh metadata status confirmed the persisted eligible
 profile and updated expiry. No retry or generation occurred. Prior offline gates:
 **187 Rust tests, 152 runner tests, all six Cargo gates PASS**; three reviews found
-no blockers. Generation ledger unchanged: **17/40 used, 23 remaining**.
+no blockers. At L1 completion, the ledger was **17/40 used, 23 remaining**.
 
 ## Previous increment: connect real renewal, verify offline
 
@@ -239,9 +249,9 @@ conflict rather than terminating another application's listener.
 
 ## 4. Implementation and offline acceptance matrix
 
-Every PASS below means observed **offline Linux evidence**, not real login or
-account entitlement. A1 has one real login PASS; R2 has offline implementation
-coverage, not live renewal acceptance.
+Offline PASS rows below mean observed **offline Linux evidence**, not account
+entitlement. A1 also has two distinct-account live logins; R2 also has one explicit
+live renewal. The separate bounded live results are recorded in section 5.
 
 | ID | Requirement | Minimum acceptance evidence | Status |
 |---|---|---|---|
@@ -267,12 +277,12 @@ authorize real credential writes or provider traffic.
 |---|---|---|---:|---|
 | L0 | Login two named profiles | wi-experiment and wi-secondary each completed real login. Fresh status confirmed both logged in without reauthentication. Reviewed read-only comparison confirmed distinct provider accounts/incarnations. Existing Pi/Codex files remain untouched. | 0 | PASS |
 | L1 | Explicit refresh | One refresh of wi-experiment returned exit 0; fresh status confirmed eligible persisted profile and updated expiry. Reviewed manager validates unchanged identity. Other-profile preservation and automatic expiry/rotation edge coverage remain synthetic. | 0 | PASS |
-| W1 | WS text, explicit profile A | Actual lifecycle, expected effective text, selected profile A, valid completed response. | 1 | NOT RUN |
-| W2 | WS continuation, random profile | Record the selected local profile; both requests stay bound to it, reuse the same socket, and send the prior response ID plus new input only. | 2 | NOT RUN |
-| W3 | WS tool round trip | One selected profile throughout; validated `add_numbers(17,25)`, one correlated execution/result delivery, and final `42`. | 2 | NOT RUN |
-| S1 | SSE text, explicit profile B | Actual lifecycle, expected effective text, selected profile B, valid completed response. | 1 | NOT RUN |
-| S2 | SSE continuation, random profile | Same selected profile across both requests and credential reloads; correct native history replay and remembered text. Opaque replay is conditional on actual emission. | 2 | NOT RUN |
-| S3 | SSE tool round trip | One selected profile throughout; validated call, correlated local result delivery, correct native replay, and final `42`. | 2 | NOT RUN |
+| W1 | WS text, explicit profile A | wi-experiment selected; one native response.created, two text deltas, validated completed terminal, and effective text matched gateway connected. | 1 | PASS |
+| W2 | WS continuation, random profile | Random selection chose wi-experiment once. Both responses matched expected text; request two reused the socket with the prior response ID and new input only. | 2 | PASS |
+| W3 | WS tool round trip | wi-secondary stayed selected; validated `add_numbers(17,25)`, one correlated execution/result delivery on the same socket, and final `42`. | 2 | PASS |
+| S1 | SSE text, explicit profile B | wi-secondary selected; actual lifecycle, expected effective text and validated completed response; missing MIME admitted by strict SSE prolog. | 1 | PASS |
+| S2 | SSE continuation, random profile | wi-experiment selected once; fixed account binding, native history replay and remembered text passed. Opaque items were not emitted. | 2 | PASS |
+| S3 | SSE tool round trip | wi-experiment stayed selected; validated add_numbers(17,25), one correlated execution/result, native replay and final `42`. Opaque items were not emitted. | 2 | PASS |
 
 The generation cases reuse the existing matrix and synthetic prompts; extend the
 existing smoke helper rather than creating another runner. Random distribution
@@ -285,10 +295,10 @@ fallback, query quotas, or switch accounts after 401/403/429 or an uncertain sen
 This feature does not change any account's provider-imposed limits.
 
 **Budget:** the user granted 20 additional generation submissions for this
-follow-up. The cumulative assistant cap is now **40: 17 used, 23 remaining**.
-The previous 17/20 ledger remains historical; no usage was reset. The proposed
-10-submission generation matrix fits this budget and would leave 13 if all cases
-complete with their planned counts. This is a cap, not a quota to consume.
+follow-up. The cumulative assistant cap is **40: 27 used, 13 remaining** after S3.
+The previous ledgers remain historical; no usage was reset. W1-W3 and S1-S3 used
+exactly the planned 10 matrix submissions. No further live tests are planned.
+This is a cap, not a quota to consume.
 
 The budget extension did not itself start implementation. The user subsequently
 approved the offline pass; that pass is now verified and does not remove the
@@ -307,12 +317,17 @@ not generation submissions; they still require authorization.
 - [x] Complete R2 experimental real renewal and offline verification.
 - [x] Observe L1 real renewal after separate live authorization; one attempt passed.
 - [x] Run and record final offline gate G1.
-- [x] Obtain sufficient generation budget: user added 20; 23 remain.
+- [x] Obtain sufficient generation budget: user added 20; 13 remain after this matrix.
 - [x] Obtain explicit authorization for first live login and L1 credential renewal.
 - [x] Obtain authorization and complete L0 second-account login; distinct accounts confirmed.
-- [ ] Obtain authorization for later generation cases.
-- [ ] Execute the bounded live matrix, recording PASS/BLOCKED/NOT RUN honestly.
-- [ ] Prepare the combined design-conversation report described below.
+- [x] Obtain separate authorization for each generation case W1-W3 and S1-S3.
+- [x] Complete W1: managed-auth WebSocket text with explicit profile A.
+- [x] Complete W2: random-profile same-WebSocket continuation.
+- [x] Complete W3: same-WebSocket add_numbers tool round trip.
+- [x] Complete S1: SSE text with explicit profile B.
+- [x] Complete S2: random-profile SSE continuation with native replay.
+- [x] Complete S3: SSE add_numbers tool round trip with native replay.
+- [x] Prepare the combined design-conversation report described below.
 
 Stop when this matrix is satisfied or blocked. Do not add more selection policies,
 usage-aware balancing, quota queries, cooldowns, automatic account failover,
@@ -320,48 +335,27 @@ mid-session switching, transparent reconnect/replay, background schedulers,
 other providers, device login, a database, a keyring, or a web UI. Those require
 separate design decisions. A bounded auth manager is not a general agent scheduler.
 
-## 7. Pending combined report for the design conversation
+## 7. Combined report for the design conversation
 
-**The previous report has not been sent.** The user is waiting for the design
-conversation. Keep both milestones together in the next report, but separate
-their evidence and implementation status.
+[COMBINED_DESIGN_REPORT.md](COMBINED_DESIGN_REPORT.md) now contains the complete
+handoff, with distinct evidence for:
 
-### Completed and pushed work
+- `718c43a`: repaired gateway and prior external-Codex-auth six-case live matrix,
+  already pushed before the Wi follow-up.
+- `27539bd`: Wi naming, managed profiles and experimental browser login.
+- `17ba3c3`: real renewal and completed L0/L1 authentication evidence.
+- Later W1-W3/S1-S3 managed-auth live results against unchanged runtime17ba3c3:
+  all six PASS, 10 new submissions, cumulative27/40 used and13remaining.
 
-- Commit: `718c43afd2a0d826dccc85e7d1c50034139816e4`, pushed to `origin/master`.
-- Validated finalized-item recovery, lifecycle/tool validation and diagnostics,
-  and bounded missing-Content-Type SSE admission.
-- Previous six-case WebSocket/SSE live matrix PASS with explicitly selected
-  external Codex OAuth and `gpt-6-astra` on local Linux.
-- Previous offline evidence: 134 Rust tests and 152 runner tests passed; all six
-  Cargo gates passed. These counts do not validate future edits.
-- Previous live ledger: 17/20 assistant submissions used; manual user runs excluded.
-- Limits: no live opaque reasoning replay observed; no new cross-platform CI
-  result claimed in that report.
-- Detailed evidence remains in `docs/LOCAL_VERIFICATION.md` and
-  `docs/local-verification.json`. Preserve historical reports unchanged.
+The final pre-push offline rerun at `2026-09-08T22:13:23Z` passed all six Cargo
+gates with187 Rust tests and152 runner tests. No live requests ran during that
+rerun. The report retains experimental provider-support, Linux-only, automatic
+expiry-renewal and opaque-replay limits. Historical evidence remains unchanged.
 
-### Locally implemented offline follow-up
-
-- Wi package/library/binary naming, private Linux JSON profile storage, multiple
-  profiles, explicit or session-local random selection, and fixed session identity.
-- Synthetic OAuth callback/exchange and cancellation-safe renewal mechanics.
-- No account change within a session in this milestone.
-- Latest login increment: 177 Rust tests and 152 runner tests passed; all three final reviews passed.
-- Experimental browser login, fixed-TLS-response identity handling and guarded
-  profile persistence are implemented. One real login and fresh status passed.
-- Login/profile work was committed as `27539bd`; it was not pushed.
-- Renewal has 187-Rust/152-runner offline evidence and one explicit live L1 PASS.
-  L0 two-profile login is complete; the new generation matrix remains deferred.
-- Renewal changes are unstaged on HEAD `27539bd`. Do not attribute those changes
-  to the prior commits. Add the actual new commit if the
-  user later authorizes one.
-- One browser login and code exchange completed without retry. No generation
-  requests consumed; generation ledger remains 17/40 used, 23 remaining.
-- The combined report is still pending delivery to the design conversation.
-
-No report delivery, credential mutation, commit, push, or live request is
-authorized merely by updating this matrix.
+The user explicitly authorized the report, then commit and push to origin/master,
+including the two local Wi implementation commits. This section is prepared before
+Git publication; the final delivery confirmation supplies the report commit ID.
+No further live requests or implementation expansion are authorized.
 
 ## 8. Offline implementation evidence
 
@@ -502,3 +496,141 @@ auth: two browser logins, two code exchanges, one refresh. Generation ledger:
 The 187-Rust/152-runner final offline gate applies to unchanged runtime source.
 This evidence is prepared for the authorized renewal/L0/L1 commit on baseline
 27539bd; the resulting commit is identified by Git history. No push is authorized.
+
+## 13. W1 managed-auth WebSocket text PASS
+
+L0/L1 renewal work was committed locally as `17ba3c3`. The user then authorized
+W1 only. Parent ran `wi smoke --auth-source gateway --account wi-experiment
+--model gpt-6-astra --transport websocket --case text` under a 180-second deadline.
+Exit 0 at `2026-09-08T21:45:23Z`; passed=true, stage=first_acceptance, no error.
+Selected-profile output confirmed wi-experiment. One submission was observed.
+
+Evidence: one native response.created, one normalized start, two text deltas,
+validated response.completed/status completed, one finalized message, and one
+effective item. Effective expected/normalized/streamed text comparisons and
+answers_equal were true. Native terminal output was empty; the existing validated
+output_item.done recovery supplied effective output. Provenance was
+validated_output_item_done, not native terminal text. No tools or continuation ran.
+
+No retry, fallback, account switch or additional case occurred. New ledger:
+18/40 generation submissions used, 22 remaining. L0/L1 remain PASS; W2 is next.
+The prior 187-Rust/152-runner gates and reviews apply to unchanged runtime code.
+Only evidence/docs changed; no new commit or push was authorized for this run.
+
+## 14. W2 managed-auth WebSocket continuation PASS
+
+The user approved W2. Parent ran `wi smoke --auth-source gateway --model gpt-6-astra
+--transport websocket --case continuation` once under a 180-second deadline.
+No account argument was supplied. Wi selected wi-experiment once; no repeat was
+used to obtain a preferred random result. Exit 0 at `2026-09-08T21:50:25Z`,
+passed=true, stage=final_acceptance, no error, two submissions.
+
+Each response had one native response.created, one normalized start, two text
+deltas and a validated completed terminal. Expected answers remembered and lantern
+passed. Effective expected/normalized/streamed comparisons were true. Each native
+terminal had output:[]; one finalized message was recovered per response with
+validated_output_item_done provenance. Native text comparisons were unavailable.
+
+Request two had socket_reused=true, prior_response_equal=true and
+new_input_only_equal=true. The existing fixed-profile handshake plus actual socket
+reuse demonstrates unchanged session binding. No tool, retry, fallback or account
+switch occurred. New ledger:20/40 used,20remaining. W2 is checked off; W3 is next.
+Runtime remains unchanged from the 187-Rust/152-runner reviewed baseline17ba3c3.
+Only report/docs changes were made, left unstaged. No commit or push.
+
+## 15. W3 managed-auth WebSocket tool round trip PASS
+
+The user approved W3. Parent ran `wi smoke --auth-source gateway --model gpt-6-astra
+--transport websocket --case tool` once under a 180-second deadline. No account
+argument was supplied; Wi randomly selected wi-secondary once. Exit0 at
+`2026-09-08T21:54:09Z`, passed=true, stage=final_acceptance, no error, two submissions.
+
+First response: one native response.created, nine argument deltas, one finalized
+function call and a validated completed terminal. The strict validator accepted
+exactly one direct add_numbers call with arguments17,25. Exactly one correlated
+local execution and valid result42 passed. Request two reused the socket and had
+prior_response_equal=true, new_input_only_equal=true and result_linkage_equal=true.
+The final response had one text delta, one finalized message, a validated completed
+terminal and expected/normalized/streamed effective text42 comparisons all true.
+
+Both native terminals had output:[]; each effective item came from the existing
+validated_output_item_done recovery. Native text comparisons were unavailable,
+not PASS. No retries, fallback, account switches or further cases occurred.
+W3 is checked off; all W1-W3 passed. S1 is next. Ledger:22/40 used,18remaining.
+Runtime remains unchanged from the reviewed187-Rust/152-runner baseline17ba3c3.
+Only sanitized evidence/docs changed, left unstaged; no commit or push.
+
+## 16. S1 managed-auth SSE text PASS
+
+The user approved S1. Parent ran `wi smoke --auth-source gateway --account
+wi-secondary --model gpt-6-astra --transport sse --case text` once under a
+180-second deadline. Wi confirmed the explicit profile. Exit 0 at
+`2026-09-08T21:57:38Z`, passed=true, stage=first_acceptance, no error, one submission.
+
+HTTP status 200, media missing, body_class text_or_other and sample_state
+sse_prolog_admitted. The existing bounded strict prolog check admitted the response;
+no MIME rule was changed. One native response.created, one normalized start, two
+text deltas, one finalized message and a validated completed terminal were observed.
+Expected answer gateway connected and effective expected/normalized/streamed text
+comparisons passed. Native SSE replay equality was true for this initial request;
+continuation replay and opaque replay were not exercised.
+
+The native terminal had output:[]; the effective message used
+validated_output_item_done provenance. Native text comparisons were unavailable,
+not PASS. No tool, retry, fallback, account switch or S2 request occurred.
+Ledger: 23/40 used, 17 remaining. S1 is checked off; S2 is next. Runtime is unchanged
+from the reviewed 187-Rust/152-runner baseline 17ba3c3. Only sanitized evidence/docs
+changed, left unstaged; no commit or push.
+
+## 17. S2 managed-auth SSE continuation PASS
+
+The user approved S2. Parent ran `wi smoke --auth-source gateway --model gpt-6-astra
+--transport sse --case continuation` once under a 180-second deadline. No account
+argument was supplied; Wi randomly selected wi-experiment once. Exit 0 at
+`2026-09-08T22:01:09Z`, passed=true, stage=final_acceptance, no error, two submissions.
+
+Each response had HTTP 200, media missing, body_class text_or_other and
+sample_state sse_prolog_admitted. Each produced one native response.created, one
+normalized start, two text deltas, one finalized message and a validated completed
+terminal. Expected answers remembered and lantern passed. Effective expected,
+normalized and streamed comparisons were true. Both native terminals had output:[];
+each effective message used validated_output_item_done provenance. Native text
+comparisons were unavailable, not PASS.
+
+native_sse_replay_equal was true for both requests, including the continuation.
+The second opaque_replay was not_emitted, so live opaque replay remains untested.
+The existing SSE preparation checks retain the selected account binding. WebSocket
+socket-reuse and prior-response-ID fields do not apply to this SSE replay path.
+No retries, fallback, account switch, tool execution or S3 request occurred.
+Ledger: 25/40 used, 15 remaining. S2 is checked off; S3 is next. Runtime remains
+unchanged from reviewed baseline 17ba3c3 and its 187-Rust/152-runner gates.
+Only sanitized evidence/docs changed, left unstaged. No commit or push.
+
+## 18. S3 managed-auth SSE tool PASS and matrix completion
+
+The user approved S3. Parent ran `wi smoke --auth-source gateway --model gpt-6-astra
+--transport sse --case tool` once under a 180-second deadline. No account argument
+was supplied; Wi randomly selected wi-experiment once. Exit 0 at
+`2026-09-08T22:05:23Z`, passed=true, stage=final_acceptance, no error, two submissions.
+
+Both HTTP 200 responses lacked Content-Type and passed existing strict SSE prolog
+admission. Each had one native response.created, one normalized start and a validated
+completed terminal. First response: nine argument deltas and one finalized function
+call. Strict validation proved one direct add_numbers(17,25), exactly one correlated
+local execution and valid result42. Request two had native_sse_replay_equal=true
+and result_linkage_equal=true. Final response: one text delta, one finalized message,
+answer42 and effective expected/normalized/streamed comparisons all true.
+
+Each native terminal had output:[]; validated_output_item_done recovery supplied
+the effective call/message. Native text comparisons were unavailable, not PASS.
+Second-request opaque_replay=not_emitted; live opaque replay remains untested.
+Existing SSE preparation retains the selected account; no live renewal is claimed.
+No retries, fallback, account switches or further cases occurred.
+
+L0, L1 and all six generation cases now PASS on local Linux. The generation matrix
+used 10 submissions total; cumulative ledger 27/40 used, 13 remaining. Runtime code
+is unchanged from reviewed baseline 17ba3c3, with prior 187-Rust/152-runner and all
+six Cargo gates PASS. The remaining task is the combined design-conversation report.
+Broader provider support, non-Linux live behavior and automatic-expiry live renewal
+remain outside this acceptance. Only sanitized evidence/docs changed, left unstaged.
+No commit or push; no further provider request is planned.

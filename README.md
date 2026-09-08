@@ -4,11 +4,15 @@ A small, headless Rust gateway with compiled-in provider plugins. This milestone
 adds persistent OpenAI/Codex WebSocket sessions, explicit SSE mode, typed output
 items, and one ordinary function-tool round trip.
 
-**Status: two distinct Wi account logins and one explicit renewal passed on local Linux.**
+**Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status
 both after login and after renewal. Automatic expiry-triggered renewal has offline evidence.
-Stable provider support and model entitlement are unconfirmed.
-See [managed authentication](docs/WI_AUTH.md) for implemented mechanics and limits.
+W1-W3 WebSocket text, continuation and add_numbers passed with managed auth and
+gpt-6-astra. S1-S3 SSE text, continuation and add_numbers also passed.
+Live opaque replay remains untested; stable provider support is unconfirmed.
+See the [combined implementation report](docs/COMBINED_DESIGN_REPORT.md) for
+commit boundaries and verification evidence. See [managed authentication](docs/WI_AUTH.md)
+for implemented mechanics and limits.
 The original delivery was uncompiled. Its [verification](docs/VERIFICATION.md)
 is historical evidence, not the record of local repair. Normal tests use synthetic
 credentials and loopback servers. Offline success does not prove account access.

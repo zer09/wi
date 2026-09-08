@@ -1,4 +1,4 @@
-//! Wi-owned profiles. Real renewal remains unavailable.
+//! Wi-owned profiles with guarded experimental credential renewal.
 use super::{
     auth::{CredentialSource, SubscriptionCredentials},
     managed_store::{Profile, Store},
@@ -11,9 +11,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub const OAUTH_CONFIGURATION_BLOCKER: &str =
-    "Wi OAuth renewal is unavailable; experimental browser login does not enable renewal";
-pub fn production_oauth_blocker() -> Result<()> {
+#[cfg(all(test, target_os = "linux"))]
+const OAUTH_CONFIGURATION_BLOCKER: &str = "synthetic renewal is unconfigured";
+#[cfg(all(test, target_os = "linux"))]
+fn production_oauth_blocker() -> Result<()> {
     Err(GatewayError::InvalidAuth(OAUTH_CONFIGURATION_BLOCKER))
 }
 fn now() -> Result<u64> {
@@ -29,7 +30,9 @@ pub(super) trait Exchange: Send + Sync {
     fn configured(&self) -> Result<()>;
     async fn refresh(&self, refresh: &str) -> Result<Profile>;
 }
+#[cfg(all(test, target_os = "linux"))]
 struct Unconfigured;
+#[cfg(all(test, target_os = "linux"))]
 #[async_trait]
 impl Exchange for Unconfigured {
     fn configured(&self) -> Result<()> {
@@ -48,7 +51,7 @@ impl AuthManager {
     pub fn default_location() -> Result<Self> {
         Ok(Self {
             store: Store::default_location()?,
-            exchange: Arc::new(Unconfigured),
+            exchange: Arc::new(super::refresh::RefreshExchange::default()),
         })
     }
     pub fn list(&self) -> Result<Vec<ProfileMetadata>> {

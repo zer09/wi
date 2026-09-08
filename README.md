@@ -4,9 +4,10 @@ A small, headless Rust gateway with compiled-in provider plugins. This milestone
 adds persistent OpenAI/Codex WebSocket sessions, explicit SSE mode, typed output
 items, and one ordinary function-tool round trip.
 
-**Status: one experimental Wi browser login passed on local Linux.**
-Wi persisted its own eligible profile and confirmed it through fresh metadata status.
-Real renewal remains unavailable. Stable provider support and model entitlement are unconfirmed.
+**Status: two distinct Wi account logins and one explicit renewal passed on local Linux.**
+Wi persisted its own eligible profile and confirmed it through fresh metadata status
+both after login and after renewal. Automatic expiry-triggered renewal has offline evidence.
+Stable provider support and model entitlement are unconfirmed.
 See [managed authentication](docs/WI_AUTH.md) for implemented mechanics and limits.
 The original delivery was uncompiled. Its [verification](docs/VERIFICATION.md)
 is historical evidence, not the record of local repair. Normal tests use synthetic
@@ -104,7 +105,13 @@ The browser and local launcher necessarily receive the authorization URL.
 The shared public-client configuration follows Pi's browser flow, with honest `wi`
 identification. This does not establish OpenAI approval, stable support, or entitlement.
 No retries, device flow, manual-code fallback, or API-key exchange are implemented.
-`auth refresh` and automatic renewal remain unavailable, including after successful login.
+`wi auth refresh --provider openai-codex --account personal` renews the selected
+Wi-owned profile and prints safe current metadata. `--auth-source gateway` enables
+automatic preparation near expiry before a new session or same-profile SSE request.
+Established WebSockets never renew mid-session. The token exchange uses fixed TLS,
+no proxy/redirect/retry, 10-second connect/read limits, a 30-second exchange limit,
+and a 65536-byte response limit. Renewal evidence is OFFLINE-only; live renewal is
+NOT RUN. TODO: separately authorize L1 renewal and the later managed-auth matrix.
 See [Wi auth](docs/WI_AUTH.md) for bounds, trust assumptions, and persistence behavior.
 
 ## Reuse your own subscription login

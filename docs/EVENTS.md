@@ -4,7 +4,10 @@ Managed authentication does not change the event JSON schema. The CLI reports
 only the validated selected profile alias on stderr. Provider account IDs and
 tokens never become selection evidence. Preparation failures before generation
 dispatch remain `not_submitted`; OAuth exchange uncertainty is separate from
-generation submission uncertainty. Production OAuth remains configuration-blocked.
+generation submission uncertainty. Experimental login and real renewal are implemented;
+renewal evidence is OFFLINE-only and live renewal is NOT RUN. Explicit auth refresh
+returns safe profile metadata, not generation events. SSE prepares the same bound
+profile before submission; established WebSockets never renew mid-session.
 
 ## Envelope
 

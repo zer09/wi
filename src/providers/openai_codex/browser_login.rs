@@ -22,10 +22,10 @@ use tokio::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+pub(super) const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER: &str = "https://auth.openai.com";
 const AUTHORIZE: &str = "https://auth.openai.com/oauth/authorize";
-const TOKEN: &str = "https://auth.openai.com/oauth/token";
+pub(super) const TOKEN: &str = "https://auth.openai.com/oauth/token";
 const REDIRECT: &str = "http://localhost:1455/auth/callback";
 const HOST: &str = "localhost:1455";
 const TOTAL: Duration = Duration::from_secs(180);
@@ -407,7 +407,7 @@ struct AccountClaim {
 
 // Only call with bytes obtained directly from the fixed, certificate-checked token endpoint.
 // TLS authenticates the source. Decoding these claims is not JWT signature verification.
-fn token_profile(body: &[u8]) -> Result<Profile> {
+pub(super) fn token_profile(body: &[u8]) -> Result<Profile> {
     if body.len() > 65536 {
         return Err(failed());
     }

@@ -46,6 +46,14 @@ fn managed_absent_cli_is_actionable_and_never_creates_store() {
             ],
             vec![
                 "auth",
+                "refresh",
+                "--provider",
+                "openai-codex",
+                "--account",
+                "missing",
+            ],
+            vec![
+                "auth",
                 "logout",
                 "--provider",
                 "openai-codex",
@@ -95,6 +103,8 @@ fn managed_absent_cli_is_actionable_and_never_creates_store() {
                 assert_eq!(output.status.code(), Some(1));
                 assert!(error.contains(if matches!(args[1], "status" | "logout") {
                     "Wi profile does not exist"
+                } else if args[1] == "refresh" {
+                    "selected profile is unavailable; login or select another profile"
                 } else {
                     "no eligible Wi profiles; login first"
                 }));

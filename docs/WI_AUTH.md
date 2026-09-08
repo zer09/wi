@@ -1,4 +1,4 @@
-# Wi managed authentication: experimental browser login
+# Wi managed authentication: experimental login and renewal
 
 Wi is the Cargo package, library, and binary at version 0.2.0. The provider ID
 remains `openai-codex`. `Gateway` remains the provider-neutral routing type.
@@ -7,10 +7,13 @@ Repository paths and historical verification records retain their original names
 ## Experimental status and trust model
 
 `wi auth login --experimental` implements one Pi-compatible browser flow. This
-user-selected experiment supersedes the earlier configuration gate for login only.
+user-selected experiment now also enables Pi-compatible renewal of Wi-owned profiles.
 The public client registration is an undocumented compatibility choice, not a
 claim of OpenAI approval, stable support, or account entitlement. A provider denial
-stops the attempt. Real `auth refresh` and automatic renewal remain unavailable.
+stops the attempt. Real `auth refresh` and automatic preparation are implemented.
+One explicit live renewal passed at `2026-09-08T21:23:21Z`; a fresh process
+confirmed the persisted eligible profile and updated expiry. Automatic expiry-triggered
+renewal and failure/rotation edge cases retain offline evidence.
 
 The fixed configuration follows Pi source at `96617628e`,
 `packages/ai/src/auth/oauth/openai-codex.ts`: the public client ID
@@ -33,23 +36,38 @@ not overflow. The earlier of that expiry and `exp` must pass the existing freshn
 check, including its 30-second margin. Ordinary extra fields such as `id_token`
 are ignored rather than stored. Only required profile data is persisted.
 
-`browser_login.rs` owns this flow. Its tests inject only loopback endpoints, temp
-stores, and harmless launchers under `cfg(test)`. The older `oauth_offline.rs`
-remains synthetic regression coverage; its fake attestation is not used in login.
+`browser_login.rs` owns browser login and the shared strict token-response parser.
+The private `refresh.rs` adapter sends form-encoded `grant_type=refresh_token`,
+`refresh_token`, and `client_id` to the same fixed TLS token endpoint, following
+Pi's `openai-codex.ts:171-188` at the revision above. It requires the returned
+complete token pair; it never reuses the old refresh token when one is omitted.
+Both flows use the response trust model above. There is no arbitrary one-day
+expiry cap. Renewal uses certificate validation, an honest Wi user-agent, no
+proxy/redirect/retry, 10-second connect/read limits, and a 30-second total exchange
+limit. Responses are bounded to 65536 bytes while reading, including chunked or
+absent-length bodies. Errors expose static stage classes, not bodies, headers,
+URLs, or credentials. Collected response bytes use `Zeroizing` storage.
+
+Tests inject only literal loopback HTTP endpoints and temp stores under `cfg(test)`;
+login tests also use harmless launchers. No production endpoint override exists.
+The older `oauth_offline.rs` remains synthetic regression coverage; its fake
+attestation is not used by either real exchange.
 
 ## CLI surface
 
 - `wi auth login --provider openai-codex --account personal --experimental [--replace]`: experimental browser login.
 - `wi auth list --provider openai-codex`: local metadata only.
 - `wi auth status --provider openai-codex --account personal`: local metadata only.
-- `wi auth refresh --provider openai-codex --account personal`: blocked.
+- `wi auth refresh --provider openai-codex --account personal`: one explicit renewal, even when fresh; returns safe current metadata.
 - `wi auth logout --provider openai-codex --account personal`: local deletion only.
 
 Logout never revokes a remote credential or touches another application's store.
 Login requires explicit replacement of an existing profile. Without `--experimental`,
 it fails before path resolution, credential reads, listener creation, or browser launch.
 Alias, Linux store safety, and existing-profile conflict checks precede browser launch.
-The command returns only the local alias, expiry, and persisted/eligible flags.
+Login returns only the local alias, expiry, and persisted/eligible flags.
+Refresh returns current profile metadata: alias, expiry, enabled, logged-in, and
+reauthentication flags. It never returns provider account IDs or tokens.
 
 Linux `/usr/bin/xdg-open` must be installed and configured to open a browser. Wi
 passes the URL as one argument without a shell and suppresses launcher output.
@@ -127,7 +145,12 @@ expiry before each submission. It does not reload or renew mid-session. A new
 session is required after WS expiry. SSE may prepare the same selected profile
 before the next request, including tool-result delivery.
 
-Synthetic renewal holds the cross-process lock through the exchange and atomic
+Explicit refresh forces one exchange for the selected eligible profile. Automatic
+preparation exchanges only when expiry is within the 30-second freshness margin.
+Concurrent automatic waiters reread under the lock and reuse a completed rotation.
+List, status, and load never contact the token endpoint, even for expired profiles.
+
+Renewal holds the cross-process lock through the exchange and atomic
 persistence. It rereads after acquiring the lock. Before exchange it creates and
 syncs an empty, nonsecret `.rotation-<alias>-<incarnation>` guard, then syncs the
 directory. Reads treat that guard as authoritative reauthentication state even
@@ -144,15 +167,16 @@ It cannot expose the old refresh token because the new document is already
 durable. Replacement and logout clean only the removed incarnation's
 guard after their document commit; leftover guards do not affect new incarnations
 or other profiles. This is not a general recovery journal.
-The synthetic renewal exchange contract must attest account identity;
-local `jwt_hints` decoding is not signature verification. Experimental login uses
-the separate transport-authenticated response model described above.
+The real renewal exchange uses the same transport-authenticated response model as
+experimental login. Local `jwt_hints` decoding is not signature verification.
+The manager independently rejects account changes and preserves the incarnation.
 
 An owned blocking worker completes the bounded exchange and persistence even when
 a session cancels its waiting future. A process crash cannot preserve an unpersisted
 new token, but the earlier durable guard prevents blind reuse after restart.
 No automatic generation retries, account failover, reconnect replay, or background
-refresh scheduler is added. Production renewal remains unavailable.
+refresh scheduler is added. Lock acquisition and blocking filesystem operations
+have no new time bound; the 30-second limit applies to the token exchange.
 
 Login uses the same stable lock and atomic persistence path. It checks conflicts
 again under lock, creates a new incarnation, and guards only that candidate before
@@ -171,9 +195,22 @@ operations cannot be forcibly bounded by the async deadline.
 One parent-run experimental browser login passed on local Linux at
 `2026-09-08T20:09:22Z`. Wi persisted an eligible profile; a fresh metadata-only
 status command confirmed logged_in=true and requires_reauthentication=false.
-This is observed login evidence, separate from the synthetic tests. No generation,
-model entitlement, real renewal, or second-account success is claimed.
-Real renewal and broader managed-auth live tests remain deferred. Existing Pi/Codex
-credential files remain read-only and are not consulted by browser login.
+This is observed login evidence, separate from the synthetic tests. A second
+profile login passed at `2026-09-08T21:36:47Z`. Fresh Wi status confirmed both
+profiles logged in without reauthentication. A reviewed read-only metadata checker
+confirmed distinct provider accounts and login incarnations without displaying
+identifiers or tokens. No generation or model entitlement is claimed.
+The real renewal adapter also has offline loopback/temp-store evidence for form
+encoding, request count, bounds, sanitized failures, identity/expiry validation,
+explicit rotation, concurrent automatic preparation, cancellation, and restart
+guards. Existing synthetic storage and WS/SSE regressions remain applicable.
+L1 explicit live renewal passed once at `2026-09-08T21:23:21Z`, without retry or
+generation. A fresh status process confirmed the same local profile remained
+logged in without reauthentication and had the same updated expiry as the refresh
+result. Identity preservation is enforced by the reviewed manager; provider IDs
+and tokens were not exposed. Other-profile preservation remains synthetic evidence.
+L0 two-account login and L1 explicit renewal are complete. TODO: obtain separate
+authorization for the managed-auth generation matrix. Existing Pi/Codex credential
+files remain read-only and are not consulted by managed login or renewal.
 The parent-owned matrix and verification reports remain the authority for acceptance
 and the generation ledger.

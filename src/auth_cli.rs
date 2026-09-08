@@ -1,9 +1,6 @@
 //! Provider dispatch only; OAuth and file ownership stay in the provider.
 use clap::{Args, Subcommand, ValueEnum};
-use wi::{
-    Result,
-    providers::openai_codex::managed_auth::{AuthManager, production_oauth_blocker},
-};
+use wi::{Result, providers::openai_codex::managed_auth::AuthManager};
 
 #[derive(Clone, Copy, ValueEnum)]
 enum ProviderArg {
@@ -41,7 +38,7 @@ enum Action {
     List(ProviderArgs),
     /// Read one local profile's metadata only.
     Status(AccountArgs),
-    /// Renewal is unavailable, including for experimental browser logins.
+    /// Renew one Wi profile through the experimental token exchange.
     Refresh(AccountArgs),
     /// Delete only this Wi profile. Does not revoke remote credentials.
     Logout(AccountArgs),
@@ -61,7 +58,11 @@ impl AuthCommand {
                 )
                 .await?,
             ),
-            Action::Refresh(_) => production_oauth_blocker(),
+            Action::Refresh(args) => {
+                let manager = AuthManager::default_location()?;
+                manager.refresh(&args.account).await?;
+                crate::line_json(&manager.status(&args.account)?)
+            }
             Action::List(_) => crate::line_json(&AuthManager::default_location()?.list()?),
             Action::Status(args) => {
                 crate::line_json(&AuthManager::default_location()?.status(&args.account)?)
@@ -100,28 +101,21 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn auth_cli_login_refresh_block_without_ambient_path_resolution() {
-        for verb in ["login", "refresh"] {
-            let cli = crate::Cli::try_parse_from([
-                "wi",
-                "auth",
-                verb,
-                "--provider",
-                "openai-codex",
-                "--account",
-                "synthetic",
-            ])
-            .unwrap();
-            let crate::Command::Auth(command) = cli.command else {
-                panic!()
-            };
-            let error = command.run().await.unwrap_err();
-            let expected = if verb == "login" {
-                "requires --experimental"
-            } else {
-                "renewal is unavailable"
-            };
-            assert!(error.to_string().contains(expected));
-        }
+    async fn auth_cli_login_blocks_without_ambient_path_resolution() {
+        let cli = crate::Cli::try_parse_from([
+            "wi",
+            "auth",
+            "login",
+            "--provider",
+            "openai-codex",
+            "--account",
+            "synthetic",
+        ])
+        .unwrap();
+        let crate::Command::Auth(command) = cli.command else {
+            panic!()
+        };
+        let error = command.run().await.unwrap_err();
+        assert!(error.to_string().contains("requires --experimental"));
     }
 }

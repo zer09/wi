@@ -29,7 +29,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Manage Wi-owned profiles. Browser login is experimental; renewal is unavailable.
+    /// Manage Wi-owned profiles with experimental browser login and renewal.
     Auth(auth_cli::AuthCommand),
     /// Read local credential metadata only. Makes no provider request.
     AuthCheck(AuthArgs),

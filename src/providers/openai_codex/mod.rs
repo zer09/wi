@@ -13,6 +13,7 @@ mod managed_store_tests;
 mod oauth_offline;
 pub mod observation;
 pub mod profile_selection;
+mod refresh;
 mod session;
 mod sse;
 mod state;

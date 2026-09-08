@@ -1,14 +1,23 @@
 # Local verification report — 2026-09-07 UTC
 
-**Current status: Wi experimental browser login PASS.**
+**Current status: L0 two-account login and L1 explicit live renewal PASS.**
+
+Renewal work builds on local commit `27539bd`, containing the accepted Wi naming,
+profiles and first login. This report is prepared for the user-authorized renewal
+commit after L0 success. No push is authorized. Prior evidence remains valid. The separately authorized L1 refresh completed once
+at `2026-09-08T21:23:21Z`, with exit 0 and fresh-process confirmation of persistence.
 
 One parent-run login completed at `2026-09-08T20:09:22Z`, returned exit 0 and
 persisted an eligible Wi-owned profile. A fresh metadata-only process confirmed
 logged_in=true and requires_reauthentication=false. No retry occurred.
 
-The latest unstaged tree passed all six Cargo gates, **177 Rust tests and 152
-runner tests**. All three final reviews found no blockers. Real renewal, the
-second-account login and new managed-auth generation tests remain deferred.
+The latest unstaged tree passed all six Cargo gates, **187 Rust tests and 152
+runner tests**. All three reviews found no blockers. Real renewal transport now
+connects to explicit refresh and automatic preparation. One explicit live renewal
+passed; automatic expiry-triggered renewal retains offline evidence. Second-account
+login also passed at `2026-09-08T21:36:47Z`. Fresh Wi status and a reviewed metadata
+comparison confirmed two logged-in profiles with distinct provider accounts.
+New managed-auth generation tests remain deferred.
 Successful login establishes observed compatibility, not stable provider support
 or model entitlement.
 
@@ -16,13 +25,17 @@ The previous six-case WebSocket/SSE live matrix passed and was committed/pushed 
 `718c43afd2a0d826dccc85e7d1c50034139816e4`. It does not establish live acceptance
 of the new auth source or the renamed client's identification.
 
-**17/40 assistant generation submissions used, 23 remaining.** This increment
-made one browser login and one code exchange, counted separately from generation.
-Real credentials stayed in the reviewed Wi process and its private store;
-Pi/Codex credential files were not accessed. No refresh or generation ran.
-No new commit or push occurred; implementation and report changes remain unstaged.
+**17/40 assistant generation submissions used, 23 remaining.** Cumulative auth
+accounting is two browser logins, two code exchanges and one refresh exchange.
+Real credentials were handled by reviewed Wi processes and one reviewed read-only
+metadata checker. No values were displayed, no Pi/Codex auth files were accessed,
+and no generation request ran during L0/L1. Runtime source remains unchanged from
+the final offline gate. Pre-commit Git states in earlier sections are historical.
 
-See [experimental login result](#2026-09-08-experimental-wi-login-pass),
+See [L0 live result](#2026-09-08-l0-two-account-login-pass),
+[L1 live result](#2026-09-08-l1-explicit-live-renewal-pass),
+[offline renewal result](#2026-09-08-real-renewal-offline-pass),
+[experimental login result](#2026-09-08-experimental-wi-login-pass),
 [Wi offline baseline](#2026-09-08-wi-naming-and-managed-auth-offline-results)
 and `docs/WI_AUTH_MATRIX.md`. The pending design-conversation report must combine
 this partial follow-up with the previous completed commit. Earlier results,
@@ -1096,3 +1109,103 @@ Auth accounting: one browser login, one code exchange, zero refreshes/retries.
 Generation accounting: zero new, 17/40 used, 23 remaining. No further live request
 is planned in this increment. The changes are unstaged and uncommitted. Include
 this result with the prior completed commit in the pending combined report.
+
+## 2026-09-08 real renewal offline PASS
+
+Baseline: local commit `27539bd39a19ea5fcf55e8d9159ccc89ce2dcbbf`, containing the
+previous Wi naming/profile/login work. This increment connects the real refresh
+adapter; it does not perform live renewal, login or generation.
+
+`src/providers/openai_codex/refresh.rs` implements the fixed Pi-compatible form
+exchange with Wi identification, TLS validation, no proxy/redirect/retry/fallback,
+10-second I/O and 30-second exchange bounds, and a 65536-byte response cap. Shared
+login parsing validates complete token pairs, account claims and checked/fresh
+expiry. The existing manager preserves identity/incarnation, durable rotation
+guards and cancellation-surviving persistence. CLI refresh emits metadata only.
+Read-only load/list/status and established WS behavior remain unchanged. SSE
+preparation may renew only the same bound profile. No dependencies changed.
+
+Parent final `uv run scripts/verify.py` completed at `2026-09-08T21:17:01Z`:
+all six Cargo gates PASS, 187 Rust tests (166 library + 16 CLI + 1 absence integration
++ 4 provider-contract), zero failed/ignored/measured/filtered tests, zero doctests.
+`node scripts/cli_retest.mjs --self-test`: 152 PASS, live_started=false.
+`git diff --check` and `wi auth --help` passed. Inventory: 45 Rust files,
+178 regex-counted test definitions, 25 fixture events; executed counts prevail.
+
+Ten new loopback tests exercise the actual adapter, including exact form encoding,
+explicit and automatic rotation, no-network reads/fresh preparation, concurrency,
+cancelled waiters, account mismatch/restart guards, bounded malformed responses,
+timeouts, no retries/redirects, sanitized errors, and strict token validation.
+Existing synthetic fault and WS/SSE binding regressions remain passing.
+
+All three reviews completed without blockers. Two stale descriptions of renewal
+were corrected mechanically before the final gate. Proxy refusal is established
+by `.no_proxy()` source review, not a dedicated environment-proxy test. Exchange
+time bounds do not bound existing lock waits or blocking filesystem operations.
+Former public configuration-blocker helpers are now test-only, because production
+renewal no longer uses that placeholder; no runtime API was renamed.
+
+**R2 PASS offline; L1 NOT RUN.** Linux offline evidence does not prove real refresh
+acceptance. One separately authorized explicit refresh of the existing profile
+is the next live check. A rejected or ambiguous refresh can require login again;
+no automatic retry is permitted. Second-account and generation cases remain deferred.
+Zero real credential reads/writes, browser logins, code exchanges, refreshes or
+generation requests occurred in this increment. Ledger unchanged: 17/40 generation
+submissions used, 23 remaining. Changes are unstaged; no new commit or push.
+
+## 2026-09-08 L1 explicit live renewal PASS
+
+Following explicit user approval and the completed 187-Rust/152-runner offline
+and review gates, parent ran one `wi auth refresh --provider openai-codex
+--account wi-experiment` invocation under a 90-second local deadline. It exited 0
+at `2026-09-08T21:23:21Z`. Safe metadata reported enabled=true, logged_in=true,
+requires_reauthentication=false and an updated expiry.
+
+A fresh `wi auth status` process confirmed the same profile metadata and expiry.
+Expiry advanced from the previous login observation. The reviewed manager validates
+unchanged provider account before persistence and preserves the login incarnation.
+This is live success through that validation path, not a separately captured account
+identifier comparison. Other-profile preservation remains synthetic evidence because
+only one profile has been live-tested. No tokens, fingerprints, provider IDs, raw
+URLs, headers or native token responses were captured in reports.
+
+One successful forced-refresh invocation through the reviewed no-retry path establishes
+one refresh exchange. Credentials were handled only by Wi and its private store;
+existing Pi/Codex auth files were not accessed. No retry, fallback or generation ran.
+L1 is PASS on local Linux. Automatic expiry/concurrency/failure cases retain offline
+evidence. Second-account login and managed-auth W1-W3/S1-S3 remain deferred.
+
+Cumulative auth: one browser login, one code exchange, one refresh exchange.
+Generation ledger unchanged: 17/40 used, 23 remaining. No further live request is
+planned in this L1 scope. Only documentation changed after the observed run;
+renewal code remains unchanged from the final offline gate. Changes remain
+unstaged; no new commit or push.
+
+## 2026-09-08 L0 two-account login PASS
+
+The user approved L0 and committing on success. One browser login with a new alias,
+wi-secondary, completed at `2026-09-08T21:36:47Z`. The reviewed command was
+`wi auth login --provider openai-codex --account wi-secondary --experimental`,
+with a 200-second local deadline and no replacement. Exit 0; persisted=true;
+eligible=true. No retry, fallback, refresh or generation occurred in this step.
+
+Fresh Wi status processes confirmed wi-experiment and wi-secondary enabled,
+logged_in=true, requires_reauthentication=false. The first profile's expiry was
+unchanged from L1; the second matched the new login metadata. A reviewed read-only
+local checker compared the two account and incarnation fields inside the selected
+private Wi store and emitted only booleans: distinct_provider_accounts=true and
+distinct_login_incarnations=true. It validated file/path safety and read size,
+withheld all failure details, made no network request, and wrote no credential data.
+No provider IDs, tokens or fingerprints were displayed or saved in reports.
+Existing Pi/Codex auth files were not accessed.
+
+L0 is PASS: two distinct provider accounts have persisted Wi profiles. L1 remains
+PASS from its separate explicit refresh. New W1-W3/S1-S3 remain NOT RUN; account
+login does not establish model entitlement. Runtime code remains unchanged from
+the 187-Rust/152-runner, six-Cargo-gate verification and three completed reviews.
+
+Cumulative auth: two browser logins, two code exchanges, one refresh exchange.
+Generation ledger unchanged: 17/40 used, 23 remaining. This report records the
+pre-commit evidence for the authorized commit of renewal and L0/L1 results on
+baseline `27539bd`. Git history identifies the resulting commit. No push or
+additional generation test was authorized by this request.

@@ -14,6 +14,9 @@ use std::{
     sync::Arc,
 };
 use tokio::io::AsyncReadExt;
+mod collect_lifecycle;
+#[cfg(test)]
+mod collect_tests;
 mod demo;
 mod smoke;
 
@@ -123,7 +126,7 @@ async fn collect(
     request_id: &str,
     json_mode: bool,
 ) -> Result<ModelResponse> {
-    let mut rendered = String::new();
+    let mut lifecycle = collect_lifecycle::Lifecycle::default();
     while let Some(envelope) = session.events.next().await {
         if json_mode {
             line_json(&envelope)?;
@@ -134,6 +137,7 @@ async fn collect(
         if envelope.request_id.as_deref() != Some(request_id) {
             return Err(GatewayError::Protocol("unexpected request identity"));
         }
+        lifecycle.observe(&envelope.event)?;
         match envelope.event {
             ProviderEvent::OutputItemUpdated {
                 kind: DeltaKind::Text | DeltaKind::Refusal,
@@ -142,12 +146,12 @@ async fn collect(
             } => {
                 if !json_mode {
                     write_text(&delta)?;
-                    rendered.push_str(&delta);
                 }
             }
             ProviderEvent::ResponseFinished { response } => {
+                lifecycle.validate(&response)?;
                 if !json_mode {
-                    if let Some(suffix) = response.text.strip_prefix(&rendered) {
+                    if let Some(suffix) = response.text.strip_prefix(&lifecycle.rendered) {
                         write_text(suffix)?;
                     } else {
                         write_text("\n[Authoritative final response]\n")?;

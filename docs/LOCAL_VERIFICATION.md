@@ -1,5 +1,25 @@
 # Local verification report — 2026-09-07 UTC
 
+**Current status: all six live matrix cases PASS.**
+
+WebSocket and SSE each passed text, continuation and the complete
+`add_numbers(17,25)` round trip with explicit Codex auth and `gpt-6-astra`.
+The remaining SSE fix admits a missing-header response only after strict bounded
+protocol proof. It does not accept arbitrary HTTP 200 or a present wrong MIME.
+
+All six offline gates passed: **134 Rust tests and 152 runner tests**.
+All three final reviews found no blockers. **17/20 assistant submissions used,
+3 remaining**; the user's three manual submissions remain excluded.
+
+No further live tests are needed for this matrix. All edits remain unstaged.
+No credentials were changed; no commits or pushes occurred.
+See [completed SSE matrix](#2026-09-08-sse-compatibility-and-completed-matrix).
+Earlier failures, counts and gate interruptions below remain historical.
+
+See [offline repair and diagnostics](#2026-09-08-offline-repair-and-diagnostics-follow-up)
+for the 94-test result and later GitHub Actions evidence. Earlier sections remain
+historical snapshots, including their Git state, W1/S1 failures and 2/10 ledger.
+
 ## Verdict
 
 **Partially verified. Offline gates pass; live acceptance does not pass.**
@@ -229,3 +249,681 @@ invalidate later observed tests, and they are not labeled completed retroactivel
 The native gateway is built and substantially verified offline. The small milestone
 is **not accepted as live verified**. No GUI/server/full-agent work or advanced
 feature milestone was started. No commit, push or publication occurred.
+
+## 2026-09-08 offline repair and diagnostics follow-up
+
+### Scope and current checkout
+
+At the start of this pass, actual HEAD was
+`f30a020679a1eeb61978209e40e78a640db334af` on `master`, and the working tree was
+clean. It matched the commit examined by the remote review. The initial commit
+and push mentioned in the conversation occurred after the original report above.
+This pass made no stage, commit, push, auth-check, credential read or provider
+request. All current repairs and documentation edits remain unstaged.
+
+**Result: offline repair and diagnostics preparation PASS; live acceptance remains
+incomplete.** All three independent reviews completed with no blocking findings.
+The status-parsing defect below is confirmed. Neither historical live failure has
+been attributed to that defect or to any other cause without evidence.
+
+### Repairs and regression evidence
+
+| Area | Change | Observed regression evidence |
+|---|---|---|
+| Function-call status, src/providers/openai_codex/codec.rs:192-197 | Only an absent field or the exact string completed yields complete=true. Present null, boolean, numeric, array, object, empty, unknown and in-progress statuses yield false. Native fields remain preserved. | Before the fix, three status regressions failed. Real codec-to-registry mixed batches now reject before any event/execution/cache. Corrected batches execute fresh, not reused. |
+| Continuation boundary, state.rs:227-310 and tests.rs:289-382 | Existing incomplete-call policy now receives the correct normalized status. Both matching tool-result and ordinary user continuation are blocked. | State tests cover both transports and mixed batches. Loopback public-session tests prove no second request for malformed statuses. Omitted/completed controls still succeed. |
+| Text evidence, observation.rs:98-121,235-363 | Add independent native/expected, normalized/native and streamed/native comparisons. Text remains private and bounded. | Match/mismatch, altered normalized data, no deltas, terminal-only, refusal/malformed parts, multipart Unicode, 1 MiB bounds and request reset tested. |
+| SSE evidence, wire.rs:27-96,272-324 | Record exact HTTP status and allowlisted media/body classifications before returning the existing strict HTTP/MIME error. | Actual loopback responses exercise success, generic rejection, missing/invalid/wrong MIME, JSON/HTML/plain/binary/empty bodies, 302/401/403/429/503, no redirect/retry, timeout, truncation, read error and cancellation. |
+| Evidence safety, diagnostic_tests.rs | No raw text, content-type parameters, headers, body bytes, IDs or fingerprints enter snapshots. Accepted SSE and disabled observers do not sample bodies. | Serialization/Debug sentinel and static-value allowlist checks pass. Accepted SSE is not delayed for diagnostic sampling. |
+
+The implementation recorded a pre-fix `cargo test --lib` run with **74 passed,
+3 failed**. Its numeric exit code was not surfaced. A reviewer also reproduced
+the same three failures in an isolated scratch copy with baseline status parsing;
+that later copy included seven diagnostic tests, so it reported 81 passed and
+3 failed. No baseline code was restored into the working tree.
+
+Eight test definitions were added: one status boundary test and seven diagnostics
+tests. Existing state and public-session tests were extended with malformed-status
+matrices. Test definitions are not the basis for PASS; actual executed summaries
+are recorded below.
+
+### Diagnostic meanings and limits
+
+The fields are additive to smoke schema version 1. `src/demo.rs`, `src/smoke.rs`
+and the existing `required_proof` acceptance conditions were not loosened.
+
+| Field in submissions[] | Meaning |
+|---|---|
+| native_expected_text_equal | Terminal native ordinary text, trimmed, equals this fixed case/request's expected answer. No expected answer applies to the first tool response. |
+| normalized_native_text_equal | Both normalized ordinary item text and response.text equal response.native.output ordinary text, without trimming. |
+| streamed_native_text_equal | Output-text deltas concatenated in observed arrival order equal native terminal ordinary text, without trimming. No deltas is unavailable, not true. |
+| http.status | Exact numeric status observed when an SSE HTTP response arrives, including generic errors and rejected 2xx responses. |
+| http.media | One of missing, invalid, event_stream, json, html, plain_text, other. No arbitrary header value is retained. |
+| http.body_class | A bounded-prefix heuristic: empty, json_like, html_like, text_or_other, binary_or_non_utf8, or null. It is not a failure cause or complete content analysis. |
+| http.sample_state | not_sampled, unavailable, complete, read_error, timeout or truncated. The initial receipt remains unavailable if sampling is interrupted. |
+
+Text comparisons are null if required evidence is absent, malformed, unsupported,
+not applicable or over the **1 MiB** diagnostic bound. Native text is extracted
+independently before parsing/acceptance failure; normalized comparison is available
+only after a validated terminal. Arrival-order comparison is not a per-item lifecycle
+validator and can flag interleaved ordering. It does not change authoritative
+terminal handling or the existing strict answer check.
+
+Only rejected SSE responses with an enabled observer are sampled. The retained
+prefix is at most **4096 bytes**, under a **one-second** timeout within existing
+cancellation/request limits. A cap hit is conservatively truncated, including an
+exactly 4096-byte body. Sampling failure does not replace the original rejection
+category. No sample is taken for accepted SSE or an observer-disabled session.
+Only HTTP success plus text/event-stream can start SSE parsing.
+
+Exact status is authoritative in `submissions[].http.status`; the older
+`acceptance.request_failure.http_status` remains limited to inferred 401/403/429.
+The older W1/S1 summaries lack these new fields. Their values cannot be recovered
+retroactively from the retained evidence. The original failed W1 result remains
+intact, as do the unknown exact S1 status/media/body and upstream outcome.
+
+### Local execution results, 2026-09-08
+
+The implementation, three reviewers and final parent rerun executed offline gates
+on Linux. The parent ran `uv run scripts/verify.py` and observed exit **0**, all
+six commands below, 25 Rust files, 94 test definitions and 25 fixture events.
+Repeated executions are not counted as additional distinct tests.
+
+| Command | Exit | Result |
+|---|---:|---|
+| cargo fmt --all -- --check | 0 | PASS |
+| cargo check --all-targets | 0 | PASS |
+| cargo test --all-targets | 0 | 94 passed: 84 library, 6 binary, 4 integration |
+| cargo clippy --all-targets -- -D warnings | 0 | PASS |
+| cargo build --all-targets | 0 | PASS |
+| cargo test --doc | 0 | PASS, 0 doctests |
+| uv run scripts/verify.py | 0 | All six gates completed |
+| git diff --check | 0 | PASS |
+
+All test groups reported **0 failed, 0 ignored, 0 measured and 0 filtered**.
+The example target contains zero tests. No live test or real credential check ran.
+Cargo.toml, Cargo.lock, auth code, provider endpoints, crate name and client identity
+remain unchanged. New `diagnostic_tests.rs` is untracked until the user authorizes
+staging; existing code/docs are unstaged modifications.
+
+### Later GitHub Actions evidence, observed 2026-09-08
+
+Authenticated `gh` reads confirmed two successful Rust source validation runs:
+
+- [Run 34154153299](https://github.com/zer09/wi/actions/runs/34154153299), initial commit
+  `5174b2a9374b11b0c62c15a9a5b020fa7422e2fa`, started 2026-09-07 19:04:22 UTC,
+  updated 19:06:55 UTC. All three platform jobs report success.
+- [Run 34154340956](https://github.com/zer09/wi/actions/runs/34154340956), reviewed HEAD
+  `f30a020679a1eeb61978209e40e78a640db334af`, started 2026-09-07 19:07:10 UTC,
+  completed by 19:09:25 UTC. Exact job summaries and test logs were retrieved:
+
+| Job | Completed UTC, 2026-09-07 | Tests passed | Result |
+|---|---|---:|---|
+| [ubuntu-latest / 101842920175](https://github.com/zer09/wi/actions/runs/34154340956/job/101842920175) | 19:08:15 | 76 library + 6 binary + 4 integration = 86 | All six Cargo steps success |
+| [macos-latest / 101842920329](https://github.com/zer09/wi/actions/runs/34154340956/job/101842920329) | 19:08:36 | 76 + 6 + 4 = 86 | All six Cargo steps success |
+| [windows-latest / 101842920387](https://github.com/zer09/wi/actions/runs/34154340956/job/101842920387) | 19:09:25 | 74 + 6 + 4 = 84 | All six Cargo steps success |
+
+All logged groups reported zero failed/ignored/filtered tests; example/doctest
+counts were zero. Windows excludes two Unix-only tests at compilation, not as
+ignored tests. This establishes hosted cross-platform offline evidence for the
+committed baseline. **It does not test this pass's uncommitted 94-test tree or
+any live provider behavior.** The original report's earlier NOT RUN statements
+remain valid for their original time.
+
+Read commands included `gh run list --repo zer09/wi --branch master --limit 6`,
+`gh run view 34154340956 --repo zer09/wi --json headSha,conclusion,jobs,url`, and
+`gh run view 34154340956 --repo zer09/wi --job JOB_ID --log` with only test-summary
+lines retained. No workflow was dispatched or changed.
+
+### Proposed bounded live-retest plan, NOT RUN
+
+**Current ledger: 2/10 used; 8 remain. This is a proposal, not authorization or an
+automatic action.** Keep original IDs W1/S1 immutable; use W1-R1/S1-R1 for later
+attempts and append evidence instead of overwriting failures.
+
+1. After explicit user approval, confirm the approved source/binary and rerun offline checks if it changed.
+2. Confirm the exact selected model through safe metadata. Use only the selected Pi OAuth source; do not switch identities or billing.
+3. Under separate approval for live preparation, the reviewed gateway may perform metadata-only auth-check. It was not performed in this pass.
+4. Run W1-R1 once with the fixed text case and a 180-second subprocess deadline. Reserve one submission before invoking it.
+5. Inspect sanitized equality fields, lifecycle, outcome and delta counts. Stop the WebSocket sequence on failure; do not retry automatically.
+6. If independently approved, run S1-R1 once with explicit SSE and the same deadline. Reserve one submission; inspect exact status/media/sample state and lifecycle.
+7. Stop after these two text probes to review results. Maximum additional usage is **2**, making the cumulative ledger at most **4/10**, leaving at least **6**.
+
+Proposed commands, not executed in this pass:
+
+- `timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket --model gpt-6-astra --case text`
+- `timeout 180s target/debug/gateway smoke --auth-source pi --transport sse --model gpt-6-astra --case text`
+
+The model literal is the previously selected value and must still match the user's
+approved metadata. An interrupted invocation without a complete summary counts
+conservatively; local timeout does not prove upstream cancellation. Record all
+failed or uncertain sends. Do not lower TLS checks, follow redirects, accept
+non-SSE content, loosen exact answers or enable advanced features.
+
+If both text probes later pass, propose continuation plus add_numbers on one
+selected priority transport (WebSocket preferred): at most four more submissions,
+bringing cumulative usage to at most 8/10. Do not run that phase automatically.
+A complete fresh six-case matrix costs ten additional submissions, which cannot
+fit the eight remaining. The final two slots must be allocated deliberately;
+full two-transport acceptance may require additional user authorization.
+
+### Remaining uncertainty
+
+The new diagnostics can distinguish future observations; they cannot establish
+what caused the earlier W1 answer mismatch or S1 content-type failure. There is
+no new live evidence or new entitlement claim. Existing low-risk cache-capacity,
+intermediate lifecycle and idle-closure diagnostic limitations remain outside
+this focused pass. The uncommitted changes have local Linux evidence but have not
+run on hosted CI. No credentials, authentication settings, advanced features,
+crate/client identity or Git history were changed in this pass.
+
+## 2026-09-08 approved text retest results
+
+The user approved the two-text-probe proposal after the offline repair report.
+Only W1-R1 and the independently selected S1-R1 ran. Neither continuation nor tool
+cases ran. Source and acceptance rules were not changed for this retest.
+
+### Preparation
+
+- HEAD remained `f30a020679a1eeb61978209e40e78a640db334af` on `master` with the
+  previously reviewed, unstaged repair tree and untracked diagnostic tests.
+- Safe runtime metadata still selected `openai-codex` / `gpt-6-astra`.
+- `uv run scripts/verify.py` exited 0. All six Cargo gates passed again, with
+  **94 tests passed** (84 library, 6 binary, 4 integration), zero failures,
+  ignored or filtered tests, and zero doctests.
+- Smoke/auth-check CLI help and `git diff --check` passed.
+- `target/debug/gateway auth-check --auth-source pi` exited 0. It reported
+  accepted credential shape and `live_request_made: false`. The reviewed gateway
+  loaded only the selected credentials in process; no credential values were
+  displayed, copied, changed or fingerprinted. This check is not entitlement proof.
+
+### Observed results
+
+Both commands used the fixed text prompt, explicit Pi OAuth, the selected model
+and a 180-second subprocess deadline. Each made exactly one observed submission.
+Neither command reached its subprocess deadline or retried.
+
+| Evidence | W1-R1 / WebSocket | S1-R1 / explicit SSE |
+|---|---|---|
+| Started UTC | 2026-09-08 04:14:16 | 2026-09-08 04:14:35 |
+| Finished UTC | 2026-09-08 04:14:19 | 2026-09-08 04:14:38 |
+| Exit code | 1 | 1 |
+| Result | FAIL, exact-answer acceptance | BLOCKED, strict SSE content-type check |
+| Stage | first_acceptance | first_generation |
+| Top-level error code | protocol_error | provider_error |
+| Request failure | null | unexpected_content_type; upstream_outcome unknown |
+| Native created / normalized started | 1 / 1 | 0 / 0 |
+| Text deltas | 2 | 0 |
+| Refusal / reasoning / argument deltas | 0 / 0 / 0 | 0 / 0 / 0 |
+| Terminal type / status | response.completed / completed | null / null |
+| Validated terminal | true | false |
+| Existing answers_equal | [false] | [] |
+| native_expected_text_equal | null | null |
+| normalized_native_text_equal | null | null |
+| streamed_native_text_equal | null | null |
+| HTTP status / media | Not applicable | 200 / missing |
+| Body sample state / classification | Not applicable | timeout / null |
+
+Commands executed exactly once each:
+
+- `timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket --model gpt-6-astra --case text`
+- `timeout 180s target/debug/gateway smoke --auth-source pi --transport sse --model gpt-6-astra --case text`
+
+W1-R1 passed the required native lifecycle proof but failed the unchanged strict
+answer validator. All three independent text comparisons were unavailable, not
+false or true. They do not establish native wording, a normalization defect, a
+stream mismatch or a particular response shape. Two deltas and a completed
+terminal are not enough to claim exact-answer acceptance. No raw native text was
+retained to infer a cause.
+
+S1-R1 observed an HTTP 200 response with no Content-Type header. The gateway
+rejected it before SSE parsing. The one-second diagnostic sample timed out, so
+there is no usable body classification; null does not mean empty. The legacy
+request-failure status remained null, but `submissions[].http.status` preserved
+200. No native lifecycle was observed. The upstream generation outcome is
+unknown. This does not establish why the header was absent, what the body
+contained, or whether an account/model/policy issue existed.
+
+These new results do not establish the causes of the original W1/S1 failures.
+Their original evidence remains intact. Machine-readable summaries are appended
+under the latest `follow_ups` entry; `current_live_ledger` is the authoritative
+current count, while the original `live` object remains a historical snapshot.
+
+### Ledger and stop condition
+
+| Attempt | Submissions | Cumulative used |
+|---|---:|---:|
+| Original W1 and S1 | 2 | 2 |
+| W1-R1 | 1 | 3 |
+| S1-R1 | 1 | 4 |
+
+**4/10 used, 6 remain. No more live requests are scheduled or authorized by this
+completed two-probe approval.** Both affected sequences stopped. Continuation,
+add_numbers and broader account capability checks remain untested live.
+
+The milestone remains unaccepted. The next useful work is offline investigation
+of the unavailable text comparisons and the observed SSE rejection, without
+attributing either to an unproved cause. Further live use needs a new decision
+after that investigation. No code, auth setting, crate/client identity, advanced
+feature, Git index or history changed during these probes. Only the two local
+verification reports were updated afterward; all work remains unstaged.
+
+## 2026-09-08 ledger reconciliation and partial offline implementation
+
+The user confirmed exactly one successful Codex `generate --follow-up` invocation
+and one Codex `tool-demo` invocation that did not call the tool. The reported
+continuation used two submissions; the no-call demo used one. Combined with the
+four previously recorded submissions, the ledger is **7/10 used, 3 remaining**.
+The manual command outputs and exact errors were not collected. User-reported
+success is not retroactive strict smoke acceptance.
+
+The user approved the offline recommendation. This pass targets bounded lifecycle
+diagnostics, a CLI guard against discarded output, regression coverage, and safe
+SSE partial-prefix classifications. Finalized-item recovery, forced tool choice,
+changed terminal authority and relaxed MIME acceptance remain outside this pass.
+
+The implementation delegate stopped with terminal reason **budget_exhausted**.
+The parent inspected the resulting tree. Partial work includes
+`src/collect_lifecycle.rs`, `src/collect_tests.rs`,
+`src/providers/openai_codex/lifecycle_tests.rs`, and edits to CLI collection,
+observer diagnostics, SSE sampling and accompanying docs. Existing changes remain
+preserved. No files were staged or committed.
+
+Recovered pre-fix evidence: the focused CLI run exited **101** with one passing
+and one failing test. The failure was
+`collect_rejects_discarded_or_changed_stream_before_second_send_or_execution`,
+with the assertion `discarded evidence must fail collect`. This proves the
+regression detected the earlier behavior, not that the new implementation passes.
+
+**Complete final verification has not been established. Independent review has
+not run for these new changes.** The earlier 94-test results apply to the earlier
+reviewed tree, not this partial implementation. No provider request, credential
+read or auth-check occurred in this offline implementation pass. Continuation
+requires inspecting and completing the partial implementation before review.
+
+## 2026-09-08 completed offline repair and independent Codex validation
+
+### Completed implementation and verification
+
+The user authorized completion of the partial implementation and independent
+validation of the two CLI commands. The implementation retry completed. Subsequent
+reviews found evidence-parser ordering/identity defects. Verification reproduced
+the defects using synthetic events; focused remediations corrected them. The final
+review-a, review-b and review-c all completed with **no blocking findings**.
+
+The completed scope includes:
+
+- `src/collect_lifecycle.rs` and `src/main.rs`: per-request CLI tracking bounded
+  by 1 MiB cumulative serialized/retained data, 4096 events and 512 items. The
+  guard checks text/refusal parts and finalized messages/function calls against
+  terminal output before returning success, submitting a follow-up or executing
+  a tool. It supports terminal-only, matching-prefix/suffix and interleaved parts.
+- `src/providers/openai_codex/observation.rs`: additive static unavailable-reason
+  states and bounded finalized-item counts. Existing equality meanings stay intact.
+- `src/providers/openai_codex/wire.rs`: opt-in rejected-response sampling retains
+  a safe partial-prefix class after timeout/read error. Limits remain 4096 bytes
+  and one second. Zero-byte timeout stays unavailable, not empty. Strict SSE
+  status/MIME checks and the original rejection category remain unchanged.
+- `scripts/cli_retest.mjs` and its tests: fixed, explicit-opt-in runner for the
+  actual gateway CLI. It captures raw stdout/stderr only in bounded memory and
+  emits static categories, counts and booleans. It validates envelope identities,
+  local sequence order, normalized response lifecycle and executor order.
+
+The Node runner trusts the reviewed Rust CLI's clean exit 0 for stream/terminal
+content consistency. It does not independently duplicate Rust content tracking.
+It reports this distinction through CLI outcome and separate observed/inferred
+fields. It does not prove outbound bytes, same-socket reuse or transmitted tool
+result contents. A reconstructed exit-zero synthetic trace that the current CLI
+cannot produce is not treated as independent proof of a live gateway defect.
+
+No finalized-item recovery, forced tool choice, public ModelResponse change,
+authentication setting change, identity rename, dependency change, retry or MIME
+relaxation was implemented. Exact finalized-native equality remains deliberately
+conservative and can reject metadata enrichment.
+
+Parent-observed checks before credential access, 2026-09-08:
+
+| Check | Result |
+|---|---|
+| `uv run scripts/verify.py` | Exit 0; all six Cargo gates passed |
+| `cargo test --all-targets` within verifier | 102 passed: 86 library, 12 binary, 4 integration |
+| `cargo test --doc` within verifier | 0 doctests, PASS |
+| `node scripts/cli_retest.mjs --self-test` | Exit 0; 151 synthetic tests, live_started=false |
+| `git diff --check` | PASS |
+| Cargo.toml, Cargo.lock, auth.rs and provider.rs diff check | Unchanged from HEAD |
+
+All Rust test groups reported zero failures, ignored or filtered tests. Inventory
+was 28 Rust files and 25 fixture events. Tests that exercise CLI output emit
+synthetic fixtures; those are not live streams. This working tree has local Linux
+evidence only, not a new hosted CI result.
+
+### Independent live execution
+
+The user explicitly selected Codex auth for these commands. The reviewed
+`target/debug/gateway auth-check --auth-source codex` exited 0 with accepted
+credential shape and `live_request_made:false`. Only the gateway loaded the
+selected credential file. No token values, fingerprints or auth-file contents
+were displayed or recorded, and no credential storage was changed.
+
+The parent invoked these once each, not the user's earlier invocations:
+
+- `node scripts/cli_retest.mjs --run-live --case continuation`
+- `node scripts/cli_retest.mjs --run-live --case tool`
+
+The runner directly starts `target/debug/gateway` with explicit
+`--auth-source codex --model gpt-6-astra --transport websocket --json`.
+For `generate`, it uses the user's prompt `Remember the word lantern and acknowledge.`
+and follow-up `What word did I ask you to remember?`. For `tool-demo`, it uses
+the existing fixed demo instructions. JSON mode permits private parsing; raw
+native output never enters the saved report or conversation.
+
+Each invocation has a 180-second deadline and a maximum of two submissions.
+Both stopped on the first response without retry or timeout:
+
+| Evidence | C-CODEX-1: generate --follow-up | T-CODEX-1: tool-demo |
+|---|---|---|
+| Started/finished UTC | 07:06:29 / 07:06:34 | 07:06:49 / 07:06:53 |
+| Runner / gateway exit | 1 / 1 | 1 / 1 |
+| Sanitizer error | null | null |
+| CLI error category | lifecycle_guard | lifecycle_guard |
+| Observed request IDs | 1 | 1 |
+| Normalized starts / terminals | 1 / 1 | 1 / 1 |
+| Terminal status | completed | completed |
+| Text deltas | 11 | 0 |
+| Function-argument deltas | 0 | 9 |
+| Finalized streamed items | 1 message | 1 function_call |
+| Terminal output items | 0 | 0 |
+| Terminal text state | no_ordinary_parts | no_ordinary_parts |
+| Local executor starts / finishes | 0 / 0 | 0 / 0 |
+| Follow-up / result-delivery submission | Not sent | Not sent |
+| Assertions passed | false | false |
+| Accounted submissions | 1 | 1 |
+
+Accounting is based on one observed request plus the reviewed first-response-stop
+control flow, not an outbound wire observer. A lifecycle-guard error occurs
+before the next CLI generate or executor call. Uncertain/truncated runner output
+would instead reserve the full two-submission command maximum. Neither invocation
+had uncertain/truncated output, signal, timeout or parser error.
+
+### What the new evidence establishes
+
+**Both new Codex runs contained finalized streamed items that were absent from
+the completed terminal output.** `ResponseDecoder` currently emits those items
+as events but constructs `ModelResponse` from terminal output only. The CLI now
+detects that inconsistency and stops instead of treating it as success.
+
+For the new tool run, saying the model did not call a tool would be incorrect:
+a finalized function-call event and nine argument deltas were observed. However,
+the retained counters do not assert the finalized call's name, exact arguments,
+status or authority. The empty terminal had no executable call, so neither
+`add_numbers` execution nor result 42 was observed. `tool_choice:auto` did not
+prevent a function-call event in this run; forcing tool choice is not established
+as the repair for this observed failure.
+
+The same decoder behavior could explain earlier symptoms, but these Codex runs
+do not retroactively prove the original Pi W1/S1 or manual command causes. SSE
+was not retried, and its missing-header/body cause remains unresolved. Why the
+provider omitted the streamed items from terminal output is also unresolved.
+
+### Current assistant-only ledger and next boundary
+
+| Assistant activity | Submissions |
+|---|---:|
+| Original Pi W1/S1 | 2 |
+| Pi W1-R1/S1-R1 | 2 |
+| Codex C-CODEX-1 | 1 |
+| Codex T-CODEX-1 | 1 |
+| Total | 6 |
+
+**6/10 used, 4 remaining.** The user's three manual submissions are separately
+recorded and excluded by explicit user direction. The earlier combined 7/10
+calculation is historical, not the current assistant budget. Both newly authorized
+commands have been run; no further live execution is scheduled.
+
+The next compatibility decision is whether to reconcile validated finalized
+items with an explicitly empty completed terminal. Any such repair must keep
+native terminal provenance, reject incomplete/conflicting/malformed batches,
+never execute deltas or added-only calls, and test real executor/continuation
+boundaries before live validation. It is not included in this completed
+terminal-authority-preserving repair. All changes remain unstaged; no commit or
+push was performed. Live continuation and the ordinary tool round trip remain
+unaccepted.
+
+## 2026-09-08 finalized-item recovery and matrix results
+
+### Scope and offline completion
+
+The user approved completion of the existing six-case matrix and increased the
+assistant submission cap to 16. The user then authorized continuation from the
+five completed solution reports after two routes failed. Those failures remain
+historical. The oracle requested precise recovery invariants; the parent applied
+them before implementation. The implementation completed, verified review findings
+were repaired, and final review-a/review-b/review-c all found no blockers.
+
+The repair is limited to:
+
+- Provider-level recovery from validated finalized items when a successful
+  completed/done terminal explicitly contains `output:[]`. No delta or added-only
+  item becomes effective output. The whole batch must pass identity, schema,
+  index, completeness, authority and content-consistency checks.
+- Tracking bounds of 1 MiB serialized associated evidence, 4096 events and 512
+  items. Recovery-only errors are latched and do not replace nonempty native
+  terminal output. Failed recovery reports `TerminalReceived` without settlement,
+  execution, a finished response or another send.
+- Public `ModelResponse.output_provenance`, defaulting to `NativeTerminal` for
+  older serialized responses and set to `ValidatedOutputItemDone` for recovery.
+  `output` and `text` are effective data. `native` retains the original terminal.
+  Existing Rust struct literals need the added field; project literals were updated.
+- Explicit Codex support in the existing smoke helper. Private `PiOnly` became
+  `SmokeAuthSource` because it now supports both explicit sources. The helper has
+  no default source/fallback and requires the fixed model `gpt-6-astra`.
+- Separate effective/native diagnostics. Node runner `effective_text_state`
+  replaces its ambiguous `terminal_text_state`; the Rust observer retains native
+  `terminal_text_state` and adds separate effective fields.
+
+Review regressions exposed and corrected associated-field/part-family gaps and
+non-prefix provisional arguments/content. Rejected mixed batches produce zero
+execution and no second send in both loopback transports. Tests also cover valid
+recovery, native preservation, old/new provenance serialization, terminal outcomes,
+exact bounds, opaque replay and tool-result linkage. Existing strict tool checks,
+`tool_choice:auto`, auth handling, dependencies, endpoints, client identity and SSE
+MIME validation remain unchanged. No new runner or advanced feature was added.
+
+Parent-observed final gates before live execution:
+
+| Check | Result |
+|---|---|
+| `uv run scripts/verify.py` | Exit 0; all six Cargo gates PASS |
+| Rust tests | 119 passed: 101 library, 14 binary, 4 integration |
+| Failures / ignored / filtered | 0 / 0 / 0 |
+| Doctests | 0 tests, PASS |
+| `node scripts/cli_retest.mjs --self-test` | 152 passed; live_started=false |
+| `git diff --check` | PASS |
+| Cargo.toml, Cargo.lock and auth.rs | Unchanged from HEAD |
+
+Inventory: 31 Rust source/test/example files and 25 fixture events. Evidence is
+local Linux; no new hosted or cross-platform CI run was performed.
+
+### Live matrix, parent-observed
+
+The reviewed metadata-only Codex auth check passed. The gateway alone loaded the
+selected credentials in process. No credential values, fingerprints, headers,
+identifiers or raw native streams were disclosed or saved.
+
+Each case used this reviewed command prefix with the table's transport and case:
+`timeout --signal=TERM --kill-after=5s 180s target/debug/gateway smoke --auth-source codex --model gpt-6-astra`.
+The helper uses the actual gateway transport and its internal structural observer,
+not the earlier Node CLI runner. Every listed case ran at most once.
+
+| Case | Transport / case | UTC start / finish | Exit | Submissions | Result |
+|---|---|---|---:|---:|---|
+| W1 | websocket / text | 09:31:48 / 09:31:53 | 0 | 1 | PASS |
+| W2 | websocket / continuation | 09:31:59 / 09:32:08 | 0 | 2 | PASS |
+| W3 | websocket / tool | 09:32:19 / 09:32:26 | 0 | 2 | PASS |
+| S1 | sse / text | 09:32:36 / 09:32:38 | 1 | 1 | BLOCKED |
+| S2 | sse / continuation | Not run | N/A | 0 | Failed prerequisite S1 |
+| S3 | sse / tool | Not run | N/A | 0 | Failed prerequisite S1 |
+
+**W1:** one actual native start, two text deltas, validated completed terminal,
+exact `gateway connected` answer. Effective, normalized and streamed text agreed.
+
+**W2:** exact `remembered` and `lantern` answers. Both responses had one native
+start, two text deltas and validated completed status. On request two,
+`socket_reused`, `prior_response_equal` and `new_input_only_equal` were all true.
+This proves same-connection parent/new-input continuation, not just word recall.
+
+**W3:** one completed direct `add_numbers` call with arguments `a=17,b=25` passed
+strict validation. Nine argument deltas were observed. Exactly one correlated
+local execution and one validated `sum=42` result occurred. The second request
+reused the socket, matched the prior response and transmitted the tool result
+with matching call ID (`result_linkage_equal:true`). The final ordinary answer was
+exactly `42`, with one text delta and no further call. Tool-call, executor and
+result acceptance booleans were all true.
+
+All five accepted WebSocket responses had **zero native terminal items and one
+effective recovered item**, with `output_provenance:validated_output_item_done`.
+Native text comparisons remained unavailable; effective text comparisons passed
+where applicable. This is observed live validation of the recovery repair, not
+rewriting the native terminal evidence. No reasoning/opaque output was emitted;
+opaque replay remains covered synthetically, not proved by these live cases.
+
+**S1:** the request failed at `first_generation`. The request failure category was
+`unexpected_content_type`, with upstream outcome `unknown`; the wrapper reported
+`provider_error`. HTTP diagnostics recorded exact status **200**, media **missing**,
+sample state **timeout**, and body class **text_or_other**. A nonempty bounded
+prefix arrived, but it did not establish a valid SSE stream. The one-second sample
+timeout does not mean zero bytes arrived. There was no native start, delta or
+validated terminal. S2 and S3 stopped without submissions.
+
+The earlier Pi SSE observations also lacked Content-Type, but this new observation
+uses Codex auth. No evidence establishes the header omission's cause or a safe
+request-side fix. Do not infer HTML, JSON, policy rejection or valid SSE from the
+partial `text_or_other` classification. Strict parsing was not relaxed.
+
+### Current disposition
+
+- **WebSocket text, continuation and ordinary tool round trip: PASS.**
+- **SSE text: BLOCKED. SSE continuation/tool: NOT RUN.**
+- **Full six-case milestone: incomplete.** Remaining work is the SSE blocker,
+  followed by S1/S2/S3 validation after an evidence-backed repair decision.
+- Assistant ledger: prior 6 + matrix 6 = **12/16 used, 4 remaining**. Manual user
+  runs remain excluded. A fresh S1/S2/S3 sequence needs five submissions, so four
+  remaining cannot cover that complete sequence without another budget decision.
+- No retries or additional live runs are scheduled. All source/report changes
+  remain unstaged; no commit, push or publication occurred.
+
+## 2026-09-08 SSE compatibility and completed matrix
+
+### Minimal repair and offline evidence
+
+The user raised the assistant cap to 20 and authorized only the remaining SSE
+matrix work. All six solution reports completed. The parent incorporated the
+oracle's refined first-frame, identity, label and byte-limit invariants. The
+implementation completed and all three final reviews passed with no blockers.
+
+The new path applies only to **2xx responses with an entirely absent Content-Type**
+on the existing subscription SSE path. The first data-containing frame must prove
+strict SSE framing and a valid Responses created/terminal event. Empty data,
+`[DONE]`, arbitrary JSON types, malformed payloads or a wrong event label reject
+immediately, even if valid-looking data follows. HTML/plain/JSON prefixes and
+unknown fields cannot be ignored to find a later valid frame.
+
+The prolog allows standard comments/metadata, BOM, fragmented UTF-8 and line
+endings. Its limits are **65,536 raw bytes and an absolute 10 seconds**. Every
+fetched byte, including the proof chunk's suffix, replays exactly once through the
+ordinary decoder. Existing 8 MiB frame and 32 MiB response limits remain active.
+The diagnostic preserves `media:missing`; `sse_prolog_admitted` records body-based
+protocol proof, not a synthesized header. Other `sse_prolog_*` states distinguish
+this probe from the unchanged 4 KiB/one-second rejection sampler.
+
+Present wrong/invalid MIME, non-2xx handling, labeled-SSE decoding, credentials,
+headers, endpoints, identity, WebSocket behavior, recovery, tools and acceptance
+criteria remain unchanged. No retry, fallback or extra runner was added.
+
+Reference evidence, fetched read-only through `gh`:
+
+- [Pi v0.85.1 source](https://github.com/earendil-works/pi/blob/v0.85.1/packages/ai/src/api/openai-codex-responses.ts)
+  checks response success/body and parses SSE without a MIME gate.
+- [OpenClaw #90205](https://github.com/openclaw/openclaw/pull/90205) reports live
+  Codex SSE with missing Content-Type; [#90487](https://github.com/openclaw/openclaw/pull/90487)
+  scopes compatibility to the native backend and body proof.
+
+These references corroborate the compatibility issue, not our previous body or
+account behavior. No reference retry, identity change or TLS bypass was adopted.
+The live evidence below independently proves this gateway path.
+
+Parent checks before live execution:
+
+| Check | Result |
+|---|---|
+| `uv run scripts/verify.py` | Exit 0; all six Cargo gates PASS |
+| Rust tests | 134 passed: 116 library, 14 binary, 4 integration |
+| Failed / ignored / filtered | 0 / 0 / 0 |
+| Doctests | 0 tests, PASS |
+| `node scripts/cli_retest.mjs --self-test` | 152 passed; live_started=false |
+| `git diff --check` | PASS |
+| Cargo.toml / Cargo.lock / auth.rs | Unchanged from HEAD |
+
+The 15 new tests cover strict admission, decisive bad first frames, fragmentation,
+exact/+1 limits, absolute timeout, cancellation, observer parity, replay fidelity
+and missing-MIME S1/S2/S3 loopbacks, including synthetic opaque replay and tool
+execution. Inventory: 33 Rust files and 25 fixture events.
+
+### Live SSE results
+
+The reviewed metadata-only Codex auth check passed with `live_request_made:false`.
+Only the gateway read selected credentials in process. No credential values,
+fingerprints, identifiers, headers or raw native streams were saved or disclosed.
+
+Each command used the same prefix, followed by its case:
+`timeout --signal=TERM --kill-after=5s 180s target/debug/gateway smoke --auth-source codex --model gpt-6-astra --transport sse`.
+
+| Case | Flag | UTC start / finish | Exit | Submissions | Result |
+|---|---|---|---:|---:|---|
+| S1 text | `--case text` | 10:28:55 / 10:28:59 | 0 | 1 | PASS |
+| S2 continuation | `--case continuation` | 10:29:06 / 10:29:10 | 0 | 2 | PASS |
+| S3 tool round trip | `--case tool` | 10:29:20 / 10:29:26 | 0 | 2 | PASS |
+
+All five requests observed HTTP 200, missing MIME and `sse_prolog_admitted`.
+Each had one actual native start and a validated completed terminal. Every
+terminal had zero native output items and one validated finalized effective item,
+so finalized-item recovery was also exercised on SSE. Native text comparisons
+remain unavailable; effective comparisons passed where applicable.
+
+- **S1:** exact `gateway connected`, two text deltas, effective/normalized/streamed
+  text agreement and correct actual input.
+- **S2:** exact `remembered` then `lantern`, two text deltas per response and
+  `native_sse_replay_equal:true` for both requests. The second request replayed the
+  expected native conversation history. `opaque_replay:not_emitted` correctly
+  records that no opaque reasoning was returned; it is not a live opaque proof.
+- **S3:** one validated ordinary direct `add_numbers` call with `a=17,b=25`, nine
+  argument deltas, one correlated local execution, validated `sum=42`, and actual
+  result delivery with matching call ID. The second request had correct native
+  replay and `result_linkage_equal:true`. Its ordinary final answer was exactly
+  `42`, with one text delta and no additional call. All tool acceptance booleans
+  passed. Opaque reasoning again was not emitted.
+
+### Accepted matrix and stopping point
+
+| Matrix case | Status | Live evidence |
+|---|---|---|
+| W1 WebSocket text | PASS | Previous recovery-matrix run |
+| W2 WebSocket same-socket continuation | PASS | Previous recovery-matrix run |
+| W3 WebSocket tool round trip | PASS | Previous recovery-matrix run |
+| S1 SSE text | PASS | This run |
+| S2 SSE native-history continuation | PASS | This run |
+| S3 SSE tool round trip | PASS | This run |
+
+**The six-case matrix is complete for selected Codex OAuth and `gpt-6-astra` on
+this Linux host.** WebSocket was not rerun because its path was unchanged; the
+full offline suite retained its regression coverage. Historical failures were
+not retroactively converted into passing runs.
+
+The assistant ledger is **17/20 used, 3 remaining**: prior 12 plus this SSE
+sequence's five submissions. Manual user runs remain excluded. No extra probes
+or automatic retries occurred. No further live requests are planned.
+
+Why the server omitted headers/output remains unknown, but successful protocol
+admission and effective output are now directly validated. Live opaque replay,
+broader account/model capabilities and new hosted/non-Linux CI are not claimed.
+All work remains unstaged; no commit, push or publication occurred.

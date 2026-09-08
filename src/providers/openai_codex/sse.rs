@@ -12,9 +12,23 @@ pub(super) struct SseDecoder {
     after_cr: bool,
     first_line_seen: bool,
     frame_bytes: usize,
+    strict_prolog: bool,
+    event_label: String,
+    dispatched_label: String,
 }
 
 impl SseDecoder {
+    pub fn strict_prolog() -> Self {
+        Self {
+            strict_prolog: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn dispatched_label(&self) -> &str {
+        &self.dispatched_label
+    }
+
     pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<String>> {
         let mut frames = Vec::new();
         for &byte in bytes {
@@ -57,6 +71,21 @@ impl SseDecoder {
             self.first_line_seen = true;
             text = text.strip_prefix('\u{feff}').unwrap_or(text);
         }
+        if self.strict_prolog {
+            if text.chars().any(|c| c.is_control() && c != '\t') {
+                return Err(GatewayError::UnexpectedContentType);
+            }
+            if !text.is_empty() && !text.starts_with(':') {
+                let (field, value) = text.split_once(':').unwrap_or((text, ""));
+                let value = value.strip_prefix(' ').unwrap_or(value);
+                match field {
+                    "data" | "id" => {}
+                    "event" => self.event_label = value.into(),
+                    "retry" if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => {}
+                    _ => return Err(GatewayError::UnexpectedContentType),
+                }
+            }
+        }
         if text.is_empty() {
             self.dispatch(frames);
         } else if let Some(value) = text.strip_prefix("data:") {
@@ -73,6 +102,9 @@ impl SseDecoder {
         if !self.data.is_empty() {
             let _ = self.data.pop(); // remove the newline appended by the last data field
             frames.push(std::mem::take(&mut self.data));
+        }
+        if self.strict_prolog {
+            self.dispatched_label = std::mem::take(&mut self.event_label);
         }
         self.frame_bytes = 0;
     }

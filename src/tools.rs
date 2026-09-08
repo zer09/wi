@@ -226,6 +226,7 @@ mod tests {
             complete: true,
         };
         ModelResponse {
+            output_provenance: Default::default(),
             id: "r1".into(),
             model: None,
             outcome,

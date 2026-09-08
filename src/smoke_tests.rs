@@ -1,6 +1,46 @@
 use super::*;
 use harness_gateway::{EventEnvelope, RequestReceipt, SessionControl};
 
+#[tokio::test]
+async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early() {
+    use clap::Parser;
+    for source in ["pi", "codex"] {
+        let cli = crate::Cli::try_parse_from([
+            "gateway",
+            "smoke",
+            "--auth-source",
+            source,
+            "--model",
+            "wrong",
+            "--transport",
+            "websocket",
+            "--case",
+            "text",
+        ])
+        .unwrap();
+        let crate::Command::Smoke(args) = cli.command else {
+            panic!("smoke")
+        };
+        assert!(matches!(
+            run(args).await,
+            Err(GatewayError::Protocol("smoke requires gpt-6-astra"))
+        ));
+    }
+    assert!(
+        crate::Cli::try_parse_from([
+            "gateway",
+            "smoke",
+            "--model",
+            "gpt-6-astra",
+            "--transport",
+            "websocket",
+            "--case",
+            "text"
+        ])
+        .is_err()
+    );
+}
+
 struct NoNetwork;
 #[async_trait::async_trait]
 impl SessionControl for NoNetwork {

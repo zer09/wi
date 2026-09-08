@@ -51,6 +51,153 @@ pub struct SendEvidence {
     pub refusal_deltas: usize,
     pub reasoning_deltas: usize,
     pub argument_deltas: usize,
+    pub native_expected_text_equal: Option<bool>,
+    pub normalized_native_text_equal: Option<bool>,
+    pub streamed_native_text_equal: Option<bool>,
+    pub http: Option<HttpEvidence>,
+    pub terminal_text_state: TextState,
+    pub streamed_text_state: TextState,
+    pub native_expected_text_unavailable: Option<TextState>,
+    pub normalized_native_text_unavailable: Option<TextState>,
+    pub streamed_native_text_unavailable: Option<TextState>,
+    pub finalized_items: FinalizedCounts,
+    pub native_terminal_items: Option<usize>,
+    pub effective_items: Option<usize>,
+    pub output_provenance: Option<crate::OutputProvenance>,
+    pub effective_text_state: TextState,
+    pub effective_expected_text_equal: Option<bool>,
+    pub normalized_effective_text_equal: Option<bool>,
+    pub streamed_effective_text_equal: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaClass {
+    Missing,
+    Invalid,
+    EventStream,
+    Json,
+    Html,
+    PlainText,
+    Other,
+}
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyClass {
+    Empty,
+    JsonLike,
+    HtmlLike,
+    TextOrOther,
+    BinaryOrNonUtf8,
+}
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleState {
+    NotSampled,
+    Unavailable,
+    Complete,
+    ReadError,
+    Timeout,
+    Truncated,
+    // Missing-MIME admission uses 64 KiB / 10 seconds, not rejection sampling.
+    SsePrologPending,
+    SsePrologAdmitted,
+    SsePrologRejected,
+    SsePrologTimeout,
+    SsePrologReadError,
+    SsePrologTruncated,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct HttpEvidence {
+    pub status: u16,
+    pub media: MediaClass,
+    pub body_class: Option<BodyClass>,
+    pub sample_state: SampleState,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextState {
+    Available,
+    NoOrdinaryParts,
+    MissingOrInvalidOutput,
+    MalformedContent,
+    UnsupportedKindOrPart,
+    OverLimit,
+    NoTerminal,
+    NoDeltas,
+    NotApplicable,
+    NotValidated,
+}
+
+// Counts include duplicates and saturate at 4096 per request. No native items are retained.
+const MAX_DIAGNOSTIC_COUNT: usize = 4096;
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct FinalizedCounts {
+    pub total: usize,
+    pub message: usize,
+    pub function_call: usize,
+    pub reasoning: usize,
+    pub other: usize,
+    pub malformed: usize,
+    pub overflow: bool,
+}
+fn increment(count: &mut usize) {
+    *count = count.saturating_add(1).min(MAX_DIAGNOSTIC_COUNT);
+}
+
+// Diagnostic text stays private and bounded, independently of transport limits.
+pub(super) const MAX_DIAGNOSTIC_TEXT: usize = 1024 * 1024;
+fn ordinary_items<'a>(
+    items: impl IntoIterator<Item = &'a Value>,
+) -> std::result::Result<String, TextState> {
+    let mut text = String::new();
+    let mut seen = false;
+    for item in items {
+        match item
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or(TextState::MalformedContent)?
+        {
+            "reasoning" | "function_call" => continue,
+            "message" => {}
+            _ => return Err(TextState::UnsupportedKindOrPart),
+        }
+        for part in item
+            .get("content")
+            .and_then(Value::as_array)
+            .ok_or(TextState::MalformedContent)?
+        {
+            let kind = part
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or(TextState::MalformedContent)?;
+            if kind != "output_text" {
+                return Err(TextState::UnsupportedKindOrPart);
+            }
+            let part = part
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or(TextState::MalformedContent)?;
+            if part.len() > MAX_DIAGNOSTIC_TEXT - text.len() {
+                return Err(TextState::OverLimit);
+            }
+            text.push_str(part);
+            seen = true;
+        }
+    }
+    if seen {
+        Ok(text)
+    } else {
+        Err(TextState::NoOrdinaryParts)
+    }
+}
+fn ordinary_text(output: Option<&Value>) -> std::result::Result<String, TextState> {
+    ordinary_items(
+        output
+            .and_then(Value::as_array)
+            .ok_or(TextState::MissingOrInvalidOutput)?,
+    )
 }
 #[derive(Clone, Default)]
 pub struct SmokeObserver(Arc<Mutex<Vec<SendEvidence>>>);
@@ -69,6 +216,7 @@ pub(super) struct Observation {
     history: Vec<Value>,
     prior_id: Option<String>,
     prior_call: Option<String>,
+    streamed_text: Mutex<Option<String>>,
 }
 impl Observation {
     pub fn new(observer: SmokeObserver, case: SmokeCase, transport: Transport) -> Self {
@@ -79,10 +227,12 @@ impl Observation {
             history: vec![],
             prior_id: None,
             prior_call: None,
+            streamed_text: Mutex::new(Some(String::new())),
         }
     }
     pub fn send(&mut self, body: &Value) {
         let mut records = self.observer.0.lock().unwrap_or_else(|e| e.into_inner());
+        *self.streamed_text.lock().unwrap_or_else(|e| e.into_inner()) = Some(String::new());
         let ordinal = records.len() + 1;
         let next = if ordinal == 1 {
             json!([{"role":"user","content":[{"type":"input_text","text":self.case.first_prompt()}]}])
@@ -148,6 +298,27 @@ impl Observation {
             refusal_deltas: 0,
             reasoning_deltas: 0,
             argument_deltas: 0,
+            native_expected_text_equal: None,
+            normalized_native_text_equal: None,
+            streamed_native_text_equal: None,
+            http: None,
+            terminal_text_state: TextState::NoTerminal,
+            streamed_text_state: TextState::NoDeltas,
+            native_expected_text_unavailable: Some(if self.expected(ordinal).is_some() {
+                TextState::NoTerminal
+            } else {
+                TextState::NotApplicable
+            }),
+            normalized_native_text_unavailable: Some(TextState::NotValidated),
+            streamed_native_text_unavailable: Some(TextState::NoTerminal),
+            finalized_items: FinalizedCounts::default(),
+            native_terminal_items: None,
+            effective_items: None,
+            output_provenance: None,
+            effective_text_state: TextState::NotValidated,
+            effective_expected_text_equal: None,
+            normalized_effective_text_equal: None,
+            streamed_effective_text_equal: None,
         });
         if let Some(input) = input {
             if websocket {
@@ -163,15 +334,51 @@ impl Observation {
             return;
         };
         match value.get("type").and_then(Value::as_str) {
-            Some("response.created") => record.native_created_count += 1,
-            Some("response.output_text.delta") => record.text_deltas += 1,
-            Some("response.refusal.delta") => record.refusal_deltas += 1,
+            Some("response.created") => increment(&mut record.native_created_count),
+            Some("response.output_item.done") => {
+                let counts = &mut record.finalized_items;
+                counts.overflow |= counts.total == MAX_DIAGNOSTIC_COUNT;
+                increment(&mut counts.total);
+                let count = match value.pointer("/item/type").and_then(Value::as_str) {
+                    Some("message") => &mut counts.message,
+                    Some("function_call") => &mut counts.function_call,
+                    Some("reasoning") => &mut counts.reasoning,
+                    Some(_) => &mut counts.other,
+                    None => &mut counts.malformed,
+                };
+                increment(count);
+            }
+            Some("response.output_text.delta") => {
+                increment(&mut record.text_deltas);
+                let mut aggregate = self.streamed_text.lock().unwrap_or_else(|e| e.into_inner());
+                match (
+                    aggregate.as_mut(),
+                    value.get("delta").and_then(Value::as_str),
+                ) {
+                    (Some(text), Some(delta))
+                        if delta.len() <= MAX_DIAGNOSTIC_TEXT - text.len() =>
+                    {
+                        text.push_str(delta);
+                        record.streamed_text_state = TextState::Available;
+                    }
+                    (Some(_), delta) => {
+                        record.streamed_text_state = if delta.is_none() {
+                            TextState::MalformedContent
+                        } else {
+                            TextState::OverLimit
+                        };
+                        *aggregate = None;
+                    }
+                    (None, _) => {}
+                }
+            }
+            Some("response.refusal.delta") => increment(&mut record.refusal_deltas),
             Some("response.reasoning_text.delta" | "response.reasoning_summary_text.delta") => {
-                record.reasoning_deltas += 1
+                increment(&mut record.reasoning_deltas)
             }
             Some(
                 "response.function_call_arguments.delta" | "response.custom_tool_call_input.delta",
-            ) => record.argument_deltas += 1,
+            ) => increment(&mut record.argument_deltas),
             Some(kind) => {
                 record.terminal_type = match kind {
                     "response.completed" => Some("response.completed"),
@@ -181,6 +388,42 @@ impl Observation {
                     "response.cancelled" => Some("response.cancelled"),
                     _ => return,
                 };
+                record.native_terminal_items = value
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .map(|v| v.len().min(MAX_DIAGNOSTIC_COUNT));
+                record.native_expected_text_equal = None;
+                record.streamed_native_text_equal = None;
+                let native_text = ordinary_text(value.pointer("/response/output"));
+                record.terminal_text_state = native_text
+                    .as_ref()
+                    .err()
+                    .copied()
+                    .unwrap_or(TextState::Available);
+                record.native_expected_text_unavailable = if self.expected(record.ordinal).is_none()
+                {
+                    Some(TextState::NotApplicable)
+                } else {
+                    native_text.as_ref().err().copied()
+                };
+                record.streamed_native_text_unavailable =
+                    native_text.as_ref().err().copied().or_else(|| {
+                        (record.streamed_text_state != TextState::Available)
+                            .then_some(record.streamed_text_state)
+                    });
+                if let Ok(text) = native_text {
+                    record.native_expected_text_equal = self
+                        .expected(record.ordinal)
+                        .map(|expected| text.trim() == expected);
+                    if record.text_deltas > 0 {
+                        record.streamed_native_text_equal = self
+                            .streamed_text
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .map(|stream| stream == &text);
+                    }
+                }
                 record.terminal_status = Some(
                     match value.pointer("/response/status").and_then(Value::as_str) {
                         Some("completed") => "completed",
@@ -194,6 +437,26 @@ impl Observation {
             None => {}
         }
     }
+    fn expected(&self, ordinal: usize) -> Option<&'static str> {
+        match (self.case, ordinal) {
+            (SmokeCase::Text, 1) => Some("gateway connected"),
+            (SmokeCase::Continuation, 1) => Some("remembered"),
+            (SmokeCase::Continuation, 2) => Some("lantern"),
+            (SmokeCase::Tool, 2) => Some("42"),
+            _ => None,
+        }
+    }
+    pub fn http(&self, evidence: HttpEvidence) {
+        if let Some(record) = self
+            .observer
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last_mut()
+        {
+            record.http = Some(evidence);
+        }
+    }
     pub fn terminal(&mut self, response: &ModelResponse) {
         if let Some(record) = self
             .observer
@@ -203,6 +466,71 @@ impl Observation {
             .last_mut()
         {
             record.validated_terminal = true;
+            record.native_terminal_items = response
+                .native
+                .get("output")
+                .and_then(Value::as_array)
+                .map(|v| v.len().min(MAX_DIAGNOSTIC_COUNT));
+            record.effective_items = Some(response.output.len().min(MAX_DIAGNOSTIC_COUNT));
+            record.output_provenance = Some(response.output_provenance);
+            let effective = ordinary_items(response.output.iter().map(|item| &item.native));
+            record.effective_text_state = effective
+                .as_ref()
+                .err()
+                .copied()
+                .unwrap_or(TextState::Available);
+            if let Ok(text) = effective {
+                record.effective_expected_text_equal = self
+                    .expected(record.ordinal)
+                    .map(|expected| text.trim() == expected);
+                record.normalized_effective_text_equal = Some(response.text == text);
+                if record.text_deltas > 0 {
+                    record.streamed_effective_text_equal = self
+                        .streamed_text
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        .map(|stream| stream == &text);
+                }
+            }
+            record.native_expected_text_equal = None;
+            record.normalized_native_text_equal = None;
+            record.streamed_native_text_equal = None;
+            let native_text = ordinary_text(response.native.get("output"));
+            record.terminal_text_state = native_text
+                .as_ref()
+                .err()
+                .copied()
+                .unwrap_or(TextState::Available);
+            record.native_expected_text_unavailable = if self.expected(record.ordinal).is_none() {
+                Some(TextState::NotApplicable)
+            } else {
+                native_text.as_ref().err().copied()
+            };
+            record.normalized_native_text_unavailable = native_text.as_ref().err().copied();
+            record.streamed_native_text_unavailable =
+                native_text.as_ref().err().copied().or_else(|| {
+                    (record.streamed_text_state != TextState::Available)
+                        .then_some(record.streamed_text_state)
+                });
+            if let Ok(text) = native_text {
+                record.native_expected_text_equal = self
+                    .expected(record.ordinal)
+                    .map(|expected| text.trim() == expected);
+                let normalized = ordinary_items(response.output.iter().map(|item| &item.native));
+                record.normalized_native_text_unavailable = normalized.as_ref().err().copied();
+                record.normalized_native_text_equal = normalized
+                    .ok()
+                    .map(|normalized| normalized == text && response.text == text);
+                if record.text_deltas > 0 {
+                    record.streamed_native_text_equal = self
+                        .streamed_text
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .as_ref()
+                        .map(|stream| stream == &text);
+                }
+            }
         }
         self.prior_id = Some(response.id.clone());
         self.prior_call = response

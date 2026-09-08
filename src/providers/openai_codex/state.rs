@@ -226,7 +226,21 @@ mod tests {
     #[test]
     fn incomplete_calls_settle_but_block_all_continuation() {
         for transport in [Transport::WebSocket, Transport::Sse] {
-            for mixed in [false, true] {
+            for (mixed, status) in [false, true].into_iter().flat_map(|mixed| {
+                [
+                    json!(null),
+                    json!(false),
+                    json!(12),
+                    json!({}),
+                    json!([]),
+                    json!(""),
+                    json!("unknown"),
+                    json!("in_progress"),
+                    json!("failed"),
+                ]
+                .into_iter()
+                .map(move |status| (mixed, status))
+            }) {
                 let mut o = SessionOptions::new("test");
                 o.transport = transport;
                 let mut s = Conversation::default();
@@ -237,7 +251,7 @@ mod tests {
                         "name":"add_numbers", "arguments":"{}", "status":"completed"}));
                 }
                 output.push(json!({"type":"function_call", "call_id":"incomplete",
-                    "name":"add_numbers", "arguments":"{}", "status":"in_progress"}));
+                    "name":"add_numbers", "arguments":"{}", "status":status}));
                 let r = parse_response(json!({"id":"r1", "status":"completed", "output":output}))
                     .unwrap();
                 s.settle(input, &r).unwrap();

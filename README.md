@@ -123,7 +123,9 @@ rejected to avoid sending the previous account's conversation to a new account.
 Only an authorized operator may run these commands after offline and security
 review. Each invocation uses the real gateway/provider path. It has no retry,
 fallback, alternate model, raw-event output, or automatic auth check.
-`--auth-source pi`, `--transport`, `--case`, and `--model` are required.
+`--auth-source pi|codex`, `--transport`, `--case`, and `--model` are required.
+There is no default auth source or fallback. The smoke helper rejects models other
+than exact `gpt-6-astra` before credential access.
 
 ```bash
 # One generation. The deadline is external; timeout leaves upstream outcome unknown.
@@ -153,6 +155,105 @@ bodies are discarded. Read this field with the top-level `stage`. The top-level
 the structured evidence identifies a more specific failure. Setup failures have
 no request-failure record and use the safe top-level error code.
 
+Effective output may come from a validated complete done batch when the successful
+native terminal array is explicitly empty. See [EVENTS.md](docs/EVENTS.md) for the
+bounded recovery policy. Native JSON remains unchanged.
+
+The additive observer fields do not change smoke schema version 1 or acceptance:
+- `native_terminal_items` counts native terminal items; `effective_items` separately
+  counts effective items. `output_provenance` identifies their source.
+- `effective_text_state`, `effective_expected_text_equal`,
+  `normalized_effective_text_equal`, and `streamed_effective_text_equal` compare
+  effective output separately, using the same private 1 MiB text bound.
+  Recovery leaves native counts at zero and native text comparisons unavailable.
+- `native_expected_text_equal` compares terminal native ordinary text, trimmed,
+  with the fixed answer for that case/request. The first tool response has no
+  expected answer (`null`).
+- `normalized_native_text_equal` compares both normalized ordinary output and
+  `response.text` with `response.native.output`, without trimming.
+- `streamed_native_text_equal` compares text deltas assembled in observed order
+  with terminal ordinary text, without trimming. Its private aggregate is capped
+  at 1 MiB and resets at each request.
+
+Only message `output_text` parts count as ordinary text. Refusals, unsupported or
+malformed parts, diagnostic overflow, and missing terminal text yield `null`, not
+success. No deltas also yields `null` for streamed equality. Diagnostics are
+captured before acceptance can fail. Exact trimmed answer acceptance, required
+lifecycle proof, and tool assertions remain unchanged.
+
+`terminal_text_state` distinguishes `available`, `no_ordinary_parts`,
+`missing_or_invalid_output`, `malformed_content`, `unsupported_kind_or_part`,
+`over_limit`, and `no_terminal`. `streamed_text_state` distinguishes `available`,
+`no_deltas`, `malformed_content`, and `over_limit`. Each equality has a corresponding
+`*_unavailable` reason: null when compared, otherwise one of these static states,
+`not_validated`, or `not_applicable`. First-turn tool expected text is not applicable.
+Terminal shape is captured before decoding; validation is recorded only after parsing.
+`finalized_items` counts total, message, function_call, reasoning, other, and malformed
+done events, including duplicates. Counters saturate at 4096 per request;
+`finalized_items.overflow` indicates additional done events. No native item is retained
+for counting. Existing lifecycle/delta counters also saturate at 4096.
+
+`submissions[].http.status` is the authoritative exact numeric HTTP status when
+an SSE response arrives, including rejected success statuses and generic errors.
+The legacy failure status remains limited to inferred 401/403/429 categories.
+`http.media` is `missing`, `invalid`, `event_stream`, `json`, `html`, `plain_text`,
+or `other`. No header value or parameter is exposed.
+
+Ordinary HTTP/MIME rejections with an enabled observer receive a body-prefix sample:
+at most 4096 bytes, with a one-second timeout within existing cancellation and
+total limits. `sample_state` is `not_sampled`, `unavailable`, `complete`,
+`read_error`, `timeout`, or `truncated`. `unavailable` preserves the initial HTTP
+receipt if sampling does not finish, for example after cancellation.
+Reaching the cap reports `truncated` conservatively, even if the body is exactly
+4096 bytes. `body_class` is `empty`,
+`json_like`, `html_like`, `text_or_other`, `binary_or_non_utf8`, or `null` when
+unavailable. A nonempty prefix remains classifiable after timeout or read error.
+A zero-byte timeout/read error stays null; only zero-byte EOF can classify empty.
+Classes are prefix heuristics, not failure causes. Labeled accepted SSE is
+`not_sampled`; a disabled observer collects no diagnostics. Sampling never replaces
+the original rejection category. There are no redirects, retries, or fallback.
+
+Within this fixed subscription adapter only, a successful 2xx response with an
+entirely absent Content-Type can enter strict SSE prolog admission. Present wrong,
+empty, or invalid MIME values and non-2xx statuses retain their rejection behavior.
+Admission requires the first blank-line-dispatched data frame to qualify within
+65536 raw bytes from byte zero and one absolute 10-second deadline. Comments and
+blank frames without data may precede it. EOF without that delimiter rejects.
+The first data frame is decisive: empty/whitespace data, `[DONE]`, invalid JSON,
+and unknown event types reject without searching for a later valid frame.
+
+The prolog accepts an initial BOM, incremental UTF-8, LF/CR/CRLF, comments, and
+standard data/event/id/retry fields. Unknown lines, invalid UTF-8, and control
+characters other than tab reject. The last event label wins, including an empty
+reset; a nonempty label must equal the JSON type exactly. IDs do not enable
+resumption; retry fields must each contain nonempty ASCII digits and never enable
+retries. The JSON response ID must be a nonempty string of at most 512 UTF-8 bytes.
+Only `response.created` or terminal `response.completed`, `response.done`,
+`response.incomplete`, `response.failed`, and `response.cancelled` may qualify.
+A fresh trial response decoder must produce the corresponding recognized lifecycle
+event. Trial events never reach observation, settlement, or caller state.
+
+All fetched chunks, including the uninspected suffix of the proof chunk, replay
+once in order into a fresh ordinary SSE decoder. Admission stops at proof, not EOF.
+The existing 32 MiB response and 8 MiB later-frame limits still apply. Fetched bytes
+are checked against 32 MiB before retention or conversion to the existing byte-stream
+Vec; replay contributes once to normal receive accounting. Cancellation and total
+request limits still enclose admission. Admission failure is `unexpected_content_type`
+with unknown upstream outcome, except for existing outer cancellation/size/timeout
+categories. There is no second rejection sample after consuming a candidate.
+
+The original `http.media` remains `missing`. Admission adds `sample_state` values
+`sse_prolog_pending`, `sse_prolog_admitted`, `sse_prolog_rejected`,
+`sse_prolog_timeout`, `sse_prolog_read_error`, and `sse_prolog_truncated`.
+These describe **64 KiB / 10-second admission**, not 4 KiB / one-second rejection
+sampling. The pending HTTP receipt survives cancellation. Only the first at most
+4096 privately inspected bytes contribute to `body_class`; no raw data or IDs leave
+this diagnostic. Observer enablement does not change admission behavior.
+
+Compatibility corroboration: the pinned [Pi v0.85.1 adapter source](https://github.com/earendil-works/pi/blob/v0.85.1/packages/ai/src/api/openai-codex-responses.ts)
+parses the response body without a MIME gate. That reference is not live proof for
+this gateway; this adapter deliberately requires the stricter bounded proof above.
+
 Zero text deltas means streaming text was not
 observed; terminal-only output is not streaming evidence. Missing native-created
 or required continuation proof makes the helper exit nonzero.
@@ -164,6 +265,64 @@ observer retains comparison material only in memory and never serializes it.
 The summary contains no headers, credential/account/response/call IDs, native
 payloads, model text, or raw error bodies. An external kill can prevent summary
 output; conservatively count the case's maximum submissions in that situation.
+
+## Fixed CLI retest runner
+
+`scripts/cli_retest.mjs` runs the built `target/debug/gateway` directly. It never
+runs Cargo, Pi, or the Codex executable. Help and synthetic self-tests do not
+start the gateway or read credentials:
+
+```bash
+node scripts/cli_retest.mjs --help
+node scripts/cli_retest.mjs --self-test
+```
+
+After separate source review and live authorization, the parent may run each
+fixed case once. Each invocation reserves at most two submissions:
+
+```bash
+node scripts/cli_retest.mjs --run-live --case continuation
+node scripts/cli_retest.mjs --run-live --case tool
+```
+
+Both commands explicitly select Codex auth, `gpt-6-astra`, WebSocket, and CLI JSON.
+Continuation uses exactly `Remember the word lantern and acknowledge.` followed
+by `What word did I ask you to remember?`. The tool case runs `tool-demo` with its
+existing validators. There are no arbitrary arguments, prompts, models, auth
+paths, retries, or default live action. The subprocess has ignored stdin and piped
+stdout/stderr. At 180 seconds, the runner sends SIGTERM, then SIGKILL after one
+second, and bounds pipe cleanup by another second. Interruption does not prove
+upstream cancellation. Do not pipe raw CLI output into reports.
+
+The runner emits one sanitized JSON object. `requests` contains per-request
+normalized lifecycle/delta counts, separate `done_items`, `effective_items`, and
+`native_terminal_items` counts, static `output_provenance`, allowlisted terminal
+status and `effective_text_state`, lantern-presence and final-42 booleans, and effective function-call
+semantics. Old payloads default to `native_terminal`. The runner does not implement
+recovery; it validates effective output and requires a clean CLI exit. `executor.correlated` requires actual
+linked start/finish events for the complete direct namespaceless add_numbers call
+with a=17 and b=25. Text `42` alone cannot pass the tool case.
+
+The CLI does not serialize tool-result input or transport dispatch evidence.
+Thus `executor.result42_observed` and `accounting.observed_transport_submissions`
+are always null. `result42_validated_by_cli_inferred` records that correlated
+executor events and a second request crossed the reviewed CLI result validator;
+it is not observed wire linkage. Distinct private request IDs establish only
+`observed_request_ids`. `conservative_upper_bound` is two unless a complete
+first-response guard/no-tool failure supports the explicitly labelled
+`inferred_first_response_stop` bound of one. Missing, invalid, truncated, killed,
+or otherwise incomplete evidence always reserves two. No events never means
+no send. These fields cannot prove socket reuse or the encoded continuation body.
+
+`assertions_passed` requires exit zero, two completed lifecycles, and the case's
+text/tool assertions. The runner exits nonzero otherwise. `reason` contains only
+static parser/process categories. `public_error` matches exact known CLI errors;
+all other stderr becomes `unclassified`. Raw lines are bounded to 8 MiB, total
+stdout to 64 MiB, stderr to 64 KiB, ordinary text comparisons to 1 MiB, and retained
+request summaries to two. Limits fail closed and terminate the child. Native
+items, IDs, arguments, text, headers, stderr, and exception details are never
+written or echoed. All fixtures and subprocesses in self-tests are synthetic.
+These instructions are not live verification or permission to exceed the budget.
 
 ## General CLI examples (not sanitized evidence)
 
@@ -219,7 +378,19 @@ cargo run -- generate --auth-source pi \
 `--json` emits NDJSON. **This includes native provider items and opaque continuation
 material and must be treated as sensitive application data.** Normal text mode
 prints exposed text/refusal content, not reasoning summaries. Final response text
-is authoritative and reconciled with streamed text.
+is authoritative. Both modes treat streamed output as provisional. If a completed
+effective output omits or conflicts with streamed nonempty text/refusal or finalized
+message/function-call output, the CLI exits nonzero with a static error before tool
+execution or follow-up. Recovery belongs to the provider decoder, not the CLI.
+Terminal-only responses and matching text prefixes with terminal suffixes remain valid.
+The guard compares streamed parts by item identity and content index, not their
+combined arrival order. Valid interleaving remains valid; text mode prints a labelled
+terminal response when arrival order is not a prefix of terminal text.
+The per-request guard charges every item event's serialized bytes, including duplicates,
+and the separate rendered-text copy against a cumulative 1 MiB. It permits at most 4096 events, 512 finalized occurrences, and item/content
+indexes below 512. Private retained text copies are each bounded by 1 MiB; finalized
+native items share the cumulative byte budget. All tracking resets at each collect.
+Conflicting identities or finalized native content fail closed, even if only metadata differs.
 
 ```bash
 cargo run -- capabilities

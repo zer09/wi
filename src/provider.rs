@@ -262,8 +262,19 @@ pub struct Usage {
     pub cached_input_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
 }
+/// Source of the effective output; native terminal JSON is never rewritten.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputProvenance {
+    #[default]
+    NativeTerminal,
+    ValidatedOutputItemDone,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ModelResponse {
+    #[serde(default)]
+    pub output_provenance: OutputProvenance,
     pub id: String,
     pub model: Option<String>,
     pub outcome: ResponseOutcome,
@@ -277,6 +288,7 @@ impl std::fmt::Debug for ModelResponse {
         f.debug_struct("ModelResponse")
             .field("outcome", &self.outcome)
             .field("output_items", &self.output.len())
+            .field("output_provenance", &self.output_provenance)
             .finish()
     }
 }

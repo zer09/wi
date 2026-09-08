@@ -57,6 +57,50 @@ The adapter retains its in-memory context even with WebSocket delta requests, bu
 does not automatically replay it on reconnect. Outcome-uncertain failures require
 an explicit application decision, not a transparent transport retry.
 
+## SSE admission boundary
+
+The fixed subscription SSE transport normally requires successful status and
+`text/event-stream`. Only entirely absent Content-Type on a successful 2xx response
+activates strict prolog admission. Present wrong/empty/invalid MIME and non-2xx
+responses retain their rejection and optional diagnostic sampling.
+
+Admission reuses incremental `SseDecoder` framing in an opt-in strict mode.
+The ordinary decoder's permissive field handling and final-frame-at-EOF behavior
+remain unchanged. The prolog accepts initial BOM, fragmented UTF-8, LF/CR/CRLF,
+comments, blank frames without data, and standard fields. Unknown lines and control
+characters other than tab reject. Event labels use the last occurrence, including
+empty reset. ID fields remain non-resuming metadata and reject NUL; retry values
+must each be nonempty ASCII digits without enabling retries.
+
+The first data-containing blank-line dispatch is decisive. Its JSON must carry a
+nonempty response ID of at most 512 UTF-8 bytes and type `response.created` or a
+recognized completed/done/incomplete/failed/cancelled terminal. A nonempty last event
+label must match the JSON type byte for byte. A fresh trial `ResponseDecoder` must
+produce ResponseStarted for created or ResponseFinished for a terminal. Trial events
+are discarded without calling observation, settlement, or changing upstream outcome.
+Malformed, empty, whitespace, DONE, or unknown first data rejects; later frames cannot
+rescue it. EOF without the dispatch delimiter is not admission proof.
+
+One absolute 10-second deadline and 65536 cumulative raw bytes from byte zero bound
+the prolog, including comments and delimiters. Exact-cap proof is accepted; proof
+beyond the cap is rejected. The send's cancellation and total deadline remain outside
+this probe. The original HTTP receipt is recorded as missing/pending before awaiting
+the body. Failure does not start another rejection sample or retry the request.
+
+The byte stream checks cumulative fetched bytes against 32 MiB before Vec conversion
+or retention. Consumed chunks move into a replay queue without another full-chunk
+copy. The proof chunk's uninspected suffix stays intact. Replay precedes the remaining
+body on the same POST and is charged once by ordinary receive accounting. A fresh
+ordinary SSE decoder receives every byte in order. Its 8 MiB frame limit remains
+unchanged. Admission stops as soon as proof is available, even on an open stream.
+
+Admission runs identically with observation enabled or disabled. Its additive
+`sse_prolog_*` sample states describe 64 KiB / 10-second admission, not ordinary
+4 KiB / one-second rejection sampling. Only the first at most 4096 inspected bytes
+supply a private body classifier; public metadata retains the original missing media.
+See README for exact states and the pinned Pi compatibility reference. External
+compatibility references are corroboration only, not gateway live evidence.
+
 ## Tool boundary
 
 The provider records generated function calls; it does not execute them. A
@@ -80,7 +124,10 @@ item ID is not a call ID. New user instructions can accompany a complete result
 batch at the next-request boundary; this is not native mid-response steering.
 A completed terminal with any incomplete function call remains visible, but its
 settled output blocks both tool-result and user continuation. Incomplete call IDs
-do not become outstanding result IDs.
+do not become outstanding result IDs. Only omitted call status (intentional
+compatibility) or the exact string `completed` marks a call complete. Every other
+present value, including JSON null and non-string values, marks it incomplete.
+The codec preserves the native value for inspection without enabling execution.
 
 ## Submission and observation boundaries
 
@@ -89,20 +136,53 @@ serialization, and SSE credential reload, account affinity, headers, and request
 construction. The transport sets `Unknown` immediately before polling its first
 network-capable send. Send failures and cancellation after that boundary remain
 uncertain. Only a codec-validated terminal changes the outcome to
-`TerminalReceived`, including when a later local delivery or settlement fails.
+`TerminalReceived`, including when local finalized-item recovery, delivery, or settlement fails.
+The decoder records this boundary before recovery and exposes it even on an error.
+Invalid or mismatched terminal responses do not cross this boundary.
 
 The optional smoke observer belongs to one transport instance. It compares the
 serialized WebSocket frame or built HTTP body at dispatch, not the model's claims.
 It distinguishes native `response.created` from the codec's terminal-only
 synthetic identity event. Only counts, static categories, and equality booleans
 leave the observer. Opaque SSE replay is conditional on actual opaque output.
-Normal sessions do not allocate or collect this observation state.
+Normal sessions do not allocate or collect this observation state. Text comparisons
+retain terminal `response.native.output` comparisons independently of effective text.
+Separate effective counts, provenance, text state, and equality fields describe recovered
+output without reclassifying an empty native array as native text. Streamed
+text is assembled in observed order in private memory capped at 1 MiB per request.
+Unavailable comparisons are null with static reasons, not successful proof. Terminal
+text shape is captured before decoding; finalized-item categories retain counts only.
+Counts include duplicates and saturate at 4096 per request. HTTP receipt records exact
+numeric status and static media classes per send. Ordinary HTTP/MIME rejections
+sample up to 4096 bytes for at most one second only with an enabled observer.
+Missing-MIME admission uses the separate bounds and states described above. Sampling preserves the rejection
+category and remains subject to existing cancellation and total limits. Nonempty
+partial prefixes retain their safe class after timeout/read error; zero-byte timeout
+remains unavailable, not empty. See the
+README smoke section for additive diagnostic fields and their unavailable states.
 
 The smoke collector separately preserves admitted failure evidence in
 `acceptance.request_failure`: an allowlisted static code, 401/403/429 status when
 known, and the unchanged upstream outcome. It discards event messages and maps
 unknown codes to `unclassified`. The top-level stage identifies setup, generation,
 or acceptance. This summary does not change the provider-neutral event shape.
+
+The private CLI collector checks provisional text/refusal and finalized message/call
+material against effective output before follow-up or tool execution.
+It rejects missing/conflicting evidence rather than reconstructing output. Per request,
+item events consume a cumulative 1 MiB serialized-byte budget, including duplicates.
+Tracking permits 4096 events and 512 finalized occurrences; item/content indexes must
+be below 512. Each retained text copy is bounded by 1 MiB. This check does not alter
+codec outcomes, conversation settlement, or library continuation authority.
+
+The provider decoder owns a private bounded finalized-item tracker. It recovers only
+complete done objects after a correlated successful terminal explicitly supplies an empty
+output array. Nonempty terminal arrays remain authoritative. The tracker validates the
+whole batch and related item evidence; it never reconstructs items from deltas or
+executes tools. Recovery populates existing output/text fields with explicit provenance,
+without rewriting native terminal JSON. Conversation and registry consumers continue to
+use effective output, including native item metadata for SSE replay. See EVENTS.md for
+bounds, lifecycle validation, and fail-closed rules.
 
 ## Intentionally deferred
 

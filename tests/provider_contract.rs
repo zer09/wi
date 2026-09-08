@@ -28,6 +28,7 @@ impl SessionControl for EchoControl {
                 provider_sequence: None,
                 event: ProviderEvent::ResponseFinished {
                     response: ModelResponse {
+                        output_provenance: Default::default(),
                         id: "r1".into(),
                         model: None,
                         outcome: ResponseOutcome::Completed,

@@ -23,8 +23,16 @@ use tokio_tungstenite::{
 
 #[path = "boundary_tests.rs"]
 mod boundary_tests;
+#[path = "diagnostic_tests.rs"]
+mod diagnostic_tests;
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
 #[path = "observation_tests.rs"]
 mod observation_tests;
+#[path = "recovery_loopback_tests.rs"]
+mod recovery_loopback_tests;
+#[path = "sse_prolog_loopback_tests.rs"]
+mod sse_prolog_loopback_tests;
 
 struct FakeAuth;
 #[async_trait]
@@ -244,9 +252,63 @@ async fn decoded_native_namespace_rejects_entire_batch_without_caching() {
 }
 
 #[tokio::test]
+async fn decoded_status_rejects_batch_without_execution_or_cache() {
+    for status in [
+        json!(null),
+        json!(true),
+        json!(7),
+        json!({}),
+        json!([]),
+        json!(""),
+        json!("unknown"),
+        json!("in_progress"),
+        json!("failed"),
+    ] {
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(AddNumbers)).unwrap();
+        let mut native = json!({"id":"r1", "status":"completed", "output":[
+            {"type":"function_call", "call_id":"call1", "name":"add_numbers", "arguments":"{\"a\":17,\"b\":25}"},
+            {"type":"function_call", "call_id":"call2", "name":"add_numbers", "arguments":"{\"a\":17,\"b\":25}", "status":status}
+        ]});
+        let decoded = codec::parse_response(native.clone()).unwrap();
+        assert_eq!(decoded.output[1].native["status"], status);
+        let mut events = vec![];
+        assert!(matches!(
+            tools.execute_response(&decoded, |e| events.push(e)).await,
+            Err(GatewayError::UnsupportedOutput)
+        ));
+        assert!(events.is_empty());
+        native["output"][1]["status"] = json!("completed");
+        let corrected = codec::parse_response(native).unwrap();
+        let results = tools
+            .execute_response(&corrected, |e| events.push(e))
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(events.len(), 4);
+        assert!(
+            events
+                .iter()
+                .all(|e| !matches!(e, crate::tools::ToolExecutionEvent::ToolResultReused { .. }))
+        );
+    }
+}
+
+#[tokio::test]
 async fn terminal_call_status_gates_session_continuation_before_second_send() {
-    for status in [Some("in_progress"), None, Some("completed")] {
-        let complete = status != Some("in_progress");
+    for status in [
+        Some(json!(null)),
+        Some(json!(true)),
+        Some(json!(7)),
+        Some(json!({})),
+        Some(json!([])),
+        Some(json!("")),
+        Some(json!("unknown")),
+        Some(json!("in_progress")),
+        None,
+        Some(json!("completed")),
+    ] {
+        let complete = status.is_none() || status == Some(json!("completed"));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {

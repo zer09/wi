@@ -206,6 +206,688 @@
     "push_or_publication_performed": false
   },
   "advanced_features_enabled": [],
+  "latest_follow_up": "2026-09-08-sse-matrix-complete",
+  "current_implementation_status": {
+    "date": "2026-09-08",
+    "scope": "bounded_finalized_recovery_and_missing_mime_sse_admission_for_six_case_matrix",
+    "status": "offline_pass_complete_six_case_live_matrix_pass",
+    "prior_failed_attempt": {"role": "implementation", "terminal_reason": "budget_exhausted"},
+    "recovered_red_regression": {
+      "test": "collect_rejects_discarded_or_changed_stream_before_second_send_or_execution",
+      "status": "failed_before_guard",
+      "exit_code": 101
+    },
+    "complete_final_verification": "pass_134_rust_tests_152_runner_tests",
+    "independent_review": "review_a_review_b_review_c_no_blockers",
+    "finalized_item_recovery_implemented": true,
+    "forced_tool_choice_implemented": false,
+    "additional_live_submissions": 5,
+    "changes_left_unstaged": true
+  },
+  "current_live_ledger": {
+    "as_of": "2026-09-08T10:29:26Z",
+    "max_gateway_generation_submissions": 20,
+    "gateway_generation_submissions_attempted": 17,
+    "remaining_budget": 3,
+    "sse_completion_submissions": 5,
+    "recovery_matrix_submissions": 6,
+    "budget_extension": "User explicitly approved increasing assistant limit to 20 and continuing only the SSE matrix repair; previous 16-submission authorization remains historical",
+    "matrix_completion_status": "all_six_cases_pass",
+    "user_authorized_partial_solution_gate_continuation": true,
+    "oracle_revisions_applied": true,
+    "final_review_gate": "all_three_completed_no_blockers",
+    "completed_solution_roles": ["solution-a", "solution-b", "solution-c", "solution-d", "solution-e"],
+    "failed_solution_roles": {"solution-f": "routes_unavailable", "solution-g": "routes_unavailable"},
+    "assistant_codex_cli_submissions": 2,
+    "cli_accounting_basis": "one observed request per command plus reviewed first-response-stop control flow; runner does not directly observe outbound writes",
+    "scope": "assistant_run_gateway_submissions_only_per_explicit_user_direction",
+    "historical_submissions": 2,
+    "approved_retest_submissions": 2,
+    "user_reported_manual_submissions_excluded": 3,
+    "manual_count_evidence": "User confirmed each manual command once and explicitly excluded those submissions from the assistant ledger. Keep manual results separate from agent-observed validation.",
+    "automatic_retries": 0,
+    "transport_fallbacks": 0,
+    "stopped": true,
+    "further_live_execution_authorized": false,
+    "authorized_scope": "S1-S3 once each after minimal SSE repair and offline review, selected Codex auth/gpt-6-astra; no extra probes or automatic retries; stop failed dependent sequences",
+    "authorization_disposition": "Completed: S1-S3 passed once each; prior W1-W3 passing evidence retained. All six matrix cases accepted; no additional live requests planned",
+    "completed_authorized_scope": "one Codex generate --follow-up and one Codex tool-demo, WebSocket gpt-6-astra; both stopped on first-response CLI guard failure, no retries",
+    "original_live_object_is_historical": true
+  },
+  "follow_ups": [
+    {
+      "id": "2026-09-08-offline-status-and-diagnostics",
+      "checked_at": "2026-09-08T04:02:39Z",
+      "mode": "offline_repair_and_diagnostics_preparation",
+      "base_head": "f30a020679a1eeb61978209e40e78a640db334af",
+      "branch": "master",
+      "initial_worktree": "clean",
+      "result": "offline_pass_live_acceptance_still_incomplete",
+      "historical_base_fields_preserved": true,
+      "live_provider_submissions_this_pass": 0,
+      "cumulative_provider_submissions": 2,
+      "remaining_budget": 8,
+      "real_credentials_accessed": false,
+      "auth_check_performed": false,
+      "auth_settings_changed": false,
+      "advanced_features_enabled": [],
+      "crate_or_client_identity_changed": false,
+      "git_writes_performed": false,
+      "changes_left_unstaged": true,
+      "repairs": [
+        {
+          "area": "function_call_status",
+          "path": "src/providers/openai_codex/codec.rs:192-197",
+          "status": "fixed_and_regression_tested",
+          "complete_when": ["property_absent", "exact_string_completed"],
+          "blocked_present_values": ["null", "boolean", "number", "array", "object", "empty_string", "unknown_string", "in_progress"],
+          "native_fields_preserved": true,
+          "boundaries_tested": ["real_codec_to_registry_mixed_batch_zero_execution_and_cache", "real_codec_to_conversation_both_transports", "public_session_no_second_send", "omitted_and_completed_positive_controls"]
+        },
+        {
+          "area": "text_diagnostics",
+          "path": "src/providers/openai_codex/observation.rs",
+          "status": "implemented_and_offline_tested",
+          "fields": ["native_expected_text_equal", "normalized_native_text_equal", "streamed_native_text_equal"],
+          "expected_comparison": "trimmed_native_ordinary_text_against_fixed_expected_answer",
+          "normalized_comparison": "exact_normalized_ordinary_output_and_response_text_against_response_native_output",
+          "stream_comparison": "arrival_order_output_text_deltas_against_native_terminal_ordinary_text_without_trimming",
+          "private_text_limit_bytes": 1048576,
+          "unavailable_value": null,
+          "raw_text_or_fingerprints_exposed": false,
+          "acceptance_loosened": false
+        },
+        {
+          "area": "sse_http_diagnostics",
+          "path": "src/providers/openai_codex/wire.rs",
+          "status": "implemented_and_offline_tested",
+          "exact_status_field": "submissions[].http.status",
+          "media_classes": ["missing", "invalid", "event_stream", "json", "html", "plain_text", "other"],
+          "body_classes": ["empty", "json_like", "html_like", "text_or_other", "binary_or_non_utf8"],
+          "sample_states": ["not_sampled", "unavailable", "complete", "read_error", "timeout", "truncated"],
+          "sample_limit_bytes": 4096,
+          "sample_timeout_seconds": 1,
+          "sample_only_opt_in_rejected_responses": true,
+          "accepted_sse_sampled": false,
+          "classes_are_prefix_heuristics_not_causes": true,
+          "strict_sse_handling_preserved": true,
+          "original_rejection_category_preserved": true,
+          "raw_headers_body_ids_or_secrets_exposed": false,
+          "automatic_retries": 0
+        }
+      ],
+      "regression_evidence": {
+        "implementation_red_command": "cargo test --lib",
+        "implementation_red_exit_code": null,
+        "implementation_red_passed": 74,
+        "implementation_red_failed": 3,
+        "failed_tests": ["incomplete_calls_settle_but_block_all_continuation", "decoded_status_rejects_batch_without_execution_or_cache", "terminal_call_status_gates_session_continuation_before_second_send"],
+        "reviewer_scratch_reproduction": {
+          "baseline_status_logic_only": true,
+          "project_tree_unchanged": true,
+          "passed": 81,
+          "failed": 3,
+          "count_difference": "scratch reproduction also included seven diagnostic tests added after initial red run"
+        },
+        "added_test_definitions": 8,
+        "existing_tests_extended": true
+      },
+      "offline": {
+        "status": "pass",
+        "platform": "Linux x86_64",
+        "passed_tests": 94,
+        "failed_tests": 0,
+        "ignored_tests": 0,
+        "filtered_tests": 0,
+        "measured_tests": 0,
+        "test_breakdown": {"library": 84, "binary": 6, "integration": 4, "example": 0, "doctests": 0},
+        "source_files": 25,
+        "test_definitions": 94,
+        "fixture_events": 25,
+        "dependency_declarations_and_lock_unchanged": true,
+        "commands": [
+          {"command": "cargo fmt --all -- --check", "exit_code": 0},
+          {"command": "cargo check --all-targets", "exit_code": 0},
+          {"command": "cargo test --all-targets", "exit_code": 0},
+          {"command": "cargo clippy --all-targets -- -D warnings", "exit_code": 0},
+          {"command": "cargo build --all-targets", "exit_code": 0},
+          {"command": "cargo test --doc", "exit_code": 0},
+          {"command": "uv run scripts/verify.py", "exit_code": 0, "parent_rerun": true},
+          {"command": "git diff --check", "exit_code": 0}
+        ],
+        "review_roles_completed": ["review-a", "review-b", "review-c"],
+        "blocking_findings_remaining": 0,
+        "hosted_ci_for_uncommitted_changes": "not_run"
+      },
+      "github_actions_follow_up": {
+        "observed_at": "2026-09-08T04:02:39Z",
+        "retrieval": "authenticated_gh_run_list_view_and_job_log_test_summaries",
+        "workflow": "Rust source validation",
+        "workflow_mutation_performed": false,
+        "runs": [
+          {
+            "id": 34154153299,
+            "head_sha": "5174b2a9374b11b0c62c15a9a5b020fa7422e2fa",
+            "url": "https://github.com/zer09/wi/actions/runs/34154153299",
+            "created_at": "2026-09-07T19:04:22Z",
+            "updated_at": "2026-09-07T19:06:55Z",
+            "conclusion": "success",
+            "platform_jobs": {"ubuntu-latest": "success", "macos-latest": "success", "windows-latest": "success"}
+          },
+          {
+            "id": 34154340956,
+            "head_sha": "f30a020679a1eeb61978209e40e78a640db334af",
+            "url": "https://github.com/zer09/wi/actions/runs/34154340956",
+            "created_at": "2026-09-07T19:07:10Z",
+            "updated_at": "2026-09-07T19:09:25Z",
+            "conclusion": "success",
+            "jobs": [
+              {"id": 101842920175, "name": "test (ubuntu-latest)", "completed_at": "2026-09-07T19:08:15Z", "conclusion": "success", "all_six_cargo_steps": "success", "passed_tests": 86, "library": 76, "binary": 6, "integration": 4, "example": 0, "doctests": 0, "failed": 0, "ignored": 0, "filtered": 0},
+              {"id": 101842920329, "name": "test (macos-latest)", "completed_at": "2026-09-07T19:08:36Z", "conclusion": "success", "all_six_cargo_steps": "success", "passed_tests": 86, "library": 76, "binary": 6, "integration": 4, "example": 0, "doctests": 0, "failed": 0, "ignored": 0, "filtered": 0},
+              {"id": 101842920387, "name": "test (windows-latest)", "completed_at": "2026-09-07T19:09:25Z", "conclusion": "success", "all_six_cargo_steps": "success", "passed_tests": 84, "library": 74, "binary": 6, "integration": 4, "example": 0, "doctests": 0, "failed": 0, "ignored": 0, "filtered": 0, "unix_only_tests_compiled_out": 2}
+            ]
+          }
+        ],
+        "applies_to_committed_baseline_only": true,
+        "live_behavior_verified": false
+      },
+      "proposed_live_retest": {
+        "status": "proposed_not_authorized_or_run",
+        "starting_ledger": {"used": 2, "cap": 10, "remaining": 8},
+        "explicit_user_approval_required": true,
+        "preserve_original_case_evidence": true,
+        "metadata_and_auth_preparation": "only after user approval; no auth-check in this pass",
+        "phase_one": [
+          {"id": "W1-R1", "transport": "websocket", "case": "text", "maximum_submissions": 1},
+          {"id": "S1-R1", "transport": "sse", "case": "text", "maximum_submissions": 1, "independent_selection_not_fallback": true}
+        ],
+        "phase_one_maximum_additional_submissions": 2,
+        "phase_one_maximum_cumulative_submissions": 4,
+        "deadline_seconds_per_invocation": 180,
+        "automatic_retries": 0,
+        "stop_affected_sequence_on_failure": true,
+        "stop_for_evidence_review_after_text_probes": true,
+        "count_ambiguous_writes_conservatively": true,
+        "phase_two_requires_separate_decision": "prioritize continuation and add_numbers on one approved transport, at most four additional submissions, cumulative at most eight",
+        "full_fresh_matrix_fits_remaining_budget": false,
+        "unallocated_budget_after_optional_phase_two": 2
+      },
+      "changed_paths": [
+        "src/providers/openai_codex/codec.rs",
+        "src/providers/openai_codex/observation.rs",
+        "src/providers/openai_codex/wire.rs",
+        "src/providers/openai_codex/state.rs",
+        "src/providers/openai_codex/tests.rs",
+        "src/providers/openai_codex/observation_tests.rs",
+        "src/providers/openai_codex/diagnostic_tests.rs",
+        "README.md",
+        "docs/ARCHITECTURE.md",
+        "docs/EVENTS.md",
+        "docs/LOCAL_VERIFICATION.md",
+        "docs/local-verification.json"
+      ],
+      "remaining_uncertainty": [
+        "Historical W1 native wording versus normalized/stream consistency remains unknown; no raw answer was retained",
+        "Historical S1 exact status/media/body remain unknown; new fields cannot reconstruct them",
+        "No live provider, entitlement, continuation or tool result was tested in this pass",
+        "Uncommitted changes have not run on hosted CI or non-Linux platforms",
+        "Arrival-order stream comparison is not a per-item lifecycle validator",
+        "Body classifications are bounded prefix heuristics and not causes",
+        "Existing cache-capacity and idle-closure limitations remain outside this focused pass"
+      ]
+    },
+    {
+      "id": "2026-09-08-approved-text-retest",
+      "checked_at": "2026-09-08T04:14:38Z",
+      "authorization": "user approved two text probes and preparation after the offline repair report",
+      "base_head": "f30a020679a1eeb61978209e40e78a640db334af",
+      "tested_source": "reviewed unstaged offline repair tree; no code changes during retest",
+      "selected_provider": "openai-codex",
+      "selected_auth_source": "pi",
+      "selected_model": "gpt-6-astra",
+      "model_selection_evidence": "safe_runtime_metadata_reconfirmed",
+      "result": "live_acceptance_failed_testing_stopped",
+      "milestone_accepted": false,
+      "offline_preflight": {
+        "command": "uv run scripts/verify.py",
+        "exit_code": 0,
+        "all_six_cargo_gates": "pass",
+        "passed_tests": 94,
+        "library": 84,
+        "binary": 6,
+        "integration": 4,
+        "example": 0,
+        "doctests": 0,
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "cli_help_and_diff_check": "pass"
+      },
+      "auth_metadata": {
+        "command": "target/debug/gateway auth-check --auth-source pi",
+        "exit_code": 0,
+        "credential_shape": "accepted",
+        "freshness_check": "accepted_at_check_time",
+        "live_request_made": false,
+        "credentials_loaded_only_in_reviewed_gateway": true,
+        "credential_values_disclosed": false,
+        "credential_mutation_performed": false,
+        "token_fingerprints_computed": false,
+        "entitlement_proven": false
+      },
+      "starting_submissions": 2,
+      "additional_submissions": 2,
+      "cumulative_submissions": 4,
+      "remaining_budget": 6,
+      "automatic_retries": 0,
+      "transport_fallbacks": 0,
+      "deadline_seconds_per_invocation": 180,
+      "timed_out_invocations": 0,
+      "cases": [
+        {
+          "id": "W1-R1",
+          "started_at": "2026-09-08T04:14:16Z",
+          "finished_at": "2026-09-08T04:14:19Z",
+          "command": "timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket --model gpt-6-astra --case text",
+          "exit_code": 1,
+          "status": "fail",
+          "submissions": 1,
+          "summary": {
+            "acceptance": {"answers_equal": [false], "executor_correlated": false, "normalized_started_counts": [1], "request_failure": null, "tool_call_valid": false, "tool_result_valid": false},
+            "case": "text",
+            "error_code": "protocol_error",
+            "passed": false,
+            "schema_version": 1,
+            "stage": "first_acceptance",
+            "submissions": [
+              {"argument_deltas": 0, "http": null, "native_created_count": 1, "native_expected_text_equal": null, "native_sse_replay_equal": null, "new_input_only_equal": true, "normalized_native_text_equal": null, "opaque_replay": null, "ordinal": 1, "prior_response_equal": null, "reasoning_deltas": 0, "refusal_deltas": 0, "result_linkage_equal": null, "socket_reused": false, "streamed_native_text_equal": null, "terminal_status": "completed", "terminal_type": "response.completed", "text_deltas": 2, "transport": "web_socket", "validated_terminal": true}
+            ],
+            "transport": "web_socket"
+          },
+          "interpretation": "Native lifecycle completed; unchanged strict answer validator failed. All three text comparisons are unavailable. No particular text shape, native wording or normalization/stream defect is established.",
+          "raw_native_text_recorded": false
+        },
+        {
+          "id": "S1-R1",
+          "started_at": "2026-09-08T04:14:35Z",
+          "finished_at": "2026-09-08T04:14:38Z",
+          "command": "timeout 180s target/debug/gateway smoke --auth-source pi --transport sse --model gpt-6-astra --case text",
+          "exit_code": 1,
+          "status": "blocked",
+          "submissions": 1,
+          "summary": {
+            "acceptance": {"answers_equal": [], "executor_correlated": false, "normalized_started_counts": [0], "request_failure": {"code": "unexpected_content_type", "http_status": null, "upstream_outcome": "unknown"}, "tool_call_valid": false, "tool_result_valid": false},
+            "case": "text",
+            "error_code": "provider_error",
+            "passed": false,
+            "schema_version": 1,
+            "stage": "first_generation",
+            "submissions": [
+              {"argument_deltas": 0, "http": {"body_class": null, "media": "missing", "sample_state": "timeout", "status": 200}, "native_created_count": 0, "native_expected_text_equal": null, "native_sse_replay_equal": true, "new_input_only_equal": null, "normalized_native_text_equal": null, "opaque_replay": null, "ordinal": 1, "prior_response_equal": null, "reasoning_deltas": 0, "refusal_deltas": 0, "result_linkage_equal": null, "socket_reused": false, "streamed_native_text_equal": null, "terminal_status": null, "terminal_type": null, "text_deltas": 0, "transport": "sse", "validated_terminal": false}
+            ],
+            "transport": "sse"
+          },
+          "interpretation": "Observed HTTP 200 without Content-Type; rejected before SSE parsing. Bounded body sample timed out and classification is unavailable, not empty. No native lifecycle or upstream terminal observed; generation outcome remains unknown.",
+          "raw_body_or_headers_recorded": false
+        }
+      ],
+      "original_W1_S1_evidence_preserved": true,
+      "continuation_and_tool_cases_run": false,
+      "acceptance_changed": false,
+      "code_changed_during_retest": false,
+      "auth_settings_changed": false,
+      "advanced_features_enabled": [],
+      "git_index_or_history_changed": false,
+      "reports_updated": ["docs/LOCAL_VERIFICATION.md", "docs/local-verification.json"],
+      "next_step": "Offline investigation only after a new task decision; no further live execution under the completed two-probe approval",
+      "remaining_uncertainty": [
+        "Why all W1-R1 text comparisons were unavailable",
+        "Why S1-R1 had no Content-Type and what its body contained",
+        "Causes of the original W1 and S1 failures remain unknown",
+        "No live continuation, ordinary tool round trip or broader account capability acceptance"
+      ]
+    },
+    {
+      "id": "2026-09-08-assistant-codex-cli-validation",
+      "checked_at": "2026-09-08T07:06:53Z",
+      "base_head": "f30a020679a1eeb61978209e40e78a640db334af",
+      "source": "reviewed unstaged lifecycle and diagnostic repair tree",
+      "implementation": {
+        "status": "complete_for_approved_offline_scope",
+        "changes": ["bounded CLI lifecycle consistency guard", "explicit observer unavailable reasons and finalized-item counts", "bounded SSE partial-prefix classification on timeout/read error", "fixed opt-in CLI evidence runner with private bounded capture and lifecycle/envelope validation"],
+        "finalized_item_recovery": false,
+        "forced_tool_choice": false,
+        "strict_terminal_and_sse_authority_preserved": true,
+        "public_model_response_structure_unchanged": true,
+        "dependency_and_auth_source_files_unchanged": true,
+        "runner_guard_proof": "stream/terminal content consistency inferred only from clean exit zero of fixed reviewed Rust CLI; Node independently validates lifecycle, envelope, case and known-answer evidence",
+        "prior_blocked_attempt_preserved_in_history": true,
+        "review_remediations": ["case-aware response lifecycle and private identity checks", "executor completion before any second-request evidence", "session/provider/event identity and monotonic local sequence checks"],
+        "final_review_roles": ["review-a", "review-b", "review-c"],
+        "blocking_findings_remaining": 0
+      },
+      "offline": {
+        "status": "pass",
+        "parent_verify_command": "uv run scripts/verify.py",
+        "parent_verify_exit": 0,
+        "six_cargo_gates": "fmt_check_check_test_clippy_warning_denied_build_doctest_all_passed",
+        "rust_passed": 102,
+        "rust_breakdown": {"library": 86, "binary": 12, "integration": 4, "example": 0, "doctests": 0},
+        "failed": 0,
+        "ignored": 0,
+        "filtered": 0,
+        "rust_source_files": 28,
+        "fixture_events": 25,
+        "runner_self_test_command": "node scripts/cli_retest.mjs --self-test",
+        "runner_self_test_exit": 0,
+        "runner_tests_passed": 151,
+        "runner_self_tests_live_started": false,
+        "git_diff_check": "pass",
+        "platform": "Linux",
+        "hosted_ci_for_current_uncommitted_changes": "not_run"
+      },
+      "auth_metadata": {
+        "command": "target/debug/gateway auth-check --auth-source codex",
+        "exit_code": 0,
+        "credential_shape": "accepted",
+        "live_request_made": false,
+        "credentials_read_only_in_reviewed_gateway": true,
+        "credential_values_or_fingerprints_disclosed": false,
+        "credential_storage_modified": false
+      },
+      "selected_provider": "openai-codex",
+      "selected_auth_source": "codex_explicitly_selected_by_user_for_these_commands",
+      "selected_model": "gpt-6-astra",
+      "transport": "websocket",
+      "runner_uses_actual_gateway_cli": true,
+      "raw_streams_stored_or_printed": false,
+      "deadline_seconds_per_command": 180,
+      "automatic_retries": 0,
+      "starting_assistant_submissions": 4,
+      "additional_assistant_submissions": 2,
+      "ending_assistant_submissions": 6,
+      "remaining_assistant_budget": 4,
+      "manual_submissions_excluded_per_user": 3,
+      "cases": [
+        {
+          "id": "C-CODEX-1",
+          "command": "node scripts/cli_retest.mjs --run-live --case continuation",
+          "gateway_arguments": ["generate", "--auth-source", "codex", "--model", "gpt-6-astra", "--transport", "websocket", "--json", "--prompt", "Remember the word lantern and acknowledge.", "--follow-up", "What word did I ask you to remember?"],
+          "started_at": "2026-09-08T07:06:29Z",
+          "finished_at": "2026-09-08T07:06:34Z",
+          "runner_exit": 1,
+          "gateway_exit": 1,
+          "status": "failed_first_response_guard_followup_not_submitted",
+          "signal": null,
+          "time_limit": false,
+          "cancelled": false,
+          "parser_reason": null,
+          "public_error": "lifecycle_guard",
+          "accounting": {"observed_request_ids": 1, "observed_transport_submissions": null, "conservative_upper_bound": 1, "basis": "inferred_first_response_stop"},
+          "request": {
+            "events": 22, "started": 1, "status": 1, "terminal": 1, "failed": 0, "extensions": 6,
+            "deltas": {"text": 11, "refusal": 0, "reasoning_summary": 0, "reasoning_text": 0, "function_arguments": 0, "custom_tool_input": 0},
+            "started_items": {"total": 1, "message": 1, "function_call": 0, "reasoning": 0, "other": 0, "malformed": 0},
+            "done_items": {"total": 1, "message": 1, "function_call": 0, "reasoning": 0, "other": 0, "malformed": 0},
+            "terminal_items": {"total": 0, "message": 0, "function_call": 0, "reasoning": 0, "other": 0, "malformed": 0},
+            "terminal_status": "completed", "terminal_text_state": "no_ordinary_parts", "lantern_present": null, "final42_equal": null, "call_count": 0, "exact_add_numbers_17_25": false
+          },
+          "executor": {"started": 0, "finished": 0, "reused": 0, "correlated": false, "result42_observed": null, "result42_validated_by_cli_inferred": false},
+          "assertions_passed": false
+        },
+        {
+          "id": "T-CODEX-1",
+          "command": "node scripts/cli_retest.mjs --run-live --case tool",
+          "gateway_arguments": ["tool-demo", "--auth-source", "codex", "--model", "gpt-6-astra", "--transport", "websocket", "--json"],
+          "started_at": "2026-09-08T07:06:49Z",
+          "finished_at": "2026-09-08T07:06:53Z",
+          "runner_exit": 1,
+          "gateway_exit": 1,
+          "status": "failed_first_response_guard_before_execution",
+          "signal": null,
+          "time_limit": false,
+          "cancelled": false,
+          "parser_reason": null,
+          "public_error": "lifecycle_guard",
+          "accounting": {"observed_request_ids": 1, "observed_transport_submissions": null, "conservative_upper_bound": 1, "basis": "inferred_first_response_stop"},
+          "request": {
+            "events": 18, "started": 1, "status": 1, "terminal": 1, "failed": 0, "extensions": 4,
+            "deltas": {"text": 0, "refusal": 0, "reasoning_summary": 0, "reasoning_text": 0, "function_arguments": 9, "custom_tool_input": 0},
+            "started_items": {"total": 1, "message": 0, "function_call": 1, "reasoning": 0, "other": 0, "malformed": 0},
+            "done_items": {"total": 1, "message": 0, "function_call": 1, "reasoning": 0, "other": 0, "malformed": 0},
+            "terminal_items": {"total": 0, "message": 0, "function_call": 0, "reasoning": 0, "other": 0, "malformed": 0},
+            "terminal_status": "completed", "terminal_text_state": "no_ordinary_parts", "lantern_present": null, "final42_equal": null, "call_count": 0, "exact_add_numbers_17_25": false
+          },
+          "executor": {"started": 0, "finished": 0, "reused": 0, "correlated": false, "result42_observed": null, "result42_validated_by_cli_inferred": false},
+          "assertions_passed": false
+        }
+      ],
+      "observed_conclusion": "Both new Codex runs had finalized streamed items but empty completed terminal output. Terminal-only response construction excludes those items; CLI guard correctly failed before followup or execution. The tool run DID contain a finalized function-call event.",
+      "remaining_uncertainty": [
+        "Finalized tool name, arguments, completeness and authorization were not asserted by the retained done-item counts; no execution or result42 was observed",
+        "Why this provider response omitted items from terminal output remains unknown",
+        "New Codex evidence does not retroactively establish original Pi W1/S1 or user-manual failure causes",
+        "SSE was not retried and its earlier missing MIME/body cause remains unresolved",
+        "Finalized-item recovery needs a separate explicit reconciliation/provenance decision and regressions; no such recovery was implemented",
+        "Exact finalized-native comparison can also reject metadata enrichment; current empty-output runs do not require that explanation"
+      ],
+      "milestone_accepted": false,
+      "further_live_runs_planned": false,
+      "all_changes_left_unstaged": true,
+      "commit_or_push_performed": false
+    },
+    {
+      "id": "2026-09-08-recovery-matrix",
+      "checked_at": "2026-09-08T09:32:38Z",
+      "base_head": "f30a020679a1eeb61978209e40e78a640db334af",
+      "scope": "existing six-case matrix only",
+      "gate_history": {
+        "user_authorized_continuation_from_five_completed_solutions": true,
+        "failed_solution_roles_preserved": ["solution-f", "solution-g"],
+        "oracle": "REVISE; refined invariants verified and incorporated by parent",
+        "implementation": "completed",
+        "confirmed_review_repairs": ["item-associated field and part-family validation", "runner effective_text_state label", "provisional arguments and message/reasoning content prefix validation"],
+        "final_reviews": {"review-a": "no_blockers", "review-b": "no_blockers", "review-c": "no_blockers"}
+      },
+      "repair": {
+        "area": "src/providers/openai_codex/finalized.rs and codec.rs",
+        "behavior": "Only validated completed/done terminals with explicit output:[] can recover a complete dense unique bounded batch of finalized items. Partial evidence never creates output. Invalid associated evidence rejects the whole recovery batch before settlement or execution.",
+        "limits": {"serialized_associated_evidence_bytes": 1048576, "observed_events": 4096, "items": 512, "maximum_output_index": 511},
+        "nonempty_terminal_authority_preserved": true,
+        "native_terminal_unchanged": true,
+        "public_api_change": "ModelResponse.output_provenance: OutputProvenance; NativeTerminal default or ValidatedOutputItemDone. Existing Rust struct literals need the field; older serialized responses deserialize with default.",
+        "effective_output_and_text_shared_by_all_consumers": true,
+        "recovery_failure_upstream_outcome": "TerminalReceived",
+        "private_enum_rename": "PiOnly -> SmokeAuthSource because explicit Codex support was added to existing smoke helper",
+        "tool_choice": "auto_unchanged",
+        "sse_mime_validation": "strict_unchanged",
+        "auth_endpoint_identity_dependencies": "unchanged",
+        "node_evidence_label": "effective_text_state replaces terminal_text_state; native_terminal_items stays separate",
+        "no_new_runner_or_advanced_features": true
+      },
+      "offline": {
+        "parent_command": "uv run scripts/verify.py",
+        "exit_code": 0,
+        "all_six_cargo_gates": "pass",
+        "rust_passed": 119,
+        "breakdown": {"library": 101, "binary": 14, "integration": 4, "example": 0, "doctests": 0},
+        "failed": 0, "ignored": 0, "measured": 0, "filtered": 0,
+        "rust_files": 31, "fixture_events": 25,
+        "node_self_test": "node scripts/cli_retest.mjs --self-test",
+        "node_passed": 152, "node_live_started": false,
+        "git_diff_check": "pass",
+        "platform": "Linux",
+        "new_hosted_ci_or_other_platform_runs": false,
+        "cargo_toml_lock_auth_rs_unchanged_from_head": true
+      },
+      "auth_metadata": {"command": "target/debug/gateway auth-check --auth-source codex", "exit": 0, "credential_shape": "accepted", "live_request_made": false, "storage_modified": false},
+      "live": {
+        "runner": "reviewed target/debug/gateway smoke with internal wire observer, not Node CLI runner",
+        "auth_source": "codex", "model": "gpt-6-astra",
+        "command_prefix": "timeout --signal=TERM --kill-after=5s 180s target/debug/gateway smoke --auth-source codex --model gpt-6-astra",
+        "no_raw_provider_output_or_identifiers_saved": true,
+        "new_provider_submissions": 6, "assistant_total": 12, "cap": 16, "remaining": 4,
+        "manual_submissions_excluded": 3, "automatic_retries": 0, "fallbacks": 0,
+        "cases": [
+          {
+            "id": "W1", "arguments": "--transport websocket --case text",
+            "started_at": "2026-09-08T09:31:48Z", "finished_at": "2026-09-08T09:31:53Z",
+            "status": "PASS", "exit": 0, "submissions": 1,
+            "stage": "first_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true], "normalized_started_counts": [1],
+            "request_evidence": [{"ordinal": 1, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "terminal_type": "response.completed", "terminal_status": "completed", "new_input_only_equal": true, "native_terminal_items": 0, "effective_items": 1, "finalized_message_count": 1, "output_provenance": "validated_output_item_done", "terminal_text_state": "no_ordinary_parts", "effective_text_state": "available", "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}]
+          },
+          {
+            "id": "W2", "arguments": "--transport websocket --case continuation",
+            "started_at": "2026-09-08T09:31:59Z", "finished_at": "2026-09-08T09:32:08Z",
+            "status": "PASS", "exit": 0, "submissions": 2,
+            "stage": "final_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true, true], "normalized_started_counts": [1, 1],
+            "request_evidence": [
+              {"ordinal": 1, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "terminal_type": "response.completed", "terminal_status": "completed", "new_input_only_equal": true, "native_terminal_items": 0, "effective_items": 1, "finalized_message_count": 1, "output_provenance": "validated_output_item_done", "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true},
+              {"ordinal": 2, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "terminal_type": "response.completed", "terminal_status": "completed", "new_input_only_equal": true, "prior_response_equal": true, "socket_reused": true, "native_terminal_items": 0, "effective_items": 1, "finalized_message_count": 1, "output_provenance": "validated_output_item_done", "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}
+            ]
+          },
+          {
+            "id": "W3", "arguments": "--transport websocket --case tool",
+            "started_at": "2026-09-08T09:32:19Z", "finished_at": "2026-09-08T09:32:26Z",
+            "status": "PASS", "exit": 0, "submissions": 2,
+            "stage": "final_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true], "normalized_started_counts": [1, 1],
+            "tool_call_valid": true, "executor_correlated": true, "tool_result_valid": true,
+            "asserted_tool": "one completed direct add_numbers call, a=17,b=25, one new execution, sum=42 result with the same call_id, final ordinary answer42, no further call",
+            "request_evidence": [
+              {"ordinal": 1, "native_created_count": 1, "argument_deltas": 9, "text_deltas": 0, "validated_terminal": true, "terminal_type": "response.completed", "terminal_status": "completed", "new_input_only_equal": true, "native_terminal_items": 0, "effective_items": 1, "finalized_function_call_count": 1, "output_provenance": "validated_output_item_done", "effective_text_state": "no_ordinary_parts", "effective_expected_text_equal": null},
+              {"ordinal": 2, "native_created_count": 1, "text_deltas": 1, "validated_terminal": true, "terminal_type": "response.completed", "terminal_status": "completed", "new_input_only_equal": true, "prior_response_equal": true, "socket_reused": true, "result_linkage_equal": true, "native_terminal_items": 0, "effective_items": 1, "finalized_message_count": 1, "output_provenance": "validated_output_item_done", "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}
+            ]
+          },
+          {
+            "id": "S1", "arguments": "--transport sse --case text",
+            "started_at": "2026-09-08T09:32:36Z", "finished_at": "2026-09-08T09:32:38Z",
+            "status": "BLOCKED", "exit": 1, "submissions": 1,
+            "stage": "first_generation", "passed": false, "error_code": "provider_error",
+            "request_failure": {"code": "unexpected_content_type", "http_status": null, "upstream_outcome": "unknown"},
+            "http": {"status": 200, "media": "missing", "sample_state": "timeout", "body_class": "text_or_other"},
+            "native_created_count": 0, "validated_terminal": false, "terminal_type": null, "terminal_status": null,
+            "normalized_started_counts": [0], "text_deltas": 0, "argument_deltas": 0,
+            "native_sse_replay_equal": true, "opaque_replay": null,
+            "output_provenance": null, "effective_items": null, "native_terminal_items": null,
+            "interpretation": "Nonempty bounded body prefix received, not identified as valid SSE by diagnostics. MIME rejection occurred before SSE parsing; exact body and cause unknown. Sample timeout does not mean no bytes."
+          },
+          {"id": "S2", "status": "NOT_RUN", "submissions": 0, "reason": "S1 failed prerequisite"},
+          {"id": "S3", "status": "NOT_RUN", "submissions": 0, "reason": "S1 failed prerequisite"}
+        ],
+        "websocket_matrix": "PASS",
+        "sse_matrix": "BLOCKED",
+        "complete_six_case_milestone": false,
+        "stopped": true,
+        "further_live_execution_planned": false
+      },
+      "limits": [
+        "Live success applies to selected Codex auth/model on this run, not historical Pi or manual invocations",
+        "All five accepted WebSocket responses used recovered effective items; native-terminal text comparisons remain unavailable because native output was empty",
+        "No live reasoning/opaque fields were emitted in these WebSocket cases; opaque replay remains synthetic coverage only",
+        "SSE request shape had no evidence-backed defect; no MIME relaxation or speculative header changes were made",
+        "SSE body class is a partial-prefix category, not proof of valid SSE, HTML, JSON, entitlement, or provider policy",
+        "Current tree remains unstaged and has no new hosted or cross-platform CI evidence"
+      ],
+      "reports_updated": ["docs/LOCAL_VERIFICATION.md", "docs/local-verification.json"],
+      "commit_or_push_performed": false
+    },
+    {
+      "id": "2026-09-08-sse-matrix-complete",
+      "checked_at": "2026-09-08T10:29:26Z",
+      "scope": "SSE compatibility and remaining S1-S3 only",
+      "base_head": "f30a020679a1eeb61978209e40e78a640db334af",
+      "gate_evidence": {
+        "solution_roles": "all six completed",
+        "oracle": "REVISE; precise first-data-frame, identity, label, limit and evidence invariants incorporated by parent",
+        "implementation": "completed",
+        "review-a": "PASS no blockers", "review-b": "PASS no blockers", "review-c": "PASS no blockers",
+        "parent_verifier": "uv run scripts/verify.py", "exit": 0,
+        "cargo_gates": "fmt_check/check_all/test_all/clippy_warnings_denied/build_all/doctest all PASS",
+        "rust_tests": 134, "library": 116, "binary": 14, "integration": 4,
+        "failed": 0, "ignored": 0, "filtered": 0, "doctests": 0,
+        "rust_files": 33, "fixture_events": 25,
+        "node_self_test": "node scripts/cli_retest.mjs --self-test",
+        "node_tests": 152, "node_live_started": false,
+        "git_diff_check": "PASS",
+        "cargo_toml_lock_and_auth_rs_unchanged_from_head": true
+      },
+      "repair": {
+        "files": ["src/providers/openai_codex/wire.rs", "src/providers/openai_codex/sse.rs", "src/providers/openai_codex/observation.rs", "src/providers/openai_codex/diagnostic_tests.rs", "src/providers/openai_codex/tests.rs", "src/providers/openai_codex/sse_prolog_unit_tests.rs", "src/providers/openai_codex/sse_prolog_loopback_tests.rs", "README.md", "docs/ARCHITECTURE.md", "docs/EVENTS.md"],
+        "admission": "Only 2xx with entirely absent Content-Type can qualify. Strict blank-line-delimited first data frame must be a recognized valid Responses created or terminal event. Invalid first data never skips ahead. Present wrong MIME and non-2xx remain rejected.",
+        "bounds": {"prolog_raw_bytes": 65536, "absolute_prolog_seconds": 10, "qualifier_id_bytes": 512, "private_classifier_bytes": 4096, "normal_response_bytes": 33554432, "normal_frame_bytes": 8388608},
+        "byte_preservation": "Every fetched byte replays once before remaining stream, including proof-chunk suffix; normal decoder and accounting remain active",
+        "diagnostics": "Original media remains missing; distinct sse_prolog states identify protocol admission, not the legacy one-second rejection sampler",
+        "unchanged": ["WebSocket path", "request headers", "credentials", "identity", "endpoints", "dependencies", "tool choice", "matrix acceptance checks"],
+        "reference_basis": ["https://github.com/earendil-works/pi/blob/v0.85.1/packages/ai/src/api/openai-codex-responses.ts", "https://github.com/openclaw/openclaw/pull/90205", "https://github.com/openclaw/openclaw/pull/90487"],
+        "reference_limit": "Reference behavior and third-party reports corroborate missing-MIME SSE; only new gateway runs below prove this selected account/model path. No reference retries or TLS bypasses were adopted."
+      },
+      "auth_metadata": {"command": "target/debug/gateway auth-check --auth-source codex", "exit": 0, "credential_shape": "accepted", "live_request_made": false, "storage_modified": false},
+      "live": {
+        "auth_source": "codex", "model": "gpt-6-astra", "transport": "sse",
+        "command_prefix": "timeout --signal=TERM --kill-after=5s 180s target/debug/gateway smoke --auth-source codex --model gpt-6-astra --transport sse",
+        "runner": "actual gateway with internal structural observer",
+        "prior_assistant_submissions": 12, "new_submissions": 5, "assistant_total": 17, "cap": 20, "remaining": 3,
+        "user_manual_submissions_excluded": 3, "automatic_retries": 0, "fallbacks": 0,
+        "raw_native_streams_headers_identifiers_or_credentials_saved": false,
+        "cases": [
+          {
+            "id": "S1", "arguments": "--case text", "status": "PASS", "exit": 0, "submissions": 1,
+            "started_at": "2026-09-08T10:28:55Z", "finished_at": "2026-09-08T10:28:59Z",
+            "stage": "first_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true], "normalized_started_counts": [1],
+            "request_evidence": [{"ordinal": 1, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "native_sse_replay_equal": true, "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}]
+          },
+          {
+            "id": "S2", "arguments": "--case continuation", "status": "PASS", "exit": 0, "submissions": 2,
+            "started_at": "2026-09-08T10:29:06Z", "finished_at": "2026-09-08T10:29:10Z",
+            "stage": "final_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true, true], "normalized_started_counts": [1, 1],
+            "request_evidence": [
+              {"ordinal": 1, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "native_sse_replay_equal": true, "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true},
+              {"ordinal": 2, "native_created_count": 1, "text_deltas": 2, "validated_terminal": true, "native_sse_replay_equal": true, "opaque_replay": "not_emitted", "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}
+            ]
+          },
+          {
+            "id": "S3", "arguments": "--case tool", "status": "PASS", "exit": 0, "submissions": 2,
+            "started_at": "2026-09-08T10:29:20Z", "finished_at": "2026-09-08T10:29:26Z",
+            "stage": "final_acceptance", "passed": true, "error_code": null,
+            "answers_equal": [true], "normalized_started_counts": [1, 1],
+            "tool_call_valid": true, "executor_correlated": true, "tool_result_valid": true,
+            "tool_assertion": "one completed ordinary direct add_numbers(17,25), one correlated execution, sum42 result delivered with same call_id, ordinary final42, no extra call",
+            "request_evidence": [
+              {"ordinal": 1, "native_created_count": 1, "text_deltas": 0, "argument_deltas": 9, "finalized_function_calls": 1, "validated_terminal": true, "native_sse_replay_equal": true, "effective_text_state": "no_ordinary_parts", "effective_expected_text_equal": null},
+              {"ordinal": 2, "native_created_count": 1, "text_deltas": 1, "validated_terminal": true, "native_sse_replay_equal": true, "opaque_replay": "not_emitted", "result_linkage_equal": true, "effective_expected_text_equal": true, "normalized_effective_text_equal": true, "streamed_effective_text_equal": true}
+            ]
+          }
+        ],
+        "common_to_all_five_requests": {
+          "http": {"status": 200, "media": "missing", "sample_state": "sse_prolog_admitted", "body_class": "text_or_other"},
+          "terminal_type": "response.completed", "terminal_status": "completed", "validated_terminal": true,
+          "native_terminal_items": 0, "effective_items": 1,
+          "output_provenance": "validated_output_item_done", "refusal_deltas": 0, "reasoning_deltas": 0,
+          "terminal_text_state": "no_ordinary_parts",
+          "normalized_native_text_equal": null, "streamed_native_text_equal": null
+        }
+      },
+      "matrix": {
+        "W1": "PASS", "W2": "PASS", "W3": "PASS", "S1": "PASS", "S2": "PASS", "S3": "PASS",
+        "websocket_evidence": "2026-09-08-recovery-matrix; unchanged WS path, no extra live WS runs",
+        "sse_evidence": "this follow-up",
+        "milestone_accepted": true,
+        "acceptance_scope": "six-case live matrix on local Linux, explicitly selected Codex OAuth and gpt-6-astra"
+      },
+      "limits": [
+        "Why the server omitted Content-Type and terminal items remains unknown; accepted protocol and effective output are now validated rather than inferred from HTTP200",
+        "No opaque reasoning emitted in these live cases; opaque replay remains synthetic evidence, with live not_emitted recorded",
+        "Historical Pi failures and manual results remain historical, not retroactively converted to PASS",
+        "No new hosted CI or non-Linux run; no broader account/model capabilities claimed"
+      ],
+      "changes_left_unstaged": true, "commit_or_push_performed": false, "further_live_requests_planned": false
+    }
+  ],
   "notes": [
     "Initial solution-d/solution-g failures and first implementation evidence failure remain historical failures; user authorized continuation/retry",
     "Completed implementation and remediation passed the full repeat review gate",

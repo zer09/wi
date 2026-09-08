@@ -101,6 +101,7 @@ mod tests {
     use harness_gateway::OutputItem;
     fn response() -> ModelResponse {
         ModelResponse {
+            output_provenance: Default::default(),
             id: "synthetic".into(),
             model: None,
             outcome: ResponseOutcome::Completed,

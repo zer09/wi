@@ -19,8 +19,9 @@ use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, ValueEnum)]
-enum PiOnly {
+enum SmokeAuthSource {
     Pi,
+    Codex,
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum CaseArg {
@@ -30,9 +31,9 @@ enum CaseArg {
 }
 #[derive(Args)]
 pub struct SmokeArgs {
-    /// Required opt-in. Only the selected Pi OAuth source is supported here.
+    /// Required explicit OAuth source. No fallback.
     #[arg(long, value_enum)]
-    auth_source: PiOnly,
+    auth_source: SmokeAuthSource,
     #[arg(long)]
     model: String,
     #[arg(long, value_enum)]
@@ -122,6 +123,9 @@ async fn collect(
 }
 
 pub async fn run(args: SmokeArgs) -> Result<()> {
+    if args.model != "gpt-6-astra" {
+        return Err(GatewayError::Protocol("smoke requires gpt-6-astra"));
+    }
     let case = match args.case {
         CaseArg::Text => SmokeCase::Text,
         CaseArg::Continuation => SmokeCase::Continuation,
@@ -136,7 +140,8 @@ pub async fn run(args: SmokeArgs) -> Result<()> {
     let mut stage = "setup";
     let task = async {
         let source = match args.auth_source {
-            PiOnly::Pi => AuthSource::Pi,
+            SmokeAuthSource::Pi => AuthSource::Pi,
+            SmokeAuthSource::Codex => AuthSource::Codex,
         };
         let provider = OpenAiCodexProvider::new(Arc::new(LocalAuthFile::default_for(source)?))
             .with_smoke_observer(observer.clone(), case);

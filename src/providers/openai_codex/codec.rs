@@ -6,12 +6,18 @@ use crate::{
 };
 use serde_json::Value;
 
+#[cfg(test)]
+#[path = "recovery_tests.rs"]
+mod recovery_tests;
+
 const MAX_ITEMS: usize = 512;
 
 #[derive(Default)]
 pub(super) struct ResponseDecoder {
     response_id: Option<String>,
     pub finished: bool,
+    pub terminal_received: bool,
+    finalized: super::finalized::FinalizedItems,
 }
 
 impl ResponseDecoder {
@@ -23,6 +29,7 @@ impl ResponseDecoder {
             .get("type")
             .and_then(Value::as_str)
             .ok_or(GatewayError::Protocol("missing event type"))?;
+        self.finalized.observe(&value);
         let mut events = Vec::new();
         match kind {
             "response.created" => {
@@ -101,7 +108,7 @@ impl ResponseDecoder {
                     .get("response")
                     .cloned()
                     .ok_or(GatewayError::Protocol("terminal response missing"))?;
-                let response = parse_response(native)?;
+                let mut response = parse_response(native)?;
                 if !matches!(kind, "response.completed" | "response.done")
                     && response.outcome == ResponseOutcome::Completed
                 {
@@ -120,6 +127,27 @@ impl ResponseDecoder {
                         response_id: response.id.clone(),
                     });
                     self.response_id = Some(response.id.clone());
+                }
+                // Upstream completed even when local recovery cannot be trusted.
+                self.terminal_received = true;
+                if matches!(kind, "response.completed" | "response.done")
+                    && response.outcome == ResponseOutcome::Completed
+                    && response
+                        .native
+                        .get("output")
+                        .and_then(Value::as_array)
+                        .is_some_and(Vec::is_empty)
+                {
+                    let recovered = self.finalized.recover(&response.id)?;
+                    if !recovered.is_empty() {
+                        let mut effective = response.native.clone();
+                        effective["output"] = Value::Array(recovered);
+                        let parsed = parse_response(effective)?;
+                        response.output = parsed.output;
+                        response.text = parsed.text;
+                        response.output_provenance =
+                            crate::OutputProvenance::ValidatedOutputItemDone;
+                    }
                 }
                 self.finished = true;
                 events.push(ProviderEvent::ResponseFinished { response });
@@ -189,10 +217,12 @@ pub(super) fn parse_item(native: Value) -> Result<OutputItem> {
                 .get("namespace")
                 .and_then(Value::as_str)
                 .map(String::from),
-            complete: matches!(
-                native.get("status").and_then(Value::as_str),
-                None | Some("completed")
-            ),
+            // Omission is compatible; malformed present values cannot authorize execution.
+            complete: match native.get("status") {
+                None => true,
+                Some(Value::String(status)) => status == "completed",
+                Some(_) => false,
+            },
         })
     } else {
         None
@@ -273,6 +303,7 @@ pub(super) fn parse_response(native: Value) -> Result<ModelResponse> {
         })
         .transpose()?;
     Ok(ModelResponse {
+        output_provenance: crate::OutputProvenance::NativeTerminal,
         id,
         model: native
             .get("model")

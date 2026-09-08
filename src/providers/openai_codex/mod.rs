@@ -3,6 +3,7 @@
 //! subscription endpoint entitlement. No credentials leave the fixed endpoint.
 pub mod auth;
 mod codec;
+mod finalized;
 pub mod observation;
 mod session;
 mod sse;

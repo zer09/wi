@@ -344,7 +344,11 @@ async fn drive(
         }.ok_or(GatewayError::UnexpectedEnd)?;
         wire.observe_native(&value);
         let seq = value.get("sequence_number").and_then(Value::as_u64);
-        let events = decoder.apply(value)?;
+        let decoded = decoder.apply(value);
+        if decoder.terminal_received {
+            *upstream = UpstreamOutcome::TerminalReceived;
+        }
+        let events = decoded?;
         // A validated terminal is known even if a preceding synthetic start cannot be delivered.
         for event in &events {
             if let ProviderEvent::ResponseFinished { response } = event {

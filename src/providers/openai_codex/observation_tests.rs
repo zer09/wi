@@ -68,6 +68,23 @@ fn observer_snapshot_schema_counts_and_stability_are_sanitized() {
         "refusal_deltas",
         "reasoning_deltas",
         "argument_deltas",
+        "native_expected_text_equal",
+        "normalized_native_text_equal",
+        "streamed_native_text_equal",
+        "http",
+        "terminal_text_state",
+        "streamed_text_state",
+        "native_expected_text_unavailable",
+        "normalized_native_text_unavailable",
+        "streamed_native_text_unavailable",
+        "finalized_items",
+        "native_terminal_items",
+        "effective_items",
+        "output_provenance",
+        "effective_text_state",
+        "effective_expected_text_equal",
+        "normalized_effective_text_equal",
+        "streamed_effective_text_equal",
     ];
     assert_eq!(record.as_object().unwrap().len(), keys.len());
     for key in keys {

@@ -191,7 +191,7 @@ export async function selfTest() {
   await test(async () => {
     const child = fakeChild();
     const result = await run('tool', (path, args, opts) => {
-      assert.ok(path.endsWith('/target/debug/gateway'));
+      assert.ok(path.endsWith('/target/debug/wi'));
       assert.equal(opts.shell, false);
       assert.deepEqual(opts.stdio, ['ignore', 'pipe', 'pipe']);
       assert.deepEqual(args, command('tool'));

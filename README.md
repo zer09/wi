@@ -1,10 +1,13 @@
-# Harness Gateway 0.2.0
+# Wi 0.2.0
 
 A small, headless Rust gateway with compiled-in provider plugins. This milestone
 adds persistent OpenAI/Codex WebSocket sessions, explicit SSE mode, typed output
 items, and one ordinary function-tool round trip.
 
-**Status: local offline repair; live compatibility remains unverified.**
+**Status: one experimental Wi browser login passed on local Linux.**
+Wi persisted its own eligible profile and confirmed it through fresh metadata status.
+Real renewal remains unavailable. Stable provider support and model entitlement are unconfirmed.
+See [managed authentication](docs/WI_AUTH.md) for implemented mechanics and limits.
 The original delivery was uncompiled. Its [verification](docs/VERIFICATION.md)
 is historical evidence, not the record of local repair. Normal tests use synthetic
 credentials and loopback servers. Offline success does not prove account access.
@@ -78,7 +81,31 @@ has not been executed as part of this delivery.
 
 `Cargo.lock` is retained after local dependency resolution. The direct HTTP and
 WebSocket crate versions remain pinned. Use the lockfile for reproducible
-resolution; no dependency versions or features were changed for this repair.
+resolution. Managed auth directly uses the already locked `ring` and `rustix`
+crates for secure randomness and safe Linux filesystem operations.
+
+## Experimental Wi browser login
+
+On Linux or WSL's private Linux filesystem, explicitly opt in:
+
+```bash
+./target/debug/wi auth login --provider openai-codex --account personal --experimental
+```
+
+This writes only Wi's separate secure store. An existing alias requires `--replace`.
+Without `--experimental`, login fails before path access or network activity.
+Linux `/usr/bin/xdg-open` must open a browser and exit successfully within 10 seconds.
+On WSL, configure that launcher beforehand; Wi does not use `cmd.exe` or another fallback.
+Port 1455 must be free. Wi never cancels an existing listener.
+The command prints static progress and local alias/expiry/persistence metadata, not
+an authorization URL or tokens. Do not enable HTTP tracing or process-argument logging.
+The browser and local launcher necessarily receive the authorization URL.
+
+The shared public-client configuration follows Pi's browser flow, with honest `wi`
+identification. This does not establish OpenAI approval, stable support, or entitlement.
+No retries, device flow, manual-code fallback, or API-key exchange are implemented.
+`auth refresh` and automatic renewal remain unavailable, including after successful login.
+See [Wi auth](docs/WI_AUTH.md) for bounds, trust assumptions, and persistence behavior.
 
 ## Reuse your own subscription login
 
@@ -109,7 +136,8 @@ the final path component is opened with `O_NOFOLLOW`. Protect its parent directo
 as well. Windows ACLs are not validated by this milestone. Paths are supplied by
 a trusted local caller; do not accept credential paths from remote HTTP users.
 
-The gateway never logs, writes, copies to project storage, or refreshes credentials.
+The external-source reader never logs, writes, copies, or refreshes credentials.
+Wi-owned profiles use a separate protected file store; see [Wi auth](docs/WI_AUTH.md).
 JWT decoding provides hints only; OpenAI authenticates the token cryptographically.
 
 **WebSocket:** credentials and account are fixed at the handshake. Expired auth
@@ -123,18 +151,18 @@ rejected to avoid sending the previous account's conversation to a new account.
 Only an authorized operator may run these commands after offline and security
 review. Each invocation uses the real gateway/provider path. It has no retry,
 fallback, alternate model, raw-event output, or automatic auth check.
-`--auth-source pi|codex`, `--transport`, `--case`, and `--model` are required.
+`--auth-source pi|codex|gateway`, `--transport`, `--case`, and `--model` are required.
 There is no default auth source or fallback. The smoke helper rejects models other
 than exact `gpt-6-astra` before credential access.
 
 ```bash
 # One generation. The deadline is external; timeout leaves upstream outcome unknown.
-timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket \
+timeout 180s target/debug/wi smoke --auth-source pi --transport websocket \
   --model gpt-6-astra --case text
 # Each of these can submit two generations on one session.
-timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket \
+timeout 180s target/debug/wi smoke --auth-source pi --transport websocket \
   --model gpt-6-astra --case continuation
-timeout 180s target/debug/gateway smoke --auth-source pi --transport websocket \
+timeout 180s target/debug/wi smoke --auth-source pi --transport websocket \
   --model gpt-6-astra --case tool
 ```
 
@@ -268,7 +296,7 @@ output; conservatively count the case's maximum submissions in that situation.
 
 ## Fixed CLI retest runner
 
-`scripts/cli_retest.mjs` runs the built `target/debug/gateway` directly. It never
+`scripts/cli_retest.mjs` runs the built `target/debug/wi` directly. It never
 runs Cargo, Pi, or the Codex executable. Help and synthetic self-tests do not
 start the gateway or read credentials:
 

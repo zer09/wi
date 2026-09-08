@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const GATEWAY = fileURLToPath(new URL('../target/debug/gateway', import.meta.url));
+const GATEWAY = fileURLToPath(new URL('../target/debug/wi', import.meta.url));
 const LINE = 8 * 1024 * 1024;
 const TOTAL = 64 * 1024 * 1024;
 const STDERR = 64 * 1024;

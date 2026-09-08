@@ -1,9 +1,9 @@
 //! CLI-only consistency checks. Streamed material never becomes response output.
-use harness_gateway::{
-    DeltaKind, GatewayError, ItemKind, ModelResponse, ProviderEvent, ResponseOutcome, Result,
-};
 use serde_json::Value;
 use std::io::Write;
+use wi::{
+    DeltaKind, GatewayError, ItemKind, ModelResponse, ProviderEvent, ResponseOutcome, Result,
+};
 
 pub(super) const MAX_BYTES: usize = 1024 * 1024;
 pub(super) const MAX_EVENTS: usize = 4096;

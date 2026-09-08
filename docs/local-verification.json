@@ -206,33 +206,46 @@
     "push_or_publication_performed": false
   },
   "advanced_features_enabled": [],
-  "latest_follow_up": "2026-09-08-sse-matrix-complete",
+  "latest_follow_up": "2026-09-08-wi-experimental-login-pass",
   "current_implementation_status": {
     "date": "2026-09-08",
-    "scope": "bounded_finalized_recovery_and_missing_mime_sse_admission_for_six_case_matrix",
-    "status": "offline_pass_complete_six_case_live_matrix_pass",
+    "scope": "wi_experimental_browser_login_single_attempt",
+    "status": "offline_pass_single_live_login_pass_renewal_and_generation_deferred",
     "prior_failed_attempt": {"role": "implementation", "terminal_reason": "budget_exhausted"},
     "recovered_red_regression": {
       "test": "collect_rejects_discarded_or_changed_stream_before_second_send_or_execution",
       "status": "failed_before_guard",
       "exit_code": 101
     },
-    "complete_final_verification": "pass_134_rust_tests_152_runner_tests",
+    "complete_final_verification": "pass_177_rust_tests_152_runner_tests",
     "independent_review": "review_a_review_b_review_c_no_blockers",
     "finalized_item_recovery_implemented": true,
     "forced_tool_choice_implemented": false,
-    "additional_live_submissions": 5,
+    "additional_live_submissions": 0,
+    "prior_failure_fields_are_historical": true,
+    "production_login_implemented": true,
+    "production_login_support_status": "experimental_undocumented_compatibility",
+    "single_login_increment_accepted": true,
+    "production_renewal_configured": false,
+    "managed_profile_mechanics_offline_verified": true,
+    "new_milestone_accepted": false,
     "changes_left_unstaged": true
   },
   "current_live_ledger": {
-    "as_of": "2026-09-08T10:29:26Z",
-    "max_gateway_generation_submissions": 20,
+    "as_of": "2026-09-08T20:09:22Z",
+    "max_gateway_generation_submissions": 40,
     "gateway_generation_submissions_attempted": 17,
-    "remaining_budget": 3,
+    "remaining_budget": 23,
     "sse_completion_submissions": 5,
     "recovery_matrix_submissions": 6,
-    "budget_extension": "User explicitly approved increasing assistant limit to 20 and continuing only the SSE matrix repair; previous 16-submission authorization remains historical",
-    "matrix_completion_status": "all_six_cases_pass",
+    "budget_extension": "User granted 20 additional submissions for the Wi managed-auth follow-up: cumulative cap40, used17, remaining23. Previous cap20 and completed matrix results remain historical; no additional submissions made.",
+    "matrix_completion_status": "previous_six_case_pass_wi_single_login_pass_new_generation_not_run",
+    "browser_login_attempts": 1,
+    "code_exchange_submissions": 1,
+    "refresh_submissions": 0,
+    "auth_traffic_excluded_from_generation_budget": true,
+    "prior_matrix_commit": "718c43afd2a0d826dccc85e7d1c50034139816e4",
+    "gate_role_history_applies_to": "previous_recovery_work; current Wi reviews are recorded in the latest follow-up",
     "user_authorized_partial_solution_gate_continuation": true,
     "oracle_revisions_applied": true,
     "final_review_gate": "all_three_completed_no_blockers",
@@ -250,7 +263,7 @@
     "stopped": true,
     "further_live_execution_authorized": false,
     "authorized_scope": "S1-S3 once each after minimal SSE repair and offline review, selected Codex auth/gpt-6-astra; no extra probes or automatic retries; stop failed dependent sequences",
-    "authorization_disposition": "Completed: S1-S3 passed once each; prior W1-W3 passing evidence retained. All six matrix cases accepted; no additional live requests planned",
+    "authorization_disposition": "User authorized experimental Pi-compatible Wi browser login and one attempt after review. That attempt completed with eligible persisted profile and fresh metadata status. No retry/refresh/generation. Single-login increment complete; broader live work requires separate scope. Generation budget remains17/40used23remaining.",
     "completed_authorized_scope": "one Codex generate --follow-up and one Codex tool-demo, WebSocket gpt-6-astra; both stopped on first-response CLI guard failure, no retries",
     "original_live_object_is_historical": true
   },
@@ -886,6 +899,137 @@
         "No new hosted CI or non-Linux run; no broader account/model capabilities claimed"
       ],
       "changes_left_unstaged": true, "commit_or_push_performed": false, "further_live_requests_planned": false
+    },
+    {
+      "id": "2026-09-08-wi-managed-auth-offline",
+      "checked_at": "2026-09-08T15:25:22Z",
+      "base_head": "718c43afd2a0d826dccc85e7d1c50034139816e4",
+      "scope": "User-approved offline implementation of docs/WI_AUTH_MATRIX.md; no credential access or live execution",
+      "status": "offline_verified_partial_delivery_production_oauth_blocked",
+      "milestone_accepted": false,
+      "implemented": {
+        "naming": "Wi product; wi Cargo package/library/binary; version0.2.0, provider openai-codex and Gateway types retained",
+        "credential_store": "Linux-only private versioned JSON profiles at XDG_CONFIG_HOME/wi/auth/openai-codex.json or HOME/.config/wi/auth/openai-codex.json",
+        "storage_controls": "0700/0600 owner checks, descriptor-relative no-symlink traversal, single-link regular files,1MiB bounds, stable process lock, synced atomic replacement, incarnation-scoped non-secret rotation guards",
+        "profile_selection": "Explicit override or unbiased random per session open; local metadata only; no quota probes or fallback",
+        "session_binding": "Profile alias, account and login incarnation pinned; SSE refresh/reload cannot switch identity; WebSocket keeps handshake snapshot",
+        "auth_management": "Local list/status/logout and separate preparation hook; production login/refresh blocked before credential reads; no command creates a real profile yet",
+        "renewal_mechanics": "Synthetic selected-profile renewal persists independently of cancelled waiter; guards prevent reuse after ambiguous exchange/persistence, including post-rename sync failure",
+        "oauth_mechanics": "Test-only loopback PKCE/state/callback/token exchange; production browser launcher and trusted identity validation unimplemented",
+        "new_api": "CredentialSource::prepare_submission default no-op for external sources; load remains snapshot-only",
+        "existing_sources": "Pi/Codex read-only sources retained; no copying/refreshing/migration/account fallback",
+        "dependencies": "Direct ring0.17.14 and Linux rustix1.1.4 uses added from existing lock; no dependency versions upgraded"
+      },
+      "review": {
+        "implementation": "completed offline contract",
+        "confirmed_and_remediated": [
+          "Post-rename directory-sync failure could return an error with eligible rotated credentials; durable external rotation guard now governs availability",
+          "Duplicate state parameters were not two callbacks; regression now sends two valid callbacks and observes one exchange and persistence",
+          "Absent store returned generic unsafe error before empty selection; read-only absence now returns empty/actionable state without creation",
+          "Absent-profile logout returned generic unsafe error; optional stable lock now produces profile-not-found without creation"
+        ],
+        "not_confirmed": "Suspected async runtime deadlock from synchronous selection: session opening already offloads selection to a blocking worker; no remediation required",
+        "review-a": "PASS no blockers", "review-b": "PASS no blockers", "review-c": "PASS no blockers"
+      },
+      "offline": {
+        "parent_command": "uv run scripts/verify.py", "exit": 0,
+        "cargo_fmt_check": "PASS", "cargo_check_all_targets": "PASS", "cargo_test_all_targets": "PASS",
+        "cargo_clippy_all_targets_warnings_denied": "PASS", "cargo_build_all_targets": "PASS", "cargo_test_doc": "PASS",
+        "rust_tests_passed": 163, "library": 142, "binary": 16, "absence_cli_integration": 1, "provider_contract_integration": 4,
+        "failed": 0, "ignored": 0, "measured": 0, "filtered": 0, "doctests": 0,
+        "static_inventory": {"source_files": 41, "regex_test_definitions": 160, "fixture_events": 25, "note": "Regex excludes three parameterized Tokio attributes; executed counts are authoritative"},
+        "node_command": "node scripts/cli_retest.mjs --self-test", "node_exit": 0, "node_tests_passed": 152, "node_live_started": false,
+        "git_diff_check": "PASS", "cli_version": "wi 0.2.0"
+      },
+      "matrix": {
+        "N1": "PASS_OFFLINE", "A1": "SYNTHETIC_PASS_PRODUCTION_BLOCKED", "A2": "PASS_OFFLINE", "A3": "PASS_OFFLINE",
+        "P1": "PASS_OFFLINE", "P2": "PASS_OFFLINE", "P3": "PASS_OFFLINE", "R1": "PASS_OFFLINE",
+        "R2": "SYNTHETIC_PASS_PRODUCTION_BLOCKED", "C1": "PASS_OFFLINE", "G1": "PASS_OFFLINE",
+        "L0": "NOT_RUN", "L1": "NOT_RUN", "W1": "NOT_RUN", "W2": "NOT_RUN", "W3": "NOT_RUN", "S1": "NOT_RUN", "S2": "NOT_RUN", "S3": "NOT_RUN"
+      },
+      "live": {
+        "new_generation_submissions": 0, "auth_or_refresh_requests": 0, "real_credentials_read": false, "real_credentials_modified": false,
+        "browser_launched": false, "assistant_total": 17, "cap": 40, "remaining": 23, "manual_user_submissions_excluded": 3,
+        "no_live_capability_claim": true
+      },
+      "remaining": [
+        "Establish permitted production OAuth client, redirect, scopes and token/refresh contract",
+        "Implement production browser integration and trusted account identity validation; no copied client identity is activated",
+        "Connect and validate production renewal after the auth contract is established",
+        "Obtain explicit real-login/credential mutation and live-test authorization, then run bounded new matrix",
+        "Non-Linux managed persistence deliberately fails closed; no new cross-platform CI evidence",
+        "File fault injection is not power-loss testing; guard cleanup can conservatively require login after durable commit",
+        "An externally held advisory lock can prolong blocking-worker waits; no bounded lock-acquisition claim",
+        "New wi client identification has not been live-tested; prior live results belong to old commit"
+      ],
+      "evidence_files": ["docs/WI_AUTH_MATRIX.md", "docs/WI_AUTH.md", "src/providers/openai_codex/managed_store_tests.rs", "src/providers/openai_codex/managed_auth.rs", "src/providers/openai_codex/managed_loopback_tests.rs", "src/providers/openai_codex/oauth_offline.rs", "tests/managed_absence_cli.rs"],
+      "combined_design_report": {
+        "delivery_status": "pending_user_said_previous_report_not_sent",
+        "previous_completed_commit": "718c43afd2a0d826dccc85e7d1c50034139816e4",
+        "new_follow_up_commit": null,
+        "requirement": "Combine previous completed matrix with current offline partial delivery, keeping evidence and commit attribution separate"
+      },
+      "changes_left_unstaged": true, "commit_or_push_performed": false
+    },
+    {
+      "id": "2026-09-08-wi-experimental-login-pass",
+      "checked_at": "2026-09-08T20:09:22Z",
+      "base_head": "718c43afd2a0d826dccc85e7d1c50034139816e4",
+      "status": "single_experimental_login_pass",
+      "single_login_increment_accepted": true,
+      "whole_managed_auth_milestone_accepted": false,
+      "authorization": "User chose an empirical Pi-compatible login experiment, superseding prior provider-confirmed configuration requirement for login only; one attempt after offline review, no retry or generation",
+      "implementation": {
+        "cli": "wi auth login --provider openai-codex --account <alias> --experimental [--replace]",
+        "flow": "Fixed Pi public-client configuration, PKCE S256/state, localhost1455callback, minimal scopes, Wi identification; no runtime substitute or copied credentials",
+        "identity_trust": "Account and expiry claims only from access token directly returned by fixed certificate-checked HTTPS token endpoint; not local JWT signature verification",
+        "persistence": "Secure Wi store, candidate incarnation guard, conflict recheck, durable commit before browser success, cancellation-surviving worker",
+        "renewal": "Still unavailable; no real refresh exchange implemented",
+        "support": "Undocumented compatibility experiment, no official support or general entitlement claim",
+        "dependencies_changed": false
+      },
+      "review": {
+        "review-a": "PASS no blockers", "review-b": "PASS no blockers", "review-c": "PASS no blockers",
+        "verified_remediations": [
+          "Ignore unrecognized callback parameters after strict bounded decoding while preserving recognized duplicates/state/issuer/denial checks",
+          "Accept ASCII-case-insensitive Bearer token type without trimming; reject other schemes",
+          "Remove arbitrary one-day expiry cap; retain positive u64, checked addition, JWT expiry cap and freshness checks"
+        ]
+      },
+      "offline": {
+        "checked_at": "2026-09-08T20:08:41Z",
+        "command": "uv run scripts/verify.py", "exit": 0,
+        "cargo_fmt_check": "PASS", "cargo_check_all_targets": "PASS", "cargo_test_all_targets": "PASS",
+        "cargo_clippy_all_targets_warnings_denied": "PASS", "cargo_build_all_targets": "PASS", "cargo_test_doc": "PASS",
+        "rust_tests_passed": 177, "library": 156, "binary": 16, "absence_cli_integration": 1, "provider_contract_integration": 4,
+        "failed": 0, "ignored": 0, "measured": 0, "filtered": 0, "doctests": 0,
+        "source_files": 43, "regex_test_definitions": 170, "fixture_events": 25,
+        "node_command": "node scripts/cli_retest.mjs --self-test", "node_exit": 0, "node_tests_passed": 152, "node_live_started": false,
+        "git_diff_check": "PASS"
+      },
+      "live": {
+        "command": "./target/debug/wi auth login --provider openai-codex --account wi-experiment --experimental",
+        "exit": 0, "browser_waiting_observed": true, "login_complete_observed": true,
+        "profile_persisted": true, "profile_eligible": true, "expiry_present": true,
+        "fresh_process_status": {"enabled": true, "logged_in": true, "requires_reauthentication": false, "expiry_matches_login": true},
+        "browser_login_attempts": 1, "code_exchange_submissions": 1,
+        "accounting_basis": "One successful invocation plus reviewed single-callback, single-exchange, no-retry control flow; raw traffic was not recorded",
+        "refresh_submissions": 0, "generation_submissions": 0, "retries": 0, "fallbacks": 0,
+        "real_credentials_handling": "Reviewed Wi process and private Wi store only; no shell/file-reader disclosure",
+        "external_pi_codex_auth_files_accessed": false,
+        "assistant_generation_total": 17, "generation_cap": 40, "generation_remaining": 23
+      },
+      "matrix": {"L0": "PARTIAL_one_profile_pass_second_not_run", "L1": "NOT_RUN", "W1": "NOT_RUN", "W2": "NOT_RUN", "W3": "NOT_RUN", "S1": "NOT_RUN", "S2": "NOT_RUN", "S3": "NOT_RUN"},
+      "remaining": [
+        "Real renewal unavailable",
+        "Second independent account/profile not tested live",
+        "No new managed-auth generation or model entitlement test",
+        "Linux-only persistence; no new hosted or cross-platform CI",
+        "Undocumented registration compatibility may change; successful login is not formal provider approval"
+      ],
+      "evidence_files": ["src/providers/openai_codex/browser_login.rs", "src/providers/openai_codex/browser_login_tests.rs", "src/auth_cli.rs", "docs/WI_AUTH.md", "docs/WI_AUTH_MATRIX.md"],
+      "combined_design_report": "Pending; include previous completed718c43a and current uncommitted offline/auth-login results with separate attribution",
+      "new_commit": null, "changes_left_unstaged": true, "commit_or_push_performed": false, "further_live_requests_planned": false
     }
   ],
   "notes": [

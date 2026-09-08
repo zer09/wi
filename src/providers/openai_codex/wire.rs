@@ -25,7 +25,7 @@ mod sse_prolog_unit_tests;
 
 const MAX_FRAME: usize = 8 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
-const USER_AGENT: &str = concat!("harness-gateway/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = concat!("wi/", env!("CARGO_PKG_VERSION"));
 pub(super) const WS_BETA: &str = "responses_websockets=2026-02-06";
 
 fn media_class(header: Option<&HeaderValue>) -> MediaClass {
@@ -280,6 +280,7 @@ impl Wire {
         // Install one explicit crypto provider. Respect an embedding application's
         // existing choice if it has already installed a provider.
         let _ = rustls::crypto::ring::default_provider().install_default();
+        credentials.prepare_submission().await?;
         let auth = credentials.load().await?;
         let observation =
             observer.map(|(observer, case)| Observation::new(observer, case, transport));
@@ -291,7 +292,7 @@ impl Wire {
                 request.headers_mut().extend(auth.headers()?);
                 request
                     .headers_mut()
-                    .insert("originator", HeaderValue::from_static("harness_gateway"));
+                    .insert("originator", HeaderValue::from_static("wi"));
                 request
                     .headers_mut()
                     .insert("user-agent", HeaderValue::from_static(USER_AGENT));
@@ -394,6 +395,7 @@ impl Wire {
                 received,
                 observation,
             } => {
+                credentials.prepare_submission().await?;
                 let auth = credentials.load().await?;
                 if auth.account_id() != account_id {
                     return Err(GatewayError::AuthAccountChanged);
@@ -403,7 +405,7 @@ impl Wire {
                     .headers(auth.headers()?)
                     .header(ACCEPT, "text/event-stream")
                     .header("OpenAI-Beta", "responses=experimental")
-                    .header("originator", "harness_gateway")
+                    .header("originator", "wi")
                     .header("session-id", session_id.as_str())
                     .header("x-client-request-id", request_id)
                     .json(&body)

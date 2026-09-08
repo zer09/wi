@@ -1,4 +1,4 @@
-# Architecture and ownership
+# Wi architecture and ownership
 
 ## One crate, explicit module boundaries
 
@@ -6,7 +6,10 @@
 |---|---|
 | `provider.rs` | Traits, session options, normalized items/events, capabilities |
 | `gateway.rs` | Provider registration and selection; no OpenAI protocol/auth logic |
-| `providers/openai_codex/auth.rs` | Read-only credential source; no refresh writer |
+| `providers/openai_codex/auth.rs` | Read-only snapshots and explicit external files; separate preparation hook |
+| `providers/openai_codex/managed_auth.rs` | Selected profile binding and cancellation-independent renewal ownership |
+| `providers/openai_codex/managed_store.rs` | Protected Linux JSON store, locking and atomic updates |
+| `providers/openai_codex/profile_selection.rs` | Metadata-only exact or uniform random session selection |
 | `providers/openai_codex/wire.rs` | WebSocket/HTTP transport, fixed destinations, TLS and bounds |
 | `providers/openai_codex/codec.rs` | Native event decoding and typed item classification |
 | `providers/openai_codex/state.rs` | In-memory transcript, parent response, pending result identities |
@@ -21,6 +24,18 @@
 shared-library ABI or runtime code loader. Adding a provider does not require
 implementing OpenAI credentials or modifying the gateway. The external
 `tests/provider_contract.rs` implements a provider without OpenAI imports.
+
+## Managed authentication boundary
+
+The package, library, and CLI are `wi`; `Gateway` remains the routing abstraction.
+Managed providers select once at every session open. A bound credential source
+retains the alias, login incarnation, and provider account. `load()` is read-only.
+The separate preparation hook is a no-op for external sources. It runs before a
+new handshake and each SSE submission, never during an established WS session.
+Renewal holds a stable file lock, rereads current state, and persists a reauth
+marker before exchange. An owned worker completes persistence after waiter
+cancellation. Production exchanges remain blocked; only private synthetic tests
+supply an exchange implementation. See [Wi auth](WI_AUTH.md).
 
 ## Two interfaces, not one borrowed stream
 
@@ -191,7 +206,9 @@ bounds, lifecycle validation, and fail-closed rules.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
 - Tool discovery and skill resource loading/hosted uploads.
-- HTTP server, GUI, browser OAuth, credential refresh, keyring and proxy support.
+- HTTP server, GUI, keyring and proxy support.
+- Production browser OAuth and renewal, pending permitted client configuration.
+  Offline PKCE/callback mechanics and synthetic renewal are implemented separately.
 
 Advanced requirements fail closed instead of silently degrading or switching
 billing/authentication modes. Item preservation is not advertised as execution

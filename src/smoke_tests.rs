@@ -1,12 +1,12 @@
 use super::*;
-use harness_gateway::{EventEnvelope, RequestReceipt, SessionControl};
+use wi::{EventEnvelope, RequestReceipt, SessionControl};
 
 #[tokio::test]
 async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early() {
     use clap::Parser;
-    for source in ["pi", "codex"] {
+    for source in ["pi", "codex", "gateway"] {
         let cli = crate::Cli::try_parse_from([
-            "gateway",
+            "wi",
             "smoke",
             "--auth-source",
             source,
@@ -28,7 +28,7 @@ async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early()
     }
     assert!(
         crate::Cli::try_parse_from([
-            "gateway",
+            "wi",
             "smoke",
             "--model",
             "gpt-6-astra",

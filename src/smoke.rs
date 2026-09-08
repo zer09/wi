@@ -5,21 +5,21 @@ mod tests;
 use crate::{TransportArg, demo, line_json};
 use clap::{Args, ValueEnum};
 use futures_util::StreamExt;
-use harness_gateway::providers::openai_codex::{
-    OpenAiCodexProvider, PROVIDER_ID,
-    auth::{AuthSource, LocalAuthFile},
+use serde::Serialize;
+use std::sync::Arc;
+use wi::providers::openai_codex::{
+    PROVIDER_ID,
     observation::{FOLLOW_UP, SmokeCase, SmokeObserver, required_proof},
 };
-use harness_gateway::tools::{AddNumbers, ToolExecutionEvent, ToolRegistry};
-use harness_gateway::{
+use wi::tools::{AddNumbers, ToolExecutionEvent, ToolRegistry};
+use wi::{
     Gateway, GatewayError, InputItem, ModelResponse, ProviderEvent, ProviderSession, Result,
     SessionOptions, Transport, UpstreamOutcome,
 };
-use serde::Serialize;
-use std::sync::Arc;
 
 #[derive(Clone, Copy, ValueEnum)]
 enum SmokeAuthSource {
+    Gateway,
     Pi,
     Codex,
 }
@@ -34,6 +34,8 @@ pub struct SmokeArgs {
     /// Required explicit OAuth source. No fallback.
     #[arg(long, value_enum)]
     auth_source: SmokeAuthSource,
+    #[arg(long)]
+    account: Option<String>,
     #[arg(long)]
     model: String,
     #[arg(long, value_enum)]
@@ -140,11 +142,16 @@ pub async fn run(args: SmokeArgs) -> Result<()> {
     let mut stage = "setup";
     let task = async {
         let source = match args.auth_source {
-            SmokeAuthSource::Pi => AuthSource::Pi,
-            SmokeAuthSource::Codex => AuthSource::Codex,
+            SmokeAuthSource::Gateway => crate::SourceArg::Gateway,
+            SmokeAuthSource::Pi => crate::SourceArg::Pi,
+            SmokeAuthSource::Codex => crate::SourceArg::Codex,
         };
-        let provider = OpenAiCodexProvider::new(Arc::new(LocalAuthFile::default_for(source)?))
-            .with_smoke_observer(observer.clone(), case);
+        let provider = crate::provider(&crate::AuthArgs {
+            auth_source: source,
+            auth_file: None,
+            account: args.account,
+        })?
+        .with_smoke_observer(observer.clone(), case);
         let mut gateway = Gateway::new();
         gateway.register(Arc::new(provider))?;
         let mut registry = ToolRegistry::new();

@@ -126,6 +126,10 @@ impl SubscriptionCredentials {
 /// this credential source without touching response parsing or gateway routing.
 #[async_trait]
 pub trait CredentialSource: Send + Sync {
+    /// Separate preparation; external read-only sources remain no-ops.
+    async fn prepare_submission(&self) -> Result<()> {
+        Ok(())
+    }
     async fn load(&self) -> Result<SubscriptionCredentials>;
 }
 

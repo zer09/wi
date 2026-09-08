@@ -1,9 +1,9 @@
 //! Demonstrates a plugin that does NOT import any OpenAI module or credential.
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use harness_gateway::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use wi::*;
 
 struct EchoProvider;
 struct EchoControl {
@@ -122,9 +122,7 @@ fn input_and_session_limits_are_checked() {
     assert!(validate_input(&[]).is_err());
     assert!(validate_input(&[InputItem::user("x".repeat(MAX_INPUT_BYTES + 1))]).is_err());
     let mut o = SessionOptions::new("test");
-    o.tools
-        .push(harness_gateway::tools::add_numbers_definition());
-    o.tools
-        .push(harness_gateway::tools::add_numbers_definition());
+    o.tools.push(wi::tools::add_numbers_definition());
+    o.tools.push(wi::tools::add_numbers_definition());
     assert!(o.validate().is_err());
 }

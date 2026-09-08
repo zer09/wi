@@ -1,7 +1,7 @@
 use super::*;
-use harness_gateway::{EventEnvelope, ItemKind, OutputItem, RequestReceipt, SessionControl};
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use wi::{EventEnvelope, ItemKind, OutputItem, RequestReceipt, SessionControl};
 
 #[derive(Default)]
 struct Control(AtomicUsize);
@@ -29,11 +29,11 @@ fn function_call() -> OutputItem {
         id: Some("call-item".into()),
         kind: ItemKind::FunctionCall,
         native_type: "function_call".into(),
-        function_call: Some(harness_gateway::FunctionCall {
+        function_call: Some(wi::FunctionCall {
             call_id: "call".into(),
             name: "add_numbers".into(),
             arguments: "{\"a\":17,\"b\":25}".into(),
-            origin: harness_gateway::CallOrigin::Direct,
+            origin: wi::CallOrigin::Direct,
             namespace: None,
             complete: true,
         }),
@@ -138,7 +138,7 @@ async fn collect_accepts_recovered_effective_output_without_native_guard_false_f
         let mut terminal = final_event(vec![message("visible")], "visible");
         if let ProviderEvent::ResponseFinished { response } = &mut terminal {
             response.native["output"] = json!([]);
-            response.output_provenance = harness_gateway::OutputProvenance::ValidatedOutputItemDone;
+            response.output_provenance = wi::OutputProvenance::ValidatedOutputItemDone;
         }
         let (mut session, _) = session(vec![update("vis"), done(message("visible")), terminal]);
         let response = collect(&mut session, "request", mode).await.unwrap();

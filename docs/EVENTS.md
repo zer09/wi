@@ -1,4 +1,10 @@
-# Event contract v1 (gateway 0.2.0)
+# Event contract v1 (Wi 0.2.0)
+
+Managed authentication does not change the event JSON schema. The CLI reports
+only the validated selected profile alias on stderr. Provider account IDs and
+tokens never become selection evidence. Preparation failures before generation
+dispatch remain `not_submitted`; OAuth exchange uncertainty is separate from
+generation submission uncertainty. Production OAuth remains configuration-blocked.
 
 ## Envelope
 

@@ -27,6 +27,9 @@ mod boundary_tests;
 mod diagnostic_tests;
 #[path = "lifecycle_tests.rs"]
 mod lifecycle_tests;
+#[cfg(target_os = "linux")]
+#[path = "managed_loopback_tests.rs"]
+mod managed_loopback_tests;
 #[path = "observation_tests.rs"]
 mod observation_tests;
 #[path = "recovery_loopback_tests.rs"]
@@ -63,7 +66,7 @@ async fn accept(listener: TcpListener) -> WebSocketStream<TcpStream> {
             "Bearer synthetic-oauth-token"
         );
         assert_eq!(req.headers()["chatgpt-account-id"], "synthetic-account");
-        assert_eq!(req.headers()["originator"], "harness_gateway");
+        assert_eq!(req.headers()["originator"], "wi");
         assert_eq!(req.headers()["openai-beta"], wire::WS_BETA);
         Ok(response)
     })

@@ -1,13 +1,13 @@
 //! Explicit live example: selects Codex credentials, not Pi, only when run.
-//! Output includes response text and IDs; use `gateway smoke` for sanitized evidence.
+//! Output includes response text and IDs; use `wi smoke` for sanitized evidence.
 //! Usage: cargo run --example two_turns -- EXACT_ENABLED_MODEL_ID
 use futures_util::StreamExt;
-use harness_gateway::providers::openai_codex::{
+use std::sync::Arc;
+use wi::providers::openai_codex::{
     OpenAiCodexProvider, PROVIDER_ID,
     auth::{AuthSource, LocalAuthFile},
 };
-use harness_gateway::{Gateway, InputItem, ProviderEvent, SessionOptions};
-use std::sync::Arc;
+use wi::{Gateway, InputItem, ProviderEvent, SessionOptions};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,14 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .events
                 .next()
                 .await
-                .ok_or(harness_gateway::GatewayError::UnexpectedEnd)?;
+                .ok_or(wi::GatewayError::UnexpectedEnd)?;
             if event.request_id.as_deref() != Some(receipt.request_id.as_str()) {
                 return Err("unexpected request identity or closed session".into());
             }
             match event.event {
                 ProviderEvent::ResponseFinished { response } => {
                     println!("{}: {}", receipt.request_id, response.text);
-                    if response.outcome != harness_gateway::ResponseOutcome::Completed {
+                    if response.outcome != wi::ResponseOutcome::Completed {
                         return Err("incomplete response".into());
                     }
                     break;

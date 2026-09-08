@@ -1,20 +1,32 @@
 # Local verification report — 2026-09-07 UTC
 
-**Current status: all six live matrix cases PASS.**
+**Current status: Wi experimental browser login PASS.**
 
-WebSocket and SSE each passed text, continuation and the complete
-`add_numbers(17,25)` round trip with explicit Codex auth and `gpt-6-astra`.
-The remaining SSE fix admits a missing-header response only after strict bounded
-protocol proof. It does not accept arbitrary HTTP 200 or a present wrong MIME.
+One parent-run login completed at `2026-09-08T20:09:22Z`, returned exit 0 and
+persisted an eligible Wi-owned profile. A fresh metadata-only process confirmed
+logged_in=true and requires_reauthentication=false. No retry occurred.
 
-All six offline gates passed: **134 Rust tests and 152 runner tests**.
-All three final reviews found no blockers. **17/20 assistant submissions used,
-3 remaining**; the user's three manual submissions remain excluded.
+The latest unstaged tree passed all six Cargo gates, **177 Rust tests and 152
+runner tests**. All three final reviews found no blockers. Real renewal, the
+second-account login and new managed-auth generation tests remain deferred.
+Successful login establishes observed compatibility, not stable provider support
+or model entitlement.
 
-No further live tests are needed for this matrix. All edits remain unstaged.
-No credentials were changed; no commits or pushes occurred.
-See [completed SSE matrix](#2026-09-08-sse-compatibility-and-completed-matrix).
-Earlier failures, counts and gate interruptions below remain historical.
+The previous six-case WebSocket/SSE live matrix passed and was committed/pushed as
+`718c43afd2a0d826dccc85e7d1c50034139816e4`. It does not establish live acceptance
+of the new auth source or the renamed client's identification.
+
+**17/40 assistant generation submissions used, 23 remaining.** This increment
+made one browser login and one code exchange, counted separately from generation.
+Real credentials stayed in the reviewed Wi process and its private store;
+Pi/Codex credential files were not accessed. No refresh or generation ran.
+No new commit or push occurred; implementation and report changes remain unstaged.
+
+See [experimental login result](#2026-09-08-experimental-wi-login-pass),
+[Wi offline baseline](#2026-09-08-wi-naming-and-managed-auth-offline-results)
+and `docs/WI_AUTH_MATRIX.md`. The pending design-conversation report must combine
+this partial follow-up with the previous completed commit. Earlier results,
+counts and Git states below remain historical.
 
 See [offline repair and diagnostics](#2026-09-08-offline-repair-and-diagnostics-follow-up)
 for the 94-test result and later GitHub Actions evidence. Earlier sections remain
@@ -927,3 +939,160 @@ Why the server omitted headers/output remains unknown, but successful protocol
 admission and effective output are now directly validated. Live opaque replay,
 broader account/model capabilities and new hosted/non-Linux CI are not claimed.
 All work remains unstaged; no commit, push or publication occurred.
+
+## 2026-09-08 Wi naming and managed-auth offline results
+
+Checked at `2026-09-08T15:25:22Z`, against the unstaged tree based on `718c43a`.
+The user approved offline implementation of `docs/WI_AUTH_MATRIX.md` only.
+The previous completed matrix was already committed and pushed, but its report
+had not yet been sent to the design conversation.
+
+### Implemented and observed offline
+
+- Cargo package/library/binary are `wi`, product Wi, version 0.2.0. Active imports,
+  CLI examples and runner paths changed deliberately; provider ID `openai-codex`,
+  Gateway types and historical records did not. Client identification is now `wi`.
+- Provider-local versioned JSON supports multiple named profiles, not a singleton.
+  Linux storage uses private owner permissions, descriptor-relative no-symlink
+  traversal, bounded parsing, stable cross-process locks and synced atomic writes.
+- Explicit profile selection overrides uniform random selection. Selection occurs
+  once per session open. The source pins profile alias, account and login
+  incarnation through SSE reloads/tool results; WS retains its handshake snapshot.
+- `CredentialSource::prepare_submission()` separates renewal preparation from
+  read-only `load`. External Pi/Codex sources retain a no-op preparation default.
+- Synthetic renewal tests prove identity preservation, single refresh under
+  concurrent preparation, persistence after waiter cancellation and fail-closed
+  handling of failed/ambiguous exchanges and write phases.
+- Persistent non-secret rotation guards prevent selection/load after uncertain
+  rotated-document persistence, including post-rename directory sync failure.
+- Local list/status/logout handle absent stores without creating anything.
+  Existing unsafe/unlocked documents still fail closed; logout preserves other
+  profiles and the stable lock.
+- Test-only OAuth mechanics cover loopback callback handling, PKCE/state,
+  deadlines and token validation. Two actual valid callbacks cause one exchange
+  and one profile persistence. This is not production identity verification.
+
+New components are under `src/providers/openai_codex/`: `managed_auth.rs`,
+`managed_store.rs`, `profile_selection.rs`, `oauth_offline.rs`, and focused tests.
+CLI dispatch is in `src/auth_cli.rs`; CLI absence tests are in
+`tests/managed_absence_cli.rs`. `docs/WI_AUTH.md` describes the implemented boundary.
+Direct uses of already-locked `ring` and Linux `rustix` were added; dependency
+versions were not upgraded. Cargo.lock is retained.
+
+### Review findings and repairs
+
+| Finding | Observed evidence | Repair |
+|---|---|---|
+| Rotation persistence failure could leave profile eligible | Synthetic post-rename directory-fsync EIO returned failure while visible JSON cleared reauth | Separate durable incarnation-scoped guard remains authoritative until JSON commit; fault-phase/restart regressions |
+| Duplicate callback assertion lacked a second callback | Existing test duplicated state parameters in one request | Two valid callbacks, counted token exchange and persistence |
+| Missing store incorrectly reported unsafe | Isolated missing XDG/HOME and empty-directory CLI cases | Read-only absence-aware descriptor traversal and actionable empty/missing selection |
+| Missing-profile logout still reported unsafe | Same absent-store cases through logout | Optional stable locked read; no creation; missing alias and unrelated profile preservation tests |
+
+All findings above were independently confirmed before remediation. A separate
+suspected runtime deadlock was not confirmed: session selection and auth reads
+already run on blocking workers. Each remediation was followed by the full review
+gate. The final review-a, review-b and review-c all passed without blockers.
+
+### Parent final verification
+
+| Check | Observed result |
+|---|---|
+| `uv run scripts/verify.py` | Exit 0; fmt/check/test/Clippy with warnings denied/build/doctests all PASS |
+| Rust tests | 163 passed: 142 library, 16 binary, 1 absence integration, 4 provider-contract |
+| Failed / ignored / measured / filtered | 0 / 0 / 0 / 0 |
+| Doctests | 0 tests; PASS |
+| `node scripts/cli_retest.mjs --self-test` | Exit 0; 152 passed; live_started=false |
+| `git diff --check` | PASS |
+| `target/debug/wi --version` | `wi 0.2.0` |
+| Git state | HEAD remains `718c43a`; index empty; changes unstaged |
+
+Static inventory: 41 Rust files, 160 regex-counted test definitions and 25 fixture
+events. The regex omits three parameterized Tokio attributes; executed test
+counts above are authoritative. Test runs are not summed into a larger count.
+
+### Remaining blockers and evidence limits
+
+**The new authentication milestone is not complete.** `wi auth login` and
+`wi auth refresh` return the static OAuth configuration blocker before path
+resolution, secret reads, listener creation or network requests. The browser
+launcher, permitted OAuth client configuration and trusted production account
+validation are not implemented. No production command creates a profile yet.
+The production token-renewal exchange remains unavailable. Synthetic success
+must not be reported as a usable OpenAI login.
+
+The new L0/L1 and W1-W3/S1-S3 live rows are all **NOT RUN**. Real auth/credential
+mutation and live execution require explicit authorization after the remaining
+production work and its review. The cumulative cap is 40: **17 used, 23 remaining**.
+No submissions or real auth exchanges were consumed by this pass.
+
+Managed persistence is Linux-only and fails closed elsewhere. No new non-Linux
+or hosted-CI run occurred. Fault injection is not physical power-loss testing.
+Guard cleanup failure can conservatively require login after a durable rotation.
+An external process can prolong advisory lock waits; no bounded lock-wait claim
+is made. New client identification has not been live-tested, and no quota,
+account failover, mid-session switching or generation replay was added.
+
+### Pending combined report
+
+Report the earlier completed live milestone under commit `718c43a` separately
+from this **uncommitted, offline-verified partial follow-up**. The user has not
+sent the earlier report and wants both in the eventual design-conversation report.
+Use `docs/WI_AUTH_MATRIX.md` sections 7-8 for the combined outline and current
+TODOs. Do not invent a new commit ID, mark blocked rows PASS, or claim this report
+has already been delivered externally.
+
+## 2026-09-08 experimental Wi login PASS
+
+The user chose a bounded empirical login experiment. This superseded the previous
+provider-confirmed-configuration prerequisite for this increment only. Wi uses
+the published Pi-compatible configuration with its own originator/user-agent;
+no provider approval or stable contract is asserted.
+
+Implemented `wi auth login --experimental`: fixed browser/code-exchange flow,
+strict bounded single-use PKCE callback, TLS-authenticated token response,
+account/expiry parsing, and guarded durable Wi-profile persistence. No real
+renewal, generation, fallback, listener cancellation or credential copying was
+added. Details and limits are in `docs/WI_AUTH.md`.
+
+Review confirmed and remediation corrected three compatibility defects: rejecting
+unrecognized callback parameters, case-sensitive Bearer token type, and an
+unsupported one-day expiry cap. Security-related duplicate/state/issuer checks,
+malformed input rejection, response bounds, expiry overflow/minimum and private
+storage controls remain intact. All three repeated final reviews passed.
+
+### Observed offline evidence
+
+At `2026-09-08T20:08:41Z`, parent `uv run scripts/verify.py` passed all six Cargo
+gates. Cargo reported 177 tests: 156 library + 16 binary + 1 absence integration +
+4 provider-contract. Zero failures, ignored, measured or filtered tests; zero
+doctests. The Node runner self-test passed 152 tests with live_started=false.
+`git diff --check` passed. Static inventory counted 43 Rust files, 170 regex test
+definitions and 25 fixture events; executable test counts are authoritative.
+
+### Observed live evidence
+
+One invocation, no replacement:
+`./target/debug/wi auth login --provider openai-codex --account wi-experiment --experimental`.
+Wi reported browser authorization waiting, then login complete. It exited 0 at
+`2026-09-08T20:09:22Z`. Safe metadata reported persisted=true, eligible=true, and
+an expiry. The reviewed one-callback/no-retry control flow establishes one token
+exchange for this successful invocation; no raw traffic was captured.
+
+A fresh invocation of `wi auth status` for that alias reported enabled=true,
+logged_in=true, requires_reauthentication=false, and the same expiry. This proves
+that a new process could read the persisted eligible profile. Token values,
+provider account identity and authorization URLs are omitted from this report.
+Real credentials were read/written only by the reviewed Wi process and private
+Wi store. Existing Pi/Codex credential files were not read or modified.
+
+### Acceptance and remaining scope
+
+The **single-login increment is accepted locally**. L0's broader two-account
+requirement has only one-profile coverage. L1 real renewal and new W1-W3/S1-S3
+remain NOT RUN. Login does not prove generation entitlement or model transport
+compatibility. The historical six-case matrix still belongs to commit `718c43a`.
+
+Auth accounting: one browser login, one code exchange, zero refreshes/retries.
+Generation accounting: zero new, 17/40 used, 23 remaining. No further live request
+is planned in this increment. The changes are unstaged and uncommitted. Include
+this result with the prior completed commit in the pending combined report.

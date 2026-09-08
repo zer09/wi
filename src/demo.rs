@@ -1,9 +1,9 @@
 //! Pure acceptance checks for the fixed synthetic demonstration, not registry policy.
-use harness_gateway::{
+use serde_json::{Value, json};
+use wi::{
     CallOrigin, FunctionCall, GatewayError, InputItem, ItemKind, ModelResponse, ResponseOutcome,
     Result,
 };
-use serde_json::{Value, json};
 
 pub const TOOL_INSTRUCTIONS: &str = "You are testing a tool gateway. Use exactly one direct add_numbers call with a=17 and b=25. After receiving its output, reply with exactly 42 and stop. Do not request any other tool.";
 pub const TOOL_PROMPT: &str = "Use add_numbers with a=17 and b=25. What is the sum?";
@@ -98,7 +98,7 @@ pub fn validate_answer(response: &ModelResponse, expected: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harness_gateway::OutputItem;
+    use wi::OutputItem;
     fn response() -> ModelResponse {
         ModelResponse {
             output_provenance: Default::default(),

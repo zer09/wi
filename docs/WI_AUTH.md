@@ -1,0 +1,179 @@
+# Wi managed authentication: experimental browser login
+
+Wi is the Cargo package, library, and binary at version 0.2.0. The provider ID
+remains `openai-codex`. `Gateway` remains the provider-neutral routing type.
+Repository paths and historical verification records retain their original names.
+
+## Experimental status and trust model
+
+`wi auth login --experimental` implements one Pi-compatible browser flow. This
+user-selected experiment supersedes the earlier configuration gate for login only.
+The public client registration is an undocumented compatibility choice, not a
+claim of OpenAI approval, stable support, or account entitlement. A provider denial
+stops the attempt. Real `auth refresh` and automatic renewal remain unavailable.
+
+The fixed configuration follows Pi source at `96617628e`,
+`packages/ai/src/auth/oauth/openai-codex.ts`: the public client ID
+`app_EMoamEEZ73f0CkXaXp7hrann`, `https://auth.openai.com/oauth/authorize` and
+`https://auth.openai.com/oauth/token`, and `http://localhost:1455/auth/callback`.
+Scopes are `openid profile email offline_access`. Wi uses authorization code,
+PKCE S256, independent random state and verifier, `id_token_add_organizations=true`,
+`codex_cli_simplified_flow=true`, `originator=wi`, and an honest `wi/0.2.0` user-agent.
+There are no dynamic production endpoints, retries, redirects, device/manual-code
+fallbacks, connector scopes, or ID-token-to-API-key exchanges.
+
+Only the access token received directly from the fixed, certificate-checked HTTPS
+token response supplies `https://api.openai.com/auth.chatgpt_account_id` and `exp`.
+TLS authenticates the response source; local claim decoding does not verify a JWT
+signature or establish trust in an arbitrary imported token. Missing or malformed
+account/expiry claims fail. Access and refresh tokens must be nonempty; token type,
+when present, must be `Bearer` (ASCII case-insensitive, without trimming).
+`expires_in` must be a positive `u64` whose addition to the current Unix time does
+not overflow. The earlier of that expiry and `exp` must pass the existing freshness
+check, including its 30-second margin. Ordinary extra fields such as `id_token`
+are ignored rather than stored. Only required profile data is persisted.
+
+`browser_login.rs` owns this flow. Its tests inject only loopback endpoints, temp
+stores, and harmless launchers under `cfg(test)`. The older `oauth_offline.rs`
+remains synthetic regression coverage; its fake attestation is not used in login.
+
+## CLI surface
+
+- `wi auth login --provider openai-codex --account personal --experimental [--replace]`: experimental browser login.
+- `wi auth list --provider openai-codex`: local metadata only.
+- `wi auth status --provider openai-codex --account personal`: local metadata only.
+- `wi auth refresh --provider openai-codex --account personal`: blocked.
+- `wi auth logout --provider openai-codex --account personal`: local deletion only.
+
+Logout never revokes a remote credential or touches another application's store.
+Login requires explicit replacement of an existing profile. Without `--experimental`,
+it fails before path resolution, credential reads, listener creation, or browser launch.
+Alias, Linux store safety, and existing-profile conflict checks precede browser launch.
+The command returns only the local alias, expiry, and persisted/eligible flags.
+
+Linux `/usr/bin/xdg-open` must be installed and configured to open a browser. Wi
+passes the URL as one argument without a shell and suppresses launcher output.
+The launcher must exit successfully within 10 seconds. Wi has no Windows-shell
+fallback, including under WSL. Use the private WSL Linux filesystem and configure
+its Linux launcher before login. The browser must reach `localhost:1455`.
+Wi binds `127.0.0.1:1455` before launch. An occupied port fails without cancelling
+another listener or selecting another port. No raw URL is printed for manual use.
+The browser and local process arguments necessarily contain the authorization URL;
+do not capture these with tracing or process-monitor logs.
+
+The login deadline is 180 seconds; code exchange is limited to 30 seconds, with
+10-second connection/read bounds. Launcher cancellation kills and reaps the child.
+Callbacks are limited to 8192 bytes and token responses to 65536 bytes.
+Only `GET /auth/callback` with exactly one `Host: localhost:1455`, matching state,
+and one nonempty code is accepted. Optional `iss` must equal `https://auth.openai.com`.
+Matching-state OAuth denial returns a static failure without exchange; error
+descriptions are discarded. Duplicate recognized parameters and malformed parameters
+fail. Unrecognized parameters are ignored after key/value decoding validates percent
+escapes, UTF-8, and the absence of control characters.
+The callback listener is consumed once, so queued callbacks cannot exchange twice.
+
+Generation, tool-demo, and the existing smoke helper accept `--auth-source gateway`
+and optional `--account personal`. Without an account, each session open uniformly
+selects one eligible profile. Selection uses rejection sampling, not modulo-biased
+randomness. Eligibility requires an enabled login that does not require reauth;
+expired access remains eligible when refresh credentials exist. A missing or
+ineligible manual choice fails without fallback. No quota or usage request occurs.
+
+The CLI prints the validated local alias on stderr, outside the event JSON stream.
+It does not print provider account IDs. The alias contains only ASCII letters,
+digits, hyphens, and underscores, with a maximum length of 64.
+
+`pi` and `codex` remain explicitly selected, read-only file sources. They reject
+`--account`. Managed auth rejects `--auth-file`; aliases cannot inject paths.
+There is no migration, credential copying, ambient source search, or API-key fallback.
+`auth-check` remains the external-source snapshot check; use `auth status` for Wi.
+
+## File protection
+
+The managed store is `$XDG_CONFIG_HOME/wi/auth/openai-codex.json`, otherwise
+`$HOME/.config/wi/auth/openai-codex.json`. It is plaintext versioned JSON containing
+multiple independent named profiles. Use a private Linux filesystem, including
+the WSL home filesystem, not a Windows-mounted credential directory.
+
+Managed directories require mode 0700. Credential and stable lock files require
+0600 and the current effective owner. Existing unsafe permissions are rejected,
+not repaired. Descriptor-relative operations reject symlinks in every component;
+regular credential files must have one hard link. Read-only list, status, and
+selection treat a missing tree or safe private directory without both document
+and lock as empty, without creating files. An existing document without its
+stable lock is unsafe. Parsing and serialized updates
+are limited to 1 MiB. Updates write a private exclusive temporary file, sync the
+file, atomically rename it, then sync the directory. A stable advisory file lock
+serializes cooperating processes. Updates reread under that lock and preserve
+unrelated profiles. Processes with sufficient OS access can still read or alter
+plaintext credentials. Protect the configuration directory's ancestors too.
+
+Managed persistence explicitly fails closed outside Linux. Unix modes do not
+claim Windows ACL protection. Existing external file readers retain their prior
+platform behavior. No keyring, database, or unused config.toml settings are added.
+
+## Binding, renewal, and cancellation
+
+`AuthManager` selects and prepares a profile. `ManagedCredentials::load()` returns
+a read-only snapshot and never selects, refreshes, or writes. The separate
+`CredentialSource::prepare_submission()` hook defaults to a no-op for external
+sources. A provider reused for several sessions selects separately for each open.
+
+The bound source pins the alias, provider account, and unique login incarnation.
+Refresh changes tokens, not identity. Replacing or deleting a profile cannot make
+an SSE reload consume a different login, even under the same alias and account.
+An established WebSocket retains its original handshake and checks snapshot
+expiry before each submission. It does not reload or renew mid-session. A new
+session is required after WS expiry. SSE may prepare the same selected profile
+before the next request, including tool-result delivery.
+
+Synthetic renewal holds the cross-process lock through the exchange and atomic
+persistence. It rereads after acquiring the lock. Before exchange it creates and
+syncs an empty, nonsecret `.rotation-<alias>-<incarnation>` guard, then syncs the
+directory. Reads treat that guard as authoritative reauthentication state even
+when the JSON says otherwise. Failure, ambiguous exchange, timeout, or failed
+rotated-token persistence leaves the guard, including a directory-sync failure
+after rename. Such an error does not prove disk rollback: rotated JSON can be
+visible but remains ineligible through a fresh manager.
+
+The rotation commits only after the complete rotated JSON and directory sync
+succeed. Guard removal and its directory sync are best-effort cleanup after that
+commit; cleanup failure does not return a failed-rotation result. A retained or
+crash-restored guard can conservatively require login despite a successful commit.
+It cannot expose the old refresh token because the new document is already
+durable. Replacement and logout clean only the removed incarnation's
+guard after their document commit; leftover guards do not affect new incarnations
+or other profiles. This is not a general recovery journal.
+The synthetic renewal exchange contract must attest account identity;
+local `jwt_hints` decoding is not signature verification. Experimental login uses
+the separate transport-authenticated response model described above.
+
+An owned blocking worker completes the bounded exchange and persistence even when
+a session cancels its waiting future. A process crash cannot preserve an unpersisted
+new token, but the earlier durable guard prevents blind reuse after restart.
+No automatic generation retries, account failover, reconnect replay, or background
+refresh scheduler is added. Production renewal remains unavailable.
+
+Login uses the same stable lock and atomic persistence path. It checks conflicts
+again under lock, creates a new incarnation, and guards only that candidate before
+writing. A post-rename failure leaves the candidate ineligible. Failures before
+replacement do not disable the old profile. Unrelated profiles remain intact.
+The browser success page is sent only after durable commit. A disconnected browser
+does not turn an already committed login into a reported persistence failure.
+Guard cleanup failure can conservatively report `persisted=true, eligible=false`.
+Login lock acquisition waits at most one second. The absolute deadline is checked
+before commit. Once filesystem commit starts, the worker completes it rather than
+reporting a timeout with an unknown persistence result. Blocking kernel filesystem
+operations cannot be forcibly bounded by the async deadline.
+
+## Remaining acceptance work
+
+One parent-run experimental browser login passed on local Linux at
+`2026-09-08T20:09:22Z`. Wi persisted an eligible profile; a fresh metadata-only
+status command confirmed logged_in=true and requires_reauthentication=false.
+This is observed login evidence, separate from the synthetic tests. No generation,
+model entitlement, real renewal, or second-account success is claimed.
+Real renewal and broader managed-auth live tests remain deferred. Existing Pi/Codex
+credential files remain read-only and are not consulted by browser login.
+The parent-owned matrix and verification reports remain the authority for acceptance
+and the generation ledger.

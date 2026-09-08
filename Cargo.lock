@@ -394,29 +394,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-gateway"
-version = "0.2.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64",
- "clap",
- "futures-util",
- "libc",
- "reqwest",
- "rustls",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "uuid",
- "zeroize",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1619,6 +1596,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wi"
+version = "0.2.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "base64",
+ "clap",
+ "futures-util",
+ "libc",
+ "reqwest",
+ "ring",
+ "rustix",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

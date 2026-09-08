@@ -2,9 +2,17 @@
 //! API-key endpoint. Platform feature documentation is not a guarantee of
 //! subscription endpoint entitlement. No credentials leave the fixed endpoint.
 pub mod auth;
+pub mod browser_login;
 mod codec;
 mod finalized;
+pub mod managed_auth;
+mod managed_store;
+#[cfg(all(test, target_os = "linux"))]
+mod managed_store_tests;
+#[cfg(test)]
+mod oauth_offline;
 pub mod observation;
+pub mod profile_selection;
 mod session;
 mod sse;
 mod state;
@@ -24,8 +32,13 @@ pub const PROVIDER_ID: &str = "openai-codex";
 const WS_ENDPOINT: &str = "wss://chatgpt.com/backend-api/codex/responses";
 const SSE_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/responses";
 
+enum ProviderAuth {
+    External(Arc<dyn CredentialSource>),
+    Managed(managed_auth::AuthManager, Option<String>),
+}
 pub struct OpenAiCodexProvider {
-    credentials: Arc<dyn CredentialSource>,
+    credentials: ProviderAuth,
+    profile_observer: Option<fn(&str)>,
     websocket_endpoint: String,
     sse_endpoint: String,
     timeouts: Timeouts,
@@ -34,12 +47,29 @@ pub struct OpenAiCodexProvider {
 impl OpenAiCodexProvider {
     pub fn new(credentials: Arc<dyn CredentialSource>) -> Self {
         Self {
-            credentials,
+            credentials: ProviderAuth::External(credentials),
+            profile_observer: None,
             websocket_endpoint: WS_ENDPOINT.into(),
             sse_endpoint: SSE_ENDPOINT.into(),
             timeouts: Timeouts::default(),
             observation: None,
         }
+    }
+    /// Selection occurs at each session open, not when the provider is constructed.
+    pub fn managed(manager: managed_auth::AuthManager, account: Option<String>) -> Self {
+        Self {
+            credentials: ProviderAuth::Managed(manager, account),
+            profile_observer: None,
+            websocket_endpoint: WS_ENDPOINT.into(),
+            sse_endpoint: SSE_ENDPOINT.into(),
+            timeouts: Timeouts::default(),
+            observation: None,
+        }
+    }
+    /// Observe only the validated local alias, never provider identity or tokens.
+    pub fn with_profile_observer(mut self, observer: fn(&str)) -> Self {
+        self.profile_observer = Some(observer);
+        self
     }
     /// Enable allowlisted evidence only for an explicitly selected synthetic smoke case.
     pub fn with_smoke_observer(
@@ -121,10 +151,27 @@ impl Provider for OpenAiCodexProvider {
             Transport::WebSocket => &self.websocket_endpoint,
             Transport::Sse => &self.sse_endpoint,
         };
+        let credentials: Arc<dyn CredentialSource> = match &self.credentials {
+            ProviderAuth::External(source) => source.clone(),
+            ProviderAuth::Managed(manager, account) => {
+                let manager = manager.clone();
+                let account = account.clone();
+                let selected =
+                    tokio::task::spawn_blocking(move || manager.select(account.as_deref()))
+                        .await
+                        .map_err(|_| {
+                            crate::GatewayError::InvalidAuth("profile selection worker failed")
+                        })??;
+                if let Some(observer) = self.profile_observer {
+                    observer(selected.selected_profile());
+                }
+                Arc::new(selected)
+            }
+        };
         let wire = wire::Wire::open(
             options.transport,
             endpoint,
-            self.credentials.clone(),
+            credentials,
             &id,
             self.timeouts.connect,
             self.observation.clone(),

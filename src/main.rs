@@ -1,19 +1,20 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
-use harness_gateway::providers::openai_codex::{
-    OpenAiCodexProvider, PROVIDER_ID,
-    auth::{AuthSource, CredentialSource, LocalAuthFile},
-};
-use harness_gateway::tools::{AddNumbers, ToolRegistry};
-use harness_gateway::{
-    DeltaKind, Gateway, GatewayError, InputItem, ModelResponse, ProviderEvent, ProviderSession,
-    ResponseOutcome, Result, SessionOptions, Transport,
-};
 use std::{
     io::{self, Write},
     sync::Arc,
 };
 use tokio::io::AsyncReadExt;
+use wi::providers::openai_codex::{
+    OpenAiCodexProvider, PROVIDER_ID,
+    auth::{AuthSource, CredentialSource, LocalAuthFile},
+};
+use wi::tools::{AddNumbers, ToolRegistry};
+use wi::{
+    DeltaKind, Gateway, GatewayError, InputItem, ModelResponse, ProviderEvent, ProviderSession,
+    ResponseOutcome, Result, SessionOptions, Transport,
+};
+mod auth_cli;
 mod collect_lifecycle;
 #[cfg(test)]
 mod collect_tests;
@@ -21,16 +22,15 @@ mod demo;
 mod smoke;
 
 #[derive(Parser)]
-#[command(
-    version,
-    about = "Minimal Rust Codex subscription gateway; no API-key fallback"
-)]
+#[command(version, about = "Wi: Rust subscription gateway; no API-key fallback")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Manage Wi-owned profiles. Browser login is experimental; renewal is unavailable.
+    Auth(auth_cli::AuthCommand),
     /// Read local credential metadata only. Makes no provider request.
     AuthCheck(AuthArgs),
     /// Print implemented/verified status without reading credentials.
@@ -44,6 +44,7 @@ enum Command {
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum SourceArg {
+    Gateway,
     Codex,
     Pi,
 }
@@ -58,6 +59,9 @@ struct AuthArgs {
     auth_source: SourceArg,
     #[arg(long)]
     auth_file: Option<std::path::PathBuf>,
+    /// Exact Wi profile; valid only with --auth-source gateway.
+    #[arg(long, conflicts_with = "auth_file")]
+    account: Option<String>,
 }
 #[derive(Args)]
 struct ModelArgs {
@@ -87,7 +91,17 @@ struct GenerateArgs {
 }
 
 fn credentials(args: &AuthArgs) -> Result<LocalAuthFile> {
+    if args.account.is_some() {
+        return Err(GatewayError::InvalidRequest(
+            "--account requires --auth-source gateway",
+        ));
+    }
     let source = match args.auth_source {
+        SourceArg::Gateway => {
+            return Err(GatewayError::InvalidRequest(
+                "use wi auth status for managed profile metadata",
+            ));
+        }
         SourceArg::Codex => AuthSource::Codex,
         SourceArg::Pi => AuthSource::Pi,
     };
@@ -104,8 +118,26 @@ fn options(args: &ModelArgs) -> SessionOptions {
     };
     o
 }
+fn provider(args: &AuthArgs) -> Result<OpenAiCodexProvider> {
+    if matches!(args.auth_source, SourceArg::Gateway) {
+        if args.auth_file.is_some() {
+            return Err(GatewayError::InvalidRequest(
+                "managed auth does not accept --auth-file",
+            ));
+        }
+        if let Some(name) = &args.account {
+            wi::providers::openai_codex::profile_selection::validate_name(name)?;
+        }
+        return Ok(OpenAiCodexProvider::managed(
+            wi::providers::openai_codex::managed_auth::AuthManager::default_location()?,
+            args.account.clone(),
+        )
+        .with_profile_observer(|name| eprintln!("Wi profile: {name}")));
+    }
+    Ok(OpenAiCodexProvider::new(Arc::new(credentials(args)?)))
+}
 async fn open(args: &ModelArgs, options: SessionOptions) -> Result<ProviderSession> {
-    let provider = OpenAiCodexProvider::new(Arc::new(credentials(&args.auth)?));
+    let provider = provider(&args.auth)?;
     let mut gateway = Gateway::new();
     gateway.register(Arc::new(provider))?;
     gateway.open_session(PROVIDER_ID, options).await
@@ -174,11 +206,11 @@ async fn generate(args: GenerateArgs) -> Result<()> {
     let prompt = if args.stdin {
         let mut bytes = Vec::new();
         tokio::io::stdin()
-            .take((harness_gateway::MAX_INPUT_BYTES + 1) as u64)
+            .take((wi::MAX_INPUT_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .await
             .map_err(|e| GatewayError::Io(e.kind()))?;
-        if bytes.len() > harness_gateway::MAX_INPUT_BYTES {
+        if bytes.len() > wi::MAX_INPUT_BYTES {
             return Err(GatewayError::InvalidRequest("stdin exceeds 1 MiB"));
         }
         String::from_utf8(bytes).map_err(|_| GatewayError::InvalidRequest("stdin is not UTF-8"))?
@@ -195,12 +227,11 @@ async fn generate(args: GenerateArgs) -> Result<()> {
         if first.outcome != ResponseOutcome::Completed {
             return Err(GatewayError::NotCompleted);
         }
-        if first.output.iter().any(|i| {
-            !matches!(
-                i.kind,
-                harness_gateway::ItemKind::Message | harness_gateway::ItemKind::Reasoning
-            )
-        }) {
+        if first
+            .output
+            .iter()
+            .any(|i| !matches!(i.kind, wi::ItemKind::Message | wi::ItemKind::Reasoning))
+        {
             return Err(GatewayError::UnsupportedOutput);
         }
         if let Some(follow_up) = args.follow_up {
@@ -209,12 +240,11 @@ async fn generate(args: GenerateArgs) -> Result<()> {
             if next.outcome != ResponseOutcome::Completed {
                 return Err(GatewayError::NotCompleted);
             }
-            if next.output.iter().any(|i| {
-                !matches!(
-                    i.kind,
-                    harness_gateway::ItemKind::Message | harness_gateway::ItemKind::Reasoning
-                )
-            }) {
+            if next
+                .output
+                .iter()
+                .any(|i| !matches!(i.kind, wi::ItemKind::Message | wi::ItemKind::Reasoning))
+            {
                 return Err(GatewayError::UnsupportedOutput);
             }
         }
@@ -268,6 +298,7 @@ async fn tool_demo(args: ModelArgs) -> Result<()> {
 }
 async fn run() -> Result<()> {
     match Cli::parse().command {
+        Command::Auth(command) => command.run().await,
         Command::AuthCheck(args) => {
             let auth = credentials(&args)?.load().await?;
             line_json(

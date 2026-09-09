@@ -1,3 +1,30 @@
+# Wi: active task routing
+
+## M3 bounded run controller — 2026-09-09
+
+The M3 planning PR is documentation only. When the user starts M3 implementation,
+follow `docs/WI_RUN_CONTROLLER.md` (contract m3.1), `docs/WI_RUN_MATRIX.md`, and
+`docs/WI_RUN_IMPLEMENTOR_PROMPT.md`. The implementor executes this fixed plan;
+no second architecture-planning pass or automatic live phase is needed.
+
+M3 permits only its specified source/test/doc changes and offline verification.
+No real credential reads, profile checks, login, renewal, provider generations,
+commits, pushes or publication are authorized by that task. Pi's authoring
+conversation is separate. The completed gateway/auth baseline is
+`2d9008b125c8a67dbc6977fe07fd65442cac7f9a`; its current ledger is 27/40 used,
+13 remaining, with zero allocated to M3. Existing managed authentication is
+complete within its recorded scope and must not be redesigned.
+
+The gateway-repair handoff below and old START_HERE/LOCAL_AGENT_PROMPT documents
+are historical task instructions. Their Pi-only auth assumptions, repair scope,
+10-request live permission, and report targets do not apply to M3. Use the new
+M3 verification files; preserve old reports and ledgers. New explicit user
+instructions and higher-priority environment rules still take precedence.
+
+---
+
+## Historical gateway-repair instructions (inactive for M3)
+
 # Local agent instructions — Harness Gateway
 
 ## Task and priority

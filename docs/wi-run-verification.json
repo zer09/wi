@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "record_kind": "observed_m3_verification",
+  "contract_version": "m3.1",
+  "milestone": "bounded_run_controller",
+  "milestone_accepted": true,
+  "baseline_commit": "2d9008b125c8a67dbc6977fe07fd65442cac7f9a",
+  "planning_revision": "uncommitted worktree planning documents over baseline; not a planning commit",
+  "implementation_revision": "2d9008b125c8a67dbc6977fe07fd65442cac7f9a",
+  "checked_at": "2026-09-09",
+  "evidence_origin": {
+    "prior_execution": "Assignment-supplied observed isolated baseline and prior increment review results.",
+    "current_role": "Parent-observed post-remediation offline gates; documentation implementor HEAD/status/source mapping and active-doc checks; repeated independent review-a/review-b/review-c approval."
+  },
+  "current_status": {
+    "implementation": "complete_uncommitted",
+    "offline_gates": "pass",
+    "offline_acceptance": "accepted",
+    "independent_review": "pass_repeated_accumulated_review",
+    "live": "not_authorized_not_run"
+  },
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "rustc": "1.98.1",
+    "cargo": "1.98.1",
+    "node": "v24.18.0",
+    "uv": "0.12.10",
+    "pi": "0.85.1",
+    "coverage": "Local Linux only; no current hosted or non-Linux execution"
+  },
+  "worktree": {
+    "initial": "Before implementation: modified AGENTS.md and added docs/WI_RUN_CONTROLLER.md, docs/WI_RUN_IMPLEMENTOR_PROMPT.md, docs/WI_RUN_MATRIX.md, docs/WI_RUN_VERIFICATION.md, docs/wi-run-verification.json only, as supplied in the baseline record.",
+    "increment_5_entry": "Those six planning files already staged; runtime/test implementation changes unstaged or untracked. HEAD verified directly as baseline.",
+    "final": "M3 implementation remains dirty over baseline. This role changes only README.md, docs/ARCHITECTURE.md, docs/EVENTS.md and the two new reports. No staging or unstaging performed; report edits remain unstaged over existing staged scaffolds.",
+    "user_work_preserved": true,
+    "cargo_lock_changed": false,
+    "cargo_toml_change": "Only development Tokio test-util feature added by earlier increment",
+    "protected_files": "Historical reports, COMBINED_DESIGN_REPORT, manifests and ledger unchanged; AGENTS.md and governing planning documents preserved as received"
+  },
+  "scope": {
+    "real_credential_reads_authorized": false,
+    "auth_operations_authorized": false,
+    "live_generation_authorized": false,
+    "commits_or_pushes_authorized": false,
+    "runtime_or_test_edits_by_increment_5": false
+  },
+  "limits_defaults": {"max_model_requests": 4, "max_tool_executions": 8, "deadline_seconds": 120},
+  "matrix": [
+    {
+      "id": "M3-00", "required": true, "status": "pass",
+      "paths": ["AGENTS.md", "docs/WI_RUN_CONTROLLER.md", "scripts/verify.py", "scripts/cli_retest.mjs"],
+      "tests": [],
+      "commands": ["git rev-parse HEAD", "git status --short", "uv run scripts/verify.py", "node scripts/cli_retest.mjs --self-test", "git diff --check"],
+      "assertions": ["Baseline six Cargo gates exit 0; 187 Rust tests and 152 Node self-tests passed. Initial run_offline example unavailable, not a baseline failure.", "Planning files are uncommitted work over baseline. Prior dirty state preserved. M3 live/auth allocation zero; historical ledger unchanged."],
+      "blockers": []
+    },
+    {
+      "id": "M3-01", "required": true, "status": "pass",
+      "paths": ["src/lib.rs", "src/run/mod.rs", "tests/run_controller.rs", "tests/run_support/mod.rs", "examples/run_offline.rs"],
+      "tests": ["run_t_empty_reasoning_refusal_and_provenance_are_terminal", "run_text_only_does_not_require_continuation_or_function_tools"],
+      "commands": ["cargo test --all-targets", "cargo run --example run_offline"],
+      "assertions": ["External integration tests use the public Gateway/request/registry/token/observer API and independent native shapes. T opens once, generates once and closes once. Controller has no OpenAI parsing or agent invocation."], "blockers": []
+    },
+    {
+      "id": "M3-02", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_controller.rs", "tests/run_support/stop.rs"],
+      "tests": ["run_preadmission_rejects_without_observation_or_work", "run_preadmission_requires_continuation_for_tools_in_check_order", "run_invalid_snapshot_definition_is_checked_once_before_open", "run_text_only_does_not_require_continuation_or_function_tools"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["20-case admission table covers prompt/options/provider/transports/features/pre-cancel and invalid limits 0/33 model, 129 tool, zero/>600s deadline. Boundary validation accepts 1/32, 0/128 and positive duration/600s. Invalid snapshot definitions and missing continuation reject before events/open/tool work. Metadata capability checks are auth-neutral."], "blockers": []
+    },
+    {
+      "id": "M3-03", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "src/run/collect.rs", "tests/run_controller.rs", "src/run_cli_tests.rs"],
+      "tests": ["run_t_empty_reasoning_refusal_and_provenance_are_terminal", "run_text_only_does_not_require_continuation_or_function_tools", "run_collector_rejects_identity_order_idle_close_eof_and_accepts_gaps", "run_cancel_on_completed_no_call_provider_terminal_preserves_completion", "run_cli_refusal_completed_and_tool_limit_exit_codes"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["T, empty output, reasoning/refusal and terminal-only normalized identity complete without a tool or retry. Full response/provenance serialization is preserved. Cancellation triggered by successful no-call terminal observation cannot rewrite completion; normalized start is not native-created evidence."], "blockers": []
+    },
+    {
+      "id": "M3-04", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_controller.rs", "src/providers/openai_codex/run_loopback_tests.rs"],
+      "tests": ["run_a_b_c_exact_inputs_order_and_lifecycle", "run_websocket_a_native_and_recovered_one_socket_exact_linkage", "run_sse_a_mime_and_missing_prolog_replay_exact_effective_native_history"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["A has two attempts/admissions/turns, one execution, correlated result-only input and final 42. Tool events precede first turn finish and second turn start. Generic controller has no arithmetic oracle."], "blockers": []
+    },
+    {
+      "id": "M3-05", "required": true, "status": "pass",
+      "paths": ["tests/run_controller.rs", "tests/run_support/mod.rs", "examples/run_offline.rs"],
+      "tests": ["run_a_b_c_exact_inputs_order_and_lifecycle"],
+      "commands": ["cargo test --all-targets", "cargo run --example run_offline"],
+      "assertions": ["B exact initial/result vectors produce 42 then 50 with distinct call identities, one session, three requests and two executions; no fourth request. C checks declared sequential order and ordered result vector. Independent example asserts final 50."], "blockers": []
+    },
+    {
+      "id": "M3-06", "required": true, "status": "pass",
+      "paths": ["src/tools.rs", "src/tools_batch_tests.rs", "tests/run_controller.rs", "src/providers/openai_codex/tests.rs"],
+      "tests": ["whole_batch_authority_rejects_before_dispatch_or_reuse", "cached_calls_still_require_authority_and_schema", "call_id_at_512_byte_boundary_produces_valid_input", "run_whole_batch_invalid_authority_has_no_dispatch", "decoded_status_rejects_batch_without_execution_or_cache"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["22 registry variants with fresh/cached first call and 16 run variants cover malformed JSON/schema, unknown tools, duplicate/conflicting/empty/513-byte identity, incomplete status, namespaces and caller authority. Rejection leaves cache and execute counts unchanged and emits no new starts or continuation.", "Inherited decoded_status test covers native null/nonstring/unknown/in-progress/failed status; corrected exact completed and omitted status execute two fresh calls. The inherited adapter test is the equivalent raw-status oracle."], "blockers": []
+    },
+    {
+      "id": "M3-07", "required": true, "status": "pass",
+      "paths": ["tests/run_controller.rs", "src/providers/openai_codex/recovery_tests.rs", "src/providers/openai_codex/recovery_loopback_tests.rs", "src/providers/openai_codex/run_loopback_tests.rs"],
+      "tests": ["run_outcomes_unsupported_output_and_exact_upstream_assessment", "run_t_empty_reasoning_refusal_and_provenance_are_terminal", "recovery_terminal_trigger_table", "invalid_recovery_loopback_reports_received_without_settlement_or_second_send", "run_websocket_a_native_and_recovered_one_socket_exact_linkage", "run_sse_a_mime_and_missing_prolog_replay_exact_effective_native_history"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Noncompleted responses remain inspectable with no tool dispatch. Native and recovered effective output preserve native metadata and provenance. Inherited trigger table covers missing/null/malformed output and status combinations; invalid-recovery loopback preserves terminal_received without settlement or second send."], "blockers": []
+    },
+    {
+      "id": "M3-08", "required": true, "status": "pass",
+      "paths": ["src/providers/openai_codex/consistency.rs", "src/providers/openai_codex/session.rs", "src/providers/openai_codex/consistency_tests.rs", "src/providers/openai_codex/consistency_loopback_tests.rs", "src/providers/openai_codex/consistency_settlement_tests.rs", "src/collect_tests.rs"],
+      "tests": ["collect_rejects_discarded_or_changed_stream_before_second_send_or_execution", "collect_accepts_interleaved_parts_without_arrival_order_authority", "collect_rejects_type_conflicts_and_conservative_metadata_changes", "collect_preserves_terminal_only_matching_suffix_and_empty_streams", "consistency_public_session_rejects_before_publication_execution_or_next_send", "consistency_public_session_accepts_effective_output_and_resets_each_request", "consistency_drive_failure_leaves_conversation_unsettled"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Former CLI consistency regressions migrated to adapter coverage. Public WS/SSE sessions reject discarded/changed text or finalized items, identity/index/type/metadata contradictions and byte/item/event overflow before publication/execution/next send. Settlement test checks no conversation settlement; positive interleaving, compatible output and request reset remain covered."], "blockers": []
+    },
+    {
+      "id": "M3-09", "required": true, "status": "pass",
+      "paths": ["src/run/collect.rs", "tests/run_controller.rs", "tests/run_support/boundaries.rs", "src/providers/openai_codex/recovery_tests.rs", "src/providers/openai_codex/codec.rs"],
+      "tests": ["run_collector_rejects_identity_order_idle_close_eof_and_accepts_gaps", "run_cross_turn_sequence_failure_keeps_prior_validated_response", "run_extension_envelope_is_opaque_and_turn_sink_failures_stop", "recovery_known_parts_fields_prefixes_and_lifecycle", "terminal_response_is_authoritative"],
+      "commands": ["cargo test --all-targets", "cargo test --lib providers::openai_codex::codec::tests::terminal_response_is_authoritative -- --exact"],
+      "assertions": ["Wrong session/provider/request, response identity, repeated/decreasing sequence, duplicate start, idle null-request close and EOF fail without continuation. Gaps and terminal-only streams pass; unchanged nested envelopes are compared by healthy helper. The adapter decoder synchronously rejects an exact second terminal with event after terminal response and retains created-after-terminal rejection; collector adds no postterminal wait."], "blockers": []
+    },
+    {
+      "id": "M3-10", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_controller.rs", "tests/run_support/boundaries.rs"],
+      "tests": ["run_model_tool_limits_and_cached_batches_are_atomic", "run_outcomes_unsupported_output_and_exact_upstream_assessment", "run_cross_turn_sequence_failure_keeps_prior_validated_response"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["A at model limit 1 executes no tool; B at 2 executes only first tool with two attempts. Cached batch at limit is not replayed. Final text at last allowed request completes. Rejected attempts count independently of receipts and preserve uncertainty."], "blockers": []
+    },
+    {
+      "id": "M3-11", "required": true, "status": "pass",
+      "paths": ["src/tools.rs", "src/tools_batch_tests.rs", "tests/run_controller.rs"],
+      "tests": ["run_model_tool_limits_and_cached_batches_are_atomic", "run_scope_isolation_conflicts_mixed_cache_and_capacity", "capacity_counts_only_new_distinct_ids_and_preserves_eight_call_cap", "prepared_batch_exposes_whole_new_dispatch_budget_without_work"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Zero tools permits T but not A. Two-new-call batch with one slot rejects atomically. Cached/new pair requires one new slot. Replay at 128 succeeds; 129th new ID and ninth batch call reject before dispatch."], "blockers": []
+    },
+    {
+      "id": "M3-12", "required": true, "status": "pass",
+      "paths": ["src/tools.rs", "src/tools_batch_tests.rs", "tests/run_controller.rs"],
+      "tests": ["run_scope_isolation_conflicts_mixed_cache_and_capacity", "run_model_tool_limits_and_cached_batches_are_atomic", "fresh_scopes_share_tools_but_never_consume_or_mutate_template_cache", "whole_batch_authority_rejects_before_dispatch_or_reuse"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Identical same-run delivery reuses one result. Changed arguments or tool under a saved ID reject. Two runs execute independently with fresh run/session ownership and preserve the template cache; tool Arcs alone are shared."], "blockers": []
+    },
+    {
+      "id": "M3-13", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "src/tools.rs", "tests/run_controller.rs", "tests/run_support/stop.rs"],
+      "tests": ["run_preadmission_rejects_without_observation_or_work", "run_cancel_open_generate_receipt_and_drop_cleanup", "run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish", "run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Pre-cancel rejects before admission; deterministic pending open/generate/output and pending/between-tool cancellation stop later work. Healthy admitted cancellation finishes locally once; no fabricated finish/result or partial submission. Before generation is not_submitted; pending attempts remain unknown unless a validated response exists. Before any turn, upstream assessment is null."], "blockers": []
+    },
+    {
+      "id": "M3-14", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_support/stop.rs", "src/tools_batch_tests.rs"],
+      "tests": ["run_deadline_open_generate_receipt_and_cancel_priority", "run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish", "run_absolute_deadline_includes_completed_turn_and_later_tool", "run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal", "run_cancel_on_completed_no_call_provider_terminal_preserves_completion", "ready_stop_wins_over_ready_tool_without_fabricating_finish"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Paused time covers open/generate/output/tools; completed early turn does not reset absolute deadline. Simultaneously ready cancellation wins. Terminal disposition is classified before a new stop checkpoint, so observer cancellation on a completed no-call terminal does not rewrite completion; call-bearing responses still checkpoint before tool work. No wall-clock race, external rollback or blocking-kernel guarantee."], "blockers": []
+    },
+    {
+      "id": "M3-15", "required": true, "status": "pass",
+      "paths": ["src/tools.rs", "tests/run_controller.rs", "tests/run_support/stop.rs"],
+      "tests": ["run_ordinary_tool_errors_and_output_bounds_are_correlated_results", "run_whole_batch_invalid_authority_has_no_dispatch", "run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish", "run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal", "run_sink_finish_and_reuse_failures_stop_without_prepared_results"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Checked-add overflow and oversized output produce bounded correlated error results consumable on continuation. Invalid authority/schema is preflight failure. Partial batch stop submits no subset; cancelled pending tool creates no fabricated result."], "blockers": []
+    },
+    {
+      "id": "M3-16", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "src/run/collect.rs", "tests/run_controller.rs", "tests/run_support/boundaries.rs", "src/providers/openai_codex/run_loopback_tests.rs"],
+      "tests": ["run_outcomes_unsupported_output_and_exact_upstream_assessment", "run_cross_turn_sequence_failure_keeps_prior_validated_response", "run_websocket_disconnect_and_error_stop_one_attempt_without_reopen", "run_sse_wrong_mime_missing_invalid_prolog_and_http_errors_never_retry"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Preflight/generate rejection, failed receipt, HTTP 401/403/429 and post-send disconnect/error stop at one attempt per step without reopen/retry/fallback. Fake events cover exact not_submitted/unknown/terminal_received propagation, including terminal-valid local failure. Counters do not alter the live ledger."], "blockers": []
+    },
+    {
+      "id": "M3-17", "required": true, "status": "pass",
+      "paths": ["src/run/events.rs", "src/run/mod.rs", "tests/run_controller.rs", "tests/run_support/stop.rs", "tests/run_support/boundaries.rs"],
+      "tests": ["run_t_empty_reasoning_refusal_and_provenance_are_terminal", "run_a_b_c_exact_inputs_order_and_lifecycle", "run_open_failure_has_no_turn_or_upstream_and_closes_before_final", "run_model_tool_limits_and_cached_batches_are_atomic", "run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal", "run_cancel_on_completed_no_call_provider_terminal_preserves_completion", "run_extension_envelope_is_opaque_and_turn_sink_failures_stop"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Healthy helper compares nested envelopes, IDs, sequence and recorded attempts/admissions/tool work across T/A/B and stopped traces. First/last lifecycle and one finish per started turn are checked; open failure has no turn. Terminal-observer cancellation ends with ModelCompleted and RunFinished(Completed), retained TerminalReceived, one request and zero tool work. Dispatch counter counts accepted dispatch boundaries, including cancellation before the tool body after accepted start delivery. No fabricated agent/message/steering events."], "blockers": []
+    },
+    {
+      "id": "M3-18", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "src/run/events.rs", "tests/run_controller.rs", "tests/run_support/stop.rs", "tests/run_support/boundaries.rs", "src/run_cli_tests.rs"],
+      "tests": ["run_sink_variants_stop_once_and_final_failure_preserves_outcome", "run_nonblocking_channel_observer_full_and_closed_stop_work", "run_extension_envelope_is_opaque_and_turn_sink_failures_stop", "run_sink_finish_and_reuse_failures_stop_without_prepared_results", "run_cancel_open_generate_receipt_and_drop_cleanup", "run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish", "run_cli_broken_output_stops_work_and_final_sink_error_overrides_completed"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Full/Closed/Failed at start/provider/tool start stop emissions and later work, events_complete=false. Final delivery error retains selected outcome with sink_error and no second terminal; CLI exits 1. Bounded try_send adapter and future-drop close guard are exercised. No transcript queue/detached tool task or guaranteed return/final event after drop."], "blockers": []
+    },
+    {
+      "id": "M3-19", "required": true, "status": "pass",
+      "paths": ["tests/run_support/mod.rs", "src/providers/openai_codex/run_loopback_tests.rs", "src/providers/openai_codex/managed_loopback_tests.rs", "src/providers/openai_codex/managed_auth.rs", "tests/managed_absence_cli.rs"],
+      "tests": ["run_websocket_a_native_and_recovered_one_socket_exact_linkage", "run_sse_a_mime_and_missing_prolog_replay_exact_effective_native_history", "managed_ws_profile_selected_per_open_and_continuation_keeps_handshake", "managed_sse_renews_same_profile_for_tool_result_and_rejects_relogin", "managed_rotation_survives_cancelled_waiter_and_preserves_profiles", "managed_replacement_and_deletion_invalidate_bound_snapshot", "managed_absent_cli_is_actionable_and_never_creates_store"],
+      "commands": ["uv run scripts/verify.py", "cargo test --all-targets"],
+      "assertions": ["Fake/loopback provider opens once; auth observer records preparation/load at existing provider boundaries (WS once, SSE open plus each submission), not controller auth calls. Inherited managed selection/incarnation/renewal/store/read-only-source suites remain green with isolated HOME/XDG_CONFIG_HOME/CODEX_HOME and absent live paths. No production auth module changes or rotation-worker policy changes."], "blockers": []
+    },
+    {
+      "id": "M3-20", "required": true, "status": "pass",
+      "paths": ["src/run_cli.rs", "src/main.rs", "src/run_cli_tests.rs", "tests/run_cli.rs"],
+      "tests": ["run_cli_real_handler_json_outer_only_defaults_and_opt_in_tools", "run_cli_plain_filters_controls_labels_validated_and_partial_outcomes", "run_cli_refusal_completed_and_tool_limit_exit_codes", "run_cli_broken_output_stops_work_and_final_sink_error_overrides_completed", "run_cli_signal_cancels_and_awaits_close_and_terminal_result", "run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8", "run_binary_help_and_clap_conflicts_do_not_need_auth_locations", "legacy_parse_errors_and_help_keep_clap_exit_behavior", "run_binary_prevalidation_precedes_external_and_managed_auth_location"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Six fake real-handler tests and three binary integration tests cover defaults/opt-in, outer-only JSON, filtered plain/partial/refusal output, broken sink, signal-await-close, bounded UTF-8 stdin, help, limits/conflicts/duplicate/unknown tools and explicit managed prevalidation without auth. Completed 0, cancel 130, failure/run parse 1, help 0 and legacy parse 2."], "blockers": []
+    },
+    {
+      "id": "M3-21", "required": true, "status": "pass",
+      "paths": ["src/providers/openai_codex/run_loopback_tests.rs", "src/run/mod.rs"],
+      "tests": ["run_websocket_a_native_and_recovered_one_socket_exact_linkage", "run_websocket_disconnect_and_error_stop_one_attempt_without_reopen"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Gateway-registered test adapter traverses library controller for A native/recovered output: one socket, two response.create frames, unchanged synthetic identity, previous_response_id and new correlated result-only input. Disconnect/error has one attempt and no reopen. No smoke shortcut."], "blockers": []
+    },
+    {
+      "id": "M3-22", "required": true, "status": "pass",
+      "paths": ["src/providers/openai_codex/run_loopback_tests.rs", "src/run/mod.rs"],
+      "tests": ["run_sse_a_mime_and_missing_prolog_replay_exact_effective_native_history", "run_sse_wrong_mime_missing_invalid_prolog_and_http_errors_never_retry"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["A native/recovered output uses two HTTP requests and exact ordered effective native replay plus correlated results, including synthetic opaque metadata. Valid/missing MIME admission passes; wrong MIME, invalid/delimiter-missing prolog and HTTP failures stop with no WS fallback or retry."], "blockers": []
+    },
+    {
+      "id": "M3-23", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_controller.rs", "src/run_cli.rs", "src/run_cli_tests.rs"],
+      "tests": ["run_preadmission_rejects_without_observation_or_work", "run_outcomes_unsupported_output_and_exact_upstream_assessment", "run_text_only_does_not_require_continuation_or_function_tools", "run_cli_real_handler_json_outer_only_defaults_and_opt_in_tools"],
+      "commands": ["cargo test --all-targets"],
+      "assertions": ["Required steering/search/PTC/async/skills reject before open/auth/network; unsupported executable items remain inspectable but cannot execute. Default tool list empty. No shell, dynamic loader, failover or hidden authentication change."], "blockers": []
+    },
+    {
+      "id": "M3-24", "required": true, "status": "pass",
+      "paths": ["examples/run_offline.rs", "scripts/verify.py", "scripts/cli_retest.mjs", "Cargo.toml", "Cargo.lock"],
+      "tests": [],
+      "commands": ["cargo fmt --all -- --check", "cargo check --all-targets", "cargo test --all-targets", "cargo clippy --all-targets -- -D warnings", "cargo build --all-targets", "cargo test --doc", "uv run scripts/verify.py", "node scripts/cli_retest.mjs --self-test", "cargo run --example run_offline", "git diff --check"],
+      "assertions": ["Parent-observed isolated post-remediation final: all commands exit 0, 244 Rust tests passed, zero failed/ignored/measured/filtered, zero doctests, 152 Node self-tests with live_started=false. Example ends Completed: 50 (1 session, 3 model requests, 2 tool executions; offline). Cargo used trusted existing caches in offline mode; local Linux only; lock unchanged; dev Tokio test-util only."], "blockers": []
+    },
+    {
+      "id": "M3-25", "required": true, "status": "pass",
+      "paths": ["README.md", "docs/ARCHITECTURE.md", "docs/EVENTS.md", "docs/WI_RUN_VERIFICATION.md", "docs/wi-run-verification.json"],
+      "tests": [],
+      "commands": ["Node documentation/JSON sanity check described in WI_RUN_VERIFICATION.md", "cargo fmt --all -- --check", "git diff --check"],
+      "assertions": ["Active API/CLI/event docs match current source; stale renewal wording corrected without changing historical evidence. All 27 rows retained with observed evidence; milestone_accepted changed to true only after M3-26 passed. No new credential/auth/generation traffic; protected historical/planning files preserved."], "blockers": []
+    },
+    {
+      "id": "M3-26", "required": true, "status": "pass",
+      "paths": ["src/run/mod.rs", "tests/run_support/stop.rs", "docs/WI_RUN_VERIFICATION.md", "docs/wi-run-verification.json"],
+      "tests": ["run_cancel_on_completed_no_call_provider_terminal_preserves_completion"], "commands": ["cargo test --all-targets", "uv run scripts/verify.py", "node scripts/cli_retest.mjs --self-test", "cargo run --example run_offline", "git diff --check"],
+      "assertions": ["Increment review gates pass. The first accumulated review-a/b/c gate produced one review-b terminal-observer cancellation finding; independent verification reproduced it and focused remediation plus 244-test offline gates passed. The complete repeated accumulated review-a/review-b/review-c gate passed with no blocking findings."],
+      "blockers": []
+    }
+  ],
+  "gates": [
+    {"command": "cargo fmt --all -- --check", "initial_exit": 0, "final_exit": 0},
+    {"command": "cargo check --all-targets", "initial_exit": 0, "final_exit": 0},
+    {"command": "cargo test --all-targets", "initial_exit": 0, "final_exit": 0, "initial_passed": 187, "final_passed": 244},
+    {"command": "cargo clippy --all-targets -- -D warnings", "initial_exit": 0, "final_exit": 0},
+    {"command": "cargo build --all-targets", "initial_exit": 0, "final_exit": 0},
+    {"command": "cargo test --doc", "initial_exit": 0, "final_exit": 0, "doctests": 0},
+    {"command": "uv run scripts/verify.py", "initial_exit": 0, "final_exit": 0, "isolation": "HOME/XDG_CONFIG_HOME/CODEX_HOME redirected to temporary directories; existing CARGO_HOME/RUSTUP_HOME caches; CARGO_NET_OFFLINE=true; live credential locations absent"},
+    {"command": "node scripts/cli_retest.mjs --self-test", "initial_exit": 0, "final_exit": 0, "passed": 152, "live_started": false},
+    {"command": "cargo run --example run_offline", "initial_exit": null, "initial_status": "not_available_not_run", "final_exit": 0, "final_summary": "Completed: 50 (1 session, 3 model requests, 2 tool executions; offline)"},
+    {"command": "git diff --check", "initial_exit": 0, "final_exit": 0}
+  ],
+  "documentation_checks": [
+    {"command": "node -e 'const fs=require(\"fs\"),r=JSON.parse(fs.readFileSync(\"docs/wi-run-verification.json\",\"utf8\"));if(r.schema_version!==1||r.matrix.length!==27||r.matrix.some(x=>x.required&&x.status!==\"pass\")||r.milestone_accepted!==true)process.exit(1); console.log(\"JSON parse/schema/matrix/acceptance: PASS\");'", "exit": 0, "result": "PASS"},
+    {"command": "node -e (read-only documentation assertion script)", "exit": 0, "result": "PASS: schema/27 ordered matrix rows/statuses/61 exact test names/Markdown fences/local links/six event kinds/count arithmetic", "details": "Compared human/JSON matrix statuses and test names against Rust function definitions; checked all local links in four active Markdown files."},
+    {"command": "cargo fmt --all -- --check", "exit": 0, "result": "PASS after documentation edits"},
+    {"command": "git diff --check", "exit": 0, "result": "PASS after documentation edits"},
+    {"command": "git diff HEAD --exit-code -- Cargo.lock docs/LOCAL_VERIFICATION.md docs/local-verification.json docs/COMBINED_DESIGN_REPORT.md", "exit": 0, "result": "Unchanged"},
+    {"command": "git diff --exit-code -- AGENTS.md docs/WI_RUN_CONTROLLER.md docs/WI_RUN_MATRIX.md docs/WI_RUN_IMPLEMENTOR_PROMPT.md", "exit": 0, "result": "No unstaged changes to received governing files"}
+  ],
+  "counts": {
+    "baseline": {"rust_passed": 187, "lib": 166, "binary": 16, "managed_absence_integration": 1, "provider_contract": 4, "runner_passed": 152, "doctests_executed": 0},
+    "rust_passed": 244, "lib": 195, "binary": 17, "managed_absence_integration": 1, "provider_contract": 4, "run_cli_integration": 3, "run_controller_integration": 24,
+    "rust_failed": 0, "rust_ignored": 0, "rust_measured": 0, "rust_filtered": 0,
+    "runner_passed": 152, "runner_failed": 0, "doctests_executed": 0
+  },
+  "review": {
+    "status": "pass",
+    "reviewer_role": "Independent review-a, review-b and review-c roles completed the repeated accumulated M3-26 gate after verified remediation.",
+    "reviewed_revision": "Uncommitted increment diffs over baseline; not a new commit",
+    "increment_results": ["1: a/b/c PASS", "2: confirmed call_id bound finding fixed, repeat a/b/c PASS", "3: confirmed continuation capability finding fixed, repeat a/b/c PASS", "4: confirmed run parse exit-code finding fixed, repeat a/b/c PASS", "6: exact M3-09 duplicate-terminal regression added, focused test and a/b/c PASS", "First accumulated gate: review-a/c PASS; review-b finding independently confirmed and remediated; 244-test offline gate PASS", "Repeated accumulated M3-26 gate: review-a/b/c PASS with no blocking findings"],
+    "findings": [
+      {"increment": 2, "finding": "Call IDs longer than 512 bytes could cross preflight", "resolution": "Preflight rejects >512 before execution; 512-byte ASCII/UTF-8 boundary regression and 513-byte whole-batch rejection pass", "tests": ["call_id_at_512_byte_boundary_produces_valid_input", "whole_batch_authority_rejects_before_dispatch_or_reuse"]},
+      {"increment": 3, "finding": "Tool-enabled run lacked continuation capability admission", "resolution": "Require continuation before open, after transport/function-tool checks; text-only run remains valid without those capabilities", "tests": ["run_preadmission_requires_continuation_for_tools_in_check_order", "run_text_only_does_not_require_continuation_or_function_tools"]},
+      {"increment": 3, "finding": "Reported consistency-loopback timeout", "resolution": "Independently NOT REPRODUCED in 20 runs; not a confirmed runtime defect or timing guarantee"},
+      {"increment": 4, "finding": "Run parse errors exited 2 rather than required 1", "resolution": "Run parse errors now exit 1; help 0 and legacy parse 2 preserved", "tests": ["run_binary_help_and_clap_conflicts_do_not_need_auth_locations", "legacy_parse_errors_and_help_keep_clap_exit_behavior"]},
+      {"increment": "final accumulated gate", "finding": "Cancellation triggered by successful observation of a completed no-call terminal reached a checkpoint before terminal disposition classification and rewrote completion", "resolution": "Classify terminal disposition first; completed no-call returns without a new checkpoint, while call-bearing responses still checkpoint before preflight or tool work", "tests": ["run_cancel_on_completed_no_call_provider_terminal_preserves_completion", "run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal"]}
+    ],
+    "red_green_limit": "Confirmed findings and passing remediation/review reruns supplied; original red command transcripts and individual reviewer session IDs not supplied. No red execution was invented. Final reviewer identities are the review-a, review-b and review-c roles."
+  },
+  "changes": [
+    "README.md", "docs/ARCHITECTURE.md", "docs/EVENTS.md", "docs/WI_RUN_VERIFICATION.md", "docs/wi-run-verification.json"
+  ],
+  "prior_implementation_changes": [
+    "Cargo.toml", "src/collect_lifecycle.rs (removed after relocation)", "src/collect_tests.rs", "src/lib.rs", "src/main.rs", "src/providers/openai_codex/mod.rs", "src/providers/openai_codex/session.rs", "src/providers/openai_codex/tests.rs", "src/providers/openai_codex/codec.rs", "src/tools.rs", "examples/run_offline.rs", "src/providers/openai_codex/consistency.rs", "src/providers/openai_codex/consistency_loopback_tests.rs", "src/providers/openai_codex/consistency_settlement_tests.rs", "src/providers/openai_codex/consistency_tests.rs", "src/providers/openai_codex/run_loopback_tests.rs", "src/run/mod.rs", "src/run/events.rs", "src/run/collect.rs", "src/run_cli.rs", "src/run_cli_tests.rs", "src/tools_batch_tests.rs", "tests/run_cli.rs", "tests/run_controller.rs", "tests/run_support/mod.rs", "tests/run_support/stop.rs", "tests/run_support/boundaries.rs"
+  ],
+  "remaining_limits": ["Local Linux only; hosted/non-Linux untested", "Cooperative cancellation only; no external rollback or upstream-stop guarantee", "No durable event replay or exactly-once effects; future drop/process loss may omit final delivery", "No live M3 proof or automatic live phase"],
+  "live": {
+    "new_real_credential_reads": 0, "new_generation_submissions": 0, "new_auth_operations": 0,
+    "historical_used": 27, "historical_cap": 40, "historical_remaining": 13, "m3_budget_allocated": 0,
+    "deferred_cases": [{"id": "RL1", "status": "not_authorized_not_run"}, {"id": "RL2", "status": "not_authorized_not_run"}]
+  },
+  "notes": ["No browser/login/refresh/profile check, provider generation, hosted write, commit, push or publication in M3.", "Pi authoring conversation is separate from project verification.", "OFFLINE ACCEPTED after the repeated accumulated review; LIVE NOT AUTHORIZED / NOT RUN."]
+}

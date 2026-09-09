@@ -16,8 +16,13 @@
 | `providers/openai_codex/codec.rs` | Native event decoding and typed item classification |
 | `providers/openai_codex/state.rs` | In-memory transcript, parent response, pending result identities |
 | `providers/openai_codex/session.rs` | Task lifetime, admission, independent control/output paths |
-| `tools.rs` | Explicit tool registry and deterministic demonstration executor |
-| `main.rs` | Temporary CLI caller, text/NDJSON output, bounded tool-demo driver |
+| `providers/openai_codex/consistency.rs` | Bounded provisional/effective-output validation before settlement and terminal publication |
+| `tools.rs` | Shared two-phase registry, fresh result scopes and deterministic addition executor |
+| `run/mod.rs` | Provider-neutral bounded run controller, limits and cooperative stop ownership |
+| `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
+| `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
+| `run_cli.rs` | Thin run argument validation, rendering and cancellation adapter |
+| `main.rs` | CLI routing and legacy text/NDJSON, generate and fixed tool-demo callers |
 | `demo.rs` | Pure acceptance checks for the fixed 17+25 CLI case |
 | `smoke.rs` | Explicit synthetic live cases and sanitized acceptance summary |
 | `providers/openai_codex/observation.rs` | Opt-in transport evidence; no generic event-contract change |
@@ -41,7 +46,8 @@ refresh forces one exchange; automatic preparation skips fresh profiles and reus
 rotations completed by concurrent waiters. The adapter shares login's strict token
 parser and fixed-TLS-response trust model. It permits no proxy, redirect, or retry;
 connect/read limits are 10 seconds, exchange time 30 seconds, and response size
-65536 bytes. Renewal evidence is OFFLINE-only; live renewal is NOT RUN.
+65536 bytes. Explicit renewal has live L1 evidence; automatic expiry and failure
+paths have offline evidence.
 See [Wi auth](WI_AUTH.md).
 
 ## Two interfaces, not one borrowed stream
@@ -137,6 +143,13 @@ The CLI's fixed demo applies stricter acceptance before invoking the
 registry policy: exactly one `add_numbers` call with `a=17,b=25`, one correlated
 `sum=42` result, and final ordinary answer text exactly `42` after trimming.
 
+Whole-batch preflight validates authority, arguments, identity and capacity before
+sequential execution. IDs are bounded to 512 UTF-8 bytes. A batch has at most eight
+calls; the cache has at most 128 results. Cached calls still require authorization.
+`fresh_scope()` shares registered tool Arcs but starts an empty cache. Each run owns
+one such scope, leaving the caller's cache untouched. New-execution budgets count
+new IDs, not cached results or raw batch length.
+
 Tool results are cached by call ID in the registry instance. Reusing the same ID
 with different arguments is rejected. Identical repeated delivery uses the saved
 result. This is a bounded in-memory convenience, not a durable exactly-once claim.
@@ -189,13 +202,15 @@ known, and the unchanged upstream outcome. It discards event messages and maps
 unknown codes to `unclassified`. The top-level stage identifies setup, generation,
 or acceptance. This summary does not change the provider-neutral event shape.
 
-The private CLI collector checks provisional text/refusal and finalized message/call
-material against effective output before follow-up or tool execution.
+The adapter consistency validator checks provisional text/refusal and finalized
+message/call material against effective output before settlement or successful
+terminal publication. Both public library sessions and legacy CLI callers receive
+this protection; the run controller contains no OpenAI native-key parsing.
 It rejects missing/conflicting evidence rather than reconstructing output. Per request,
 item events consume a cumulative 1 MiB serialized-byte budget, including duplicates.
 Tracking permits 4096 events and 512 finalized occurrences; item/content indexes must
-be below 512. Each retained text copy is bounded by 1 MiB. This check does not alter
-codec outcomes, conversation settlement, or library continuation authority.
+be below 512. Each retained text copy is bounded by 1 MiB. Failure prevents conversation settlement and subsequent continuation. A previously
+validated terminal retains `terminal_received` even if this local validation fails.
 
 The provider decoder owns a private bounded finalized-item tracker. It recovers only
 complete done objects after a correlated successful terminal explicitly supplies an empty
@@ -206,17 +221,43 @@ without rewriting native terminal JSON. Conversation and registry consumers cont
 use effective output, including native item metadata for SSE replay. See EVENTS.md for
 bounds, lifecycle validation, and fail-closed rules.
 
+## Bounded run ownership
+
+`wi::run::run` validates before admission, then owns one session and a fresh tool
+scope until completion or stop. The generic collector validates provider/session/
+request identity, response identity and increasing provider-local sequence without
+interpreting native payloads. It forwards unchanged inner envelopes and never waits
+for a second terminal event. Only completed ordinary calls can continue.
+
+One admission-started monotonic deadline encloses open, generate, collection and
+cooperative tools. Cancellation wins when cancellation and deadline are ready
+together. Model limits count attempted generate calls; whole-batch tool preflight
+precedes any new dispatch. The controller never retries or reopens a failed session.
+It invokes no auth methods; provider opening and the existing same-profile SSE
+preparation retain authentication ownership and renewal-worker completion policy.
+
+The fallible synchronous observer receives outer lifecycle/provider/tool events.
+It must not block; a channel adapter uses bounded nonblocking forwarding. No internal
+transcript, durable queue or replay service is added. Sink failure stops later work;
+final-emission failure preserves the selected outcome but marks delivery incomplete.
+`RunResult` retains counters and the last full response, not an unbounded history.
+A close guard requests local session closure on return or future drop. Drop/process
+loss cannot promise a result, final event, rollback or upstream cancellation.
+`run_cli.rs` only validates inputs, constructs the existing provider, renders events
+and signals cancellation; it does not implement a second loop.
+
 ## Intentionally deferred
 
-- Agent run/turn state machine, approvals, tool cancellation and sandboxing.
+- Approvals, sandboxing and noncooperative/external-effect cancellation guarantees.
 - Durable operation acceptance/settlement/recovery, sessions, branching, queues.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
 - Tool discovery and skill resource loading/hosted uploads.
 - HTTP server, GUI, keyring and proxy support.
 - Stable provider support for the experimental shared OAuth registration.
-  Browser login and real renewal are implemented; renewal has OFFLINE-only evidence.
-  TODO: separately authorize L1 live renewal and the later managed-auth matrix.
+  Browser login and explicit renewal have local Linux live evidence. Automatic
+  expiry and failure paths have offline evidence. M3 is OFFLINE ACCEPTED after
+  repeated accumulated independent review; live runs remain NOT AUTHORIZED / NOT RUN.
 
 Advanced requirements fail closed instead of silently degrading or switching
 billing/authentication modes. Item preservation is not advertised as execution

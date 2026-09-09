@@ -313,6 +313,10 @@ async fn worker(
     // Sink sender drops here; stream drains queued events and the final slot.
 }
 
+#[cfg(test)]
+#[path = "consistency_settlement_tests.rs"]
+mod consistency_settlement_tests;
+
 #[allow(clippy::too_many_arguments)]
 async fn drive(
     wire: &mut Wire,
@@ -336,6 +340,7 @@ async fn drive(
         result = wire.send(body, request_id, upstream) => result?,
     }
     let mut decoder = ResponseDecoder::default();
+    let mut lifecycle = super::consistency::Lifecycle::default();
     loop {
         let value = tokio::select! {
             biased;
@@ -357,8 +362,11 @@ async fn drive(
             }
         }
         for event in events {
+            lifecycle.observe(&event)?;
             match event {
                 ProviderEvent::ResponseFinished { response } => {
+                    // Reject contradictions before they enter continuation history or reach callers.
+                    lifecycle.validate(&response)?;
                     state.settle(full_input, &response)?;
                     wire.end_response();
                     return Ok((response, seq));

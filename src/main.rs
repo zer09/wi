@@ -15,10 +15,10 @@ use wi::{
     ResponseOutcome, Result, SessionOptions, Transport,
 };
 mod auth_cli;
-mod collect_lifecycle;
 #[cfg(test)]
 mod collect_tests;
 mod demo;
+mod run_cli;
 mod smoke;
 
 #[derive(Parser)]
@@ -37,6 +37,8 @@ enum Command {
     Capabilities,
     /// Generate text; optional follow-up uses the same provider session.
     Generate(GenerateArgs),
+    /// Run one bounded task with optional local addition tools.
+    Run(run_cli::RunArgs),
     /// Demonstrate one ordinary, bounded, read-only function-tool round trip.
     ToolDemo(ModelArgs),
     /// Opt-in fixed live smoke case; emits only sanitized structural evidence.
@@ -158,7 +160,7 @@ async fn collect(
     request_id: &str,
     json_mode: bool,
 ) -> Result<ModelResponse> {
-    let mut lifecycle = collect_lifecycle::Lifecycle::default();
+    let mut rendered = String::new();
     while let Some(envelope) = session.events.next().await {
         if json_mode {
             line_json(&envelope)?;
@@ -169,7 +171,6 @@ async fn collect(
         if envelope.request_id.as_deref() != Some(request_id) {
             return Err(GatewayError::Protocol("unexpected request identity"));
         }
-        lifecycle.observe(&envelope.event)?;
         match envelope.event {
             ProviderEvent::OutputItemUpdated {
                 kind: DeltaKind::Text | DeltaKind::Refusal,
@@ -177,13 +178,13 @@ async fn collect(
                 ..
             } => {
                 if !json_mode {
+                    rendered.push_str(&delta);
                     write_text(&delta)?;
                 }
             }
             ProviderEvent::ResponseFinished { response } => {
-                lifecycle.validate(&response)?;
                 if !json_mode {
-                    if let Some(suffix) = response.text.strip_prefix(&lifecycle.rendered) {
+                    if let Some(suffix) = response.text.strip_prefix(&rendered) {
                         write_text(suffix)?;
                     } else {
                         write_text("\n[Authoritative final response]\n")?;
@@ -296,8 +297,9 @@ async fn tool_demo(args: ModelArgs) -> Result<()> {
     control.close();
     result
 }
-async fn run() -> Result<()> {
-    match Cli::parse().command {
+async fn run(cli: Cli) -> Result<i32> {
+    let result = match cli.command {
+        Command::Run(args) => return run_cli::run(args).await,
         Command::Auth(command) => command.run().await,
         Command::AuthCheck(args) => {
             let auth = credentials(&args)?.load().await?;
@@ -309,12 +311,33 @@ async fn run() -> Result<()> {
         Command::Generate(args) => generate(args).await,
         Command::ToolDemo(args) => tool_demo(args).await,
         Command::Smoke(args) => smoke::run(args).await,
-    }
+    };
+    result.map(|()| 0)
 }
 #[tokio::main]
 async fn main() {
-    if let Err(error) = run().await {
-        eprintln!("error: {error}");
-        std::process::exit(1);
+    // Only the root subcommand selects run's startup policy, not later argument values.
+    let is_run = std::env::args_os().nth(1).is_some_and(|arg| arg == "run");
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = match error.kind() {
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion => 0,
+                _ if is_run => 1,
+                _ => error.exit_code(),
+            };
+            let _ = error.print();
+            std::process::exit(code);
+        }
+    };
+    let code = match run(cli).await {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("error: {error}");
+            1
+        }
+    };
+    if code != 0 {
+        std::process::exit(code);
     }
 }

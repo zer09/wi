@@ -1,15 +1,15 @@
-//! CLI-only consistency checks. Streamed material never becomes response output.
-use serde_json::Value;
-use std::io::Write;
-use wi::{
+//! Adapter consistency checks. Streamed material never becomes response output.
+use crate::{
     DeltaKind, GatewayError, ItemKind, ModelResponse, ProviderEvent, ResponseOutcome, Result,
 };
+use serde_json::Value;
+use std::io::Write;
 
 pub(super) const MAX_BYTES: usize = 1024 * 1024;
 pub(super) const MAX_EVENTS: usize = 4096;
 const MAX_ITEMS: usize = 512;
 const ERROR: &str =
-    "CLI streamed output is inconsistent with terminal output or exceeds tracking limits";
+    "streamed output is inconsistent with terminal output or exceeds tracking limits";
 fn invalid() -> GatewayError {
     GatewayError::Protocol(ERROR)
 }
@@ -22,7 +22,7 @@ pub(super) struct Lifecycle {
     kinds: Vec<(u64, ItemKind)>,
     parts: Vec<(u64, usize, DeltaKind, String)>,
     finalized: Vec<(u64, Value)>,
-    pub rendered: String,
+    rendered: String,
 }
 // Count serialized bytes without allocating a second native item or JSON buffer.
 struct Budget<'a>(&'a mut usize);

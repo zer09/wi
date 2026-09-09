@@ -37,7 +37,8 @@ CLI / library caller
 
 The deterministic `add_numbers` executor is a separate module. The provider
 never executes files, commands, model-generated JavaScript, or unknown tools.
-There is no web server, GUI, database, production agent loop, or sandbox here.
+There is no web server, GUI, database, persistent agent service, or sandbox here.
+The bounded `wi::run::run` controller supports ordinary tool/result cycles.
 
 ## What is implemented in source
 
@@ -89,6 +90,67 @@ WebSocket crate versions remain pinned. Use the lockfile for reproducible
 resolution. Managed auth directly uses the already locked `ring` and `rustix`
 crates for secure randomness and safe Linux filesystem operations.
 
+## Bounded run controller (M3)
+
+`wi::run::run(&gateway, request, &registry, cancel, observer).await` accepts a
+`RunRequest` with provider ID, `SessionOptions`, prompt and `RunLimits`.
+Caller `options.tools` must be empty; the registry supplies the declarations.
+Validation errors return `Err` before events or session opening. Admitted runs
+return `RunResult` with outcome, counters, last full response and delivery status.
+The provider-neutral controller opens one session and performs sequential ordinary
+function-tool/result cycles. It has no retry, reconnect, fallback or resume path.
+Each run shares registered tool implementations but starts a fresh result cache;
+it neither consumes nor changes the caller registry's cached results.
+
+The independent example uses synthetic responses and no credentials or network:
+
+```bash
+cargo run --example run_offline
+```
+
+It ends with `Completed: 50 (1 session, 3 model requests, 2 tool executions; offline)`.
+M3 is OFFLINE ACCEPTED after the repeated accumulated independent review.
+RL1/RL2 are NOT AUTHORIZED / NOT RUN. The historical ledger remains 27/40 used,
+13 remaining, with zero allocated to M3. See [M3 verification](docs/WI_RUN_VERIFICATION.md).
+
+The following is usage documentation, not authorization to make a live request:
+
+```bash
+wi run --auth-source codex --model "YOUR_ENABLED_CODEX_MODEL_ID" \
+  --prompt "Add 17 and 25, then add 8 to the result" --tool add_numbers
+```
+
+Use exactly one of `--prompt` or `--stdin`; input must pass the existing 1 MiB
+serialized-input bound. `--instructions` defaults to `You are a helpful assistant.`
+The default auth source is Codex and transport is WebSocket; SSE requires
+`--transport sse`. Managed auth requires explicit `--auth-source gateway` and
+accepts `--account`, not `--auth-file`. No tools are enabled by default.
+Only `--tool add_numbers` is available; duplicate or unknown selections fail.
+There is no follow-up, resume or steering option.
+
+| Limit | Default | Accepted range |
+|---|---:|---:|
+| `--max-model-requests` | 4 | 1–32 |
+| `--max-tool-executions` | 8 | 0–128 |
+| `--deadline-seconds` | 120 | 1–600 |
+
+Model limits count attempts, including rejected or uncertain submissions. A tool
+batch is fully validated before dispatch and must fit the remaining new-execution
+budget. At the model-request limit, no tool batch executes or replays. Cache reuse
+does not consume a new execution slot; capacity is 128 results and eight calls per batch.
+The deadline is absolute from admission, not reset per turn. Cancellation is
+cooperative; Ctrl+C signals the token and awaits controlled completion. Neither
+cancellation nor future-drop cleanup guarantees that upstream work stopped.
+
+`--json` emits only outer `RunEventEnvelope` NDJSON on stdout. Nested native items,
+text and tool data are sensitive application data, not sanitized telemetry.
+Diagnostics remain on stderr. Plain output filters terminal controls and labels
+validated responses without marking partial output complete. Completed exits 0
+(including refusal, not proof of correctness), local cancellation exits 130, and
+other failures or startup/parse errors exit 1. Help exits 0; old command parse
+errors retain exit 2. Output delivery failure takes precedence and exits 1, even
+after completion; broken stdout stops further work.
+
 ## Experimental Wi browser login
 
 On Linux or WSL's private Linux filesystem, explicitly opt in:
@@ -114,8 +176,8 @@ Wi-owned profile and prints safe current metadata. `--auth-source gateway` enabl
 automatic preparation near expiry before a new session or same-profile SSE request.
 Established WebSockets never renew mid-session. The token exchange uses fixed TLS,
 no proxy/redirect/retry, 10-second connect/read limits, a 30-second exchange limit,
-and a 65536-byte response limit. Renewal evidence is OFFLINE-only; live renewal is
-NOT RUN. TODO: separately authorize L1 renewal and the later managed-auth matrix.
+and a 65536-byte response limit. Explicit renewal has live L1 evidence;
+automatic expiry and failure paths have offline evidence.
 See [Wi auth](docs/WI_AUTH.md) for bounds, trust assumptions, and persistence behavior.
 
 ## Reuse your own subscription login
@@ -419,8 +481,9 @@ material and must be treated as sensitive application data.** Normal text mode
 prints exposed text/refusal content, not reasoning summaries. Final response text
 is authoritative. Both modes treat streamed output as provisional. If a completed
 effective output omits or conflicts with streamed nonempty text/refusal or finalized
-message/function-call output, the CLI exits nonzero with a static error before tool
-execution or follow-up. Recovery belongs to the provider decoder, not the CLI.
+message/function-call output, the adapter rejects before settlement or successful terminal publication, and the
+CLI exits nonzero before tool execution or follow-up. Recovery and consistency
+validation belong to the provider adapter, not the CLI.
 Terminal-only responses and matching text prefixes with terminal suffixes remain valid.
 The guard compares streamed parts by item identity and content index, not their
 combined arrival order. Valid interleaving remains valid; text mode prints a labelled
@@ -428,7 +491,7 @@ terminal response when arrival order is not a prefix of terminal text.
 The per-request guard charges every item event's serialized bytes, including duplicates,
 and the separate rendered-text copy against a cumulative 1 MiB. It permits at most 4096 events, 512 finalized occurrences, and item/content
 indexes below 512. Private retained text copies are each bounded by 1 MiB; finalized
-native items share the cumulative byte budget. All tracking resets at each collect.
+native items share the cumulative byte budget. All adapter consistency tracking resets at each request.
 Conflicting identities or finalized native content fail closed, even if only metadata differs.
 
 ```bash

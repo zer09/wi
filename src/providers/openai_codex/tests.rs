@@ -23,6 +23,8 @@ use tokio_tungstenite::{
 
 #[path = "boundary_tests.rs"]
 mod boundary_tests;
+#[path = "consistency_loopback_tests.rs"]
+mod consistency_loopback_tests;
 #[path = "diagnostic_tests.rs"]
 mod diagnostic_tests;
 #[path = "lifecycle_tests.rs"]
@@ -34,6 +36,8 @@ mod managed_loopback_tests;
 mod observation_tests;
 #[path = "recovery_loopback_tests.rs"]
 mod recovery_loopback_tests;
+#[path = "run_loopback_tests.rs"]
+mod run_loopback_tests;
 #[path = "sse_prolog_loopback_tests.rs"]
 mod sse_prolog_loopback_tests;
 
@@ -586,7 +590,7 @@ async fn slow_event_consumer_gets_terminal_failure_without_unbounded_buffering()
         )
         .await;
         for _ in 0..100 {
-            let frame = json!({"type":"response.output_text.delta","item_id":"m1","output_index":0,"delta":"x"});
+            let frame = json!({"type":"response.output_text.delta","item_id":"m1","output_index":0,"content_index":0,"delta":"x"});
             if socket
                 .send(Message::Text(frame.to_string().into()))
                 .await

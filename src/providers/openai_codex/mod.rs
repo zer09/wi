@@ -4,6 +4,9 @@
 pub mod auth;
 pub mod browser_login;
 mod codec;
+mod consistency;
+#[cfg(test)]
+mod consistency_tests;
 mod finalized;
 pub mod managed_auth;
 mod managed_store;

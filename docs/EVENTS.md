@@ -5,7 +5,8 @@ only the validated selected profile alias on stderr. Provider account IDs and
 tokens never become selection evidence. Preparation failures before generation
 dispatch remain `not_submitted`; OAuth exchange uncertainty is separate from
 generation submission uncertainty. Experimental login and real renewal are implemented;
-renewal evidence is OFFLINE-only and live renewal is NOT RUN. Explicit auth refresh
+explicit renewal has live L1 evidence; automatic expiry and failure paths have
+offline evidence. Explicit auth refresh
 returns safe profile metadata, not generation events. SSE prepares the same bound
 profile before submission; established WebSockets never renew mid-session.
 
@@ -40,8 +41,8 @@ Delta kinds are `text`, `refusal`, `reasoning_summary`, `reasoning_text`,
 not access to hidden model reasoning. Keep encrypted continuation state private.
 
 The response's `outcome` carries `completed`, `incomplete` with reason, `failed`,
-or `cancelled`. The model response being completed does not complete a future
-agent run. Raw function-argument deltas are NEVER tool-execution events.
+or `cancelled`. A completed model response does not by itself complete a run
+when ordinary tool calls remain. Raw function-argument deltas are NEVER tool-execution events.
 
 Request errors before admission or during session setup are returned as Rust
 `Result::Err`. An admitted request normally produces one `response_finished` or
@@ -99,8 +100,10 @@ without item evidence stays empty. Invalid recovery emits no response_finished a
 cannot settle, continue, or execute. Its failure reports `terminal_received` because
 terminal parsing and correlation succeeded before local recovery failed.
 
-The CLI separately validates provisional evidence against effective output before
-execution or follow-up. Both display modes remain provisional until that check passes.
+The adapter consistency validator checks provisional evidence against effective
+output before settlement or successful terminal publication. Public library sessions,
+legacy CLI callers and the run controller receive the same guarantee. Both display
+modes remain provisional until validation passes.
 
 `response.completed`, `response.incomplete`, `response.failed`,
 `response.cancelled`, and the Codex `response.done` compatibility alias →
@@ -157,14 +160,71 @@ by the ordinary continuation/executor path.
 ## Demonstration executor events
 
 `tool_execution_started`, `tool_execution_finished`, and `tool_result_reused` are
-emitted by the separate tool registry, not by the provider. The CLI writes them as
-plain NDJSON objects in tool-demo mode; they are not yet wrapped in a durable
-run/session event envelope. Consumers can distinguish them by their `type`.
+emitted by the separate tool registry, not by the provider. Legacy `tool-demo`
+writes raw NDJSON objects distinguished by `type`. `wi run` nests these same objects
+inside `tool_event` with run/turn/session/request correlation. Neither form is durable.
+
+## Outer run envelope v1
+
+`wi::run::run` and `wi run --json` use `RunEventEnvelope`: `schema_version: 1`,
+`sequence`, `event_id`, `run_id`, nullable `turn_id`, `session_id`, `request_id`,
+and a flattened event with snake_case `type`. Opaque run/turn/event IDs are fresh.
+Sequence starts at 1 and counts attempted emissions independently of inner provider
+sequence. It is not a replay cursor. Inner `EventEnvelope` JSON and native payloads
+remain unchanged. These events are sensitive application data, not safe telemetry.
+
+| Serialized type | Payload and correlation |
+|---|---|
+| `run_started` | `limits`, including deadline `{secs, nanos}`; before open, with null turn/session/request IDs |
+| `turn_started` | 1-based `number`; session and new turn ID, request null before receipt |
+| `provider_event` | Unchanged nested provider `event`; outer IDs identify the current run and turn |
+| `tool_event` | Nested registry `event`; request ID identifies the response that produced the call |
+| `turn_finished` | `number`, nullable `response_id`, `outcome`, nullable `upstream_outcome` |
+| `run_finished` | `outcome`, `summary`; turn ID null |
+
+These are four lifecycle kinds and two wrappers. `TurnOutcome` uses a `type` tag:
+`model_completed`, `tools_prepared`, or `stopped` with a `reason: RunOutcome`.
+Prepared tools do not prove the next request was submitted; no result-delivery ACK
+is invented. `RunOutcome` also uses `type`: `completed`, `cancelled_locally`,
+`failed` with static `code`, or `limit_reached` with `limit` equal to
+`model_requests`, `tool_executions` or `deadline`.
+
+`RunSummary` contains `turns_started`, `turns_finished`, `model_requests_attempted`,
+`model_requests_admitted`, `new_tool_dispatches`, `tool_results_prepared`,
+`reused_results`, nullable `last_request_id` and nullable `last_upstream_outcome`.
+Attempts count generate calls and admissions count receipts. New dispatches count
+accepted dispatch boundaries after start-event delivery; cancellation at that boundary
+can prevent the tool body from running. Prepared/reused results
+are not upstream acknowledgements. These counters are not billing or live-ledger evidence.
+`RunResult` adds run/session identity, outcome, summary, the last full response,
+`events_complete` and nullable `sink_error`.
+
+Pre-admission validation returns `Err` with no events or session open. An admitted
+controlled run starts with `run_started` and ends with `run_finished` if the sink
+remains healthy. Each started turn gets one finish. Open failure has no turn.
+Incomplete/failed/provider-cancelled responses never execute tools or continue;
+the last response and provenance remain inspectable. Completed refusal is a completed
+run, not proof that the requested task succeeded.
+
+The synchronous observer returns `RunSinkError::{Full, Closed, Failed}`. Callers
+must not block it; channel forwarding must be bounded and nonblocking. A sink error
+stops later emission and work without retry and marks `events_complete=false`.
+Failure delivering the final event preserves the selected execution outcome and
+records `sink_error`; it does not emit another terminal event. CLI delivery failure
+exits 1 even after execution completed. The returned result is authoritative because
+a callback can partially consume an event before returning an error.
+
+Cancellation and the absolute deadline normally produce controlled terminal events.
+They do not roll back external side effects or guarantee kernel-blocking interruption.
+Dropping the run future requests session closure when a handle exists, but cannot
+return a result or promise terminal delivery. Process loss has the same delivery
+limit. There is no durable replay, event store, internal unbounded queue or detached
+tool task.
 
 ## Not emitted yet
 
 No `agent_start`, `agent_end`, `turn_start`, `turn_end`, message transcript,
-approval, compaction, queue, or retry lifecycle is claimed. Those require the
-corresponding harness components. Native steering acknowledgements are not
+approval, compaction, queue, or retry lifecycle is claimed. The implemented run
+lifecycle uses the exact names above, not aliases from another harness. Native steering acknowledgements are not
 implemented; `steer()` returns UnsupportedFeature. SSE and WebSocket share the
 implemented provider-event contract but not imaginary feature parity.

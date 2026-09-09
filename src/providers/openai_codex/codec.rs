@@ -425,6 +425,10 @@ mod tests {
         assert!(
             matches!(&e[0], ProviderEvent::ResponseFinished { response } if response.text == "entire answer")
         );
+        assert!(matches!(
+            d.apply(json!({"type":"response.completed","response":{"id":"r1","status":"completed","output":[]}})),
+            Err(GatewayError::Protocol("event after terminal response"))
+        ));
         assert!(
             d.apply(json!({"type":"response.created","response":{"id":"r2"}}))
                 .is_err()

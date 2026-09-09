@@ -6,6 +6,7 @@ pub mod error;
 pub mod gateway;
 pub mod provider;
 pub mod providers;
+pub mod run;
 pub mod tools;
 
 pub use error::{GatewayError, Result};

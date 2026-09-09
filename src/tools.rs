@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    future::{Future, pending},
     sync::Arc,
 };
 
@@ -52,6 +53,13 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Share registered tools, but never share cached execution results.
+    pub fn fresh_scope(&self) -> ToolRegistry {
+        Self {
+            tools: self.tools.clone(),
+            results: HashMap::new(),
+        }
+    }
     pub fn register(&mut self, tool: Arc<dyn Tool>) -> Result<()> {
         let definition = tool.definition();
         definition.validate()?;
@@ -74,11 +82,32 @@ impl ToolRegistry {
         response: &ModelResponse,
         mut emit: impl FnMut(ToolExecutionEvent),
     ) -> Result<Vec<InputItem>> {
+        let mut batch = self.preflight(response)?;
+        let mut results = Vec::with_capacity(batch.calls.len());
+        while let Some(result) = batch
+            .execute_next(
+                || Ok(()),
+                pending::<GatewayError>(),
+                |event| {
+                    emit(event);
+                    Ok(())
+                },
+            )
+            .await?
+        {
+            results.push(result);
+        }
+        Ok(results)
+    }
+
+    /// Borrow the scope so cache/registration changes cannot invalidate preflight.
+    pub(crate) fn preflight(&mut self, response: &ModelResponse) -> Result<PreparedBatch<'_>> {
         if response.outcome != ResponseOutcome::Completed {
             return Err(GatewayError::NotCompleted);
         }
         let mut calls: Vec<(FunctionCall, Value, Arc<dyn Tool>)> = Vec::new();
         let mut ids = HashSet::new();
+        let mut new_executions = 0;
         for item in &response.output {
             match item.kind {
                 ItemKind::Message | ItemKind::Reasoning => continue,
@@ -97,9 +126,12 @@ impl ToolRegistry {
             {
                 return Err(GatewayError::UnsupportedOutput);
             }
-            if call.call_id.is_empty() || !ids.insert(call.call_id.clone()) {
+            if call.call_id.is_empty()
+                || call.call_id.len() > 512
+                || !ids.insert(call.call_id.clone())
+            {
                 return Err(GatewayError::Protocol(
-                    "empty or duplicate tool call identity",
+                    "empty, oversized, or duplicate tool call identity",
                 ));
             }
             if call.arguments.len() > 64 * 1024 {
@@ -107,6 +139,9 @@ impl ToolRegistry {
             }
             let arguments: Value = serde_json::from_str(&call.arguments)
                 .map_err(|_| GatewayError::InvalidToolArguments)?;
+            if !arguments.is_object() {
+                return Err(GatewayError::InvalidToolArguments);
+            }
             let tool = self
                 .tools
                 .get(&call.name)
@@ -120,31 +155,73 @@ impl ToolRegistry {
                     "call identity reused with different arguments",
                 ));
             }
+            if !self.results.contains_key(&call.call_id) {
+                new_executions += 1;
+            }
             calls.push((call.clone(), arguments, tool));
+            if calls.len() > 8 {
+                return Err(GatewayError::InvalidRequest(
+                    "demo tool-call limit exceeded",
+                ));
+            }
         }
-        if calls.len() > 8 || self.results.len().saturating_add(calls.len()) > 128 {
+        if self.results.len().saturating_add(new_executions) > 128 {
             return Err(GatewayError::InvalidRequest(
                 "demo tool-call limit exceeded",
             ));
         }
-        let mut results = Vec::new();
-        for (call, arguments, tool) in calls {
-            if let Some(saved) = self.results.get(&call.call_id) {
+        Ok(PreparedBatch {
+            registry: self,
+            calls: calls.into_iter(),
+            new_executions,
+        })
+    }
+}
+
+pub(crate) struct PreparedBatch<'a> {
+    registry: &'a mut ToolRegistry,
+    calls: std::vec::IntoIter<(FunctionCall, Value, Arc<dyn Tool>)>,
+    /// Remaining new dispatches; check the whole budget before the first call.
+    pub(crate) new_executions: usize,
+}
+
+impl PreparedBatch<'_> {
+    /// Check stop/sink state before each call and after start observation. The
+    /// caller's stop future selects cancellation before deadline while awaiting work.
+    /// Errors discard the remaining batch; dropping pending work creates no result.
+    pub(crate) async fn execute_next<E: From<GatewayError>>(
+        &mut self,
+        mut checkpoint: impl FnMut() -> std::result::Result<(), E>,
+        stop: impl Future<Output = E>,
+        mut emit: impl FnMut(ToolExecutionEvent) -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<InputItem>, E> {
+        let Some((call, arguments, tool)) = self.calls.next() else {
+            return Ok(None);
+        };
+        let result = async {
+            checkpoint()?;
+            if let Some(saved) = self.registry.results.get(&call.call_id) {
                 emit(ToolExecutionEvent::ToolResultReused {
                     call_id: call.call_id.clone(),
                     tool_name: call.name.clone(),
-                });
-                results.push(InputItem::ToolResult {
+                })?;
+                return Ok(Some(InputItem::ToolResult {
                     call_id: call.call_id,
                     output: saved.output.clone(),
-                });
-                continue;
+                }));
             }
+            self.new_executions -= 1;
             emit(ToolExecutionEvent::ToolExecutionStarted {
                 call_id: call.call_id.clone(),
                 tool_name: call.name.clone(),
-            });
-            let (value, is_error) = match tool.execute(arguments.clone()).await {
+            })?;
+            checkpoint()?;
+            let executed = tokio::select! {
+                biased;
+                error = stop => return Err(error),
+                result = tool.execute(arguments.clone()) => result,
+            };
+            let (value, is_error) = match executed {
                 Ok(value) => (value, false),
                 Err(error) => (json!({"error":{"code":error.code()}}), true),
             };
@@ -156,7 +233,7 @@ impl ToolRegistry {
             } else {
                 is_error
             };
-            self.results.insert(
+            self.registry.results.insert(
                 call.call_id.clone(),
                 CachedResult {
                     name: call.name.clone(),
@@ -168,13 +245,19 @@ impl ToolRegistry {
                 call_id: call.call_id.clone(),
                 tool_name: call.name,
                 is_error,
-            });
-            results.push(InputItem::ToolResult {
+            })?;
+            Ok(Some(InputItem::ToolResult {
                 call_id: call.call_id,
                 output,
-            });
+            }))
         }
-        Ok(results)
+        .await;
+        if result.is_err() {
+            // A failed observer must never receive another event from this batch.
+            self.calls = Vec::new().into_iter();
+            self.new_executions = 0;
+        }
+        result
     }
 }
 
@@ -211,6 +294,10 @@ impl Tool for AddNumbers {
         Ok(json!({"sum":sum}))
     }
 }
+
+#[cfg(test)]
+#[path = "tools_batch_tests.rs"]
+mod batch_tests;
 
 #[cfg(test)]
 mod tests {

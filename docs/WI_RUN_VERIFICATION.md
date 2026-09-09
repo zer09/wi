@@ -1,11 +1,12 @@
 # Wi M3 verification — observed offline evidence
 
-Contract `m3.1`; checked 2026-09-09. Baseline and current HEAD:
-`2d9008b125c8a67dbc6977fe07fd65442cac7f9a`.
+Contract `m3.1`; checked 2026-09-09. Baseline:
+`2d9008b125c8a67dbc6977fe07fd65442cac7f9a`. Implementation commit:
+`8f28f1fd85827641e22fc93ceac88ec76060eb0c`.
 
 ## Current verdict
 
-- Implementation complete as uncommitted work over the baseline; offline gates PASS.
+- Implementation complete in commit `8f28f1fd85827641e22fc93ceac88ec76060eb0c`; offline gates PASS.
 - **OFFLINE ACCEPTED** after the repeated accumulated independent review.
 - **M3-26 PASS**. `milestone_accepted` is true.
 - **M3-09 PASS** after the adapter decoder regression now sends and rejects an
@@ -31,25 +32,26 @@ including their historical planning status. Results live here and in
 | OS / architecture | Linux 6.18.33.2-microsoft-standard-WSL2 / x86_64 |
 | Rust / Cargo | rustc 1.98.1 / cargo 1.98.1 |
 | Node / uv / Pi | v24.18.0 / 0.12.10 / 0.85.1 |
-| Planning revision | Uncommitted planning worktree files over baseline, not a planning commit |
-| Implementation revision | HEAD remains the baseline above; runtime/test changes are dirty work |
+| Planning revision | Included with the implementation in `8f28f1fd85827641e22fc93ceac88ec76060eb0c`; no separate planning commit |
+| Implementation revision | `8f28f1fd85827641e22fc93ceac88ec76060eb0c` |
 | Platform coverage | Local Linux only; no current hosted or non-Linux execution |
 
 The supplied initial preimplementation dirty state was exactly modified `AGENTS.md`
 and added `docs/WI_RUN_CONTROLLER.md`, `docs/WI_RUN_IMPLEMENTOR_PROMPT.md`,
 `docs/WI_RUN_MATRIX.md`, `docs/WI_RUN_VERIFICATION.md`, and
-`docs/wi-run-verification.json`. At this role's entry, those six files were already
-staged; implementation changes were unstaged or untracked. No index transition was
-performed. New report edits remain unstaged over the staged scaffolds. This report
-does not imply the entire index is empty or that planning files were committed.
+`docs/wi-run-verification.json`. Those files were already staged when implementation
+started; runtime/test changes were initially unstaged or untracked. The user later
+authorized staging and committing the complete accepted M3 worktree. Commit
+`8f28f1fd85827641e22fc93ceac88ec76060eb0c` preserves and includes that work.
 
-`git rev-parse HEAD` and `git status --short` confirmed that state directly.
+`git rev-parse HEAD` and `git status --short` confirmed the recorded states directly.
 `git diff HEAD -- Cargo.lock` was empty. `Cargo.lock` is unchanged;
 `Cargo.toml` adds only development Tokio `test-util` from the prior implementation.
 No auth implementation module changed. Historical `docs/LOCAL_VERIFICATION.md`,
 `docs/local-verification.json`, `COMBINED_DESIGN_REPORT`, manifests and ledger remain
 unchanged. `AGENTS.md` and governing specification documents are preserved as received.
-No reset, clean, stash, revert, stage, unstage, commit, push or publication occurred.
+No reset, clean, stash, revert, push or publication occurred. The authorized local
+stage and implementation commit occurred only after offline acceptance.
 
 ## Actual gate results
 

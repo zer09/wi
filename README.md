@@ -110,8 +110,12 @@ cargo run --example run_offline
 
 It ends with `Completed: 50 (1 session, 3 model requests, 2 tool executions; offline)`.
 M3 is OFFLINE ACCEPTED after the repeated accumulated independent review.
-RL1/RL2 are NOT AUTHORIZED / NOT RUN. The historical ledger remains 27/40 used,
-13 remaining, with zero allocated to M3. See [M3 verification](docs/WI_RUN_VERIFICATION.md).
+The separately authorized RL1 WebSocket and RL2 SSE checks passed with
+`gpt-5.6-luna` and Wi-managed gateway authentication. They used two submissions
+each with no retries. The user then raised the cumulative cap to 50 without
+adding submissions. The ledger is 31/50 used, 19 remaining; M3 itself retained
+zero allocation and the post-M3 RL checks used four. See
+[M3 verification](docs/WI_RUN_VERIFICATION.md).
 
 The following is usage documentation, not authorization to make a live request:
 

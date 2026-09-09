@@ -7,13 +7,19 @@ follow `docs/WI_RUN_CONTROLLER.md` (contract m3.1), `docs/WI_RUN_MATRIX.md`, and
 `docs/WI_RUN_IMPLEMENTOR_PROMPT.md`. The implementor executes this fixed plan;
 no second architecture-planning pass or automatic live phase is needed.
 
-M3 permits only its specified source/test/doc changes and offline verification.
+M3 permitted only its specified source/test/doc changes and offline verification.
 No real credential reads, profile checks, login, renewal, provider generations,
-commits, pushes or publication are authorized by that task. Pi's authoring
+commits, pushes or publication were authorized by that task. Pi's authoring
 conversation is separate. The completed gateway/auth baseline is
-`2d9008b125c8a67dbc6977fe07fd65442cac7f9a`; its current ledger is 27/40 used,
-13 remaining, with zero allocated to M3. Existing managed authentication is
-complete within its recorded scope and must not be redesigned.
+`2d9008b125c8a67dbc6977fe07fd65442cac7f9a`.
+
+After M3 offline acceptance, the user separately authorized RL1/RL2 with
+`gpt-5.6-luna` and Wi-managed gateway authentication. Both passed with two
+submissions each and no retries. The user then raised the cumulative cap from 40
+to 50 without authorizing more submissions. The current ledger is 31/50 used,
+19 remaining; M3 itself retained zero allocation and the post-M3 RL checks used four. Existing
+managed authentication is complete within its recorded scope and must not be
+redesigned.
 
 The gateway-repair handoff below and old START_HERE/LOCAL_AGENT_PROMPT documents
 are historical task instructions. Their Pi-only auth assumptions, repair scope,

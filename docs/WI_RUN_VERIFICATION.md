@@ -11,9 +11,12 @@ Contract `m3.1`; checked 2026-09-09. Baseline:
 - **M3-26 PASS**. `milestone_accepted` is true.
 - **M3-09 PASS** after the adapter decoder regression now sends and rejects an
   exact second terminal while retaining created-after-terminal coverage.
-- RL1/RL2: **NOT AUTHORIZED / NOT RUN**. No automatic live phase.
-- New real credential reads, auth operations and Wi provider generations: **0**.
-- Historical ledger unchanged: **27/40 used, 13 remaining; M3 allocation 0**.
+- Post-M3 RL1 WebSocket and RL2 SSE: **PASS** after separate authorization.
+- Live model/auth: `gpt-5.6-luna` with Wi-managed gateway authentication and
+  default eligible-profile selection; no Pi or Codex credential source.
+- Live usage: **4 provider generations**, two per transport, with no retries.
+- Ledger: **31/50 used, 19 remaining**; M3 allocation 0, post-M3 RL allocation 4.
+  The user raised the cap from 40 to 50 after RL1/RL2 without adding submissions.
 
 This is observed M3 verification, not a scaffold. The assignment supplies the
 isolated baseline and prior increment evidence. The parent orchestration observed
@@ -240,23 +243,52 @@ scope. These are syntax/alignment checks, not an independent acceptance review.
 changed. Final results after recording the repeated review: Node documentation/JSON sanity PASS (61 exact test names), Cargo fmt exit0,
 `git diff --check` exit0. No full runtime rerun was needed for this docs-only increment.
 
-To repeat runtime verification, use isolated temporary HOME/XDG_CONFIG_HOME/
+To repeat offline runtime verification, use isolated temporary HOME/XDG_CONFIG_HOME/
 CODEX_HOME and absent live credential locations, with the existing trusted Rust
 and uv caches/toolchain available. Run the exact ten commands in the gate table.
-Do not run auth-check, login, refresh, smoke or a live runner. The Node runner
-command is `--self-test` only; the example is `run_offline` only.
+Do not run auth-check, login, refresh, smoke or a live runner as part of an offline
+repeat. The Node runner command is `--self-test` only; the example is `run_offline`
+only.
+
+## Separately authorized post-M3 live evidence
+
+The user separately authorized RL1/RL2, selected `gpt-5.6-luna`, and required
+Wi-managed gateway authentication rather than Pi or Codex credential sources.
+The existing default eligible-profile selection policy was used without printing
+or recording the selected profile, account identity, credentials, headers or native
+provider payloads. No explicit status, login, browser-login or refresh command ran.
+Normal managed preparation occurred; whether it needed automatic renewal was not
+inspected and is not claimed.
+
+A temporary uncommitted harness called the public `wi::run::run` controller and
+existing allowlisted `SmokeObserver`/`required_proof` path. It did not use the old
+`wi smoke` shortcut and was removed after the runs. Each transport set
+`max_model_requests=2`, `max_tool_executions=1`, a 120-second deadline and no retry.
+
+| Case | Transport | Result | Observed structural evidence |
+|---|---|---|---|
+| RL1 | WebSocket | PASS; 2 submissions, 1 tool execution, final 42 | One session/socket; second send reused the socket, matched prior response ID, carried new result-only input under the original call ID; both terminals validated completed |
+| RL2 | SSE | PASS; 2 submissions, 1 tool execution, final 42 | One session, two requests; second send replayed exact effective native history plus the correlated result; opaque replay matched or was not emitted; both terminals validated completed |
+
+Both results also had two admitted/attempted model requests, two finished turns,
+one prepared tool result, no reused result, healthy event delivery and final
+`TerminalReceived` upstream classification. Exact sanitized command output was one
+PASS object per case; no provider content or identity was retained. The four
+submissions moved the cumulative ledger from 27/40 to 31/40 used, 9 remaining.
+After both runs, the user raised the cap by 10 without authorizing or making more
+submissions. The current ledger is **31/50 used, 19 remaining**. There were no
+retries or ambiguous writes.
 
 ## Deferred scope and remaining risks
 
 No unresolved confirmed in-scope runtime regression remains after remediation,
-offline gates and the repeated accumulated independent review.
-Local Linux tests do not establish hosted/non-Linux behavior or account capability.
-Real credential reads, profile checks, login/browser/refresh, provider generations,
-hosted writes, commits, pushes and publication were not performed or authorized.
-Pi's authoring conversation is separate from project tests.
+offline gates, repeated accumulated independent review and RL1/RL2. Evidence remains
+local Linux and covers only one bounded tool cycle per transport with the selected
+model; it does not establish broader account capability or non-Linux behavior.
+No explicit profile-status check, login/browser command, explicit refresh, hosted
+write, push or publication occurred. Pi's authoring conversation is separate.
 
-RL1/RL2 require separate authorization and budget; old live smoke success is not
-M3 run-controller evidence. No later live helper, persistent event service,
+No persistent event service,
 durable replay, approval system, shell/file executor, dynamic plugin loader,
 parallel tools, steering, skills/search/PTC/async calling or account failover is
 implemented by this increment. Cooperative cancellation cannot undo side effects
@@ -264,4 +296,4 @@ or guarantee upstream termination. Future drop/process loss cannot guarantee a
 RunResult or terminal event. Final-emission failure can leave execution completed
 but delivery incomplete; the returned result and CLI exit1 preserve that distinction.
 
-**OFFLINE ACCEPTED. LIVE NOT AUTHORIZED / NOT RUN.**
+**OFFLINE ACCEPTED. POST-M3 RL1/RL2 PASS. LEDGER 31/50 USED, 19 REMAINING.**

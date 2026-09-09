@@ -17,7 +17,7 @@
     "offline_gates": "pass",
     "offline_acceptance": "accepted",
     "independent_review": "pass_repeated_accumulated_review",
-    "live": "not_authorized_not_run"
+    "live": "post_m3_rl1_rl2_pass"
   },
   "environment": {
     "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
@@ -32,19 +32,21 @@
   "worktree": {
     "initial": "Before implementation: modified AGENTS.md and added docs/WI_RUN_CONTROLLER.md, docs/WI_RUN_IMPLEMENTOR_PROMPT.md, docs/WI_RUN_MATRIX.md, docs/WI_RUN_VERIFICATION.md, docs/wi-run-verification.json only, as supplied in the baseline record.",
     "increment_5_entry": "Those six planning files already staged; runtime/test implementation changes unstaged or untracked. HEAD verified directly as baseline.",
-    "final": "The user authorized staging and committing the complete accepted M3 worktree. Implementation and preserved planning work are committed as 8f28f1fd85827641e22fc93ceac88ec76060eb0c; this report-finalization update follows that commit.",
+    "final": "The user authorized and committed the accepted M3 worktree as 8f28f1fd85827641e22fc93ceac88ec76060eb0c with report finalization c01abe9. The user later approved the post-M3 live evidence, raised the cap to 50 and authorized this evidence commit and push.",
     "user_work_preserved": true,
     "cargo_lock_changed": false,
     "cargo_toml_change": "Only development Tokio test-util feature added by earlier increment",
-    "protected_files": "Historical reports, COMBINED_DESIGN_REPORT, manifests and ledger unchanged; AGENTS.md and governing planning documents preserved as received"
+    "protected_files": "Historical reports, COMBINED_DESIGN_REPORT, manifests and governing planning documents unchanged; active AGENTS.md and M3 verification ledger updated for separately authorized post-M3 work"
   },
   "scope": {
-    "real_credential_reads_authorized": false,
-    "auth_operations_authorized": false,
-    "live_generation_authorized": false,
+    "m3_implementation_real_credential_reads_authorized": false,
+    "m3_implementation_auth_operations_authorized": false,
+    "m3_implementation_live_generation_authorized": false,
+    "post_m3_rl_managed_credentials_authorized": true,
+    "post_m3_rl_live_generation_authorized": true,
     "implementation_phase_commits_or_pushes_authorized": false,
     "post_acceptance_local_commit_authorized": true,
-    "push_authorized": false,
+    "push_authorized": true,
     "runtime_or_test_edits_by_increment_5": false
   },
   "limits_defaults": {"max_model_requests": 4, "max_tool_executions": 8, "deadline_seconds": 120},
@@ -286,11 +288,29 @@
   "prior_implementation_changes": [
     "Cargo.toml", "src/collect_lifecycle.rs (removed after relocation)", "src/collect_tests.rs", "src/lib.rs", "src/main.rs", "src/providers/openai_codex/mod.rs", "src/providers/openai_codex/session.rs", "src/providers/openai_codex/tests.rs", "src/providers/openai_codex/codec.rs", "src/tools.rs", "examples/run_offline.rs", "src/providers/openai_codex/consistency.rs", "src/providers/openai_codex/consistency_loopback_tests.rs", "src/providers/openai_codex/consistency_settlement_tests.rs", "src/providers/openai_codex/consistency_tests.rs", "src/providers/openai_codex/run_loopback_tests.rs", "src/run/mod.rs", "src/run/events.rs", "src/run/collect.rs", "src/run_cli.rs", "src/run_cli_tests.rs", "src/tools_batch_tests.rs", "tests/run_cli.rs", "tests/run_controller.rs", "tests/run_support/mod.rs", "tests/run_support/stop.rs", "tests/run_support/boundaries.rs"
   ],
-  "remaining_limits": ["Local Linux only; hosted/non-Linux untested", "Cooperative cancellation only; no external rollback or upstream-stop guarantee", "No durable event replay or exactly-once effects; future drop/process loss may omit final delivery", "No live M3 proof or automatic live phase"],
+  "remaining_limits": ["Local Linux only; hosted/non-Linux untested", "Live coverage is one bounded tool cycle per transport with gpt-5.6-luna, not broad account capability", "Cooperative cancellation only; no external rollback or upstream-stop guarantee", "No durable event replay or exactly-once effects; future drop/process loss may omit final delivery"],
   "live": {
-    "new_real_credential_reads": 0, "new_generation_submissions": 0, "new_auth_operations": 0,
-    "historical_used": 27, "historical_cap": 40, "historical_remaining": 13, "m3_budget_allocated": 0,
-    "deferred_cases": [{"id": "RL1", "status": "not_authorized_not_run"}, {"id": "RL2", "status": "not_authorized_not_run"}]
+    "phase": "separately_authorized_post_m3",
+    "model": "gpt-5.6-luna",
+    "auth_source": "gateway_managed",
+    "account_policy": "default eligible-profile selection; selected profile and account identity not recorded",
+    "credential_use": "real managed credentials used; low-level read count not measured",
+    "explicit_auth_commands": 0,
+    "automatic_renewal": "not inspected; no claim",
+    "new_generation_submissions": 4,
+    "retries": 0,
+    "ambiguous_writes": 0,
+    "starting_ledger": {"used": 27, "cap": 40, "remaining": 13},
+    "m3_budget_allocated": 0,
+    "rl_budget_allocated": 4,
+    "post_rl_ledger_before_extension": {"used": 31, "cap": 40, "remaining": 9},
+    "cap_extension": {"authorized_after_rl": true, "added": 10, "new_cap": 50, "additional_submissions_authorized": 0},
+    "current_ledger": {"used": 31, "cap": 50, "remaining": 19},
+    "cases": [
+      {"id": "RL1", "status": "pass", "transport": "websocket", "submissions": 2, "tool_executions": 1, "final": 42, "assertions": ["one provider session/socket", "second send reused socket and matched prior response", "new result-only input matched original call identity", "two validated completed terminals", "healthy run events and TerminalReceived"]},
+      {"id": "RL2", "status": "pass", "transport": "sse", "submissions": 2, "tool_executions": 1, "final": 42, "assertions": ["one provider session and two HTTP requests", "effective native history and correlated result replay matched", "opaque replay matched or was not emitted", "two validated completed terminals", "healthy run events and TerminalReceived"]}
+    ],
+    "evidence_safety": "Temporary uncommitted public-controller harness used existing allowlisted structural observer; no profile, account identity, credentials, headers, native payloads or provider content retained"
   },
-  "notes": ["No browser/login/refresh/profile check, provider generation, hosted write, push or publication occurred during M3. The user authorized the local post-acceptance commit.", "Pi authoring conversation is separate from project verification.", "OFFLINE ACCEPTED after the repeated accumulated review; LIVE NOT AUTHORIZED / NOT RUN."]
+  "notes": ["No browser/login/status/explicit-refresh command or hosted write occurred during the live runs. Normal managed preparation occurred; automatic renewal was not inspected. The user later authorized the evidence commit and push.", "Pi authoring conversation is separate from project verification.", "OFFLINE ACCEPTED; separately authorized post-M3 RL1/RL2 PASS; ledger 31/50 used, 19 remaining after the user-authorized cap extension."]
 }

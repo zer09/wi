@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     Gateway, OutputProvenance,
-    run::{RunEvent, RunLimits, RunOutcome, RunRequest, RunResult},
+    run::{RunEvent, RunOutcome, RunRequest, RunResult},
 };
 use std::sync::{
     Mutex,
@@ -131,7 +131,6 @@ async fn drive(gateway: &Gateway, transport: Transport) -> (RunResult, Vec<crate
         provider_id: PROVIDER_ID.into(),
         options,
         prompt: "add 17 and 25".into(),
-        limits: RunLimits::default(),
     };
     let mut tools = ToolRegistry::new();
     tools.register(Arc::new(AddNumbers)).unwrap();
@@ -144,10 +143,12 @@ async fn drive(gateway: &Gateway, transport: Transport) -> (RunResult, Vec<crate
             &tools,
             CancellationToken::new(),
             |envelope| {
-                if let RunEvent::ProviderEvent { event } = &envelope.event
-                    && let ProviderEvent::ResponseFinished { response } = &event.event
-                {
-                    responses.push(response.clone());
+                assert_eq!(envelope.schema_version, 2);
+                if let RunEvent::ProviderEvent { event } = &envelope.event {
+                    assert_eq!(event.schema_version, 1);
+                    if let ProviderEvent::ResponseFinished { response } = &event.event {
+                        responses.push(response.clone());
+                    }
                 }
                 Ok(())
             },
@@ -348,6 +349,153 @@ async fn run_sse_a_mime_and_missing_prolog_replay_exact_effective_native_history
                 .unwrap();
         }
     }
+}
+
+fn trace_output(turn: usize) -> Vec<Value> {
+    vec![
+        json!({"type":"reasoning","id":format!("reason-{turn}"),"encrypted_content":format!("synthetic-opaque-{turn}"),"metadata":{"keep":[3,1]}}),
+        json!({"type":"function_call","id":format!("item-{turn}"),"call_id":format!("call-{turn}"),"name":"add_numbers","arguments":json!({"a":turn,"b":1}).to_string(),"status":"completed","metadata":{"keep":"synthetic"}}),
+    ]
+}
+fn trace_events(turn: usize) -> Vec<Value> {
+    let id = format!("trace-{turn}");
+    let mut events = vec![json!({"type":"response.created","response":{"id":id}})];
+    if turn == 9 {
+        events.push(terminal(&id, vec![json!({"type":"message","id":"answer","content":[{"type":"output_text","text":"9"}]} )]));
+    } else if turn.is_multiple_of(2) {
+        for (index, item) in trace_output(turn).into_iter().enumerate() {
+            events
+                .push(json!({"type":"response.output_item.done","output_index":index,"item":item}));
+        }
+        events.push(terminal(&id, vec![]));
+    } else {
+        events.push(terminal(&id, trace_output(turn)));
+    }
+    events
+}
+fn trace_result(turn: usize) -> Value {
+    json!({"type":"function_call_output","call_id":format!("call-{turn}"),"output":json!({"sum":turn+1}).to_string()})
+}
+fn assert_trace_success(result: &RunResult, responses: &[crate::ModelResponse]) {
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert!(result.events_complete);
+    assert_eq!(result.sink_error, None);
+    assert_eq!(result.summary.model_requests_attempted, 10);
+    assert_eq!(result.summary.model_requests_admitted, 10);
+    assert_eq!(result.summary.turns_started, 10);
+    assert_eq!(result.summary.turns_finished, 10);
+    assert_eq!(result.summary.new_tool_dispatches, 9);
+    assert_eq!(result.summary.tool_results_prepared, 9);
+    assert_eq!(result.summary.reused_results, 0);
+    assert_eq!(responses.len(), 10);
+    for (turn, response) in responses.iter().take(9).enumerate() {
+        assert_eq!(response.id, format!("trace-{turn}"));
+        assert_eq!(
+            response
+                .output
+                .iter()
+                .map(|item| item.native.clone())
+                .collect::<Vec<_>>(),
+            trace_output(turn)
+        );
+        if turn.is_multiple_of(2) {
+            assert_eq!(
+                response.output_provenance,
+                OutputProvenance::ValidatedOutputItemDone
+            );
+            assert_eq!(response.native["output"], json!([]));
+        } else {
+            assert_eq!(response.output_provenance, OutputProvenance::NativeTerminal);
+            assert_eq!(response.native["output"], json!(trace_output(turn)));
+        }
+    }
+    assert_eq!(result.last_response.as_ref().unwrap().text, "9");
+}
+
+#[tokio::test]
+async fn run_websocket_nine_cycles_keep_one_socket_and_exact_linkage() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut socket = accept_ws(&listener).await;
+        let first = incoming(&mut socket).await;
+        assert_first(&first, Transport::WebSocket);
+        for event in trace_events(0) {
+            send(&mut socket, event).await;
+        }
+        for turn in 1..=9 {
+            let next = incoming(&mut socket).await;
+            assert_eq!(next["type"], "response.create");
+            assert_eq!(next["prompt_cache_key"], first["prompt_cache_key"]);
+            assert_eq!(next["previous_response_id"], format!("trace-{}", turn - 1));
+            assert_eq!(next["input"], json!([trace_result(turn - 1)]));
+            for event in trace_events(turn) {
+                send(&mut socket, event).await;
+            }
+        }
+        while let Some(Ok(frame)) = socket.next().await {
+            assert!(!frame.is_text(), "unexpected eleventh generation");
+        }
+        no_extra(listener, stopped).await;
+    });
+    let (gateway, auth, opens) = setup(address, Transport::WebSocket);
+    let (result, responses) = drive(&gateway, Transport::WebSocket).await;
+    assert_trace_success(&result, &responses);
+    assert_auth(&auth, &opens, 1);
+    stop.send(()).unwrap();
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn run_sse_nine_cycles_replay_all_effective_native_history() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut tcp, _) = listener.accept().await.unwrap();
+        let (first, session) = http_request(&mut tcp).await;
+        assert_first(&first, Transport::Sse);
+        reply(
+            &mut tcp,
+            "200 OK",
+            Some("text/event-stream"),
+            &frames(trace_events(0)),
+        )
+        .await;
+        let mut expected = first["input"].as_array().unwrap().clone();
+        for turn in 1..=9 {
+            // Replay recovered effective output, not the empty native terminal array.
+            expected.extend(trace_output(turn - 1));
+            expected.push(trace_result(turn - 1));
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let (next, next_session) = http_request(&mut tcp).await;
+            assert_eq!(session, next_session);
+            assert_eq!(next["prompt_cache_key"], first["prompt_cache_key"]);
+            assert!(next.get("previous_response_id").is_none());
+            assert_eq!(next["input"], json!(expected));
+            reply(
+                &mut tcp,
+                "200 OK",
+                Some("text/event-stream"),
+                &frames(trace_events(turn)),
+            )
+            .await;
+        }
+        no_extra(listener, stopped).await;
+    });
+    let (gateway, auth, opens) = setup(address, Transport::Sse);
+    let (result, responses) = drive(&gateway, Transport::Sse).await;
+    assert_trace_success(&result, &responses);
+    assert_auth(&auth, &opens, 11);
+    stop.send(()).unwrap();
+    timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]

@@ -202,7 +202,6 @@ pub fn request() -> wi::run::RunRequest {
         provider_id: ID.into(),
         options: SessionOptions::new("opaque-model"),
         prompt: "add the numbers".into(),
-        limits: Default::default(),
     }
 }
 pub fn response(id: &str, output: Vec<OutputItem>, text: &str) -> ModelResponse {

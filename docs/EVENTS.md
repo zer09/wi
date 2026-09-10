@@ -1,4 +1,6 @@
-# Event contract v1 (Wi 0.2.0)
+# Event contracts (Wi 0.2.0)
+
+Provider events use schema 1; outer run events use schema 2 under C1.1.
 
 Managed authentication does not change the event JSON schema. The CLI reports
 only the validated selected profile alias on stderr. Provider account IDs and
@@ -10,9 +12,9 @@ offline evidence. Explicit auth refresh
 returns safe profile metadata, not generation events. SSE prepares the same bound
 profile before submission; established WebSockets never renew mid-session.
 
-## Envelope
+## Provider envelope v1
 
-Every provider event has `schema_version`, local `sequence`, `event_id`,
+Every provider event has `schema_version: 1`, local `sequence`, `event_id`,
 `session_id`, `request_id`, `provider`, optional `provider_sequence`, and a
 snake_case `type` discriminator. `request_id` is null for a session-level idle
 closure. The local sequence is independent of provider sequence numbers and is
@@ -164,18 +166,26 @@ emitted by the separate tool registry, not by the provider. Legacy `tool-demo`
 writes raw NDJSON objects distinguished by `type`. `wi run` nests these same objects
 inside `tool_event` with run/turn/session/request correlation. Neither form is durable.
 
-## Outer run envelope v1
+## Outer run envelope v2
 
-`wi::run::run` and `wi run --json` use `RunEventEnvelope`: `schema_version: 1`,
+`wi::run::run` and `wi run --json` use `RunEventEnvelope`: `schema_version: 2`,
 `sequence`, `event_id`, `run_id`, nullable `turn_id`, `session_id`, `request_id`,
 and a flattened event with snake_case `type`. Opaque run/turn/event IDs are fresh.
 Sequence starts at 1 and counts attempted emissions independently of inner provider
-sequence. It is not a replay cursor. Inner `EventEnvelope` JSON and native payloads
-remain unchanged. These events are sensitive application data, not safe telemetry.
+sequence. It is not a replay cursor. Inner `EventEnvelope` remains schema 1;
+its JSON and native payloads are unchanged. These events are sensitive application
+data, not safe telemetry.
+
+C1.1 is a breaking Rust/run-event API change, not a Wi version or client-identity
+change. `RunRequest` contains exactly `provider_id`, `options` and `prompt`.
+Strict deserialization rejects unknown fields, including obsolete `limits` values,
+even `null`. Historical schema-1 run recordings remain historical. There is no
+schema-1 compatibility emitter; removed outcome variants are neither generated
+nor accepted.
 
 | Serialized type | Payload and correlation |
 |---|---|
-| `run_started` | `limits`, including deadline `{secs, nanos}`; before open, with null turn/session/request IDs |
+| `run_started` | No event-specific payload; before open, with null turn/session/request IDs |
 | `turn_started` | 1-based `number`; session and new turn ID, request null before receipt |
 | `provider_event` | Unchanged nested provider `event`; outer IDs identify the current run and turn |
 | `tool_event` | Nested registry `event`; request ID identifies the response that produced the call |
@@ -185,9 +195,8 @@ remain unchanged. These events are sensitive application data, not safe telemetr
 These are four lifecycle kinds and two wrappers. `TurnOutcome` uses a `type` tag:
 `model_completed`, `tools_prepared`, or `stopped` with a `reason: RunOutcome`.
 Prepared tools do not prove the next request was submitted; no result-delivery ACK
-is invented. `RunOutcome` also uses `type`: `completed`, `cancelled_locally`,
-`failed` with static `code`, or `limit_reached` with `limit` equal to
-`model_requests`, `tool_executions` or `deadline`.
+is invented. `RunOutcome` also uses `type`: only `completed`, `failed` with static
+`code`, or `cancelled_locally`.
 
 `RunSummary` contains `turns_started`, `turns_finished`, `model_requests_attempted`,
 `model_requests_admitted`, `new_tool_dispatches`, `tool_results_prepared`,
@@ -195,7 +204,10 @@ is invented. `RunOutcome` also uses `type`: `completed`, `cancelled_locally`,
 Attempts count generate calls and admissions count receipts. New dispatches count
 accepted dispatch boundaries after start-event delivery; cancellation at that boundary
 can prevent the tool body from running. Prepared/reused results
-are not upstream acknowledgements. These counters are not billing or live-ledger evidence.
+are not upstream acknowledgements. Outer sequence, turn numbers and summary counters
+use checked `u64` arithmetic; unrepresentable values fail with static `counter_overflow`
+rather than wrapping. Counters are observations, not execution quotas, billing or
+live-ledger evidence.
 `RunResult` adds run/session identity, outcome, summary, the last full response,
 `events_complete` and nullable `sink_error`.
 
@@ -214,8 +226,14 @@ records `sink_error`; it does not emit another terminal event. CLI delivery fail
 exits 1 even after execution completed. The returned result is authoritative because
 a callback can partially consume an event before returning an error.
 
-Cancellation and the absolute deadline normally produce controlled terminal events.
-They do not roll back external side effects or guarantee kernel-blocking interruption.
+Cancellation normally produces controlled terminal events. No whole-run timer or
+count policy produces a terminal event. A validated completed no-call response
+keeps its selected disposition if an observer cancels later; call-bearing work
+still checks cancellation before dispatch. Tools and observers must cooperate.
+Cancellation does not roll back external side effects, guarantee kernel-blocking
+interruption or confirm upstream termination. Tool-specific timeout expiry is the
+tool's ordinary error/result, not a run-deadline outcome; the controller installs
+no tool timers or generic timeout API.
 Dropping the run future requests session closure when a handle exists, but cannot
 return a result or promise terminal delivery. Process loss has the same delivery
 limit. There is no durable replay, event store, internal unbounded queue or detached

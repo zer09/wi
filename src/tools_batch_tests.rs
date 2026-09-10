@@ -223,63 +223,152 @@ async fn ordinary_noncall_items_and_null_namespace_are_ignored() {
 }
 
 #[tokio::test]
-async fn capacity_counts_only_new_distinct_ids_and_preserves_eight_call_cap() {
-    let (mut registry, calls) = registry();
-    for id in 0..127 {
-        registry
-            .execute_response(&response(&[&id.to_string()]), |_| {})
+async fn nine_calls_and_input_capacity_batch_execute_in_order() {
+    for size in [9, 128] {
+        let (mut registry, calls) = registry();
+        let ids: Vec<_> = (0..size).map(|i| format!("c{i}")).collect();
+        let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+        let mut response = response(&ids);
+        for (i, item) in response.output.iter_mut().enumerate() {
+            item.function_call.as_mut().unwrap().arguments = json!({"a":i,"b":1}).to_string();
+        }
+        let mut events = Vec::new();
+        let results = registry
+            .execute_response(&response, |event| events.push(event))
             .await
             .unwrap();
-    }
-    let mixed = response(&["0", "127"]);
-    {
-        let batch = registry.preflight(&mixed).unwrap();
-        assert_eq!(batch.new_executions, 1);
-        assert_eq!(batch.calls.len(), 2);
-    }
-    registry.execute_response(&mixed, |_| {}).await.unwrap();
-    assert_eq!(registry.results.len(), 128);
-    let mut events = Vec::new();
-    let replay = registry
-        .execute_response(&mixed, |event| events.push(event))
-        .await
-        .unwrap();
-    assert_eq!(replay.len(), 2);
-    assert!(
-        events
-            .iter()
-            .all(|event| matches!(event, ToolExecutionEvent::ToolResultReused { .. }))
-    );
-    assert_eq!(calls.lock().unwrap().len(), 128);
-    for ids in [
-        vec!["0", "129"],
-        vec!["0", "1", "2", "3", "4", "5", "6", "7", "8"],
-    ] {
-        assert!(
-            registry
-                .execute_response(&response(&ids), |_| panic!())
-                .await
-                .is_err()
-        );
-        assert_eq!(registry.results.len(), 128);
-        assert_eq!(calls.lock().unwrap().len(), 128);
+        crate::provider::validate_input(&results).unwrap();
+        assert_eq!(results.len(), size);
+        assert_eq!(registry.results.len(), size);
+        assert_eq!(events.len(), size * 2);
+        assert_eq!(calls.lock().unwrap().len(), size);
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(calls.lock().unwrap()[i], json!({"a":i,"b":1}));
+            assert!(matches!(
+                &events[i * 2],
+                ToolExecutionEvent::ToolExecutionStarted { call_id, .. } if call_id == ids[i]
+            ));
+            assert!(matches!(
+                &events[i * 2 + 1],
+                ToolExecutionEvent::ToolExecutionFinished { call_id, is_error: false, .. }
+                    if call_id == ids[i]
+            ));
+            assert_eq!(
+                serde_json::to_value(result).unwrap(),
+                json!({"kind":"tool_result","call_id":ids[i],"output":json!({"sum":i+1}).to_string()})
+            );
+        }
     }
 }
 
 #[tokio::test]
-async fn prepared_batch_exposes_whole_new_dispatch_budget_without_work() {
+async fn result_item_capacity_rejects_whole_batch_before_dispatch_or_reuse() {
     let (mut registry, calls) = registry();
-    for (ids, budget) in [(vec!["one"], 0), (vec!["one", "two"], 1)] {
+    registry
+        .execute_response(&response(&["c0"]), |_| {})
+        .await
+        .unwrap();
+    let ids: Vec<_> = (0..129).map(|i| format!("c{i}")).collect();
+    let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+    let error = registry
+        .execute_response(&response(&ids), |_| {
+            panic!("oversized batch emitted an event")
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GatewayError::InvalidRequest("tool results exceed input item capacity")
+    ));
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(registry.results.len(), 1);
+    assert!(registry.results.contains_key("c0"));
+}
+
+#[tokio::test]
+async fn all_160_cached_results_survive_reuse_conflicts_and_fresh_scope() {
+    let (mut registry, calls) = registry();
+    let ids: Vec<_> = (0..160).map(|i| format!("c{i}")).collect();
+    let ids: Vec<_> = ids.iter().map(String::as_str).collect();
+    let mut original = Vec::new();
+    for id in &ids {
+        original.extend(
+            registry
+                .execute_response(&response(&[id]), |_| {})
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(registry.results.len(), 160);
+    let mut reused = Vec::new();
+    let mut events = Vec::new();
+    // Each replay fits one provider request, even though the cache is larger.
+    for chunk in ids.chunks(128) {
+        reused.extend(
+            registry
+                .execute_response(&response(chunk), |event| events.push(event))
+                .await
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(&reused).unwrap(),
+        serde_json::to_value(&original).unwrap()
+    );
+    assert_eq!(events.len(), 160);
+    for (event, id) in events.iter().zip(&ids) {
+        assert!(
+            matches!(event, ToolExecutionEvent::ToolResultReused { call_id, .. } if call_id == id)
+        );
+    }
+    for changed_name in [false, true] {
+        let mut conflict = response(&["new", "c0"]);
+        let call = conflict.output[1].function_call.as_mut().unwrap();
+        if changed_name {
+            call.name = "other".into();
+        } else {
+            call.arguments = json!({"a":4,"b":3}).to_string();
+        }
+        assert!(
+            registry
+                .execute_response(&conflict, |_| panic!("conflict emitted an event"))
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(calls.lock().unwrap().len(), 160);
+    assert_eq!(registry.results.len(), 160);
+    let mut scope = registry.fresh_scope();
+    assert!(scope.results.is_empty());
+    for chunk in ids.chunks(128) {
+        scope
+            .execute_response(&response(chunk), |_| {})
+            .await
+            .unwrap();
+    }
+    assert_eq!(scope.results.len(), 160);
+    assert_eq!(calls.lock().unwrap().len(), 320);
+    drop(scope);
+    assert_eq!(registry.results.len(), 160);
+    registry
+        .execute_response(&response(&["c0"]), |event| {
+            assert!(matches!(event, ToolExecutionEvent::ToolResultReused { .. }));
+        })
+        .await
+        .unwrap();
+    assert_eq!(calls.lock().unwrap().len(), 320);
+}
+
+#[tokio::test]
+async fn dropping_prepared_batch_does_not_execute_or_cache() {
+    let (mut registry, calls) = registry();
+    for ids in [vec![], vec!["one"], vec!["one", "two"]] {
         let batch = registry.preflight(&response(&ids)).unwrap();
-        assert!(batch.new_executions > budget);
-        // The controller can reject the budget by dropping this untouched batch.
+        assert_eq!(batch.calls.len(), ids.len());
         drop(batch);
         assert!(registry.results.is_empty());
         assert!(calls.lock().unwrap().is_empty());
     }
-    let batch = registry.preflight(&response(&[])).unwrap();
-    assert_eq!(batch.new_executions, 0);
-    assert_eq!(batch.calls.len(), 0);
 }
 
 #[tokio::test]
@@ -424,7 +513,6 @@ async fn overflow_and_oversized_output_are_bounded_correlated_cached_results() {
 enum Stop {
     Sink(&'static str),
     Cancelled,
-    Deadline,
     Gateway,
 }
 impl From<GatewayError> for Stop {
@@ -494,7 +582,7 @@ async fn observer_failure_at_each_start_finish_and_reuse_stops_remaining_batch()
 #[tokio::test]
 async fn checkpoint_failure_before_new_or_reused_call_emits_nothing() {
     for reuse in [false, true] {
-        for reason in [Stop::Sink("failed"), Stop::Cancelled, Stop::Deadline] {
+        for reason in [Stop::Sink("failed"), Stop::Cancelled] {
             let (mut registry, calls) = registry();
             registry
                 .execute_response(&response(&["saved"]), |_| {})
@@ -615,8 +703,8 @@ impl Tool for PendingTool {
 }
 
 #[tokio::test]
-async fn cooperative_pending_tool_is_dropped_on_cancel_deadline_or_future_drop() {
-    for mode in ["cancel", "deadline", "drop"] {
+async fn cooperative_pending_tool_is_dropped_on_cancel_or_future_drop() {
+    for mode in ["cancel", "drop"] {
         let (started_tx, mut started_rx) = oneshot::channel();
         let (_release_tx, release_rx) = oneshot::channel();
         let invoked = Arc::new(AtomicUsize::new(0));
@@ -649,17 +737,10 @@ async fn cooperative_pending_tool_is_dropped_on_cancel_deadline_or_future_drop()
         } else {
             let stop = async {
                 started_rx.await.unwrap();
-                if mode == "deadline" {
-                    return Stop::Deadline;
-                }
                 let cancel = CancellationToken::new();
                 cancel.cancel();
-                // Both stop conditions are ready; cancellation takes priority.
-                tokio::select! {
-                    biased;
-                    _ = cancel.cancelled() => Stop::Cancelled,
-                    _ = std::future::ready(()) => Stop::Deadline,
-                }
+                cancel.cancelled().await;
+                Stop::Cancelled
             };
             let error = batch
                 .execute_next(
@@ -672,12 +753,7 @@ async fn cooperative_pending_tool_is_dropped_on_cancel_deadline_or_future_drop()
                 )
                 .await
                 .unwrap_err();
-            let expected = if mode == "cancel" {
-                Stop::Cancelled
-            } else {
-                Stop::Deadline
-            };
-            assert_eq!(error, expected);
+            assert_eq!(error, Stop::Cancelled);
             assert!(
                 batch
                     .execute_next(|| panic!(), pending::<Stop>(), |_| panic!())

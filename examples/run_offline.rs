@@ -7,7 +7,7 @@ use std::sync::{
 };
 use tokio_util::sync::CancellationToken;
 use wi::{
-    run::{RunOutcome, RunRequest, run},
+    run::{RunEvent, RunOutcome, RunRequest, run},
     tools::{AddNumbers, ToolRegistry},
     *,
 };
@@ -140,11 +140,20 @@ async fn main() -> Result<()> {
             provider_id: "offline-script".into(),
             options: SessionOptions::new("script"),
             prompt: "Add 17 and 25, then add 8.".into(),
-            limits: Default::default(),
         },
         &tools,
         CancellationToken::new(),
         |event| {
+            assert_eq!(event.schema_version, 2);
+            if let RunEvent::ProviderEvent { event } = &event.event {
+                assert_eq!(event.schema_version, 1);
+            }
+            if matches!(event.event, RunEvent::RunStarted) {
+                assert_eq!(
+                    serde_json::to_value(&event.event).unwrap(),
+                    json!({"type":"run_started"})
+                );
+            }
             if let Some(session_id) = &event.session_id {
                 assert_eq!(session_id, "offline-session");
             }

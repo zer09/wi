@@ -1,49 +1,45 @@
-# Local implementor prompt — Wi C1
+# Local implementor prompt — delete RunLimits
 
-Paste the block below into a fresh Pi implementor conversation in the existing
-Wi checkout after checking out the documentation-plan branch. No new repository,
-account or login is needed. The agent implements this contract; it does not plan
-another architecture. Reading the PR alone does not start work.
+Use a fresh Pi conversation in the existing checkout of PR #1's documentation branch. No new repository, account, or login. This prompt is a fixed implementation assignment, not another design task.
 
 ```text
-Implement Wi C1, contract c1.0, exactly as specified in
- docs/WI_EXECUTION_POLICY_C1.md and
- docs/WI_EXECUTION_POLICY_C1_MATRIX.md.
-Read those files and AGENTS.md first. Confirm the actual HEAD and dirty worktree;
-preserve user changes. The runtime baseline is
-640b221b70dbb4d68704e6fa70d12f9533654cf5; later documentation commits are expected.
-Read the current M3 verification and authentication reports as accepted history.
+Implement Wi C1 contract c1.1 from docs/WI_EXECUTION_POLICY_C1.md and
+ docs/WI_EXECUTION_POLICY_C1_MATRIX.md. Read AGENTS.md and
+ docs/WI_DESIGN_SCOPE_AUDIT.md first. Inspect actual HEAD/worktree and preserve
+ user changes. Runtime baseline is 640b221b70dbb4d68704e6fa70d12f9533654cf5;
+ later documentation commits are expected.
 
-This is a correction to designer-imposed execution policy, not M4 or an M3 rewrite.
-Normal runs must have no default global model-count quota, tool-execution quota,
-or absolute deadline. Keep independently optional, explicitly requested budgets.
-Do not replace4/8/120 with larger defaults, unlimited sentinels, presets or new
-mandatory maxima. Handle the specified hidden batch/cache quotas using the fixed
-resource-accounting contract; preserve validation and bounded storage.
+DELETE RunLimits completely. Remove its request field, exports, serialization,
+ CLI flags, validation, quota/deadline branches, limit outcomes, and policy-only
+ tests. Do not keep optional limits, disabled settings, a renamed Budget type,
+ empty wrappers, presets, unlimited sentinels, or compatibility shims.
+ The c1.0 optional-budget plan and its cache-reservation design are superseded.
 
-The Pi/Codex source-report findings and precise Wi adaptations are already in the
-contract. Do not redo the planning or silently change those decisions. Ordinary
-private helper choices are yours; a genuine contradiction is a scoped blocker.
+Remove the legacy eight-call batch and 128-entry cache demonstration gates as
+ specified. Preserve call identity/result reuse, full-batch validation, existing
+ input/payload protections, and run isolation. Do not replace the removed gates
+ with a new cache-budget/reservation/eviction framework.
 
-Execute the implementation sequence, first recording real baseline/regression
-results, then applying focused code/test/doc repairs. Preserve provider neutrality,
-M3 lifecycle/cancellation/sink semantics, effective-output validation, authentication,
-transport rules and historical reports. No tool-timeout/progress API, shell, skills,
-PTC/async execution, steering, retry/failover, compaction or GUI is in this task.
+Preserve accepted M3 orchestration, cancellation, events, provider neutrality,
+ recovery, and authentication. Test supervision stays outside the product.
+ Tool-specific timing stays in the tool; do not add timeout/progress APIs.
 
-This authorizes source changes and OFFLINE verification only. Use synthetic auth
-locations, pure tools, deterministic clocks and loopback providers. No real profile
-reads/status, login, refresh, model requests, commits, pushes or publication.
-Keep the generation ledger31/50 used19remaining. Do not run a live unbudgeted test.
-Pi's authoring conversation is separate from project verification.
+Execute the specified source/test/doc changes and all C1-00 through C1-17 rows.
+ The plan is fixed: do not stop to produce another plan or expand the feature set.
+ Report a genuine contradiction instead of silently changing the contract.
+ Obtain an independent complete-diff review and fix confirmed in-scope findings.
 
-Complete every C1-00 through C1-21 row, obtain independent complete-diff review,
-repair confirmed findings and rerun gates. Report actual commands/counts, migration
-and resource behavior, unresolved limits and no-live status in
- docs/WI_EXECUTION_POLICY_C1_VERIFICATION.md and
- docs/wi-execution-policy-c1-verification.json.
-Do not stop after a plan; implement and verify. Do not claim PASS for test source
-that was not executed. Do not rewrite accepted M3 evidence to match the new policy.
-Finish with the sanitized verification summary and leave implementation changes
-uncommitted for review unless I separately authorize Git writes.
+OFFLINE work only. No real credential reads/profile commands/login/refresh,
+ provider generations, implementation commits/pushes/publication, or additional
+ feature work. Use synthetic data, cooperative fake tools, controlled clocks,
+ and loopback servers. Keep the ledger 31/50 used,19 remaining. Pi's authoring
+ conversation is separate from Wi verification traffic.
+
+Write docs/WI_EXECUTION_POLICY_C1_VERIFICATION.md and
+ docs/wi-execution-policy-c1-verification.json with actual commands/results,
+ deleted APIs/branches, every matrix row, changed test counts, remaining
+ constraints, and review evidence. Record additional questionable features;
+ do not silently remove unrelated safeguards or claim a whole-repository audit.
+ Preserve historical reports. Leave implementation changes uncommitted for review
+ unless I separately authorize Git writes.
 ```

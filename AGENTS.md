@@ -1,3 +1,36 @@
+# Wi: current task routing — C1 execution-policy correction
+
+C1 contract `c1.0` is the next scoped task, based on runtime commit
+`640b221b70dbb4d68704e6fa70d12f9533654cf5`.
+Read `docs/WI_EXECUTION_POLICY_C1.md`,
+`docs/WI_EXECUTION_POLICY_C1_MATRIX.md`, and
+`docs/WI_EXECUTION_POLICY_C1_PROMPT.md`.
+These documents fix the plan. Implement only when the user supplies the task
+prompt; a documentation PR does not itself authorize runtime work.
+
+C1 corrects designer-imposed default run quotas/deadline. It supersedes M3's
+mandatory4/8/120 defaults,32/128/600 policy ranges, legacy count guards and outer
+run-schema expectations only where explicitly specified. It preserves the accepted
+controller, source validation, managed authentication, transport/recovery and event
+semantics outside those changes. M3 and its reports remain valid historical
+implementation evidence. Do not rewrite them to pretend the new policy was tested
+before it existed. Do not implement the withdrawn M4 timeout/progress proposal.
+
+The C1 implementor is authorized for its specified code/tests/docs and offline
+verification only, not another architecture-planning pass. No real credential
+reads, profile commands, login, renewal experiments, provider generations,
+commits, pushes or publication. Use synthetic credential locations and loopback
+services. Pi's authoring conversation is separate. The generation ledger remains
+31/50 used,19 remaining; no additional submissions are authorized. Produce only the
+new C1 verification reports named in the contract. Preserve user work and stop for
+a genuine contract contradiction rather than silently substitute policy. New user
+instructions and higher-priority environment rules still take precedence.
+
+The following M3 and original repair routing is preserved as historical context;
+its old execution/live permissions and report targets do not govern C1.
+
+---
+
 # Wi: active task routing
 
 ## M3 bounded run controller — 2026-09-09
@@ -86,7 +119,7 @@ After offline/security gates pass, up to 10 total provider-generation submission
 from the gateway under test are allowed for the synthetic text, continuation, and
 add_numbers cases in the handoff. Count attempts including ambiguous writes. No
 automatic retries, fallback, reconnect replay, or advanced-feature probes. A
-failure stops the affected sequence; fix offline first. Report blockers and the
+failure stops the affected sequence; fix it offline first. Report blockers and the
 remaining budget. The cap does not include the user's Pi authoring conversation.
 
 ## Work preservation and evidence

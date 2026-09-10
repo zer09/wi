@@ -1,33 +1,50 @@
-# Wi: active task C1 — delete the run-limit feature
+# Wi: active task S1 — local workspace context and skills
 
-Contract `c1.1`; runtime baseline `640b221b70dbb4d68704e6fa70d12f9533654cf5`.
-The user explicitly rejected retaining RunLimits as optional configuration.
-This contract supersedes c1.0 completely. The prior M4 timeout/progress proposal
-is withdrawn. Do not implement either superseded design.
+Contract `s1.0`; accepted runtime baseline `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c`.
+This branch supplies a documentation-only implementation plan. Start runtime work
+only when the user gives the implementor prompt. The designer has fixed the plan;
+the implementor executes it, rather than commissioning another planning round.
 
-Read, in order:
-1. `docs/WI_EXECUTION_POLICY_C1.md`
-2. `docs/WI_EXECUTION_POLICY_C1_MATRIX.md`
-3. `docs/WI_DESIGN_SCOPE_AUDIT.md`
-4. `docs/WI_EXECUTION_POLICY_C1_PROMPT.md`
+Read in order:
+1. `docs/WI_PRODUCT_DIRECTION.md`
+2. `docs/WI_LOCAL_SKILLS_S1.md`
+3. `docs/WI_LOCAL_SKILLS_S1_MATRIX.md`
+4. `docs/WI_LOCAL_SKILLS_S1_PROMPT.md`
 
-Implement only when the user supplies the task prompt. This planning PR itself
-changes documentation, not runtime. The local task is full removal of RunLimits
-and its dependent API/CLI/control flow, not another architecture-planning pass.
-No optional/no-op/renamed budget framework or replacement resource-budget feature.
-Preserve completed M3 orchestration, cancellation, validation, and authentication.
+Implement shared Rust workspace/context preparation, always-discovered global
+skill frontmatter plus project skill frontmatter when present, catalog listing,
+and explicit skill activation. Remove HostedSkills/hosted_skills scaffolding from
+active source/capability reporting. Do not add uploads, API-key fallback, or hosted
+execution. The CLI is a caller of the library, not the future product architecture.
 
-Authorized local implementation scope is the contract's source/tests/docs and
-OFFLINE verification. No real credential access, auth/profile commands, provider
-generations, commits, pushes, or publication. Synthetic credentials, pure tools,
-controlled clocks, and loopback tests are allowed. Existing trusted development
-tooling follows the user's local permissions. Pi authoring traffic is separate.
-The ledger remains 31/50 used,19 remaining; remaining balance is not authorization.
+The service is for one owner using multiple devices. Browser disconnection does
+not cancel service-owned work. Service restart stops active tasks; none restart or
+resume automatically. Application sessions must persist. These are confirmed
+future-service requirements, NOT authorization to implement storage or the server
+in S1. Storage design is deferred and precedes service acceptance. Do not invent a
+database, persistence interface, migration scheme, or background recovery worker.
 
-Preserve user changes; never reset/clean/overwrite unrelated work. Keep historical
-verification reports and manifests unchanged. M3's planning files and old repair
-handoffs document prior tasks; their limits, test permissions, and prompts are not
-active instructions. Their full versions remain in Git history and their own files.
-Use only the new C1 report paths. Distinguish observed evidence from source review.
-Do not claim everything else is necessary or that a whole-repository audit occurred.
-New explicit user instructions and higher-priority environment rules take precedence.
+C1 c1.1 is complete. Do not restore RunLimits, budgets, run timers, quotas, or the
+withdrawn M4 timeout/progress proposal. Preserve M3/C1 orchestration, cancellation,
+correlation, validation, result reuse, and accepted authentication/transport behavior.
+A bounded implementation matrix does not impose a runtime work budget.
+
+Authorized implementation work: this contract's source, test, and active-document
+changes plus OFFLINE verification using synthetic workspaces, skills, credentials,
+scripted providers, and loopback transports. No real credential/profile commands,
+login, renewal experiments, provider requests, hosted API probes, commits, pushes,
+merge, release, or publication. Normal trusted development dependency operations
+follow the user's local permissions. Pi's authoring conversation is separate.
+The generation ledger stays 31/50 used, 19 remaining, with zero new allocation.
+
+Preserve existing user changes, historical reports/manifests, and accepted behavior.
+Do not read the owner's actual global skill files or private projects for tests;
+isolate HOME/XDG_CONFIG_HOME and use explicit temporary roots. Keep sensitive text
+out of ordinary logs and reports. Observed test execution, source review, and live
+evidence are different categories. Report blockers truthfully rather than weakening
+validation or silently broadening scope. Private implementation details may vary;
+public contract decisions require an explicit amendment if genuinely contradictory.
+
+Older M3/C1/repair prompts and their historical permissions are not active task
+instructions. Their evidence remains intact. New user instructions and higher-
+priority environment rules take precedence.

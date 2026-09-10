@@ -38,7 +38,7 @@ CLI / library caller
 The deterministic `add_numbers` executor is a separate module. The provider
 never executes files, commands, model-generated JavaScript, or unknown tools.
 There is no web server, GUI, database, persistent agent service, or sandbox here.
-The bounded `wi::run::run` controller supports ordinary tool/result cycles.
+The cancellation-aware `wi::run::run` controller supports ordinary tool/result cycles.
 
 ## What is implemented in source
 
@@ -51,8 +51,8 @@ The bounded `wi::run::run` controller supports ordinary tool/result cycles.
 - Typed response/item events; IDs for local session, request, event, response,
   output item, and tool call remain distinct.
 - Completed, incomplete, failed, cancelled, and uncertain transport outcomes.
-- A bounded local function executor, local argument validation, and in-memory
-  result reuse. The included tool adds integers and has no external side effects.
+- A local function executor with argument validation and in-memory result reuse.
+  The included tool adds integers and has no external side effects.
 - No automatic retry, reconnect, transport fallback, or API-key billing fallback.
 
 **Native steering, async tool calling, programmatic tool execution, tool search,
@@ -90,13 +90,15 @@ WebSocket crate versions remain pinned. Use the lockfile for reproducible
 resolution. Managed auth directly uses the already locked `ring` and `rustix`
 crates for secure randomness and safe Linux filesystem operations.
 
-## Bounded run controller (M3)
+## Run controller (C1.1)
 
-`wi::run::run(&gateway, request, &registry, cancel, observer).await` accepts a
-`RunRequest` with provider ID, `SessionOptions`, prompt and `RunLimits`.
-Caller `options.tools` must be empty; the registry supplies the declarations.
-Validation errors return `Err` before events or session opening. Admitted runs
-return `RunResult` with outcome, counters, last full response and delivery status.
+`wi::run::run(&gateway, request, &registry, cancel, observer).await` accepts a strict
+`RunRequest` containing exactly `provider_id`, `options` (`SessionOptions`) and
+`prompt`. Deserialization rejects unknown fields, including obsolete `limits`
+values, even `null`. Caller `options.tools` must be empty; the registry supplies
+the declarations. Validation errors return `Err` before events or session opening.
+Admitted runs return `RunResult` with outcome, counters, last full response and
+delivery status. Outcomes are `Completed`, `Failed { code }` and `CancelledLocally`.
 The provider-neutral controller opens one session and performs sequential ordinary
 function-tool/result cycles. It has no retry, reconnect, fallback or resume path.
 Each run shares registered tool implementations but starts a fresh result cache;
@@ -115,7 +117,8 @@ The separately authorized RL1 WebSocket and RL2 SSE checks passed with
 each with no retries. The user then raised the cumulative cap to 50 without
 adding submissions. The ledger is 31/50 used, 19 remaining; M3 itself retained
 zero allocation and the post-M3 RL checks used four. See
-[M3 verification](docs/WI_RUN_VERIFICATION.md).
+[M3 verification](docs/WI_RUN_VERIFICATION.md). Those historical results predate
+C1.1 and do not verify the changed contract.
 
 The following is usage documentation, not authorization to make a live request:
 
@@ -132,22 +135,36 @@ accepts `--account`, not `--auth-file`. No tools are enabled by default.
 Only `--tool add_numbers` is available; duplicate or unknown selections fail.
 There is no follow-up, resume or steering option.
 
-| Limit | Default | Accepted range |
-|---|---:|---:|
-| `--max-model-requests` | 4 | 1–32 |
-| `--max-tool-executions` | 8 | 0–128 |
-| `--deadline-seconds` | 120 | 1–600 |
+`wi run` has no model-request count, tool-execution count or whole-run deadline
+flags. Deleted flags are unknown-argument errors before provider construction or
+credential access; no replacement setting is available. The controller has no
+whole-run timer. It stops on normal response disposition, cancellation or a real
+provider, protocol, tool, resource or delivery failure, not a count/time quota.
 
-Model limits count attempts, including rejected or uncertain submissions. A tool
-batch is fully validated before dispatch and must fit the remaining new-execution
-budget. At the model-request limit, no tool batch executes or replays. Cache reuse
-does not consume a new execution slot; capacity is 128 results and eight calls per batch.
-The deadline is absolute from admission, not reset per turn. Cancellation is
-cooperative; Ctrl+C signals the token and awaits controlled completion. Neither
-cancellation nor future-drop cleanup guarantees that upstream work stopped.
+Tool batches are fully validated before dispatch. Nine small valid calls in one
+response and more than 128 small distinct calls across a run are not policy-rejected
+by count. The existing `MAX_INPUT_ITEMS = 128` capacity is per request, not a lifetime
+tool quota. A batch whose results cannot fit that item capacity fails before
+execution. The controller validates the complete actual result vector's existing
+byte/shape rules before submission; it never sends a subset or rolls back completed
+effects. Other input, payload and provider-history checks still apply.
 
-`--json` emits only outer `RunEventEnvelope` NDJSON on stdout. Nested native items,
-text and tool data are sensitive application data, not sanitized telemetry.
+Results remain cached until the run scope ends, with no eviction or lifetime
+entry-count ceiling. The cache can grow; provider-history guards do not guarantee
+bounded cache memory or process RSS for arbitrary providers. Summary counters
+observe work using checked `u64` arithmetic but never grant execution permission.
+An unrepresentable count produces a static `counter_overflow` failure instead of wrapping.
+
+Cancellation is cooperative; Ctrl+C signals the token and awaits controlled
+completion. Tools and observers must cooperate. A selected completed no-call
+response stays completed if an observer cancels later; pending calls still check
+cancellation before dispatch. Neither cancellation nor future-drop cleanup
+guarantees that upstream work stopped. Tool-specific timeouts remain tool-owned;
+the generic `Tool` trait and shipped `add_numbers` define no timeout option.
+
+`--json` emits only outer schema-2 `RunEventEnvelope` NDJSON on stdout. `run_started`
+has no event-specific payload; nested provider events remain schema 1. Nested native
+items, text and tool data are sensitive application data, not sanitized telemetry.
 Diagnostics remain on stderr. Plain output filters terminal controls and labels
 validated responses without marking partial output complete. Completed exits 0
 (including refusal, not proof of correctness), local cancellation exits 130, and
@@ -523,12 +540,13 @@ Function calls are selected only from a finalized completed response. Truncated,
 unknown, namespaced, or programmatically owned calls cannot execute in this demo.
 Argument fragments are never parsed into executable commands during streaming.
 
-Defaults are deliberately bounded: 15-second connection timeout, 90-second
+Retained Wi-local protections include a 15-second connection timeout, 90-second
 provider-event idle timeout, 10-minute request lifetime, 30-second event-consumer
-stall limit, 64 queued events, 8 MiB per incoming frame, 32 MiB per response,
-8 MiB retained context, and at most eight registry tool calls per response.
-The fixed CLI demo accepts exactly one call. Context
-limits fail explicitly; there is no implicit compaction.
+stall limit, 64 queued events, 8 MiB per incoming frame, 32 MiB per response, and
+8 MiB / 2048 items of retained context. They also include 32 declared tools and
+128 input items per request. These are request, parsing and history protections,
+not whole-run quotas or asserted provider requirements. The fixed CLI demo accepts
+exactly one call. Context limits fail explicitly; there is no implicit compaction.
 
 Both transports connect directly; HTTP/SOCKS proxy support is not included.
 Redirects and automatic retries are disabled. Production endpoints are fixed

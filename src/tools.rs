@@ -2,7 +2,7 @@
 //! registered tools run. No shell, file access, sandbox, or dynamic code loader.
 use crate::{
     CallOrigin, FunctionCall, GatewayError, InputItem, ItemKind, ModelResponse, ResponseOutcome,
-    Result, ToolDefinition,
+    Result, ToolDefinition, provider::MAX_INPUT_ITEMS,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,6 @@ impl ToolRegistry {
         }
         let mut calls: Vec<(FunctionCall, Value, Arc<dyn Tool>)> = Vec::new();
         let mut ids = HashSet::new();
-        let mut new_executions = 0;
         for item in &response.output {
             match item.kind {
                 ItemKind::Message | ItemKind::Reasoning => continue,
@@ -155,25 +154,17 @@ impl ToolRegistry {
                     "call identity reused with different arguments",
                 ));
             }
-            if !self.results.contains_key(&call.call_id) {
-                new_executions += 1;
-            }
             calls.push((call.clone(), arguments, tool));
-            if calls.len() > 8 {
-                return Err(GatewayError::InvalidRequest(
-                    "demo tool-call limit exceeded",
-                ));
-            }
         }
-        if self.results.len().saturating_add(new_executions) > 128 {
+        // Every result must fit in the next request; never execute only part of a batch.
+        if calls.len() > MAX_INPUT_ITEMS {
             return Err(GatewayError::InvalidRequest(
-                "demo tool-call limit exceeded",
+                "tool results exceed input item capacity",
             ));
         }
         Ok(PreparedBatch {
             registry: self,
             calls: calls.into_iter(),
-            new_executions,
         })
     }
 }
@@ -181,13 +172,11 @@ impl ToolRegistry {
 pub(crate) struct PreparedBatch<'a> {
     registry: &'a mut ToolRegistry,
     calls: std::vec::IntoIter<(FunctionCall, Value, Arc<dyn Tool>)>,
-    /// Remaining new dispatches; check the whole budget before the first call.
-    pub(crate) new_executions: usize,
 }
 
 impl PreparedBatch<'_> {
     /// Check stop/sink state before each call and after start observation. The
-    /// caller's stop future selects cancellation before deadline while awaiting work.
+    /// caller's stop future interrupts cooperative work when cancellation is ready.
     /// Errors discard the remaining batch; dropping pending work creates no result.
     pub(crate) async fn execute_next<E: From<GatewayError>>(
         &mut self,
@@ -210,7 +199,6 @@ impl PreparedBatch<'_> {
                     output: saved.output.clone(),
                 }));
             }
-            self.new_executions -= 1;
             emit(ToolExecutionEvent::ToolExecutionStarted {
                 call_id: call.call_id.clone(),
                 tool_name: call.name.clone(),
@@ -255,7 +243,6 @@ impl PreparedBatch<'_> {
         if result.is_err() {
             // A failed observer must never receive another event from this batch.
             self.calls = Vec::new().into_iter();
-            self.new_executions = 0;
         }
         result
     }

@@ -3,6 +3,8 @@ mod boundaries;
 mod run_support;
 #[path = "run_support/stop.rs"]
 mod stop;
+#[path = "run_support/workloads.rs"]
+mod workloads;
 use run_support::*;
 use serde_json::json;
 use std::sync::Arc;
@@ -31,7 +33,7 @@ fn trace(events: &[RunEventEnvelope]) -> Vec<&str> {
     events
         .iter()
         .map(|e| match e.event {
-            RunEvent::RunStarted { .. } => "run_started",
+            RunEvent::RunStarted => "run_started",
             RunEvent::TurnStarted { .. } => "turn_started",
             RunEvent::ProviderEvent { .. } => "provider_event",
             RunEvent::ToolEvent { .. } => "tool_event",
@@ -67,12 +69,13 @@ fn healthy(result: &RunResult, events: &[RunEventEnvelope], records: &Records) {
     let mut ids = std::collections::HashSet::new();
     let mut turns = std::collections::HashSet::new();
     for (i, event) in events.iter().enumerate() {
+        assert_eq!(event.schema_version, 2);
         assert_eq!(event.sequence, i as u64 + 1);
         assert_eq!(event.run_id, result.run_id);
         assert!(uuid::Uuid::parse_str(&event.event_id).is_ok());
         assert!(ids.insert(&event.event_id));
         match &event.event {
-            RunEvent::RunStarted { .. } => {
+            RunEvent::RunStarted => {
                 assert!(
                     event.session_id.is_none()
                         && event.turn_id.is_none()
@@ -92,6 +95,7 @@ fn healthy(result: &RunResult, events: &[RunEventEnvelope], records: &Records) {
                 assert_eq!(*number as usize, turns.len());
             }
             RunEvent::ProviderEvent { event: nested } => {
+                assert_eq!(nested.schema_version, 1);
                 assert_eq!(event.request_id, nested.request_id);
                 assert_eq!(event.session_id.as_ref(), Some(&nested.session_id));
                 assert!(
@@ -107,6 +111,79 @@ fn healthy(result: &RunResult, events: &[RunEventEnvelope], records: &Records) {
             _ => {}
         }
     }
+}
+
+#[test]
+fn run_request_contains_only_task_fields_and_rejects_obsolete_configuration() {
+    let expected = json!({
+        "provider_id": ID,
+        "options": SessionOptions::new("opaque-model"),
+        "prompt": "add the numbers",
+    });
+    assert_eq!(serde_json::to_value(request()).unwrap(), expected);
+    let decoded: RunRequest = serde_json::from_value(expected.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), expected);
+    for (field, value) in [
+        ("limits", serde_json::Value::Null),
+        (
+            "limits",
+            json!({"max_model_requests":4,"max_tool_executions":8,"deadline":{"secs":120,"nanos":0}}),
+        ),
+        ("unexpected", serde_json::Value::Null),
+    ] {
+        let mut obsolete = expected.clone();
+        obsolete[field] = value;
+        let error = serde_json::from_value::<RunRequest>(obsolete)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
+}
+
+#[test]
+fn run_outcome_accepts_only_execution_outcomes() {
+    for outcome in [
+        RunOutcome::Completed,
+        RunOutcome::Failed {
+            code: "synthetic".into(),
+        },
+        RunOutcome::CancelledLocally,
+    ] {
+        let encoded = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(
+            serde_json::from_value::<RunOutcome>(encoded).unwrap(),
+            outcome
+        );
+    }
+    for limit in ["model_requests", "tool_executions", "deadline"] {
+        assert!(
+            serde_json::from_value::<RunOutcome>(json!({
+                "type": "limit_reached", "limit": limit,
+            }))
+            .is_err()
+        );
+    }
+}
+
+#[tokio::test]
+async fn run_started_is_payload_free_in_schema_two() {
+    let (gateway, script, tools) = setup(vec![Step::Response(response("r1", vec![], "hello"))]);
+    let (result, events) = observed(&gateway, request(), &tools).await;
+    let started = &events[0];
+    assert_eq!(
+        serde_json::to_value(started).unwrap(),
+        json!({
+            "schema_version": 2,
+            "sequence": 1,
+            "event_id": started.event_id,
+            "run_id": result.run_id,
+            "turn_id": null,
+            "session_id": null,
+            "request_id": null,
+            "type": "run_started",
+        })
+    );
+    healthy(&result, &events, &script.records);
 }
 
 #[tokio::test]
@@ -157,10 +234,6 @@ async fn run_t_empty_reasoning_refusal_and_provenance_are_terminal() {
             healthy(&result, &events, &script.records);
         }
     }
-    assert_eq!(
-        serde_json::to_value(RunLimits::default()).unwrap(),
-        json!({"max_model_requests":4,"max_tool_executions":8,"deadline":{"secs":120,"nanos":0}})
-    );
 }
 
 #[tokio::test]
@@ -233,7 +306,7 @@ async fn run_a_b_c_exact_inputs_order_and_lifecycle() {
 
 #[tokio::test]
 async fn run_preadmission_rejects_without_observation_or_work() {
-    for case in 0..20 {
+    for case in 0..15 {
         let mut script = Script::new(vec![]);
         let mut req = request();
         let token = CancellationToken::new();
@@ -242,26 +315,18 @@ async fn run_preadmission_rejects_without_observation_or_work() {
         match case {
             0 => req.prompt.clear(),
             1 => req.prompt = "x".repeat(MAX_INPUT_BYTES),
-            2 => req.limits.max_model_requests = 0,
-            3 => req.limits.max_model_requests = 33,
-            4 => req.limits.max_tool_executions = 129,
-            5 => req.limits.deadline = std::time::Duration::ZERO,
-            6 => {
-                req.limits.deadline =
-                    std::time::Duration::from_secs(600) + std::time::Duration::from_nanos(1)
-            }
-            7 => req.options.tools = tools.definitions(),
-            8 => req.provider_id = "absent".into(),
-            9 => script.capabilities.websocket.implemented = false,
-            10 => {
+            2 => req.options.tools = tools.definitions(),
+            3 => req.provider_id = "absent".into(),
+            4 => script.capabilities.websocket.implemented = false,
+            5 => {
                 req.options.transport = Transport::Sse;
                 script.capabilities.sse.implemented = false;
             }
-            11 => script.capabilities.function_tools.implemented = false,
-            12 => token.cancel(),
-            13 => req.options.model.clear(),
-            14 => req.options.instructions = "x".repeat(MAX_INPUT_BYTES),
-            15..=19 => {
+            6 => script.capabilities.function_tools.implemented = false,
+            7 => token.cancel(),
+            8 => req.options.model.clear(),
+            9 => req.options.instructions = "x".repeat(MAX_INPUT_BYTES),
+            10..=14 => {
                 req.options.required_features = vec![
                     [
                         Feature::NativeSteering,
@@ -269,7 +334,7 @@ async fn run_preadmission_rejects_without_observation_or_work() {
                         Feature::ProgrammaticTools,
                         Feature::AsyncTools,
                         Feature::HostedSkills,
-                    ][case - 15],
+                    ][case - 10],
                 ]
             }
             _ => unreachable!(),
@@ -286,20 +351,6 @@ async fn run_preadmission_rejects_without_observation_or_work() {
         );
         assert_eq!(count(&records.opens), 0);
         assert_eq!(count(&records.attempts), 0);
-    }
-    for limits in [
-        RunLimits {
-            max_model_requests: 1,
-            max_tool_executions: 0,
-            deadline: std::time::Duration::from_nanos(1),
-        },
-        RunLimits {
-            max_model_requests: 32,
-            max_tool_executions: 128,
-            deadline: std::time::Duration::from_secs(600),
-        },
-    ] {
-        assert!(limits.validate().is_ok());
     }
     let (gateway, script, _) = setup(vec![Step::Response(response("r1", vec![], "hello"))]);
     let (result, _) = observed(&gateway, request(), &ToolRegistry::new()).await;
@@ -559,79 +610,21 @@ async fn run_collector_rejects_identity_order_idle_close_eof_and_accepts_gaps() 
 }
 
 #[tokio::test]
-async fn run_model_tool_limits_and_cached_batches_are_atomic() {
-    for (model, tool, expected, dispatches, attempts) in [
-        (1, 8, LimitKind::ModelRequests, 0, 1),
-        (2, 8, LimitKind::ModelRequests, 1, 2),
-        (4, 0, LimitKind::ToolExecutions, 0, 1),
-    ] {
-        let (gateway, script, tools) = setup(vec![
-            Step::Response(response("r1", vec![call("c1", 17, 25)], "")),
-            Step::Response(response("r2", vec![call("c2", 42, 8)], "")),
-        ]);
-        let mut req = request();
-        req.limits.max_model_requests = model;
-        req.limits.max_tool_executions = tool;
-        let (result, events) = observed(&gateway, req, &tools).await;
-        assert_eq!(result.outcome, RunOutcome::LimitReached { limit: expected });
-        assert_eq!(result.summary.new_tool_dispatches, dispatches);
-        assert_eq!(result.summary.model_requests_attempted, attempts);
-        assert!(result.last_response.is_some());
-        healthy(&result, &events, &script.records);
-    }
-    let (gateway, _, tools) = setup(vec![Step::Response(response(
-        "r1",
-        vec![call("c1", 17, 25), call("c2", 42, 8)],
-        "",
-    ))]);
-    let mut req = request();
-    req.limits.max_tool_executions = 1;
-    let (result, _) = observed(&gateway, req, &tools).await;
-    assert_eq!(
-        result.outcome,
-        RunOutcome::LimitReached {
-            limit: LimitKind::ToolExecutions
-        }
-    );
-    assert_eq!(result.summary.new_tool_dispatches, 0);
-    for cached_limit in [2, 3] {
-        let (gateway, _, tools) = setup(vec![
-            Step::Response(response("r1", vec![call("c1", 17, 25)], "")),
-            Step::Response(response("r2", vec![call("c1", 17, 25)], "")),
-            Step::Response(response("r3", vec![], "42")),
-        ]);
-        let mut req = request();
-        req.limits.max_model_requests = cached_limit;
-        req.limits.max_tool_executions = 1;
-        let (result, _) = observed(&gateway, req, &tools).await;
-        assert_eq!(result.summary.new_tool_dispatches, 1);
-        assert_eq!(
-            result.summary.reused_results,
-            if cached_limit == 2 { 0 } else { 1 }
-        );
-        assert_eq!(
-            result.summary.tool_results_prepared,
-            if cached_limit == 2 { 1 } else { 2 }
-        );
-        if cached_limit == 3 {
-            assert_eq!(result.outcome, RunOutcome::Completed);
-        } else {
-            assert_eq!(
-                result.outcome,
-                RunOutcome::LimitReached {
-                    limit: LimitKind::ModelRequests
-                }
-            );
-        }
-    }
-    let (gateway, _, tools) = setup(vec![Step::Response(response("r1", vec![], "hello"))]);
-    let mut req = request();
-    req.limits.max_model_requests = 1;
-    req.limits.max_tool_executions = 0;
-    assert_eq!(
-        observed(&gateway, req, &tools).await.0.outcome,
-        RunOutcome::Completed
-    );
+async fn run_cached_batches_reuse_results_without_new_dispatch() {
+    let (gateway, script, tools) = setup(vec![
+        Step::Response(response("r1", vec![call("c1", 17, 25)], "")),
+        Step::Response(response("r2", vec![call("c1", 17, 25)], "")),
+        Step::Response(response("r3", vec![], "42")),
+    ]);
+    let (result, events) = observed(&gateway, request(), &tools).await;
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert_eq!(result.summary.new_tool_dispatches, 1);
+    assert_eq!(result.summary.reused_results, 1);
+    assert_eq!(result.summary.tool_results_prepared, 2);
+    assert_eq!(result.summary.model_requests_attempted, 3);
+    let inputs = script.records.inputs.lock().unwrap();
+    assert_eq!(value(&inputs[1]), value(&inputs[2]));
+    healthy(&result, &events, &script.records);
 }
 
 #[tokio::test]
@@ -673,9 +666,7 @@ async fn run_scope_isolation_conflicts_mixed_cache_and_capacity() {
             Step::Response(response("r2", vec![next, call("new", 42, 8)], "")),
             Step::Response(response("r3", vec![], "50")),
         ]);
-        let mut req = request();
-        req.limits.max_tool_executions = 2;
-        let (result, _) = observed(&gateway, req, &tools).await;
+        let (result, _) = observed(&gateway, request(), &tools).await;
         if changed {
             failed_as(&result, "tool_preflight");
             assert_eq!(result.summary.new_tool_dispatches, 1);
@@ -686,9 +677,9 @@ async fn run_scope_isolation_conflicts_mixed_cache_and_capacity() {
             assert_eq!(result.summary.reused_results, 1);
         }
     }
-    for new_at_capacity in [false, true] {
+    for new_after_160 in [false, true] {
         let mut steps = Vec::new();
-        for batch in 0..16 {
+        for batch in 0..20 {
             steps.push(Step::Response(response(
                 &format!("r{batch}"),
                 (0..8)
@@ -698,27 +689,28 @@ async fn run_scope_isolation_conflicts_mixed_cache_and_capacity() {
             )));
         }
         steps.push(Step::Response(response(
-            "capacity",
-            vec![call(if new_at_capacity { "new" } else { "c0" }, 1, 2)],
+            "after-160",
+            vec![call(if new_after_160 { "new" } else { "c0" }, 1, 2)],
             "",
         )));
         steps.push(Step::Response(response("final", vec![], "3")));
         let (gateway, _, tools) = setup(steps);
-        let mut req = request();
-        req.limits.max_model_requests = 32;
-        req.limits.max_tool_executions = 128;
-        let (result, _) = observed(&gateway, req, &tools).await;
-        assert_eq!(result.summary.new_tool_dispatches, 128);
-        if new_at_capacity {
-            failed_as(&result, "tool_preflight");
-        } else {
-            assert_eq!(result.outcome, RunOutcome::Completed);
-            assert_eq!(result.summary.reused_results, 1);
-        }
+        let (result, _) = observed(&gateway, request(), &tools).await;
+        assert_eq!(result.outcome, RunOutcome::Completed);
+        assert_eq!(
+            result.summary.new_tool_dispatches,
+            if new_after_160 { 161 } else { 160 }
+        );
+        assert_eq!(
+            result.summary.reused_results,
+            if new_after_160 { 0 } else { 1 }
+        );
     }
     let (gateway, _, tools) = setup(vec![Step::Response(response(
         "r1",
-        (0..9).map(|i| call(&format!("c{i}"), 1, 2)).collect(),
+        (0..=MAX_INPUT_ITEMS)
+            .map(|i| call(&format!("c{i}"), 1, 2))
+            .collect(),
         "",
     ))]);
     let (result, _) = observed(&gateway, request(), &tools).await;

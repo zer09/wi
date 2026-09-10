@@ -7,12 +7,8 @@ use std::{
         Mutex,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Duration,
 };
-use tokio::{
-    sync::Notify,
-    time::{Instant, advance},
-};
+use tokio::sync::Notify;
 use wi::tools::Tool;
 
 #[tokio::test(start_paused = true)]
@@ -80,48 +76,228 @@ async fn run_cancel_open_generate_receipt_and_drop_cleanup() {
     }
 }
 
-#[tokio::test(start_paused = true)]
-async fn run_deadline_open_generate_receipt_and_cancel_priority() {
-    for phase in ["open", "generate", "receipt"] {
-        for cancel_too in [false, true] {
-            let step = if phase == "generate" {
-                Step::PendingGenerate
-            } else {
-                Step::PendingOutput
-            };
-            let mut script = Script::new(vec![step]);
-            script.pending_open = phase == "open";
-            let records = script.records.clone();
-            let mut gateway = Gateway::new();
-            gateway.register(Arc::new(script)).unwrap();
-            let tools = ToolRegistry::new();
-            let token = CancellationToken::new();
-            let mut req = request();
-            req.limits.deadline = Duration::from_secs(10);
-            let mut future = Box::pin(run(&gateway, req, &tools, token.clone(), |_| Ok(())));
-            assert!(futures_util::poll!(&mut future).is_pending());
-            advance(Duration::from_secs(10)).await;
-            if cancel_too {
-                token.cancel();
-            }
-            let result = future.await.unwrap();
-            assert_eq!(
-                result.outcome,
-                if cancel_too {
-                    RunOutcome::CancelledLocally
-                } else {
-                    RunOutcome::LimitReached {
-                        limit: LimitKind::Deadline,
-                    }
-                }
-            );
-            assert_eq!(count(&records.opens), 1);
-            assert_eq!(
-                count(&records.attempts),
-                if phase == "open" { 0 } else { 1 }
-            );
-            assert_eq!(count(&records.closes), if phase == "open" { 0 } else { 1 });
+#[derive(Default)]
+struct ReleasedTool {
+    calls: AtomicUsize,
+    dropped: Arc<AtomicUsize>,
+    entered: Notify,
+    release: Notify,
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReleasedArguments {
+    timeout_seconds: Option<u64>,
+}
+#[async_trait]
+impl Tool for ReleasedTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "wait_for_release".into(),
+            description: "Synthetic cooperative tool with its own optional timeout.".into(),
+            parameters: json!({"type":"object","properties":{"timeout_seconds":{"type":"integer","minimum":0}},"required":[],"additionalProperties":false}),
+            strict: false,
         }
+    }
+    fn validate(&self, args: &Value) -> wi::Result<()> {
+        let _: ReleasedArguments =
+            serde_json::from_value(args.clone()).map_err(|_| GatewayError::InvalidToolArguments)?;
+        Ok(())
+    }
+    async fn execute(&self, args: Value) -> wi::Result<Value> {
+        let args: ReleasedArguments =
+            serde_json::from_value(args).map_err(|_| GatewayError::InvalidToolArguments)?;
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let _drop = DropProbe(self.dropped.clone());
+        self.entered.notify_one();
+        if let Some(seconds) = args.timeout_seconds {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(seconds),
+                self.release.notified(),
+            )
+            .await
+            .map_err(|_| GatewayError::ToolFailed)?;
+        } else {
+            self.release.notified().await;
+        }
+        Ok(json!({"released":true}))
+    }
+}
+fn released_call(args: Value) -> OutputItem {
+    let mut item = call("pending-call", 0, 0);
+    let call = item.function_call.as_mut().unwrap();
+    call.name = "wait_for_release".into();
+    call.arguments = args.to_string();
+    item
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_pending_tool_survives_120_600_3600_seconds_then_release_or_cancel() {
+    for cancel in [false, true] {
+        let (gateway, script, _) = setup(vec![
+            Step::Response(response("pending", vec![released_call(json!({}))], "")),
+            Step::Response(response("final", vec![], "consumed")),
+        ]);
+        let tool = Arc::new(ReleasedTool::default());
+        let mut tools = ToolRegistry::new();
+        tools.register(tool.clone()).unwrap();
+        let token = CancellationToken::new();
+        let mut events = Vec::new();
+        let mut future = Box::pin(run(&gateway, request(), &tools, token.clone(), |event| {
+            events.push(event.clone());
+            Ok(())
+        }));
+        let start = tokio::time::Instant::now();
+        assert!(futures_util::poll!(&mut future).is_pending());
+        tool.entered.notified().await;
+        for seconds in [121, 601, 3601] {
+            let elapsed = std::time::Duration::from_secs(seconds);
+            tokio::time::advance(elapsed - start.elapsed()).await;
+            assert!(
+                futures_util::poll!(&mut future).is_pending(),
+                "stopped at {seconds}s"
+            );
+            assert!(start.elapsed() >= elapsed);
+            assert_eq!(count(&tool.calls), 1);
+            assert_eq!(count(&tool.dropped), 0);
+            assert_eq!(count(&script.records.attempts), 1);
+            assert_eq!(count(&script.records.closes), 0);
+        }
+        if cancel {
+            token.cancel();
+        } else {
+            tool.release.notify_one();
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), future)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.events_complete);
+        assert_eq!(result.sink_error, None);
+        assert_eq!(result.summary.new_tool_dispatches, 1);
+        assert_eq!(result.summary.reused_results, 0);
+        assert_eq!(count(&script.records.opens), 1);
+        assert_eq!(count(&script.records.closes), 1);
+        assert_eq!(count(&tool.dropped), 1);
+        assert_eq!(Arc::strong_count(&tool), 2, "no detached tool owner");
+        let finished: Vec<_> = events
+            .iter()
+            .filter_map(|e| match &e.event {
+                RunEvent::ToolEvent {
+                    event:
+                        ToolExecutionEvent::ToolExecutionFinished {
+                            call_id,
+                            tool_name,
+                            is_error,
+                        },
+                } => Some((call_id.as_str(), tool_name.as_str(), *is_error)),
+                _ => None,
+            })
+            .collect();
+        if cancel {
+            assert_eq!(result.outcome, RunOutcome::CancelledLocally);
+            assert_eq!(result.summary.model_requests_attempted, 1);
+            assert_eq!(result.summary.tool_results_prepared, 0);
+            assert_eq!(
+                result.summary.last_upstream_outcome,
+                Some(UpstreamOutcome::TerminalReceived)
+            );
+            assert!(finished.is_empty());
+            assert_eq!(script.records.inputs.lock().unwrap().len(), 1);
+        } else {
+            assert_eq!(result.outcome, RunOutcome::Completed);
+            assert_eq!(result.summary.model_requests_attempted, 2);
+            assert_eq!(result.summary.tool_results_prepared, 1);
+            assert_eq!(result.last_response.as_ref().unwrap().text, "consumed");
+            assert_eq!(finished, [("pending-call", "wait_for_release", false)]);
+            assert_eq!(
+                value(&script.records.inputs.lock().unwrap()[1]),
+                json!([
+                    {"kind":"tool_result","call_id":"pending-call","output":"{\"released\":true}"}
+                ])
+            );
+        }
+        tool.release.notify_one();
+        tokio::task::yield_now().await;
+        assert_eq!(count(&tool.calls), 1);
+        assert_eq!(count(&tool.dropped), 1);
+        assert_eq!(trace(&events).last(), Some(&"run_finished"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_tool_owned_optional_timeout_is_an_ordinary_correlated_result() {
+    for release_before_timeout in [false, true] {
+        let (gateway, script, _) = setup(vec![
+            Step::Response(response(
+                "pending",
+                vec![released_call(json!({"timeout_seconds":7}))],
+                "",
+            )),
+            Step::Response(response("final", vec![], "consumed")),
+        ]);
+        let tool = Arc::new(ReleasedTool::default());
+        let mut tools = ToolRegistry::new();
+        tools.register(tool.clone()).unwrap();
+        let mut events = Vec::new();
+        let mut future = Box::pin(run(
+            &gateway,
+            request(),
+            &tools,
+            CancellationToken::new(),
+            |event| {
+                events.push(event.clone());
+                Ok(())
+            },
+        ));
+        assert!(futures_util::poll!(&mut future).is_pending());
+        tool.entered.notified().await;
+        tokio::time::advance(std::time::Duration::from_secs(6)).await;
+        assert!(futures_util::poll!(&mut future).is_pending());
+        assert_eq!(count(&tool.dropped), 0);
+        if release_before_timeout {
+            tool.release.notify_one();
+        } else {
+            tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        }
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), future)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.outcome, RunOutcome::Completed);
+        assert!(result.events_complete);
+        assert_eq!(result.summary.model_requests_attempted, 2);
+        assert_eq!(result.summary.new_tool_dispatches, 1);
+        assert_eq!(result.summary.tool_results_prepared, 1);
+        assert_eq!(result.last_response.as_ref().unwrap().text, "consumed");
+        let output = if release_before_timeout {
+            json!({"released":true})
+        } else {
+            json!({"error":{"code":"gateway_error"}})
+        };
+        assert_eq!(
+            value(&script.records.inputs.lock().unwrap()[1]),
+            json!([
+                {"kind":"tool_result","call_id":"pending-call","output":output.to_string()}
+            ])
+        );
+        let tool_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e.event, RunEvent::ToolEvent { .. }))
+            .collect();
+        assert_eq!(tool_events.len(), 2);
+        assert!(matches!(&tool_events[0].event, RunEvent::ToolEvent {
+            event: ToolExecutionEvent::ToolExecutionStarted { call_id, tool_name }
+        } if call_id == "pending-call" && tool_name == "wait_for_release"));
+        assert!(matches!(&tool_events[1].event, RunEvent::ToolEvent {
+            event: ToolExecutionEvent::ToolExecutionFinished { call_id, tool_name, is_error }
+        } if call_id == "pending-call" && tool_name == "wait_for_release" && *is_error == !release_before_timeout));
+        assert_eq!(tool_events[0].request_id, tool_events[1].request_id);
+        assert_eq!(tool_events[0].turn_id, tool_events[1].turn_id);
+        assert_eq!(count(&tool.calls), 1);
+        assert_eq!(count(&tool.dropped), 1);
+        assert_eq!(count(&script.records.opens), 1);
+        assert_eq!(count(&script.records.closes), 1);
+        assert_eq!(Arc::strong_count(&tool), 2);
     }
 }
 
@@ -134,8 +310,8 @@ struct ProbeTool {
 }
 enum Mode {
     Pending,
+    PendingAfterFirst,
     Large,
-    Delay,
     InvalidDefinition,
 }
 struct DropProbe(Arc<AtomicUsize>);
@@ -174,15 +350,14 @@ impl Tool for ProbeTool {
         self.entered.notify_one();
         match self.mode {
             Mode::Pending => pending().await,
-            Mode::Large => Ok(json!({"value":"x".repeat(70*1024)})),
-            Mode::Delay => {
+            Mode::PendingAfterFirst => {
                 if n == 0 {
-                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    wi::tools::AddNumbers.execute(args).await
                 } else {
-                    pending::<()>().await;
+                    pending().await
                 }
-                wi::tools::AddNumbers.execute(args).await
             }
+            Mode::Large => Ok(json!({"value":"x".repeat(70*1024)})),
             Mode::InvalidDefinition => panic!("invalid definition admitted"),
         }
     }
@@ -211,8 +386,8 @@ async fn run_invalid_snapshot_definition_is_checked_once_before_open() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish() {
-    for stop in ["cancel", "deadline", "both", "drop"] {
+async fn run_pending_tool_cancel_and_future_drop_no_fabricated_finish() {
+    for stop in ["cancel", "drop"] {
         let (gateway, script, _) = setup(vec![Step::Response(response(
             "r1",
             vec![call("c1", 17, 25), call("c2", 42, 8)],
@@ -223,9 +398,7 @@ async fn run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish()
         tools.register(tool.clone()).unwrap();
         let token = CancellationToken::new();
         let mut events = Vec::new();
-        let mut req = request();
-        req.limits.deadline = Duration::from_secs(10);
-        let mut future = Box::pin(run(&gateway, req, &tools, token.clone(), |event| {
+        let mut future = Box::pin(run(&gateway, request(), &tools, token.clone(), |event| {
             events.push(event.clone());
             Ok(())
         }));
@@ -234,23 +407,9 @@ async fn run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish()
         if stop == "drop" {
             drop(future);
         } else {
-            if stop == "deadline" || stop == "both" {
-                advance(Duration::from_secs(10)).await;
-            }
-            if stop == "cancel" || stop == "both" {
-                token.cancel();
-            }
+            token.cancel();
             let result = future.await.unwrap();
-            assert_eq!(
-                result.outcome,
-                if stop == "deadline" {
-                    RunOutcome::LimitReached {
-                        limit: LimitKind::Deadline,
-                    }
-                } else {
-                    RunOutcome::CancelledLocally
-                }
-            );
+            assert_eq!(result.outcome, RunOutcome::CancelledLocally);
             assert_eq!(result.summary.new_tool_dispatches, 1);
             assert_eq!(result.summary.tool_results_prepared, 0);
             assert_eq!(
@@ -271,34 +430,52 @@ async fn run_pending_tool_cancel_deadline_and_future_drop_no_fabricated_finish()
     }
 }
 
-#[tokio::test(start_paused = true)]
-async fn run_absolute_deadline_includes_completed_turn_and_later_tool() {
+#[tokio::test]
+async fn run_cancel_after_completed_turn_preserves_results_and_drops_later_tool() {
     let (gateway, script, _) = setup(vec![
         Step::Response(response("r1", vec![call("c1", 17, 25)], "")),
         Step::Response(response("r2", vec![call("c2", 42, 8)], "")),
     ]);
-    let tool = ProbeTool::new(Mode::Delay);
+    let tool = ProbeTool::new(Mode::PendingAfterFirst);
     let mut tools = ToolRegistry::new();
     tools.register(tool.clone()).unwrap();
-    let mut req = request();
-    req.limits.deadline = Duration::from_secs(10);
-    let start = Instant::now();
-    let result = run(&gateway, req, &tools, CancellationToken::new(), |_| Ok(()))
-        .await
-        .unwrap();
-    assert_eq!(Instant::now() - start, Duration::from_secs(10));
-    assert_eq!(
-        result.outcome,
-        RunOutcome::LimitReached {
-            limit: LimitKind::Deadline
-        }
-    );
+    let token = CancellationToken::new();
+    let mut events = Vec::new();
+    let mut future = Box::pin(run(&gateway, request(), &tools, token.clone(), |event| {
+        events.push(event.clone());
+        Ok(())
+    }));
+    assert!(futures_util::poll!(&mut future).is_pending());
+    assert_eq!(count(&tool.calls), 2);
+    token.cancel();
+    let result = future.await.unwrap();
+    assert_eq!(result.outcome, RunOutcome::CancelledLocally);
     assert_eq!(result.summary.model_requests_attempted, 2);
     assert_eq!(result.summary.tool_results_prepared, 1);
     assert_eq!(result.summary.new_tool_dispatches, 2);
-    assert_eq!(count(&tool.calls), 2);
+    assert_eq!(result.summary.turns_finished, 2);
+    assert_eq!(
+        result.summary.last_upstream_outcome,
+        Some(UpstreamOutcome::TerminalReceived)
+    );
     assert_eq!(count(&tool.dropped), 2);
     assert_eq!(count(&script.records.closes), 1);
+    let inputs = script.records.inputs.lock().unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(
+        value(&inputs[1]),
+        json!([{"kind":"tool_result","call_id":"c1","output":"{\"sum\":42}"}])
+    );
+    let finished: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.event {
+            RunEvent::ToolEvent {
+                event: ToolExecutionEvent::ToolExecutionFinished { call_id, .. },
+            } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(finished, ["c1"]);
 }
 
 #[tokio::test]
@@ -306,6 +483,7 @@ async fn run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal() 
     for boundary in [
         "run_started",
         "turn_started",
+        "provider_terminal",
         "tool_start",
         "tool_finish",
         "turn_finish",
@@ -323,8 +501,13 @@ async fn run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal() 
         let mut events = Vec::new();
         let result = run(&gateway, request(), &tools, token.clone(), |event| {
             let matched = match boundary {
-                "run_started" => matches!(event.event, RunEvent::RunStarted { .. }),
+                "run_started" => matches!(event.event, RunEvent::RunStarted),
                 "turn_started" => matches!(event.event, RunEvent::TurnStarted { .. }),
+                "provider_terminal" => matches!(
+                    &event.event,
+                    RunEvent::ProviderEvent { event }
+                        if matches!(event.event, ProviderEvent::ResponseFinished { .. })
+                ),
                 "tool_start" => matches!(
                     event.event,
                     RunEvent::ToolEvent {
@@ -369,6 +552,16 @@ async fn run_cancel_boundaries_never_submit_partial_batch_or_rewrite_terminal() 
                 assert_eq!(
                     result.summary.last_upstream_outcome,
                     Some(UpstreamOutcome::NotSubmitted)
+                );
+            }
+            "provider_terminal" => {
+                assert_eq!(count(&script.records.attempts), 1);
+                assert_eq!(count(&script.records.tool_calls), 0);
+                assert_eq!(result.summary.new_tool_dispatches, 0);
+                assert_eq!(result.summary.tool_results_prepared, 0);
+                assert_eq!(
+                    result.summary.last_upstream_outcome,
+                    Some(UpstreamOutcome::TerminalReceived)
                 );
             }
             "tool_start" => {

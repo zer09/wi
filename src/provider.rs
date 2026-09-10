@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::{GatewayError, Result};
 
 pub const MAX_INPUT_BYTES: usize = 1024 * 1024;
+pub const MAX_INPUT_ITEMS: usize = 128;
 pub const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_TOOLS: usize = 32;
 
@@ -167,7 +168,7 @@ impl InputItem {
     }
 }
 pub fn validate_input(input: &[InputItem]) -> Result<()> {
-    if input.is_empty() || input.len() > 128 {
+    if input.is_empty() || input.len() > MAX_INPUT_ITEMS {
         return Err(GatewayError::InvalidRequest(
             "input must contain 1..128 items",
         ));

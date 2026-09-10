@@ -31,9 +31,6 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
         "--stdin",
         "--instructions",
         "--tool",
-        "--max-model-requests",
-        "--max-tool-executions",
-        "--deadline-seconds",
         "--auth-source",
         "--account",
         "--auth-file",
@@ -43,7 +40,14 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
     ] {
         assert!(help.contains(flag), "{flag}");
     }
-    for flag in ["--follow-up", "--resume", "--steer"] {
+    for flag in [
+        "--follow-up",
+        "--resume",
+        "--steer",
+        "--max-model-requests",
+        "--max-tool-executions",
+        "--deadline-seconds",
+    ] {
         assert!(!help.contains(flag));
     }
     let cases = vec![
@@ -52,7 +56,6 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
         vec!["--prompt", "hello", "--unknown"],
         vec!["--prompt", "hello", "unexpected"],
         vec!["--prompt", "hello", "--prompt", "again"],
-        vec!["--prompt", "hello", "--max-model-requests", "invalid"],
         vec!["--stdin", "--prompt", "hello"],
         vec!["--prompt", "hello", "--tool", "unknown"],
         vec!["--prompt", "hello", "--transport", "automatic"],
@@ -65,13 +68,6 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
             "--auth-file",
             "absent",
         ],
-        vec!["--prompt", "hello", "--max-model-requests", "0"],
-        vec!["--prompt", "hello", "--max-model-requests", "33"],
-        vec!["--prompt", "hello", "--max-tool-executions", "129"],
-        vec!["--prompt", "hello", "--max-tool-executions", "-1"],
-        vec!["--prompt", "hello", "--deadline-seconds", "0"],
-        vec!["--prompt", "hello", "--deadline-seconds", "601"],
-        vec!["--prompt", "hello", "--deadline-seconds", "1.5"],
         vec!["--prompt", "hello", "--follow-up", "later"],
         vec!["--prompt", "hello", "--resume", "id"],
         vec!["--prompt", "hello", "--steer", "later"],
@@ -98,6 +94,43 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
     let diagnostic = String::from_utf8_lossy(&output.stderr);
     assert_eq!(diagnostic.matches("error:").count(), 1);
     assert!(diagnostic.contains("--model"));
+}
+
+#[test]
+fn removed_run_flags_are_unknown_before_auth_setup() {
+    for source in ["codex", "pi", "gateway"] {
+        for flag in [
+            "--max-model-requests",
+            "--max-tool-executions",
+            "--deadline-seconds",
+        ] {
+            for suffix in [
+                vec![flag.to_string(), "1".into()],
+                vec![format!("{flag}=1")],
+            ] {
+                let mut args = vec![
+                    "run",
+                    "--model",
+                    "synthetic",
+                    "--prompt",
+                    "hello",
+                    "--auth-source",
+                    source,
+                ];
+                args.extend(suffix.iter().map(String::as_str));
+                let output = invoke(&args, b"");
+                assert_eq!(output.status.code(), Some(1));
+                assert!(output.stdout.is_empty());
+                let diagnostic = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    diagnostic.contains(&format!("unexpected argument '{flag}")),
+                    "{diagnostic}"
+                );
+                assert_eq!(diagnostic.matches("error:").count(), 1);
+                assert!(!diagnostic.contains("home directory"));
+            }
+        }
+    }
 }
 
 #[test]

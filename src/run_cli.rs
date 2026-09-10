@@ -1,11 +1,11 @@
 use clap::{Args, ValueEnum};
-use std::{future::Future, io::Write, sync::Arc, time::Duration};
+use std::{future::Future, io::Write, sync::Arc};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::sync::CancellationToken;
 use wi::{
     DeltaKind, Gateway, GatewayError, InputItem, ProviderEvent, Result,
     providers::openai_codex::PROVIDER_ID,
-    run::{RunEvent, RunEventEnvelope, RunLimits, RunOutcome, RunRequest, RunResult, RunSinkError},
+    run::{RunEvent, RunEventEnvelope, RunOutcome, RunRequest, RunResult, RunSinkError},
     tools::{AddNumbers, ToolRegistry},
 };
 
@@ -27,12 +27,6 @@ pub(crate) struct RunArgs {
     instructions: String,
     #[arg(long, value_enum)]
     tool: Vec<ToolArg>,
-    #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..=32))]
-    max_model_requests: u32,
-    #[arg(long, default_value_t = 8, value_parser = clap::value_parser!(u32).range(0..=128))]
-    max_tool_executions: u32,
-    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=600))]
-    deadline_seconds: u64,
 }
 
 async fn handle<R, W, S, B>(
@@ -70,12 +64,6 @@ where
             "--account requires --auth-source gateway",
         ));
     }
-    let limits = RunLimits {
-        max_model_requests: args.max_model_requests,
-        max_tool_executions: args.max_tool_executions,
-        deadline: Duration::from_secs(args.deadline_seconds),
-    };
-    limits.validate()?;
     let mut options = crate::options(&args.base);
     options.instructions = args.instructions;
     let mut tools = ToolRegistry::new();
@@ -106,7 +94,6 @@ where
         provider_id: PROVIDER_ID.into(),
         options,
         prompt,
-        limits,
     };
     let cancel = CancellationToken::new();
     let task = wi::run::run(&gateway, request, &tools, cancel.clone(), |event| {
@@ -181,7 +168,6 @@ fn render<W: Write>(
                 let label = match outcome {
                     RunOutcome::Completed => "Completed",
                     RunOutcome::CancelledLocally => "Cancelled locally",
-                    RunOutcome::LimitReached { .. } => "Limit reached",
                     RunOutcome::Failed { .. } => "Failed",
                 };
                 writeln!(out, "[Run: {label}]").map_err(sink_error)?;

@@ -37,7 +37,7 @@ enum Command {
     Capabilities,
     /// Generate text; optional follow-up uses the same provider session.
     Generate(GenerateArgs),
-    /// Run one bounded task with optional local addition tools.
+    /// Run one task with optional local addition tools.
     Run(run_cli::RunArgs),
     /// Demonstrate one ordinary, bounded, read-only function-tool round trip.
     ToolDemo(ModelArgs),

@@ -152,12 +152,14 @@ async fn run_cli_real_handler_json_outer_only_defaults_and_opt_in_tools() {
             })
             .collect();
         assert_eq!(events[0]["type"], "run_started");
-        assert_eq!(
-            events[0]["limits"],
-            json!({"max_model_requests":4,"max_tool_executions":8,"deadline":{"secs":120,"nanos":0}})
-        );
+        assert_eq!(events[0].as_object().unwrap().len(), 8);
+        assert!(events[0].get("limits").is_none());
         assert_eq!(events.last().unwrap()["type"], "run_finished");
         for (i, event) in events.iter().enumerate() {
+            assert_eq!(event["schema_version"], 2);
+            if event["type"] == "provider_event" {
+                assert_eq!(event["event"]["schema_version"], 1);
+            }
             assert_eq!(event["sequence"], i + 1);
             assert!(event["run_id"].is_string());
         }
@@ -202,40 +204,23 @@ async fn run_cli_plain_filters_controls_labels_validated_and_partial_outcomes() 
 }
 
 #[tokio::test]
-async fn run_cli_refusal_completed_and_tool_limit_exit_codes() {
-    for tool_limit in [false, true] {
-        let mut r = response();
-        r.text = "I cannot comply".into();
-        if tool_limit {
-            r.output.push(OutputItem {
-                id: Some("item".into()),
-                kind: ItemKind::FunctionCall,
-                native_type: "independent-call".into(),
-                function_call: Some(FunctionCall {
-                    call_id: "call".into(),
-                    name: "add_numbers".into(),
-                    arguments: "{\"a\":17,\"b\":25}".into(),
-                    origin: CallOrigin::Direct,
-                    namespace: None,
-                    complete: true,
-                }),
-                native: json!({"opaque":7}),
-            });
-        }
-        let (gateway, records) = setup(r, false);
-        let result = handle(
-            args(&["--tool", "add_numbers", "--max-tool-executions", "0"]),
-            &b""[..],
-            |_| Ok(gateway),
-            &mut Vec::new(),
-            pending(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(exit_code(&result), if tool_limit { 1 } else { 0 });
-        assert_eq!(count(&records.generates), 1);
-        assert_eq!(result.summary.new_tool_dispatches, 0);
-    }
+async fn run_cli_refusal_completed_exit_code() {
+    let mut r = response();
+    r.text = "I cannot comply".into();
+    let (gateway, records) = setup(r, false);
+    let result = handle(
+        args(&["--tool", "add_numbers"]),
+        &b""[..],
+        |_| Ok(gateway),
+        &mut Vec::new(),
+        pending(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(exit_code(&result), 0);
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert_eq!(count(&records.generates), 1);
+    assert_eq!(result.summary.new_tool_dispatches, 0);
 }
 
 struct Broken {
@@ -331,7 +316,7 @@ async fn run_cli_signal_cancels_and_awaits_close_and_terminal_result() {
 
 #[tokio::test]
 async fn run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8() {
-    for case in 0..14 {
+    for case in 0..11 {
         let mut a = args(&[]);
         let mut input = vec![];
         match case {
@@ -350,15 +335,12 @@ async fn run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8() {
                 a.base.auth.account = Some("../invalid".into());
             }
             8 => a.tool = vec![ToolArg::AddNumbers; 2],
-            9 => a.max_model_requests = 0,
-            10 => a.max_tool_executions = 129,
-            11 => a.deadline_seconds = 601,
-            12 => {
+            9 => {
                 a.stdin = true;
                 a.prompt = None;
                 input = vec![0xff];
             }
-            13 => {
+            10 => {
                 a.stdin = true;
                 a.prompt = None;
                 input = vec![b'x'; MAX_INPUT_BYTES + 1];

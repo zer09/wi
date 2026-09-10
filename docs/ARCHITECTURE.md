@@ -18,7 +18,7 @@
 | `providers/openai_codex/session.rs` | Task lifetime, admission, independent control/output paths |
 | `providers/openai_codex/consistency.rs` | Bounded provisional/effective-output validation before settlement and terminal publication |
 | `tools.rs` | Shared two-phase registry, fresh result scopes and deterministic addition executor |
-| `run/mod.rs` | Provider-neutral bounded run controller, limits and cooperative stop ownership |
+| `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
 | `run_cli.rs` | Thin run argument validation, rendering and cancellation adapter |
@@ -140,19 +140,31 @@ uses normalized fields, but also rejects any non-null native namespace that
 normalization omitted. This is a narrow consistency check, not general provider
 wire parsing. Absent and null namespaces remain valid.
 The CLI's fixed demo applies stricter acceptance before invoking the
-registry policy: exactly one `add_numbers` call with `a=17,b=25`, one correlated
+registry validation: exactly one `add_numbers` call with `a=17,b=25`, one correlated
 `sum=42` result, and final ordinary answer text exactly `42` after trimming.
 
-Whole-batch preflight validates authority, arguments, identity and capacity before
-sequential execution. IDs are bounded to 512 UTF-8 bytes. A batch has at most eight
-calls; the cache has at most 128 results. Cached calls still require authorization.
-`fresh_scope()` shares registered tool Arcs but starts an empty cache. Each run owns
-one such scope, leaving the caller's cache untouched. New-execution budgets count
-new IDs, not cached results or raw batch length.
+Whole-batch preflight validates authority, arguments, identity and per-request input
+compatibility before sequential execution. IDs permit at most 512 UTF-8 bytes.
+`MAX_INPUT_ITEMS = 128` names the existing input-item capacity; a result batch that
+cannot fit fails before new execution. It is not a lifetime tool-call quota.
+Nine small valid calls in one response and more than 128 small distinct calls
+across a run are permitted if retained input, payload and history checks pass.
+Cached calls still require authorization. After execution, the controller validates
+the complete actual result vector's existing byte/shape rules before submission.
+It does not chunk results, submit a subset or undo completed effects.
 
-Tool results are cached by call ID in the registry instance. Reusing the same ID
-with different arguments is rejected. Identical repeated delivery uses the saved
-result. This is a bounded in-memory convenience, not a durable exactly-once claim.
+`fresh_scope()` shares registered tool Arcs but starts an empty cache. Each run owns
+one such scope, leaving the caller's cache untouched. Tool results are cached by
+call ID in the registry instance. Reusing the same ID with a different tool name or
+arguments is rejected. Identical repeated delivery uses the saved result.
+The cache retains results until its owning scope ends, with no eviction or lifetime
+entry-count ceiling. Memory can grow during a run; provider-history guards do not
+guarantee a bound on cache memory or process RSS for arbitrary providers.
+This is in-memory result reuse, not a durable exactly-once claim.
+
+A tool owns any tool-specific timeout and reports expiry as its ordinary error/result.
+The generic `Tool` trait and shipped `add_numbers` have no timeout option. The
+controller adds no universal tool timeout or progress API.
 
 The ordinary continuation requires exactly the outstanding result IDs. An output
 item ID is not a call ID. New user instructions can accompany a complete result
@@ -221,18 +233,23 @@ without rewriting native terminal JSON. Conversation and registry consumers cont
 use effective output, including native item metadata for SSE replay. See EVENTS.md for
 bounds, lifecycle validation, and fail-closed rules.
 
-## Bounded run ownership
+## Run ownership
 
-`wi::run::run` validates before admission, then owns one session and a fresh tool
+`wi::run::run` accepts only `provider_id`, `options` and `prompt` in `RunRequest`.
+Strict deserialization rejects unknown fields, including `limits: null`.
+The controller validates before admission, then owns one session and a fresh tool
 scope until completion or stop. The generic collector validates provider/session/
 request identity, response identity and increasing provider-local sequence without
 interpreting native payloads. It forwards unchanged inner envelopes and never waits
 for a second terminal event. Only completed ordinary calls can continue.
 
-One admission-started monotonic deadline encloses open, generate, collection and
-cooperative tools. Cancellation wins when cancellation and deadline are ready
-together. Model limits count attempted generate calls; whole-batch tool preflight
-precedes any new dispatch. The controller never retries or reopens a failed session.
+The controller has no whole-run timer or request/execution quota. Open, generate,
+collection and cooperative tool waits remain cancellation-aware; waiting races
+work against cancellation, not a distant deadline. Cancellation checks also guard
+transitions and dispatch. A validated completed no-call response whose disposition
+is selected is not rewritten by later observer-triggered cancellation. Pending
+calls still check cancellation before dispatch.
+The controller never retries, reconnects, falls back or reopens a failed session.
 It invokes no auth methods; provider opening and the existing same-profile SSE
 preparation retain authentication ownership and renewal-worker completion policy.
 
@@ -240,7 +257,11 @@ The fallible synchronous observer receives outer lifecycle/provider/tool events.
 It must not block; a channel adapter uses bounded nonblocking forwarding. No internal
 transcript, durable queue or replay service is added. Sink failure stops later work;
 final-emission failure preserves the selected outcome but marks delivery incomplete.
-`RunResult` retains counters and the last full response, not an unbounded history.
+`RunResult` retains counters and the last full response, not a full run transcript.
+Its outcome is `Completed`, `Failed { code }` or `CancelledLocally`. Counters use
+checked `u64` arithmetic as observations, never quota checks; numeric overflow is a
+static `counter_overflow` failure. Outer run-event schema 2 has payload-free
+`run_started`; nested provider envelopes remain schema 1. See [events](EVENTS.md).
 A close guard requests local session closure on return or future drop. Drop/process
 loss cannot promise a result, final event, rollback or upstream cancellation.
 `run_cli.rs` only validates inputs, constructs the existing provider, renders events
@@ -256,8 +277,8 @@ and signals cancellation; it does not implement a second loop.
 - HTTP server, GUI, keyring and proxy support.
 - Stable provider support for the experimental shared OAuth registration.
   Browser login and explicit renewal have local Linux live evidence. Automatic
-  expiry and failure paths have offline evidence. M3 is OFFLINE ACCEPTED after
-  repeated accumulated independent review; live runs remain NOT AUTHORIZED / NOT RUN.
+  expiry and failure paths have offline evidence. Historical M3 acceptance is
+  recorded in [M3 verification](WI_RUN_VERIFICATION.md), not as C1 verification.
 
 Advanced requirements fail closed instead of silently degrading or switching
 billing/authentication modes. Item preservation is not advertised as execution

@@ -2,6 +2,7 @@
 //! sandbox, database, or durable job scheduler is included.
 #![forbid(unsafe_code)]
 
+pub mod context;
 pub mod error;
 pub mod gateway;
 pub mod provider;

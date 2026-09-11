@@ -6,11 +6,13 @@ pub mod browser_login;
 mod codec;
 mod consistency;
 #[cfg(test)]
+#[path = "tests/consistency/consistency_tests.rs"]
 mod consistency_tests;
 mod finalized;
 pub mod managed_auth;
 mod managed_store;
 #[cfg(all(test, target_os = "linux"))]
+#[path = "tests/storage/managed_store_tests.rs"]
 mod managed_store_tests;
 #[cfg(test)]
 mod oauth_offline;
@@ -100,7 +102,6 @@ impl OpenAiCodexProvider {
                 Feature::ToolSearch,
                 Feature::ProgrammaticTools,
                 Feature::AsyncTools,
-                Feature::HostedSkills,
             ]
             .into_iter()
             .map(|feature| FeatureCapability {

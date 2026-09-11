@@ -322,7 +322,7 @@ fn jwt_hints(token: &str) -> (Option<String>, Option<u64>) {
 }
 
 #[cfg(test)]
-#[path = "auth_edge_tests.rs"]
+#[path = "tests/authentication/auth_edge_tests.rs"]
 mod edge_tests;
 
 #[cfg(test)]

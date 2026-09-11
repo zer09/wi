@@ -1,0 +1,1122 @@
+{
+  "schema_version": 1,
+  "contract": "s1.0",
+  "runtime_baseline": "b33ca4bb1cdf8ae58da8d83123b87956535d6a2c",
+  "tested_revision": "ed712c9df548b10962e527bbb634dbe53fe3fa36",
+  "worktree_state": {
+    "branch": "docs/s1-local-skills-context",
+    "initial_head": "ed712c9df548b10962e527bbb634dbe53fe3fa36",
+    "current_head": "ed712c9df548b10962e527bbb634dbe53fe3fa36",
+    "merge_base": "b33ca4bb1cdf8ae58da8d83123b87956535d6a2c",
+    "initial_clean": true,
+    "initial_state_observer": "parent/orchestrator, supplied observed evidence",
+    "current_state_observer": "report author, local Git inspection",
+    "implementation_uncommitted": true,
+    "uncommitted_changes_represented_by_tested_revision": false,
+    "note": "tested_revision is HEAD only. The tested implementation and these report drafts are uncommitted changes and are not represented by that SHA.",
+    "staged_changes": false,
+    "pre_report_modified_tracked_files": 16,
+    "pre_report_untracked_implementation_files": 14,
+    "new_report_files": 2,
+    "changed_path_count_including_reports": 32,
+    "report_assignment_changed_only": [
+      "docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md",
+      "docs/wi-local-skills-s1-verification.json"
+    ],
+    "user_changes_preserved": true,
+    "historical_reports_and_manifests_preserved": true
+  },
+  "status": "OFFLINE_ACCEPTED",
+  "accepted": true,
+  "acceptance": {
+    "technical_evidence": "PASS",
+    "pending_requirement": null,
+    "additional_blockers_found_by_report_source_inspection": [],
+    "note": "Three independent reviewers inspected the complete accumulated implementation and both report drafts. All returned PASS with no blocking findings. Live verification remains NOT RUN and was not authorized."
+  },
+  "environment": {
+    "observer": "parent/orchestrator, supplied observed final execution",
+    "os": "Linux",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "rustc": "1.98.1",
+    "cargo": "1.98.1",
+    "uv": "0.12.10",
+    "node": "v24.18.0",
+    "isolation": "HOME, XDG_CONFIG_HOME and CODEX_HOME used isolated temporary roots; trusted Cargo/Rustup caches were preserved",
+    "cargo_net_offline": true,
+    "cargo_net_offline_scope": "Final Cargo and verify commands",
+    "platforms_not_run": ["Windows", "macOS"]
+  },
+  "evidence_attribution": {
+    "parent_execution": "All baseline/final runtime gate outcomes, counts, environment and no-live-operation statements are supplied parent observations, not report-author reruns.",
+    "review_history": "Prior increment reviews and independent timeout-reproduction attempts are supplied history. Raw commands and exit codes not supplied for those attempts are not invented.",
+    "source_inspection": "The report author inspected governing documents, current status, focused diffs, implementation and test assertions. Named tests map inspected source to the parent-observed passing suites; they are not claims of separate named-test execution.",
+    "live": "No S1 live evidence. Scripted preparation/continuation does not prove live model compliance. Historical provider/auth evidence is not new S1 evidence.",
+    "report_assignment_scope": "Create the two reports only, then validate JSON parsing and git diff --check. No runtime/auth/profile gate reruns or other edits."
+  },
+  "scope": {
+    "implemented": [
+      "Explicit-root synchronous library discovery and preparation",
+      "Always-discovered global frontmatter plus project frontmatter when present",
+      "Scoped catalog listing and explicit qualified skill-body activation",
+      "Root-only project AGENTS.md and deterministic prepared user JSON",
+      "Available/active scoped-ID provenance and immutable prepared snapshot",
+      "Thin run and skills-list CLI callers",
+      "Offline skills example",
+      "HostedSkills enum, mapping and provider report removal"
+    ],
+    "public_interfaces": [
+      {"name": "ContextRoots and discover", "source": "src/context.rs:26-31,454-494"},
+      {"name": "prepare_run, PreparedRun and ContextManifest", "source": "src/context/preparation.rs:21-165"},
+      {"name": "wi run --workspace and repeatable --use-skill", "source": "src/run_cli.rs:21-37,109-123"},
+      {"name": "wi skills list --workspace --json", "source": "src/skills_cli.rs:70-79"}
+    ],
+    "existing_execution_boundary": "RunRequest and wi::run::run; no new run request field, provider session option, model/tool loop or local-skill provider capability"
+  },
+  "baseline": {
+    "observer": "parent/orchestrator, supplied observed pre-edit isolated gate set",
+    "six_cargo_gates": "PASS",
+    "cargo_commands": [
+      "cargo fmt --all -- --check",
+      "cargo check --all-targets",
+      "cargo test --all-targets",
+      "cargo clippy --all-targets -- -D warnings",
+      "cargo build --all-targets",
+      "cargo test --doc"
+    ],
+    "rust_tests": {"passed": 260, "failed": 0, "ignored": 0},
+    "verify": {"command": "uv run scripts/verify.py", "result": "PASS"},
+    "node_self_tests": {"command": "node scripts/cli_retest.mjs --self-test", "passed": 152, "live_started": false},
+    "run_offline": {"command": "cargo run --example run_offline", "outcome": "Completed", "answer": "50", "result": "PASS"},
+    "diff_check": {"command": "git diff --check", "result": "PASS"},
+    "note": "Baseline passes are comparison evidence only. They do not establish S1 implementation at HEAD."
+  },
+  "commands": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "cargo check --all-targets",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "cargo test --all-targets",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"passed": 339, "failed": 0, "ignored": 0}
+    },
+    {
+      "command": "cargo clippy --all-targets -- -D warnings",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "cargo build --all-targets",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "command": "cargo test --doc",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"doctests": 0}
+    },
+    {
+      "command": "uv run scripts/verify.py",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"source_files": 76, "rust_test_definitions": 326, "fixture_events": 25}
+    },
+    {
+      "command": "node scripts/cli_retest.mjs --self-test",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"passed": 152, "live_started": false}
+    },
+    {
+      "command": "cargo run --example run_offline",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"outcome": "Completed", "answer": "50", "sessions": 1, "model_requests": 3, "tool_executions": 2, "offline": true}
+    },
+    {
+      "command": "cargo run --example skills_offline",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS",
+      "observed_result": {"outcome": "Completed", "answer": "42", "catalog_entries": 2, "active_skills": 1, "sessions": 1, "model_requests": 2, "tool_executions": 1, "offline": true}
+    },
+    {
+      "command": "git diff --check",
+      "observer": "parent/orchestrator, supplied final observation",
+      "phase": "final-offline-implementation-before-report-drafts",
+      "exit_code": 0,
+      "result": "PASS"
+    }
+  ],
+  "final_parent_execution": {"failures": 0, "retries": 0},
+  "matrix_evidence_convention": "PASS denotes offline technical evidence, not overall acceptance. Named test assertions were inspected in the current tree; execution is attributed to the parent-observed final cargo test --all-targets unless a row explicitly identifies another observation. No row claims a report-author runtime rerun.",
+  "matrix": [
+    {
+      "id": "S1-00",
+      "status": "PASS",
+      "observed_tests": [
+        "Parent-observed isolated baseline: six Cargo gates, uv run scripts/verify.py, Node self-tests, run_offline, git diff --check",
+        "Report-author Git inspection: status --short --untracked-files=all, HEAD, branch, merge-base, staged-name inventory and focused diffs"
+      ],
+      "assertions": [
+        "Supplied initial clean HEAD and locally inspected current HEAD/merge-base agree.",
+        "The tested implementation is unstaged/uncommitted and not represented by HEAD.",
+        "Historical reports/manifests and ledger remain unchanged; verification uses synthetic roots with no real credential/global/private-project reads or live provider traffic."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-01",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_uses_no_ambient_roots_even_without_home (tests/context_catalog.rs:652-716)",
+        "context_catalog_independent_concurrent_callers_keep_workspace_context_separate (tests/context_catalog.rs:616-649)",
+        "context_prepare_simultaneous_workspaces_share_only_explicit_global_metadata (tests/context_prepare/filesystem.rs:4-69)"
+      ],
+      "assertions": [
+        "Library discovery and preparation use explicit roots without ambient cwd/HOME, CLI, OpenAI or auth-manager discovery.",
+        "Concurrent callers retain distinct project context and do not change process cwd.",
+        "Library calls work without HOME; no CLI subprocess is required by the library."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-02",
+      "status": "PASS",
+      "observed_tests": [
+        "context_cli_roots_resolve_both_environment_routes_and_workspace_once (src/context_cli.rs:104-143)",
+        "context_cli_unavailable_cwd_is_ignored_only_for_absolute_workspace (src/context_cli.rs:146-178)",
+        "context_cli_invalid_environment_is_explicit_and_sanitized (src/context_cli.rs:181-209)",
+        "context_catalog_missing_roots_are_read_only_empty_scopes (tests/context_catalog.rs:59-71)",
+        "context_catalog_existing_wrong_type_roots_fail (tests/context_catalog.rs:101-120)",
+        "skills_binary_absolute_workspace_with_deleted_cwd_lists_metadata_without_creation (tests/skills_cli.rs:190-239)"
+      ],
+      "assertions": [
+        "Global root uses absolute nonempty XDG_CONFIG_HOME/wi/skills or absolute nonempty HOME/.config/wi/skills when XDG is unset/empty.",
+        "Relative XDG and unavailable/invalid HOME fallback fail explicitly; project root is workspace/.agents/skills.",
+        "Missing skill directories are empty scopes without creation; wrong-type/unreadable roots fail.",
+        "Absolute workspace avoids cwd lookup; relative/omitted workspace resolves cwd once."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-03",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_catalog_only_never_reopens_unselected_files (tests/context_prepare.rs:177-213)",
+        "run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller (src/run_cli_context_tests.rs:98-218)",
+        "skills_binary_both_global_routes_project_addition_and_metadata_only_output (tests/skills_cli.rs:103-163)"
+      ],
+      "assertions": [
+        "All valid global frontmatter is included without explicit activation.",
+        "All valid project metadata adds to the global catalog; a workspace without project skills still receives globals.",
+        "There is no global override/disable mode, implicit body activation or model-specific discovery."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-04",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_stops_at_valid_malformed_and_root_package_boundaries (tests/context_catalog.rs:254-297)",
+        "context_catalog_unreadable_manifest_is_excluded_but_resources_are_not_traversed (tests/context_catalog.rs:916-939)",
+        "skills_binary_missing_scopes_are_empty_without_creating_config_or_auth_paths (tests/skills_cli.rs:166-186)",
+        "Source inspection: iterative sorted discover_scope (src/context.rs:496-560)"
+      ],
+      "assertions": [
+        "Traversal remains within selected skill roots and stops below every SKILL.md package boundary, including malformed and root-level packages.",
+        "Other harness directories, ancestors, arbitrary Markdown, package resources, URLs and package manifests do not become discovery sources.",
+        "Discovery/list creates no roots, configuration, registration records or auth paths."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-05",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_scopes_coexist_and_sort_by_name_not_source_path (tests/context_catalog.rs:123-182)",
+        "context_catalog_duplicate_validated_names_fail_in_either_scope (tests/context_catalog.rs:185-206)",
+        "context_prepare_exact_metadata_body_separation_selection_order_and_prefix (tests/context_prepare.rs:73-174)"
+      ],
+      "assertions": [
+        "global:review and project:review coexist in listing and model catalog.",
+        "Within-scope duplicate validated names fail; traversal order never selects a winner.",
+        "Ordering is globals by name, then projects by name."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-06",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_yaml_strings_comments_bom_crlf_and_json_data_are_retained (tests/context_catalog.rs:299-323)",
+        "context_catalog_quoted_merge_keys_are_retained_as_data (tests/context_catalog.rs:326-353)",
+        "context_catalog_malformed_yaml_excludes_only_the_located_skill (tests/context_catalog.rs:390-443)",
+        "context_catalog_required_optional_field_shapes_and_scalar_lengths (tests/context_catalog.rs:446-520)",
+        "context_catalog_requires_delimiter_lines_and_utf8_metadata (tests/context_catalog.rs:523-550)"
+      ],
+      "assertions": [
+        "Real YAML parsing supports quoted/block strings, comments, Unicode, BOM, LF/CRLF and delimiter lines.",
+        "Invalid required fields, duplicate/non-string keys, tags, plain merge keys, anchors/aliases, multiple documents and invalid UTF-8 frontmatter reject with sanitized diagnostics.",
+        "Quoted << keys remain data; valid name/description values are not normalized.",
+        "Name/description/compatibility format limits are distinct from nonbinding body recommendations."
+      ],
+      "limitations": ["Standard YAML tags such as !!str also reject; this is a documented nonblocking compatibility limitation."],
+      "blockers": []
+    },
+    {
+      "id": "S1-07",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_optional_behavior_is_data_and_directory_mismatch_only_warns (tests/context_catalog.rs:356-387)",
+        "context_catalog_required_optional_field_shapes_and_scalar_lengths (tests/context_catalog.rs:446-520)",
+        "context_prepare_selected_references_do_not_read_register_execute_or_fetch (tests/context_prepare/filesystem.rs:252-303)"
+      ],
+      "assertions": [
+        "Valid optional/unknown JSON-compatible fields are retained as data.",
+        "Unsupported behavioral metadata warns without tools, activation changes or hiding global entries.",
+        "Actual package-directory mismatch warns without exclusion; a root-level package does not receive that warning.",
+        "Standard allowed-tools has string shape; arrays are not retained as a valid standard field under s1.0."
+      ],
+      "limitations": [],
+      "blockers": []
+    },
+    {
+      "id": "S1-08",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_large_non_utf8_unselected_body_is_not_loaded_or_size_checked (tests/context_catalog.rs:553-570)",
+        "context_prepare_catalog_only_never_reopens_unselected_files (tests/context_prepare.rs:177-213)",
+        "context_prepare_selected_body_must_be_nonblank_utf8_and_bounded (tests/context_prepare/validation.rs:41-75)"
+      ],
+      "assertions": [
+        "Metadata discovery does not parse, retain or send unselected bodies and accepts large/non-UTF-8 body bytes after valid frontmatter.",
+        "An unselected file can be removed after discovery without affecting catalog-only preparation.",
+        "Selected instructions must be regular UTF-8, nonblank and within existing prompt bounds.",
+        "Buffered read-ahead is possible; no zero physical body-byte read claim is made."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-09",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_malformed_yaml_excludes_only_the_located_skill (tests/context_catalog.rs:390-443)",
+        "context_catalog_unreadable_roots_and_traversal_are_fatal (tests/context_catalog.rs:892-913)",
+        "context_catalog_debug_redacts_metadata_and_host_paths (tests/context_catalog.rs:590-613)",
+        "skills_binary_visible_diagnostics_keep_valid_entries_and_filter_controls (tests/skills_cli.rs:306-355)"
+      ],
+      "assertions": [
+        "Malformed individual skills are excluded with visible diagnostics while valid unrelated entries remain.",
+        "Unreadable traversal directories and ambiguous identities fail rather than silently return partial discovery.",
+        "Ordinary diagnostics/Debug omit YAML/body contents and canonical private paths and filter/escape terminal controls."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-10",
+      "status": "PASS",
+      "observed_tests": [
+        "context_catalog_canonicalizes_only_selected_roots (tests/context_catalog.rs:767-786)",
+        "context_catalog_descendant_package_and_manifest_links_are_diagnosed_not_followed (tests/context_catalog.rs:789-851)",
+        "context_catalog_linked_agents_and_project_skills_roots_are_skipped (tests/context_catalog.rs:854-875)",
+        "context_catalog_fifo_and_directory_manifests_are_excluded_without_reading (tests/context_catalog.rs:976-1002)",
+        "context_prepare_selected_manifest_and_ancestor_replacement_links_fail_closed (tests/context_prepare/filesystem.rs:183-221)",
+        "context_prepare_fifo_and_device_instructions_or_selected_manifest_are_not_read (tests/context_prepare/filesystem.rs:308-349)"
+      ],
+      "assertions": [
+        "Caller-selected root links may canonicalize deliberately; descendant links do not extend the selected boundary.",
+        "Unsafe manifests, links, directories and FIFOs are not read as skills/instructions; device-target links reject without creating a device node.",
+        "Containment and regular-file checks plus Unix no-follow/nonblocking final opens are present."
+      ],
+      "limitations": ["Linux execution only; Windows/macOS not run.", "No hostile-filesystem sandbox, hardlink isolation or elimination of ancestor/TOCTOU races."],
+      "blockers": []
+    },
+    {
+      "id": "S1-11",
+      "status": "PASS",
+      "observed_tests": [
+        "context_skill_ids_require_qualified_valid_names (tests/context_catalog.rs:209-251)",
+        "context_prepare_unknown_and_invalid_selections_are_not_paths (tests/context_prepare/validation.rs:11-38)",
+        "context_prepare_exact_metadata_body_separation_selection_order_and_prefix (tests/context_prepare.rs:73-174)",
+        "run_cli_parser_requires_qualified_ids_and_keeps_selection_order (src/run_cli_context_tests.rs:38-95)"
+      ],
+      "assertions": [
+        "Qualified IDs resolve exact catalog entries; unknown, bare and path-like selections reject.",
+        "Repeated identical IDs activate once at their first position; different IDs retain selection order across scopes.",
+        "Skill selection does not change tools, provider, model, required features, account or auth mode."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-12",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_agents_is_root_only_and_loaded_after_discovery (tests/context_prepare.rs:241-269)",
+        "context_prepare_no_context_is_byte_identical_with_missing_or_empty_agents (tests/context_prepare.rs:216-238)",
+        "context_prepare_agents_links_including_dangling_are_errors_not_missing (tests/context_prepare/filesystem.rs:164-180)",
+        "context_prepare_unreadable_instructions_and_selected_manifest_fail (tests/context_prepare/filesystem.rs:224-249)",
+        "skills_binary_both_global_routes_project_addition_and_metadata_only_output (tests/skills_cli.rs:103-163)"
+      ],
+      "assertions": [
+        "Only workspace root AGENTS.md is read, during preparation rather than discovery/list.",
+        "Ancestor, nested and global instruction files and SYSTEM.md are not loaded.",
+        "Missing/empty root instructions are benign; unsafe/unreadable/non-UTF-8 instructions reject before provider construction.",
+        "Project instruction source is project:AGENTS.md, not a canonical host path."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-13",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_exact_metadata_body_separation_selection_order_and_prefix (tests/context_prepare.rs:73-174)",
+        "context_prepare_delimiter_injection_is_escaped_data_not_instructions (tests/context_prepare.rs:321-359)"
+      ],
+      "assertions": [
+        "Original task bytes and caller instruction prefix remain unchanged.",
+        "Prepared JSON contains exactly task, project_instructions, available_skills and active_skills, with all frontmatter and only selected bodies.",
+        "Nested mappings are sorted deterministically; escaping preserves payload structure against delimiter-like file content.",
+        "Project/skill bodies stay out of higher-priority instructions; framing grants no authority and advertises no nonexistent loader."
+      ],
+      "limitations": ["JSON framing is not prompt-injection prevention."],
+      "blockers": []
+    },
+    {
+      "id": "S1-14",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_no_context_is_byte_identical_with_missing_or_empty_agents (tests/context_prepare.rs:216-238)",
+        "context_prepare_file_limits_and_rendered_input_overhead_fail_without_truncation (tests/context_prepare/validation.rs:95-133)",
+        "context_prepare_oversized_mandatory_catalog_is_not_partially_included (tests/context_prepare/validation.rs:136-150)",
+        "context_prepare_uses_existing_one_item_input_byte_boundary (tests/context_prepare/validation.rs:153-170)",
+        "context_prepare_validates_framed_options_with_actual_tools_at_existing_limit (tests/context_prepare/validation.rs:192-225)",
+        "context_prepare_rejects_blank_original_task_with_context_before_construction (tests/context_prepare/validation.rs:228-241)",
+        "context_prepare_rejects_blank_original_instructions_with_context_before_construction (tests/context_prepare/validation.rs:244-257)",
+        "run_cli_context_errors_and_final_validation_precede_all_constructors (src/run_cli_context_tests.rs:221-298)"
+      ],
+      "assertions": [
+        "No-context request prompt/instructions are byte-identical.",
+        "Original and effective requests undergo existing complete-input and tools-inclusive options validation before provider/auth construction.",
+        "Framing cannot make blank original task/instructions valid.",
+        "Oversize mandatory catalog, project or selected content fails explicitly without truncation or partial inclusion.",
+        "Returned options.tools is empty; no runtime/count budget or provider-threshold change is introduced."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-15",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_revalidates_metadata_and_keeps_an_owned_body_snapshot (tests/context_prepare.rs:272-318)",
+        "context_prepare_revalidates_frontmatter_before_decoding_selected_body (tests/context_prepare/validation.rs:78-92)",
+        "context_prepare_simultaneous_workspaces_share_only_explicit_global_metadata (tests/context_prepare/filesystem.rs:4-69)",
+        "context_prepare_resolved_root_links_do_not_redirect_the_snapshot (tests/context_prepare/filesystem.rs:124-161)"
+      ],
+      "assertions": [
+        "Changed or invalid frontmatter yields context_changed rather than mixing stale identity with new content.",
+        "Body-only edits before activation can be picked up; prepared owned bytes survive subsequent edits/deletion.",
+        "A fresh discovery/preparation sees new metadata/body; unrelated workspaces do not share project state.",
+        "No mid-run filesystem reload, polling or provider-session mutation is added."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-16",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_selected_references_do_not_read_register_execute_or_fetch (tests/context_prepare/filesystem.rs:252-303)",
+        "context_prepare_unknown_and_invalid_selections_are_not_paths (tests/context_prepare/validation.rs:11-38)"
+      ],
+      "assertions": [
+        "Inert resource/script/asset/installation/URL references remain body text, not permission to read, register tools, execute or fetch.",
+        "Preparation succeeds with inaccessible resource directories, excludes resource canaries, keeps the registry unchanged and makes no connection to the synthetic listener.",
+        "Unknown skill selection fails rather than reporting fictitious resource execution."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-17",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_external_provider_receives_snapshot_and_only_ordinary_tool_continuation (tests/run_support/context.rs:6-136)"
+      ],
+      "assertions": [
+        "An external non-OpenAI scripted Provider receives exact prepared input/options through wi::run::run after source fixtures are deleted.",
+        "Exact task, project policy, all catalog metadata, selected bodies and caller prefix are asserted with non-OpenAI native fields.",
+        "One session, two ordinary model requests and one tool dispatch complete with 42; no additional skill-load request.",
+        "Run schema2 and nested provider schema1 remain intact."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-18",
+      "status": "PASS",
+      "observed_tests": [
+        "context_prepare_websocket_exact_initial_context_then_same_session_parent_delta (src/providers/openai_codex/context_loopback_tests.rs:121-160)",
+        "context_prepare_sse_replays_exact_initial_context_once_with_native_history (src/providers/openai_codex/context_loopback_tests.rs:163-196)"
+      ],
+      "assertions": [
+        "Actual adapter loopback WS retains same-session parent/delta continuation and unchanged effective instructions.",
+        "Actual adapter loopback SSE retains exact initial prepared context once within native-history replay.",
+        "Global/project metadata and selected body appear in the intended initial payload, without an extra skill-load generation.",
+        "Native/recovered cases retain ordinary tool flow; auth/wire/codec policy is unchanged."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-19",
+      "status": "PASS",
+      "observed_tests": [
+        "skills_binary_both_global_routes_project_addition_and_metadata_only_output (tests/skills_cli.rs:103-163)",
+        "skills_binary_visible_diagnostics_keep_valid_entries_and_filter_controls (tests/skills_cli.rs:306-355)",
+        "run_binary_context_failures_precede_each_auth_source_and_preserve_relative_labels (tests/skills_cli.rs:459-488)",
+        "run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller (src/run_cli_context_tests.rs:98-218)",
+        "run_cli_context_errors_and_final_validation_precede_all_constructors (src/run_cli_context_tests.rs:221-298)",
+        "run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson (src/run_cli_context_tests.rs:312-343)"
+      ],
+      "assertions": [
+        "skills list is local and metadata-only, with no root instruction/body loading, provider/auth construction, tool execution or model call.",
+        "run uses shared discovery/preparation with workspace and qualified skill selection before the existing controller.",
+        "Validation/context failures do not reach provider/auth constructors; diagnostics are delivered before construction on stderr, not NDJSON stdout.",
+        "Plain controls are filtered; JSON includes metadata/relative labels but no bodies or added canonical paths; event schemas remain unchanged."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-20",
+      "status": "PASS",
+      "observed_tests": [
+        "hosted_skills_required_feature_is_unknown_before_provider_construction (tests/provider_contract.rs:120-154)",
+        "skills_binary_help_parser_is_metadata_only_and_capabilities_exclude_hosted (tests/skills_cli.rs:530-572)",
+        "advanced_feature_requirement_fails_before_authentication (src/providers/openai_codex/tests.rs:562-577)",
+        "Source/diff inspection: Feature mapping and OpenAiCodexProvider capability entry removal (src/provider.rs:25-41; src/providers/openai_codex/mod.rs:94-113)"
+      ],
+      "assertions": [
+        "HostedSkills enum/string/provider entry and dependent active expectations are removed, not disabled or aliased.",
+        "hosted_skills required-feature input fails unknown-variant decoding before construction.",
+        "Other four advanced variants remain unsupported and generic provider-native data remains preserved.",
+        "Local skills are above providers; no upload, key creation, hosted probe or API-billing fallback is added."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-21",
+      "status": "PASS",
+      "observed_tests": [
+        "run_request_contains_only_task_fields_and_rejects_obsolete_configuration (tests/run_controller.rs:119-143)",
+        "run_collector_rejects_identity_order_idle_close_eof_and_accepts_gaps (tests/run_controller.rs:545-611)",
+        "run_cached_batches_reuse_results_without_new_dispatch (tests/run_controller.rs:614-629)",
+        "run_sink_variants_stop_once_and_final_failure_preserves_outcome (tests/run_controller.rs:723-798)",
+        "run_l_160_distinct_calls_then_final_uses_161_requests (tests/run_support/workloads.rs:8-83)",
+        "run_pending_tool_survives_120_600_3600_seconds_then_release_or_cancel (tests/run_support/stop.rs:134-225)",
+        "whole_batch_authority_rejects_before_dispatch_or_reuse (src/tools_batch_tests.rs:83-137)",
+        "recovered_loopback_text_tool_continuation_and_observer_matrix (src/providers/openai_codex/recovery_loopback_tests.rs:58-158)",
+        "invalid_recovery_loopback_reports_received_without_settlement_or_second_send (src/providers/openai_codex/recovery_loopback_tests.rs:160-272)",
+        "consistency_public_session_rejects_before_publication_execution_or_next_send (src/providers/openai_codex/consistency_loopback_tests.rs:35-279)",
+        "consistency_public_session_accepts_effective_output_and_resets_each_request (src/providers/openai_codex/consistency_loopback_tests.rs:282-434)",
+        "managed_ws_profile_selected_per_open_and_continuation_keeps_handshake (src/providers/openai_codex/managed_loopback_tests.rs:40-116)",
+        "managed_sse_renews_same_profile_for_tool_result_and_rejects_relogin (src/providers/openai_codex/managed_loopback_tests.rs:140-235)",
+        "store_absence_is_read_only_but_existing_unsafe_paths_fail (src/providers/openai_codex/managed_store_tests.rs:27-60)",
+        "store_rejects_permissions_symlinks_hardlinks_and_size (src/providers/openai_codex/managed_store_tests.rs:136-170)"
+      ],
+      "assertions": [
+        "C1/M3 orchestration, cancellation, sink/correlation, preflight authority, validation and result reuse remain covered by passing final tests.",
+        "Recovery/uncertainty and synthetic authentication coverage passes; existing expectations change only for hosted removal or automatic context preparation.",
+        "No RunLimits, run timers, quotas, optional replacement budget, service, persistence, watcher or extra executor appears in the scoped implementation changes.",
+        "Earlier reviewer consistency timeout observations are retained as non-reproduced test-infrastructure observations, not omitted or treated as final-parent failures."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-22",
+      "status": "PASS",
+      "observed_tests": [
+        "Parent-observed cargo run --example run_offline: exit 0, Completed 50, offline",
+        "Parent-observed cargo run --example skills_offline: exit 0, Completed 42, offline",
+        "skills_offline assertions (examples/skills_offline.rs:147-258)",
+        "Future requirement inspection (README.md:256-264; docs/ARCHITECTURE.md:326-337)"
+      ],
+      "assertions": [
+        "run_offline uses finite scripted work: one session, three model requests, two tool executions.",
+        "skills_offline uses two catalog entries, one active skill, one session, two model requests and one tool execution.",
+        "No credentials or provider network are needed; scripted evidence is not live-model compliance evidence.",
+        "One owner/multiple devices, disconnect-not-cancel, persistent application sessions and no automatic restart/resume are recorded future requirements, not implemented S1 service behavior."
+      ],
+      "blockers": []
+    },
+    {
+      "id": "S1-23",
+      "status": "PASS",
+      "observed_tests": [
+        "All eleven parent-observed final verification commands exited 0",
+        "Three-increment review-a/review-b/review-c history: repeated gates passed after confirmed remediations",
+        "Final review-a/review-b/review-c inspected all accumulated source, tests, docs, examples, dependency changes and both report drafts",
+        "Final review-b independently observed cargo test --all-targets with 339 passed, 0 failed and 0 ignored",
+        "Final review-c independently reproduced the full required offline gate set with matching results"
+      ],
+      "assertions": [
+        "Final technical gates pass after focused fixes; no final-parent failures or retries.",
+        "Active docs/help and reports describe s1.0 without changing historical evidence or claiming live PASS/Git transitions.",
+        "Every final complete-diff reviewer returned PASS with no blocking findings."
+      ],
+      "blockers": []
+    }
+  ],
+  "parser_dependency": {
+    "name": "yaml-rust2",
+    "version_requirement": "=0.12.0",
+    "resolved_version": "0.12.0",
+    "default_features": false,
+    "manifest_source": "Cargo.toml:29-30",
+    "parser_source": "src/context/frontmatter.rs:65-142",
+    "reason": "Event parsing exposes anchors, tags and duplicate keys before expansion or replacement; UTF-8 is validated locally.",
+    "lockfile_added_packages": [
+      {"name": "yaml-rust2", "version": "0.12.0"},
+      {"name": "arraydeque", "version": "0.5.1"},
+      {"name": "hashlink", "version": "0.12.2"},
+      {"name": "hashbrown", "version": "0.17.1"},
+      {"name": "foldhash", "version": "0.2.0"}
+    ],
+    "broad_upgrades": false,
+    "initial_development_fetch_and_lock": true,
+    "fetch_observer": "parent/orchestrator supplied implementation history; lock/manifest diff inspected by report author",
+    "final_resolution": "Cached offline resolution",
+    "compatibility": [
+      "JSON-compatible YAML subset, not full general YAML or full Pi/Codex discovery/format parity",
+      "Quoted/block strings, comments, BOM and LF/CRLF supported; validated name/description values preserved exactly",
+      "Name 1..64 lowercase ASCII letters/digits/hyphens with specified hyphen rules; nonblank description up to 1024 Unicode scalars",
+      "Compatibility is a nonblank string up to 500 characters; metadata is a string-to-string map; license and allowed-tools use string shape",
+      "Unknown valid JSON-shaped data remains metadata without tool/activation authority",
+      "Duplicate/non-string mapping keys, multiple documents, tags, anchors/aliases and plain merge keys reject; quoted << remains data",
+      "Standard tags including !!str also reject; documented nonblocking limitation",
+      "Root-level SKILL.md skips package-directory mismatch comparison; nested package-directory mismatches still warn without exclusion"
+    ],
+    "hosted_api_config_change": "Feature::HostedSkills and hosted_skills are removed; former required-feature input fails unknown-variant deserialization, with no alias to local skills."
+  },
+  "provenance": {
+    "source": "src/context/preparation.rs:17-165,168-206; src/context.rs:454-494,563-621; src/run_cli.rs:109-123",
+    "task": "Caller prompt bytes are preserved in the task field; no-context requests keep the original prompt unchanged.",
+    "instructions": "Caller SessionOptions.instructions is the exact prefix. Only fixed framing is appended, never project or skill body text.",
+    "project_instructions": "Only selected workspace root AGENTS.md during preparation; source label project:AGENTS.md. Not read by discovery/list.",
+    "available_skills": "All valid parsed global and project frontmatter; global-by-name then project-by-name; no unselected bodies.",
+    "active_skills": "Explicit qualified catalog IDs, metadata revalidated, first-position deduplication, caller order and owned body snapshot.",
+    "manifest": "Available scoped IDs, active scoped IDs and optional project-instruction source; private filesystem handles and content omitted.",
+    "provider_context": "One initial prepared payload enters the existing controller. WS continues with deltas; SSE retains it within native-history replay. Instructions remain fixed.",
+    "host_paths": "Wi does not add canonical host paths to the prompt/list. Retained owner-authored metadata can itself contain sensitive text or paths."
+  },
+  "security_trust_limits": [
+    "Trusted owner-selected roots; no hostile-filesystem sandbox or hardlink isolation",
+    "Unix final opens use no-follow/nonblocking flags; Windows has source-level reparse-point checks, but Windows/macOS execution was not run",
+    "Known links/special files fail closed; ancestor replacement and TOCTOU races are not eliminated",
+    "Metadata scanning stops logically at the closing delimiter; buffered physical body read-ahead can occur",
+    "Existing MAX_INPUT_BYTES checks bound consumed prompt material and complete rendered input/options, not universal memory use or runtime work",
+    "JSON framing protects structure, not prompt-injection resistance or live model behavior",
+    "Project/skill text grants no tools, auth changes or executable configuration",
+    "Metadata/list output is intentionally sensitive user data; callers must protect it and prepared inputs despite Debug/ordinary diagnostic redaction",
+    "Resource scripts/canaries are inert; no file/shell/coding executor, network resource resolver or model-selected skill loader exists in S1"
+  ],
+  "findings_and_fixes": [
+    {
+      "id": "quoted-merge-key",
+      "classification": "confirmed",
+      "finding": "Quoted << keys were incorrectly treated as YAML merges.",
+      "resolution": "Reject plain merge keys in mapping-key position while retaining quoted << as ordinary data.",
+      "status": "FIXED",
+      "regression_tests": [
+        "context_catalog_quoted_merge_keys_are_retained_as_data (tests/context_catalog.rs:326-353)",
+        "context_catalog_malformed_yaml_excludes_only_the_located_skill (tests/context_catalog.rs:390-443)"
+      ],
+      "evidence": "Supplied remediation/review history plus inspected regression source; final parent suite passed."
+    },
+    {
+      "id": "blank-original-input",
+      "classification": "confirmed",
+      "finding": "Context wrapping allowed blank original task or instructions to become valid.",
+      "resolution": "Validate original and effective requests with existing validators, preserving selection/file error precedence.",
+      "status": "FIXED",
+      "regression_tests": [
+        "context_prepare_rejects_blank_original_task_with_context_before_construction (tests/context_prepare/validation.rs:228-241)",
+        "context_prepare_rejects_blank_original_instructions_with_context_before_construction (tests/context_prepare/validation.rs:244-257)",
+        "context_prepare_preserves_selection_and_file_error_precedence_over_blank_request (tests/context_prepare/validation.rs:260-285)"
+      ],
+      "evidence": "Supplied remediation/review history plus inspected regression source; final parent suite passed."
+    },
+    {
+      "id": "changed-frontmatter-utf8",
+      "classification": "confirmed",
+      "finding": "Invalid UTF-8 in changed frontmatter returned read_failed rather than context_changed.",
+      "resolution": "Revalidate frontmatter identity before decoding selected body bytes.",
+      "status": "FIXED",
+      "regression_tests": ["context_prepare_revalidates_frontmatter_before_decoding_selected_body (tests/context_prepare/validation.rs:78-92)"],
+      "evidence": "Supplied remediation/review history plus inspected regression source; final parent suite passed."
+    },
+    {
+      "id": "manifest-available-ids",
+      "classification": "confirmed",
+      "finding": "The provenance manifest omitted available scoped IDs.",
+      "resolution": "Populate available IDs alongside active IDs and compare manifest lists with prepared payloads.",
+      "status": "FIXED",
+      "regression_tests": [
+        "context_prepare_exact_metadata_body_separation_selection_order_and_prefix (tests/context_prepare.rs:73-174)",
+        "context_prepare_catalog_only_never_reopens_unselected_files (tests/context_prepare.rs:177-213)",
+        "context_prepare_no_context_is_byte_identical_with_missing_or_empty_agents (tests/context_prepare.rs:216-238)"
+      ],
+      "evidence": "Supplied remediation/review history plus inspected regression source; final parent suite passed."
+    },
+    {
+      "id": "absolute-workspace-cwd",
+      "classification": "confirmed",
+      "finding": "An absolute workspace unnecessarily depended on current_dir succeeding.",
+      "resolution": "Call cwd only for omitted or relative workspace; preserve explicit absolute selection when cwd is unavailable.",
+      "status": "FIXED",
+      "regression_tests": [
+        "context_cli_unavailable_cwd_is_ignored_only_for_absolute_workspace (src/context_cli.rs:146-178)",
+        "skills_binary_absolute_workspace_with_deleted_cwd_lists_metadata_without_creation (tests/skills_cli.rs:190-239)",
+        "skills_and_run_binary_deleted_cwd_still_rejects_omitted_or_relative_workspace (tests/skills_cli.rs:243-267)",
+        "run_binary_absolute_workspace_with_deleted_cwd_reaches_context_failure_before_auth (tests/skills_cli.rs:271-303)"
+      ],
+      "evidence": "Supplied remediation/review history plus inspected regression source; final parent suite passed."
+    },
+    {
+      "id": "allowed-tools-array",
+      "classification": "rejected",
+      "finding": "Suggestion that allowed-tools arrays should be retained as a valid standard field.",
+      "resolution": "Rejected because standard allowed-tools has string shape under s1.0; unknown fields still retain valid JSON-shaped data.",
+      "status": "NOT_A_BLOCKER",
+      "source": "tests/context_catalog.rs:356-387,446-520"
+    },
+    {
+      "id": "consistency-loopback-event-bound",
+      "classification": "test-infrastructure-observation-not-confirmed-as-regression",
+      "finding": "Intermittent pre-existing consistency loopback event bound timeout appeared in two reviewer full-suite attempts.",
+      "resolution": "Independent verification did not reproduce it: two named attempts and one module attempt passed. Related files were unchanged; later full/verify gates passed.",
+      "status": "NOT_A_CONFIRMED_BLOCKER",
+      "observer": "supplied reviewer/independent-verification history",
+      "reviewer_full_suite_occurrences": 2,
+      "independent_named_attempts_passed": 2,
+      "independent_module_attempts_passed": 1,
+      "specific_failing_test_name": null,
+      "attempt_commands": null,
+      "attempt_exit_codes": null,
+      "note": "The supplied summary does not identify the exact failing test or individual attempt commands/exit codes. No command or code is fabricated; this observation is not counted as a final-parent failure."
+    },
+    {
+      "id": "root-package-warning",
+      "classification": "confirmed-nonblocking-follow-up",
+      "finding": "A root-level SKILL.md received a directory/name mismatch warning because discovery compared its name with the selected root directory.",
+      "resolution": "Compare the skill name only with an actual relative package directory. Keep nested mismatch warnings and require no diagnostics for the root-package fixture.",
+      "status": "FIXED",
+      "source": "src/context.rs:590-597; tests/context_catalog.rs:254-297",
+      "evidence": "User-approved post-review follow-up; 28 focused catalog tests, formatting, all-target clippy with warnings denied, and staged/unstaged diff checks passed offline."
+    },
+    {
+      "id": "standard-tag-rejection",
+      "classification": "nonblocking-limitation-suggestion",
+      "finding": "The parser rejects standard YAML tags such as !!str as well as custom tags.",
+      "resolution": "Document the stricter supported subset without claiming full YAML compatibility.",
+      "status": "DOCUMENTED_NOT_A_BLOCKER",
+      "source": "src/context/frontmatter.rs:65-142; tests/context_catalog.rs:390-443"
+    },
+    {
+      "id": "pre-completion-compile-test-issues",
+      "classification": "intermediate-implementation-issues",
+      "finding": "Implementation delegates encountered initial compile/test assertion issues before reporting increments complete.",
+      "resolution": "Corrected before completed increment reports; final parent gates passed without failures or retries.",
+      "status": "CORRECTED_BEFORE_COMPLETION",
+      "observer": "parent/orchestrator supplied history",
+      "commands": null,
+      "exit_codes": null,
+      "note": "Specific command details were not supplied. These are not final-parent-run failures."
+    }
+  ],
+  "review": {
+    "status": "PASS",
+    "accepted": true,
+    "observer": "Three fresh independent reviewers inspected the complete accumulated diff after both report drafts existed",
+    "prior_reviews": [
+      {"increment": 1, "reviewers": ["review-a", "review-b", "review-c"], "result_after_confirmed_remediations": "Each repeated review gate passed with no confirmed blocking findings"},
+      {"increment": 2, "reviewers": ["review-a", "review-b", "review-c"], "result_after_confirmed_remediations": "Each repeated review gate passed with no confirmed blocking findings"},
+      {"increment": 3, "reviewers": ["review-a", "review-b", "review-c"], "result_after_confirmed_remediations": "Each repeated review gate passed with no confirmed blocking findings"}
+    ],
+    "findings": [
+      {"finding_id": "quoted-merge-key", "resolution": "FIXED"},
+      {"finding_id": "blank-original-input", "resolution": "FIXED"},
+      {"finding_id": "changed-frontmatter-utf8", "resolution": "FIXED"},
+      {"finding_id": "manifest-available-ids", "resolution": "FIXED"},
+      {"finding_id": "absolute-workspace-cwd", "resolution": "FIXED"},
+      {"finding_id": "allowed-tools-array", "resolution": "REJECTED"},
+      {"finding_id": "consistency-loopback-event-bound", "resolution": "NOT_REPRODUCED; retained test-infrastructure observation"},
+      {"finding_id": "root-package-warning", "resolution": "FIXED_IN_USER_APPROVED_FOLLOW_UP"},
+      {"finding_id": "standard-tag-rejection", "resolution": "DOCUMENTED_NONBLOCKING"}
+    ],
+    "final_review_performed": true,
+    "final_review_scope": "All accumulated implementation changes and both report drafts",
+    "final_reviewers": [
+      {"reviewer": "review-a", "result": "PASS", "blocking_findings": 0},
+      {"reviewer": "review-b", "result": "PASS", "blocking_findings": 0, "independent_rust_tests": {"passed": 339, "failed": 0, "ignored": 0}},
+      {"reviewer": "review-c", "result": "PASS", "blocking_findings": 0, "independent_full_offline_gate_set": "PASS"}
+    ],
+    "remaining_blockers": [],
+    "post_review_follow_up": {
+      "change": "Root-level SKILL.md skips the package-directory mismatch comparison; nested mismatches still warn",
+      "approval": "User requested review before staging, then explicitly approved inclusion in the commit",
+      "offline_gate_set": "PASS",
+      "rust_tests": {"passed": 339, "failed": 0, "ignored": 0},
+      "node_self_tests": {"passed": 152, "live_started": false},
+      "scripts_verify": "PASS",
+      "run_offline": "Completed 50",
+      "skills_offline": "Completed 42",
+      "diff_checks": "PASS"
+    },
+    "post_review_report_check": {
+      "initial_json_parse": "FAILED: missing separator introduced during the mechanical status update",
+      "fix": "Restored the missing comma between top-level objects",
+      "final_json_validation": "PASS",
+      "final_whitespace_checks": "PASS"
+    },
+    "note": "The final independent review preceded the focused root-warning follow-up. The user explicitly approved that two-file fix after reviewing it; no other implementation behavior changed."
+  },
+  "rust_tests": {
+    "observer": "parent/orchestrator, supplied final cargo test --all-targets observation",
+    "passed": 339,
+    "failed": 0,
+    "ignored": 0,
+    "baseline_passed": 260,
+    "increase_from_baseline": 79,
+    "breakdown": {
+      "lib": 207,
+      "bin_wi": 24,
+      "context_catalog": 28,
+      "context_prepare": 26,
+      "managed_absence_cli": 1,
+      "provider_contract": 5,
+      "run_cli_integration": 4,
+      "run_controller": 33,
+      "skills_cli": 11,
+      "example_test_harnesses": 0
+    },
+    "doctests": 0,
+    "filtered": null,
+    "filtered_note": "The supplied full-suite command has no test-name filter; separate filtered-test totals were not supplied.",
+    "platform_exclusions": "Linux/Unix conditional coverage ran on Linux. Windows/macOS execution and their platform-specific exclusions were not measured; zero ignored does not imply all platforms ran.",
+    "count_note": "Counts report observed execution, not an imposed target. Verify's source test-definition inventory is a different measure."
+  },
+  "node_self_tests": {
+    "observer": "parent/orchestrator, supplied final self-test observation",
+    "passed": 152,
+    "baseline_passed": 152,
+    "live_started": false
+  },
+  "verify_inventory": {
+    "observer": "parent/orchestrator, supplied final verify observation",
+    "source_files": 76,
+    "rust_test_definitions": 326,
+    "fixture_events": 25
+  },
+  "changed_files": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "README.md",
+    "docs/ARCHITECTURE.md",
+    "docs/EVENTS.md",
+    "src/lib.rs",
+    "src/main.rs",
+    "src/provider.rs",
+    "src/providers/openai_codex/mod.rs",
+    "src/providers/openai_codex/run_loopback_tests.rs",
+    "src/providers/openai_codex/tests.rs",
+    "src/run_cli.rs",
+    "src/run_cli_tests.rs",
+    "tests/provider_contract.rs",
+    "tests/run_cli.rs",
+    "tests/run_controller.rs",
+    "examples/skills_offline.rs",
+    "src/context.rs",
+    "src/context/frontmatter.rs",
+    "src/context/preparation.rs",
+    "src/context_cli.rs",
+    "src/providers/openai_codex/context_loopback_tests.rs",
+    "src/run_cli_context_tests.rs",
+    "src/skills_cli.rs",
+    "tests/context_catalog.rs",
+    "tests/context_prepare.rs",
+    "tests/context_prepare/filesystem.rs",
+    "tests/context_prepare/validation.rs",
+    "tests/run_support/context.rs",
+    "tests/skills_cli.rs",
+    "docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md",
+    "docs/wi-local-skills-s1-verification.json"
+  ],
+  "retained_constraints": [
+    "Preserve user-owned unstaged/uncommitted work and historical evidence; no stage, commit, push, merge, release or publication",
+    "S1 only: shared preparation and explicit qualified activation, not S2/P1/V1 implementation",
+    "Always retain valid global frontmatter and add project frontmatter without shadowing",
+    "No model-selected body load, resource execution, uploads, hosted execution or API-key fallback",
+    "No RunLimits, runtime budgets, run timers, count quotas or withdrawn M4 timeout/progress framework",
+    "Preserve existing C1/M3 orchestration, cancellation, correlation, validation, authority and result reuse",
+    "Preserve accepted authentication, transport, wire/codec policy and generic native-item retention",
+    "Provider event schema1 and outer run schema2 unchanged",
+    "Use synthetic temporary roots/credentials and scripted/loopback providers; do not read owner skills or private projects for tests",
+    "Separate observed execution, inspected assertions, prior review reports and live evidence",
+    "Protect sensitive metadata/prepared text and avoid canonical private paths or raw credential/YAML contents in ordinary reports",
+    "One owner/multiple devices; browser disconnect must not cancel service-owned work",
+    "Application sessions must persist; storage design precedes service acceptance and is deferred",
+    "Service restart stops active tasks with no automatic restart/resume or replay; continuation requires explicit user action",
+    "No database, persistence interface, migration design, service/UI, background recovery worker or in-memory substitute for persistent application sessions",
+    "Pi authoring conversation is separate from Wi live verification; generation ledger has no new allocation"
+  ],
+  "repeatable_local_commands": {
+    "prerequisites": [
+      "Run from the checkout with HOME, XDG_CONFIG_HOME and CODEX_HOME set to isolated temporary roots",
+      "Preserve trusted Cargo/Rustup cache locations before changing HOME",
+      "Use the recorded toolchain and cached dependencies with CARGO_NET_OFFLINE=true",
+      "Do not use actual owner skill/project roots or real auth/profile commands"
+    ],
+    "commands": [
+      "cargo fmt --all -- --check",
+      "cargo check --all-targets",
+      "cargo test --all-targets",
+      "cargo clippy --all-targets -- -D warnings",
+      "cargo build --all-targets",
+      "cargo test --doc",
+      "uv run scripts/verify.py",
+      "node scripts/cli_retest.mjs --self-test",
+      "cargo run --example run_offline",
+      "cargo run --example skills_offline",
+      "git diff --check"
+    ],
+    "note": "Repeat instructions are not additional execution claims. Test watchdogs are not runtime work limits."
+  },
+  "deferred_work": [
+    "S2 model-selected skill activation and separately approved on-demand resources",
+    "P1 storage design and persistent application sessions/history, including schema/migrations/retention decisions",
+    "V1 one-owner multi-device service, client authentication, API/subscriptions and UI",
+    "Shell/file/coding tools, watchers, resource scripts/execution and uploads",
+    "Hosted execution and API-key fallback remain excluded, not silently promised as a next increment"
+  ],
+  "future_service_requirements": {
+    "one_owner_multiple_devices": true,
+    "browser_disconnect_is_cancellation": false,
+    "application_sessions_must_persist": true,
+    "restart_stops_active_tasks": true,
+    "automatic_restart_or_resume": false,
+    "continuation_requires_explicit_user_action": true,
+    "storage_design_deferred": true,
+    "storage_design_precedes_service_acceptance": true,
+    "implemented_by_s1": false,
+    "note": "ProviderSession is an in-memory transport handle, not persistent application-session storage."
+  },
+  "live": {
+    "status": "NOT_RUN",
+    "authorized": false,
+    "generations": 0,
+    "provider_requests": 0,
+    "credential_operations": 0,
+    "auth_profile_operations": 0,
+    "login_operations": 0,
+    "renewal_operations": 0,
+    "hosted_api_probes": 0,
+    "uploads": 0,
+    "real_global_skill_content_reads_for_verification": 0,
+    "private_project_content_reads_for_verification": 0,
+    "new_generation_allocation": 0,
+    "note": "Live/auth zeros refer to real services and real owner credentials. Synthetic credential/store fixtures and loopback/scripted providers are offline evidence. The permitted initial development dependency fetch is not provider traffic."
+  },
+  "git_and_hosted_transitions": {
+    "stages": 0,
+    "commits": 0,
+    "pushes": 0,
+    "merges": 0,
+    "releases": 0,
+    "publications": 0,
+    "deployments": 0,
+    "hosted_service_writes": 0
+  },
+  "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false},
+  "service_and_storage_implemented": false,
+  "merge_readiness_follow_up": {
+    "date": "2026-09-12",
+    "scope": ["MR-00", "MR-01", "MR-02", "MR-03", "MR-04"],
+    "status": "LOCAL_OFFLINE_REPAIRS_VERIFIED_MERGE_READINESS_PENDING",
+    "merge_ready": false,
+    "review_comment": "https://github.com/zer09/wi/pull/2#issuecomment-5638072481",
+    "reviewed_revision": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+    "tested_worktree": {
+      "base_head": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+      "branch": "docs/s1-local-skills-context",
+      "initial_clean": true,
+      "observer": "Implementor, direct local Git inspection and offline execution",
+      "repairs_uncommitted": true,
+      "repairs_unstaged": true,
+      "repairs_represented_by_head": false,
+      "submitted_revision": null
+    },
+    "historical_evidence": {
+      "policy": "Append-only follow-up; all original top-level evidence fields and original Markdown content remain unchanged",
+      "failed_run": {
+        "id": 34625704647,
+        "url": "https://github.com/zer09/wi/actions/runs/34625704647",
+        "head_sha": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+        "created_at": "2026-09-11T17:05:18Z",
+        "status": "completed",
+        "conclusion": "failure",
+        "observer": "Implementor retrieved GitHub job metadata and failure logs with authenticated read-only gh; these are GitHub execution outcomes, not local native platform runs",
+        "jobs": [
+          {"os": "ubuntu-latest", "id": 103350146214, "conclusion": "success", "fmt": "PASS", "check": "PASS", "test": "PASS", "clippy_warning_denied": "PASS", "build": "PASS", "doctests": "PASS"},
+          {"os": "macos-latest", "id": 103350146402, "conclusion": "failure", "fmt": "PASS", "check": "PASS", "test": "FAIL", "clippy_warning_denied": "SKIPPED", "build": "SKIPPED", "doctests": "SKIPPED"},
+          {"os": "windows-latest", "id": 103350146474, "conclusion": "failure", "fmt": "PASS", "check": "PASS", "test": "PASS", "clippy_warning_denied": "FAIL", "build": "SKIPPED", "doctests": "SKIPPED"}
+        ],
+        "macos_failure": {
+          "test": "filesystem_safety::unix::context_catalog_non_utf8_traversal_names_fail_without_lossy_labels",
+          "reviewed_location": "tests/context_catalog/filesystem_safety.rs:269:10",
+          "phase": "fs::create_dir of a directory named from byte 0xff, before discover ran",
+          "os_error": 92,
+          "message": "Illegal byte sequence",
+          "cargo_exit_code": 101,
+          "catalog_suite": {"passed": 26, "failed": 1, "ignored": 0, "filtered": 0},
+          "discovery_validation_exercised_by_failing_fixture": false
+        },
+        "windows_failure": {
+          "reviewed_location": "src/context.rs:379",
+          "expression": "return meta.file_attributes() & 0x400 != 0;",
+          "lint": "needless_return",
+          "warning_denied": true
+        }
+      }
+    },
+    "repairs": [
+      {
+        "id": "MR-01",
+        "path": "tests/context_catalog/filesystem_safety.rs",
+        "change": "Apply #[cfg(target_os = \"linux\")] only to the malformed-name fixture and move OsStringExt into that test",
+        "preserved": "Real malformed directory creation, discover(...).unwrap_err(), ReadFailed, exact global:. label, all other existing Unix guards and assertions; no I/O-error catch or production validation change"
+      },
+      {
+        "id": "MR-02",
+        "path": "src/context.rs",
+        "change": "Replace the Windows is_link explicit return with the same tail expression",
+        "preserved": "MetadataExt::file_attributes() & 0x400 != 0 reparse-point and junction detection; no lint suppression or link-policy change"
+      }
+    ],
+    "local_environment": {
+      "observed_utc_date": "2026-09-11",
+      "date_note": "The follow-up date is the assigned 2026-09-12 review date; observed shell UTC execution date is recorded separately",
+      "os": "Linux",
+      "kernel": "6.18.33.2-microsoft-standard-WSL2",
+      "architecture": "x86_64",
+      "unprivileged": true,
+      "rustc": "1.98.1",
+      "cargo": "1.98.1",
+      "uv": "0.12.10",
+      "node": "v24.18.0",
+      "isolation": "Every Cargo/uv/Node command starts with env -i; preserve PATH and trusted Cargo/Rustup caches, select synthetic temporary HOME/XDG_CONFIG_HOME/CODEX_HOME/TMPDIR roots",
+      "cargo_net_offline": true,
+      "uv_cache": "Preserved trusted cache",
+      "uv_offline": true,
+      "uv_python_downloads": "never",
+      "dependency_downloads": 0,
+      "dependency_changes": false
+    },
+    "commands": [
+      {"command": "cargo test --test context_catalog filesystem_safety", "exit_code": 0, "result": "10 passed, 0 failed, 0 ignored, 18 filtered; real malformed-name discovery regression passed"},
+      {"command": "cargo fmt --all -- --check", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo check --all-targets", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo test --all-targets", "exit_code": 0, "result": "339 passed, 0 failed, 0 ignored, 0 filtered"},
+      {"command": "cargo clippy --all-targets -- -D warnings", "exit_code": 0, "result": "PASS on Linux only"},
+      {"command": "cargo build --all-targets", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo test --doc", "exit_code": 0, "result": "PASS; 0 doctests"},
+      {"command": "uv run scripts/verify.py", "exit_code": 0, "result": "All six Cargo gates passed again; 339 Rust tests, 0 doctests", "source_files": 113, "rust_test_definitions": 326, "fixture_events": 25},
+      {"command": "node scripts/cli_retest.mjs --self-test", "exit_code": 0, "result": "152 passed", "live_started": false},
+      {"command": "cargo run --example run_offline", "exit_code": 0, "result": "Completed 50; 1 session, 3 scripted model requests, 2 tool executions; offline"},
+      {"command": "cargo run --example skills_offline", "exit_code": 0, "result": "Completed 42; 2 catalog entries, 1 active skill, 1 session, 2 scripted model requests, 1 tool execution; offline"},
+      {"command": "git diff --check", "exit_code": 0, "result": "Final four-file source, test and report diff passed"}
+    ],
+    "command_observer": "Implementor, direct execution with isolated roots; command entries give exact program arguments without the environment prefix",
+    "parent_verification": {
+      "status": "PASS",
+      "observer": "Parent/orchestrator, independent direct execution and source/report inspection",
+      "results": "Focused filesystem test, scripts/verify.py, Node self-tests, both offline examples, final JSON parsing, historical-content preservation and git diff --check matched the implementor evidence",
+      "cargo_scope": "The parent observed all six Cargo gates through scripts/verify.py, not as six additional direct command invocations",
+      "native_platforms": ["Linux x86_64 / WSL2"],
+      "macos_windows_native": "NOT_RUN"
+    },
+    "local_attempts": {"focused_filesystem": 1, "each_full_cargo_gate": 2, "verify_runner": 1, "node_self_tests": 1, "each_offline_example": 1, "failed_gates": 0, "retries": 0, "note": "Each Cargo gate ran once directly and once through the required verify runner"},
+    "rust_tests": {
+      "full_runs": 2,
+      "passed_per_run": 339,
+      "failed_per_run": 0,
+      "ignored_per_run": 0,
+      "filtered_per_run": 0,
+      "doctests_per_run": 0,
+      "breakdown": {"lib": 207, "bin_wi": 24, "context_catalog": 28, "context_prepare": 26, "managed_absence_cli": 1, "provider_contract": 5, "run_cli": 4, "run_controller": 33, "skills_cli": 11, "example_harnesses": 0},
+      "inventory_note": "113 source files reflects the current organization, not new files or module moves in this repair. Original 76-file evidence remains historical. Platform totals are not forced to match Linux."
+    },
+    "platform_coverage": [
+      {"platform": "Linux x86_64 / WSL2", "status": "LOCAL_OFFLINE_PASS", "coverage": "Real malformed-name fixture and all applicable filesystem tests passed; 339 full-suite tests; no new Linux exclusion"},
+      {"platform": "macOS", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Only the malformed-name fixture is newly compile-time excluded. Source/cfg inspection predicts 26 catalog tests instead of the failed run's 27; this is not a native result. Other existing Unix tests retain guards and assertions. Native suite and downstream gates pending."},
+      {"platform": "Windows", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Source equivalence inspected only; no local native run or cross-compilation. Linux Clippy does not compile the Windows branch. Existing Unix exclusions unchanged; native warning-denied Clippy and remaining gates pending."},
+      {"platform": "Other Unix", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Malformed-name fixture excluded; all other existing platform guards unchanged. No native pass inferred."}
+    ],
+    "matrix": [
+      {"id": "MR-00", "status": "LOCAL_PASS", "evidence": "Initial clean tree and reviewed SHA verified; failed CI record, historical evidence, S1 semantics, organization and no-live boundary preserved"},
+      {"id": "MR-01", "status": "LOCAL_REPAIR_PASS_NATIVE_PENDING", "evidence": "Linux-only fixture guard; real malformed-name discovery passed", "pending": ["Native macOS closure"]},
+      {"id": "MR-02", "status": "SOURCE_REPAIR_NATIVE_PENDING", "evidence": "Equivalent Windows reparse-point tail expression, no suppression", "pending": ["Native Windows warning-denied Clippy closure"]},
+      {"id": "MR-03", "status": "LOCAL_GATES_PASS_SUBMITTED_CI_PENDING", "evidence": "All required local offline commands passed", "pending": ["All three configured OS jobs on a submitted repair revision", "Inspect any newly exposed downstream failures"]},
+      {"id": "MR-04", "status": "REPORTS_APPENDED_REVIEW_PASS_CI_PENDING", "evidence": "Dated Markdown follow-up and new top-level JSON object without historical rewrites; three independent reviews passed with no blocking findings", "pending": ["Submitted-revision CI"]}
+    ],
+    "review": {
+      "status": "PASS",
+      "blocking_findings": 0,
+      "implementor_source_inspection": "Focused diff inspected before independent review; not by itself merge approval",
+      "reviewers": [
+        {"role": "review-a", "result": "PASS", "blocking_findings": 0, "checks": "Focused filesystem test, formatting, diff/report preservation and failed-run metadata"},
+        {"role": "review-b", "result": "PASS", "blocking_findings": 0, "checks": "Focused filesystem test, diff/report preservation and cfg/source behavior"},
+        {"role": "review-c", "result": "PASS", "blocking_findings": 0, "checks": "Full offline gate set, source/report preservation, cfg behavior and platform-claim accuracy"}
+      ],
+      "native_macos_windows": "NOT_RUN",
+      "submitted_revision_ci": "PENDING"
+    },
+    "changed_paths": ["src/context.rs", "tests/context_catalog/filesystem_safety.rs", "docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md", "docs/wi-local-skills-s1-verification.json"],
+    "remaining_risks": [
+      "No native macOS/Windows or submitted-revision CI closure; skipped downstream gates must not be presumed fixed",
+      "Compile-time Linux cfg does not guarantee every Linux filesystem accepts malformed filename bytes; setup failures remain test failures",
+      "Existing trusted-owner, hardlink and ancestor-race limitations are unchanged"
+    ],
+    "retained_constraints": ["S1 semantics and production validation unchanged", "No lint suppression, CI job edits, dependencies, features or module reorganization", "C1/M3 orchestration, cancellation, validation, correlation, result reuse and accepted auth/transport behavior preserved", "No S2/P1/V1, storage, service, UI, resource execution, uploads or API-key fallback"],
+    "live": {"status": "NOT_RUN", "authorized": false, "generations": 0, "provider_requests": 0, "real_credential_auth_profile_login_renewal_operations": 0, "hosted_api_probes": 0, "uploads": 0, "owner_skill_or_private_project_content_reads_for_tests": 0, "note": "Synthetic credentials, scripted providers and loopback tests are offline evidence. Read-only GitHub evidence retrieval and Pi authoring are separate from Wi provider traffic."},
+    "git_and_hosted_transitions": {"stages": 0, "unstages": 0, "commits": 0, "pushes": 0, "merges": 0, "deployments": 0, "releases": 0, "publications": 0, "hosted_service_writes": 0},
+    "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false, "new_allocation": 0},
+    "service_and_storage_implemented": false,
+    "pending": ["Submitted-revision CI on Ubuntu/macOS/Windows", "Native macOS/Windows closure"]
+  }
+}

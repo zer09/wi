@@ -6,6 +6,7 @@
 |---|---|
 | `provider.rs` | Traits, session options, normalized items/events, capabilities |
 | `gateway.rs` | Provider registration and selection; no OpenAI protocol/auth logic |
+| `context.rs`, `context/*` | Explicit-root metadata discovery, activation and validated run preparation |
 | `providers/openai_codex/auth.rs` | Read-only snapshots and explicit external files; separate preparation hook |
 | `providers/openai_codex/managed_auth.rs` | Selected profile binding and cancellation-independent renewal ownership |
 | `providers/openai_codex/browser_login.rs` | Experimental browser login and strict TLS token-response parsing |
@@ -21,16 +22,75 @@
 | `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
-| `run_cli.rs` | Thin run argument validation, rendering and cancellation adapter |
-| `main.rs` | CLI routing and legacy text/NDJSON, generate and fixed tool-demo callers |
-| `demo.rs` | Pure acceptance checks for the fixed 17+25 CLI case |
-| `smoke.rs` | Explicit synthetic live cases and sanitized acceptance summary |
+| `main.rs` | Program entry point and Tokio runtime startup |
+| `cli/mod.rs` | Private CLI arguments, shared helpers, routing, legacy text/NDJSON, generate and fixed tool-demo callers |
+| `cli/auth_cli.rs` | Authentication command dispatch; provider retains credential and file ownership |
+| `cli/run_cli.rs` | Run validation, shared preparation, rendering and cancellation adapter |
+| `cli/context_cli.rs` | CLI cwd/environment root resolution and safe context diagnostics |
+| `cli/skills_cli.rs` | Metadata-only catalog listing; no provider/auth or execution path |
+| `cli/demo.rs` | Pure acceptance checks for the fixed 17+25 CLI case |
+| `cli/smoke.rs` | Explicit synthetic live cases and sanitized acceptance summary |
+| `cli/*_tests.rs` and inline CLI tests | Private binary-only CLI unit tests |
+| `tests/cli/*` | Process-level CLI integration tests, included by top-level Cargo test entry modules |
 | `providers/openai_codex/observation.rs` | Opt-in transport evidence; no generic event-contract change |
 
 `Provider` is a Rust trait implemented by a compiled-in plugin. It is not a
 shared-library ABI or runtime code loader. Adding a provider does not require
 implementing OpenAI credentials or modifying the gateway. The external
 `tests/provider_contract.rs` implements a provider without OpenAI imports.
+
+## Workspace context preparation (S1)
+
+`context::discover(ContextRoots)` and `context::prepare_run(request, &catalog,
+&selected, &tools)` are synchronous library boundaries. They read explicit
+absolute host-selected roots, not cwd, HOME or auth-manager configuration. The
+CLI resolves cwd once and resolves a relative workspace against that snapshot.
+Its global root is absolute nonempty XDG_CONFIG_HOME plus `wi/skills`, or absolute
+nonempty HOME plus `.config/wi/skills` when XDG is unset/empty. Relative XDG and
+missing/invalid fallback HOME fail explicitly. Resolution creates no directories.
+
+Discovery always includes global frontmatter and adds workspace `.agents/skills`
+when present. Both scopes remain identifiable by `global:<name>` and
+`project:<name>`. Equal names across scopes coexist; within-scope duplicates fail.
+The catalog sorts by scope then name. Discovery stops at each `SKILL.md` package
+boundary and parses frontmatter only, not resources, root instructions or bodies.
+Parsing stops at the closing delimiter; buffered I/O can read ahead into a body.
+`yaml-rust2` 0.12.0 supplies the event parser with default features disabled.
+Wi rejects tags, aliases/anchors, merge keys and multiple YAML documents, and
+retains validated JSON-compatible metadata. Unsupported behavioral fields produce
+diagnostics but grant no tools or permissions. Malformed files are excluded with
+diagnostics; unreadable traversal directories fail rather than hide a partial catalog.
+
+Preparation reads only root `AGENTS.md` and explicitly selected catalog bodies.
+It revalidates selected metadata against discovery, rejects `context_changed`,
+and produces an owned `PreparedRun` plus a provenance manifest. Selection order
+is preserved with first-position deduplication. All frontmatter enters prepared
+context even without activation. No unselected bodies or resolved host paths
+enter the request. Caller instructions remain an unchanged prefix followed by
+fixed framing. Project and skill text is JSON-escaped user context, not system
+instructions or executable configuration. Deterministic payload keys are `task`,
+`project_instructions`, `available_skills`, and `active_skills`. No-context runs
+retain the original prompt and instructions exactly.
+
+Existing input and tools-inclusive options validation applies to the final
+rendered request. `PreparedRun` returns empty `options.tools` for the controller;
+the actual registry remains authoritative. The CLI runs discovery and preparation
+in one `spawn_blocking` task before provider/auth construction and prints sanitized
+relative-label diagnostics on stderr. `skills list` calls discovery only. Its
+JSON output deliberately exposes metadata, never bodies or private source handles.
+Content-bearing library Debug implementations redact metadata and prepared input.
+
+Selected roots may canonicalize through links. Descendant links are not followed;
+a linked root `AGENTS.md` fails preparation. Final opens use Unix no-follow and
+nonblocking flags or Windows reparse-point checks. Other platforms have pre/post
+checks only. Ancestor replacement races and hardlinks remain trust limitations;
+this is an owner-controlled filesystem boundary, not a hostile-filesystem sandbox.
+JSON escaping protects payload structure, not against model prompt injection.
+
+No tool/model loop, skill execution engine or mid-run filesystem loader is added.
+WebSocket continuation uses the original prepared context and subsequent deltas;
+SSE replay retains that same initial context. Session instructions remain fixed.
+The CLI and a future service call the same library, not a CLI subprocess.
 
 ## Managed authentication boundary
 
@@ -264,22 +324,41 @@ static `counter_overflow` failure. Outer run-event schema 2 has payload-free
 `run_started`; nested provider envelopes remain schema 1. See [events](EVENTS.md).
 A close guard requests local session closure on return or future drop. Drop/process
 loss cannot promise a result, final event, rollback or upstream cancellation.
-`run_cli.rs` only validates inputs, constructs the existing provider, renders events
-and signals cancellation; it does not implement a second loop.
+`cli/run_cli.rs` validates inputs and prepares context before constructing the existing
+provider. It renders events and signals cancellation without a second loop.
+
+## Future service ownership (requirements only)
+
+S1 does not implement a service or persistence. The future service serves one
+owner across multiple devices. A browser disconnect must not cancel admitted
+service-owned work. A client subscription must not own the controller's observer
+or provider receiver directly, because sink/receiver failure currently stops work.
+Application sessions must persist in storage. Service restart stops active tasks
+without automatic restart, resume, provider submission or tool replay. Continuing
+requires an explicit user action. Storage design is deferred and must precede
+service acceptance; no backend, store interface or recovery worker is selected.
+The current `ProviderSession` is an in-memory transport handle, not that persistent
+application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 
 ## Intentionally deferred
 
 - Approvals, sandboxing and noncooperative/external-effect cancellation guarantees.
-- Durable operation acceptance/settlement/recovery, sessions, branching, queues.
+- Persistent application sessions/history and durable operation state, branching, queues.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
-- Tool discovery and skill resource loading/hosted uploads.
+- Tool discovery, model-selected skill activation and approved skill resource loading.
 - HTTP server, GUI, keyring and proxy support.
 - Stable provider support for the experimental shared OAuth registration.
   Browser login and explicit renewal have local Linux live evidence. Automatic
   expiry and failure paths have offline evidence. Historical M3 acceptance is
   recorded in [M3 verification](WI_RUN_VERIFICATION.md), not as C1 verification.
 
-Advanced requirements fail closed instead of silently degrading or switching
+Hosted skills are excluded from the product, not a deferred engine. S1 removes
+`Feature::HostedSkills`, the `hosted_skills` serialized variant and the provider
+capability entry. Old required-feature input rejects as an unknown variant before
+provider/auth construction. Local skills are preparation, not a provider capability.
+No upload, hosted execution or API-key billing path is added.
+
+Other advanced requirements fail closed instead of silently degrading or switching
 billing/authentication modes. Item preservation is not advertised as execution
 support. Subscription endpoint support still needs account-specific live tests.

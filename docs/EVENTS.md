@@ -12,6 +12,38 @@ offline evidence. Explicit auth refresh
 returns safe profile metadata, not generation events. SSE prepares the same bound
 profile before submission; established WebSockets never renew mid-session.
 
+## S1 context is pre-run data, not an event stream
+
+Workspace and skill preparation adds no event kinds or envelope fields. Shared
+`discover` returns catalog frontmatter and diagnostics. `prepare_run` returns a
+validated request and a provenance manifest, not lifecycle events. The CLI resolves
+roots and completes discovery, activation and final validation before constructing
+provider/auth objects or entering the run controller. Context failures produce no
+run NDJSON. Diagnostics use static categories and scope-relative source labels
+on stderr; plain output filters terminal controls and omits file contents.
+
+`wi skills list --json` emits one metadata object, not NDJSON events. Its `entries`
+contain qualified `id`, parsed `frontmatter` and relative `source`; `diagnostics`
+contain `scope`, `source`, `category` and `message`. No bodies or resolved host paths
+are added. Metadata remains sensitive user data, including any text or paths the
+owner put into frontmatter. Listing does not read `AGENTS.md`, activate skills,
+construct auth/providers, execute tools or contact a model.
+
+Prepared initial user content has deterministic JSON keys `task`,
+`project_instructions`, `available_skills`, and `active_skills`. The task remains
+unchanged inside the payload. All valid global/project frontmatter is included;
+only explicitly selected bodies are included. Sources use scoped relative labels,
+not canonical paths. File content stays out of higher-priority instructions.
+Without context or selections, the original prompt/instructions remain unchanged.
+The snapshot feeds existing session continuation; it is not a stored application
+session, event replay API or mid-run loader. Treat prepared content as sensitive.
+
+S1 removes `Feature::HostedSkills` and the serialized `hosted_skills` required
+feature. Old input now fails unknown-variant deserialization before provider/auth
+work. This focused API/config change does not change provider schema 1, run schema
+2, other feature variants or generic unknown provider-native item preservation.
+Local skills are not a provider capability or an alias for hosted execution.
+
 ## Provider envelope v1
 
 Every provider event has `schema_version: 1`, local `sequence`, `event_id`,
@@ -238,6 +270,13 @@ Dropping the run future requests session closure when a handle exists, but canno
 return a result or promise terminal delivery. Process loss has the same delivery
 limit. There is no durable replay, event store, internal unbounded queue or detached
 tool task.
+
+The future one-owner, multiple-device service must keep work independent of browser
+disconnection and persist application sessions. A client subscription must not
+own this fallible run observer directly. Restart stops active tasks without
+automatically resuming or restarting them. Storage and service design remain
+deferred; S1 implements neither persistence nor a server/UI. Current sequences
+and provider-session IDs are not a durable-session design.
 
 ## Not emitted yet
 

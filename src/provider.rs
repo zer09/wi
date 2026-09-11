@@ -28,7 +28,6 @@ pub enum Feature {
     ToolSearch,
     ProgrammaticTools,
     AsyncTools,
-    HostedSkills,
 }
 impl Feature {
     pub fn name(self) -> &'static str {
@@ -37,7 +36,6 @@ impl Feature {
             Self::ToolSearch => "tool_search",
             Self::ProgrammaticTools => "programmatic_tools",
             Self::AsyncTools => "async_tools",
-            Self::HostedSkills => "hosted_skills",
         }
     }
 }

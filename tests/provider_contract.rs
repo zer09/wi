@@ -117,6 +117,43 @@ async fn unknown_provider_is_rejected() {
     ));
 }
 #[test]
+fn hosted_skills_required_feature_is_unknown_before_provider_construction() {
+    let request = serde_json::json!({
+        "provider_id": "echo",
+        "prompt": "synthetic task",
+        "options": {
+            "model": "synthetic",
+            "instructions": "synthetic instructions",
+            "transport": "web_socket",
+            "tools": [],
+            "required_features": ["hosted_skills"]
+        }
+    });
+    let mut constructions = 0;
+    let result = serde_json::from_value::<wi::run::RunRequest>(request).map(|request| {
+        constructions += 1;
+        (EchoProvider, request)
+    });
+    let error = result.err().expect("removed feature must fail decoding");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown variant `hosted_skills`")
+    );
+    assert_eq!(constructions, 0);
+    for feature in [
+        Feature::NativeSteering,
+        Feature::ToolSearch,
+        Feature::ProgrammaticTools,
+        Feature::AsyncTools,
+    ] {
+        let value = serde_json::to_value(feature).unwrap();
+        assert_eq!(value, feature.name());
+        assert_eq!(serde_json::from_value::<Feature>(value).unwrap(), feature);
+    }
+}
+
+#[test]
 fn input_and_session_limits_are_checked() {
     assert!(SessionOptions::new("").validate().is_err());
     assert!(validate_input(&[]).is_err());

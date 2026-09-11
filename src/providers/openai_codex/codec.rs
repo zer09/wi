@@ -7,7 +7,7 @@ use crate::{
 use serde_json::Value;
 
 #[cfg(test)]
-#[path = "recovery_tests.rs"]
+#[path = "tests/recovery/recovery_tests.rs"]
 mod recovery_tests;
 
 const MAX_ITEMS: usize = 512;

@@ -5,6 +5,8 @@ preparation, and a cancellation-aware run controller. The CLI calls the library.
 OpenAI/Codex sessions use WebSocket or explicit SSE with typed events and ordinary
 function-tool continuation.
 
+See the [documentation index](docs/README.md) for current documentation and historical records.
+
 **Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status
 both after login and after renewal. Automatic expiry-triggered renewal has offline evidence.

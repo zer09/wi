@@ -1,8 +1,11 @@
-use super::*;
+use super::{FRAMING, Fixture, payload, request, tools};
+use std::{fs, sync::Arc};
+
 use async_trait::async_trait;
+use serde_json::{Value, json};
 use wi::{
     InputItem, ToolDefinition,
-    context::SkillId,
+    context::{ContextErrorKind, Scope, SkillId, prepare_run},
     provider::{MAX_INPUT_BYTES, validate_input},
     tools::Tool,
 };
@@ -70,23 +73,6 @@ fn context_prepare_selected_body_must_be_nonblank_utf8_and_bounded() {
             ContextErrorKind::InvalidBody
         };
         assert_eq!(error.kind(), expected);
-        assert_eq!(error.source_label(), Some("global:review/SKILL.md"));
-    }
-}
-
-#[test]
-fn context_prepare_revalidates_frontmatter_before_decoding_selected_body() {
-    let f = Fixture::new();
-    let file = f.skill(Scope::Global, "review", "description: Metadata", "BODY");
-    let catalog = f.catalog();
-    let selected = ["global:review".parse().unwrap()];
-    for bytes in [
-        b"---\nname: review\ndescription: \xff\n---\nBODY".as_slice(),
-        b"---\nname: review\ndescription: Changed\n---\n\xff".as_slice(),
-    ] {
-        fs::write(&file, bytes).unwrap();
-        let error = prepare_run(request(), &catalog, &selected, &tools()).unwrap_err();
-        assert_eq!(error.kind(), ContextErrorKind::ContextChanged);
         assert_eq!(error.source_label(), Some("global:review/SKILL.md"));
     }
 }

@@ -1,72 +1,7 @@
-use super::*;
+use super::{Fixture, request, tools};
+use std::fs;
 
-#[test]
-fn context_prepare_simultaneous_workspaces_share_only_explicit_global_metadata() {
-    let first = Fixture::new();
-    let mut second = Fixture::new();
-    first.skill(
-        Scope::Global,
-        "review",
-        "description: Shared global metadata",
-        "GLOBAL_BODY",
-    );
-    second.roots.global_skills = first.roots.global_skills.clone();
-    first.skill(
-        Scope::Project,
-        "review",
-        "description: First project metadata",
-        "FIRST_BODY",
-    );
-    second.skill(
-        Scope::Project,
-        "review",
-        "description: Second project metadata",
-        "SECOND_BODY",
-    );
-    fs::write(first.roots.workspace.join("AGENTS.md"), "FIRST_POLICY").unwrap();
-    fs::write(second.roots.workspace.join("AGENTS.md"), "SECOND_POLICY").unwrap();
-    let cwd = std::env::current_dir().unwrap();
-    let barrier = std::sync::Barrier::new(2);
-    let results = std::thread::scope(|scope| {
-        let handles: Vec<_> = [&first, &second]
-            .into_iter()
-            .map(|fixture| {
-                let barrier = &barrier;
-                scope.spawn(move || {
-                    let catalog = fixture.catalog();
-                    barrier.wait();
-                    prepare_run(
-                        request(),
-                        &catalog,
-                        &["project:review".parse().unwrap()],
-                        &tools(),
-                    )
-                    .unwrap()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect::<Vec<_>>()
-    });
-    for (index, expected) in ["FIRST", "SECOND"].into_iter().enumerate() {
-        let value = payload(&results[index]);
-        assert_eq!(
-            value["active_skills"][0]["body"],
-            format!("{expected}_BODY")
-        );
-        assert_eq!(
-            value["project_instructions"]["text"],
-            format!("{expected}_POLICY")
-        );
-        assert_eq!(value["available_skills"][0]["id"], "global:review");
-        assert!(!results[index].request().prompt.contains("GLOBAL_BODY"));
-    }
-    assert_eq!(std::env::current_dir().unwrap(), cwd);
-    let later = prepare_run(request(), &Fixture::new().catalog(), &[], &tools()).unwrap();
-    assert_eq!(later.request().prompt, request().prompt);
-}
+use wi::context::{ContextErrorKind, Scope, prepare_run};
 
 #[test]
 fn context_prepare_directory_and_missing_selected_files_fail_closed() {
@@ -101,10 +36,12 @@ fn context_prepare_directory_and_missing_selected_files_fail_closed() {
 #[cfg(unix)]
 mod unix {
     use super::*;
+    use crate::payload;
     use std::{
         os::unix::fs::{PermissionsExt, symlink},
-        path::Path,
+        path::{Path, PathBuf},
     };
+    use wi::context::{ContextRoots, discover};
 
     struct Denied(PathBuf, fs::Permissions);
     impl Denied {

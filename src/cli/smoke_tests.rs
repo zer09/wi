@@ -5,7 +5,7 @@ use wi::{EventEnvelope, RequestReceipt, SessionControl};
 async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early() {
     use clap::Parser;
     for source in ["pi", "codex", "gateway"] {
-        let cli = crate::Cli::try_parse_from([
+        let cli = crate::cli::Cli::try_parse_from([
             "wi",
             "smoke",
             "--auth-source",
@@ -18,7 +18,7 @@ async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early()
             "text",
         ])
         .unwrap();
-        let crate::Command::Smoke(args) = cli.command else {
+        let crate::cli::Command::Smoke(args) = cli.command else {
             panic!("smoke")
         };
         assert!(matches!(
@@ -27,7 +27,7 @@ async fn smoke_explicit_sources_parse_without_auth_and_wrong_model_fails_early()
         ));
     }
     assert!(
-        crate::Cli::try_parse_from([
+        crate::cli::Cli::try_parse_from([
             "wi",
             "smoke",
             "--model",

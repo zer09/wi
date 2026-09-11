@@ -2,7 +2,7 @@
 #[cfg(test)]
 #[path = "smoke_tests.rs"]
 mod tests;
-use crate::{TransportArg, demo, line_json};
+use crate::cli::{TransportArg, demo, line_json};
 use clap::{Args, ValueEnum};
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -142,11 +142,11 @@ pub async fn run(args: SmokeArgs) -> Result<()> {
     let mut stage = "setup";
     let task = async {
         let source = match args.auth_source {
-            SmokeAuthSource::Gateway => crate::SourceArg::Gateway,
-            SmokeAuthSource::Pi => crate::SourceArg::Pi,
-            SmokeAuthSource::Codex => crate::SourceArg::Codex,
+            SmokeAuthSource::Gateway => crate::cli::SourceArg::Gateway,
+            SmokeAuthSource::Pi => crate::cli::SourceArg::Pi,
+            SmokeAuthSource::Codex => crate::cli::SourceArg::Codex,
         };
-        let provider = crate::provider(&crate::AuthArgs {
+        let provider = crate::cli::provider(&crate::cli::AuthArgs {
             auth_source: source,
             auth_file: None,
             account: args.account,

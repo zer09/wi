@@ -22,12 +22,16 @@
 | `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
-| `run_cli.rs` | Run validation, shared preparation, rendering and cancellation adapter |
-| `context_cli.rs` | CLI cwd/environment root resolution and safe context diagnostics |
-| `skills_cli.rs` | Metadata-only catalog listing; no provider/auth or execution path |
-| `main.rs` | CLI routing and legacy text/NDJSON, generate and fixed tool-demo callers |
-| `demo.rs` | Pure acceptance checks for the fixed 17+25 CLI case |
-| `smoke.rs` | Explicit synthetic live cases and sanitized acceptance summary |
+| `main.rs` | Program entry point and Tokio runtime startup |
+| `cli/mod.rs` | Private CLI arguments, shared helpers, routing, legacy text/NDJSON, generate and fixed tool-demo callers |
+| `cli/auth_cli.rs` | Authentication command dispatch; provider retains credential and file ownership |
+| `cli/run_cli.rs` | Run validation, shared preparation, rendering and cancellation adapter |
+| `cli/context_cli.rs` | CLI cwd/environment root resolution and safe context diagnostics |
+| `cli/skills_cli.rs` | Metadata-only catalog listing; no provider/auth or execution path |
+| `cli/demo.rs` | Pure acceptance checks for the fixed 17+25 CLI case |
+| `cli/smoke.rs` | Explicit synthetic live cases and sanitized acceptance summary |
+| `cli/*_tests.rs` and inline CLI tests | Private binary-only CLI unit tests |
+| `tests/cli/*` | Process-level CLI integration tests, included by top-level Cargo test entry modules |
 | `providers/openai_codex/observation.rs` | Opt-in transport evidence; no generic event-contract change |
 
 `Provider` is a Rust trait implemented by a compiled-in plugin. It is not a
@@ -320,7 +324,7 @@ static `counter_overflow` failure. Outer run-event schema 2 has payload-free
 `run_started`; nested provider envelopes remain schema 1. See [events](EVENTS.md).
 A close guard requests local session closure on return or future drop. Drop/process
 loss cannot promise a result, final event, rollback or upstream cancellation.
-`run_cli.rs` validates inputs and prepares context before constructing the existing
+`cli/run_cli.rs` validates inputs and prepares context before constructing the existing
 provider. It renders events and signals cancellation without a second loop.
 
 ## Future service ownership (requirements only)

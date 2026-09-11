@@ -2,7 +2,7 @@ use clap::{Args, Subcommand};
 use std::{io::Write, path::PathBuf};
 use wi::{GatewayError, context::SkillCatalog};
 
-use crate::context_cli::{
+use crate::cli::context_cli::{
     CliError, CliResult, diagnostic_category, emit_diagnostics, filtered, resolve_roots,
 };
 

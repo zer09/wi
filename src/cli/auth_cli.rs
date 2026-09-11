@@ -50,7 +50,7 @@ impl AuthCommand {
                 account,
                 experimental,
                 replace,
-            } => crate::line_json(
+            } => crate::cli::line_json(
                 &wi::providers::openai_codex::browser_login::login(
                     account.account,
                     experimental,
@@ -61,11 +61,11 @@ impl AuthCommand {
             Action::Refresh(args) => {
                 let manager = AuthManager::default_location()?;
                 manager.refresh(&args.account).await?;
-                crate::line_json(&manager.status(&args.account)?)
+                crate::cli::line_json(&manager.status(&args.account)?)
             }
-            Action::List(_) => crate::line_json(&AuthManager::default_location()?.list()?),
+            Action::List(_) => crate::cli::line_json(&AuthManager::default_location()?.list()?),
             Action::Status(args) => {
-                crate::line_json(&AuthManager::default_location()?.status(&args.account)?)
+                crate::cli::line_json(&AuthManager::default_location()?.status(&args.account)?)
             }
             Action::Logout(args) => AuthManager::default_location()?.logout(&args.account),
         }
@@ -81,7 +81,7 @@ mod tests {
             ("codex", "--account"),
             ("gateway", "--auth-file"),
         ] {
-            let cli = crate::Cli::try_parse_from([
+            let cli = crate::cli::Cli::try_parse_from([
                 "wi",
                 "generate",
                 "--auth-source",
@@ -94,15 +94,15 @@ mod tests {
                 "synthetic",
             ])
             .unwrap();
-            let crate::Command::Generate(args) = cli.command else {
+            let crate::cli::Command::Generate(args) = cli.command else {
                 panic!()
             };
-            assert!(crate::provider(&args.base.auth).is_err());
+            assert!(crate::cli::provider(&args.base.auth).is_err());
         }
     }
     #[tokio::test]
     async fn auth_cli_login_blocks_without_ambient_path_resolution() {
-        let cli = crate::Cli::try_parse_from([
+        let cli = crate::cli::Cli::try_parse_from([
             "wi",
             "auth",
             "login",
@@ -112,7 +112,7 @@ mod tests {
             "synthetic",
         ])
         .unwrap();
-        let crate::Command::Auth(command) = cli.command else {
+        let crate::cli::Command::Auth(command) = cli.command else {
             panic!()
         };
         let error = command.run().await.unwrap_err();

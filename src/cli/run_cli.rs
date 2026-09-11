@@ -1,4 +1,4 @@
-use crate::context_cli::{CliError, CliResult, emit_diagnostics, filtered, resolve_roots};
+use crate::cli::context_cli::{CliError, CliResult, emit_diagnostics, filtered, resolve_roots};
 use clap::{Args, ValueEnum};
 use std::{future::Future, io::Write, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -20,7 +20,7 @@ enum ToolArg {
 #[derive(Args)]
 pub(crate) struct RunArgs {
     #[command(flatten)]
-    base: crate::ModelArgs,
+    base: crate::cli::ModelArgs,
     #[arg(long, required_unless_present = "stdin", conflicts_with = "stdin")]
     prompt: Option<String>,
     #[arg(long)]
@@ -50,7 +50,7 @@ where
     R: AsyncRead + Unpin,
     W: Write,
     S: Future<Output = std::io::Result<()>>,
-    B: FnOnce(&crate::AuthArgs) -> Result<Gateway>,
+    B: FnOnce(&crate::cli::AuthArgs) -> Result<Gateway>,
     F: FnOnce(Option<PathBuf>) -> CliResult<ContextRoots> + Send + 'static,
     D: Write,
 {
@@ -62,7 +62,7 @@ where
         return Err(GatewayError::InvalidRequest("duplicate tool selection").into());
     }
     let auth = &args.base.auth;
-    if matches!(auth.auth_source, crate::SourceArg::Gateway) {
+    if matches!(auth.auth_source, crate::cli::SourceArg::Gateway) {
         if auth.auth_file.is_some() {
             return Err(
                 GatewayError::InvalidRequest("managed auth does not accept --auth-file").into(),
@@ -76,7 +76,7 @@ where
             GatewayError::InvalidRequest("--account requires --auth-source gateway").into(),
         );
     }
-    let mut options = crate::options(&args.base);
+    let mut options = crate::cli::options(&args.base);
     options.instructions = args.instructions;
     let mut tools = ToolRegistry::new();
     if !args.tool.is_empty() {
@@ -213,7 +213,7 @@ pub(crate) async fn run(args: RunArgs) -> CliResult<i32> {
         tokio::io::stdin(),
         |auth| {
             let mut gateway = Gateway::new();
-            gateway.register(Arc::new(crate::provider(auth)?))?;
+            gateway.register(Arc::new(crate::cli::provider(auth)?))?;
             Ok(gateway)
         },
         &mut std::io::stdout().lock(),

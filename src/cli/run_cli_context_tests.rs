@@ -64,7 +64,7 @@ fn run_cli_parser_requires_qualified_ids_and_keeps_selection_order() {
         "project:",
     ] {
         assert!(
-            crate::Cli::try_parse_from([
+            crate::cli::Cli::try_parse_from([
                 "wi",
                 "run",
                 "--model",
@@ -80,7 +80,7 @@ fn run_cli_parser_requires_qualified_ids_and_keeps_selection_order() {
     for command in ["generate", "tool-demo", "smoke"] {
         for flag in ["--workspace", "--use-skill"] {
             assert!(
-                crate::Cli::try_parse_from([
+                crate::cli::Cli::try_parse_from([
                     "wi",
                     command,
                     "--model",
@@ -140,7 +140,7 @@ async fn run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller(
             a,
             input,
             |auth| {
-                assert!(matches!(auth.auth_source, crate::SourceArg::Gateway));
+                assert!(matches!(auth.auth_source, crate::cli::SourceArg::Gateway));
                 assert_eq!(auth.account.as_deref(), Some("synthetic"));
                 Ok(gateway)
             },
@@ -245,7 +245,7 @@ async fn run_cli_context_errors_and_final_validation_precede_all_constructors() 
                 ("input_too_large", "")
             }
             4 => {
-                let options = crate::options(&a.base);
+                let options = crate::cli::options(&a.base);
                 let overhead =
                     serde_json::to_vec(&options).unwrap().len() - options.instructions.len();
                 a.instructions = "x".repeat(MAX_INPUT_BYTES - overhead);

@@ -88,13 +88,13 @@ impl Provider for Fake {
     }
 }
 fn args(extra: &[&str]) -> RunArgs {
-    let cli = crate::Cli::try_parse_from(
+    let cli = crate::cli::Cli::try_parse_from(
         ["wi", "run", "--model", "synthetic", "--prompt", "hello"]
             .into_iter()
             .chain(extra.iter().copied()),
     )
     .unwrap();
-    let crate::Command::Run(args) = cli.command else {
+    let crate::cli::Command::Run(args) = cli.command else {
         panic!()
     };
     args
@@ -139,7 +139,7 @@ where
     R: AsyncRead + Unpin,
     W: Write,
     S: Future<Output = std::io::Result<()>>,
-    B: FnOnce(&crate::AuthArgs) -> Result<Gateway>,
+    B: FnOnce(&crate::cli::AuthArgs) -> Result<Gateway>,
 {
     let temp = tempfile::tempdir().unwrap();
     let roots = ContextRoots {
@@ -365,11 +365,11 @@ async fn run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8() {
             4 => a.base.model = "x".repeat(257),
             5 => a.base.auth.account = Some("test".into()),
             6 => {
-                a.base.auth.auth_source = crate::SourceArg::Gateway;
+                a.base.auth.auth_source = crate::cli::SourceArg::Gateway;
                 a.base.auth.auth_file = Some("absent".into());
             }
             7 => {
-                a.base.auth.auth_source = crate::SourceArg::Gateway;
+                a.base.auth.auth_source = crate::cli::SourceArg::Gateway;
                 a.base.auth.account = Some("../invalid".into());
             }
             8 => a.tool = vec![ToolArg::AddNumbers; 2],
@@ -425,7 +425,7 @@ async fn run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8() {
         a,
         &b"hello"[..],
         |auth| {
-            assert!(matches!(auth.auth_source, crate::SourceArg::Gateway));
+            assert!(matches!(auth.auth_source, crate::cli::SourceArg::Gateway));
             assert_eq!(auth.account.as_deref(), Some("synthetic"));
             Ok(gateway)
         },

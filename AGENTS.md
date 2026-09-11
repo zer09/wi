@@ -1,50 +1,55 @@
-# Wi: active task S1 — local workspace context and skills
+# Wi: active planning handoff S2 — model-selected local skill loading
 
-Contract `s1.0`; accepted runtime baseline `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c`.
-This branch supplies a documentation-only implementation plan. Start runtime work
-only when the user gives the implementor prompt. The designer has fixed the plan;
-the implementor executes it, rather than commissioning another planning round.
+Contract `s2.0`; accepted runtime baseline:
+`94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa` (PR #2 merged).
+This branch changes documentation only. Runtime implementation begins when the
+owner supplies the implementor prompt. Execute the fixed contract and matrix;
+do not replace them with another architecture-planning assignment.
 
-Read in order:
+Read:
 1. `docs/WI_PRODUCT_DIRECTION.md`
-2. `docs/WI_LOCAL_SKILLS_S1.md`
-3. `docs/WI_LOCAL_SKILLS_S1_MATRIX.md`
-4. `docs/WI_LOCAL_SKILLS_S1_PROMPT.md`
+2. `docs/slices/s2/CONTRACT.md`
+3. `docs/slices/s2/MATRIX.md`
+4. `docs/slices/s2/IMPLEMENTOR_PROMPT.md`
+5. The accepted S1 contract/reports and the relevant current source.
 
-Implement shared Rust workspace/context preparation, always-discovered global
-skill frontmatter plus project skill frontmatter when present, catalog listing,
-and explicit skill activation. Remove HostedSkills/hosted_skills scaffolding from
-active source/capability reporting. Do not add uploads, API-key fallback, or hosted
-execution. The CLI is a caller of the library, not the future product architecture.
+S2 adds one local function tool, `load_skill`, bound to an already discovered
+SkillCatalog. It returns that entry's main SKILL.md instructions through the
+existing ToolRegistry and provider continuation. Global/project metadata remains
+automatic. Normal context-aware wi run exposes the tool when the catalog is
+nonempty; no new enable flag or private planning model is required. Explicit
+--use-skill continues to work. The shared library supplies this functionality;
+the CLI is a thin caller, not the final product architecture.
 
-The service is for one owner using multiple devices. Browser disconnection does
-not cancel service-owned work. Service restart stops active tasks; none restart or
-resume automatically. Application sessions must persist. These are confirmed
-future-service requirements, NOT authorization to implement storage or the server
-in S1. Storage design is deferred and precedes service acceptance. Do not invent a
-database, persistence interface, migration scheme, or background recovery worker.
+Do not add a generic file reader, reference/script execution, hosted skills,
+uploads, provider-native search, PTC, async tools, steering, a permission manager,
+new resource-budget framework, skill-body cache, or runtime limits. Reuse existing
+file validation, result serialization limits, execution authority and call-result
+cache. Ordinary resource files beyond SKILL.md remain a later explicitly scoped
+capability. Production-provider restructuring remains DEFERRED.
 
-C1 c1.1 is complete. Do not restore RunLimits, budgets, run timers, quotas, or the
-withdrawn M4 timeout/progress proposal. Preserve M3/C1 orchestration, cancellation,
-correlation, validation, result reuse, and accepted authentication/transport behavior.
-A bounded implementation matrix does not impose a runtime work budget.
+C1 deletion remains complete: no RunLimits, count quotas, whole-run timers, optional
+replacement budgets, or the withdrawn M4 timeout/progress proposal. Preserve run
+ownership, cancellation, correlation, validated recovery, result ordering/reuse,
+authentication and WebSocket/SSE continuation.
 
-Authorized implementation work: this contract's source, test, and active-document
-changes plus OFFLINE verification using synthetic workspaces, skills, credentials,
-scripted providers, and loopback transports. No real credential/profile commands,
-login, renewal experiments, provider requests, hosted API probes, commits, pushes,
-merge, release, or publication. Normal trusted development dependency operations
-follow the user's local permissions. Pi's authoring conversation is separate.
-The generation ledger stays 31/50 used, 19 remaining, with zero new allocation.
+The final product is a one-owner multi-device service. Browser disconnect is not
+cancellation. Application sessions persist; service restart stops tasks without
+automatic replay/resumption. These requirements do not authorize storage, P1, V1,
+a server, or GUI work in S2. Do not invent a database or session-store interface.
 
-Preserve existing user changes, historical reports/manifests, and accepted behavior.
-Do not read the owner's actual global skill files or private projects for tests;
-isolate HOME/XDG_CONFIG_HOME and use explicit temporary roots. Keep sensitive text
-out of ordinary logs and reports. Observed test execution, source review, and live
-evidence are different categories. Report blockers truthfully rather than weakening
-validation or silently broadening scope. Private implementation details may vary;
-public contract decisions require an explicit amendment if genuinely contradictory.
+Authorized implementation: scoped source/tests/current-doc changes and OFFLINE
+verification after the owner gives the prompt. Use temporary synthetic workspace,
+skill and credential roots, independent scripted providers and loopback servers.
+No real credentials, profile/auth/login/renewal commands, private skill/project
+reads for tests, provider generations, hosted probes, commits, pushes, merges,
+releases, or publication. Normal trusted build tooling follows local permissions.
+Pi's authoring conversation is separate from Wi test traffic. Ledger unchanged:
+31/50 used, 19 remaining; remaining balance is not authorization.
 
-Older M3/C1/repair prompts and their historical permissions are not active task
-instructions. Their evidence remains intact. New user instructions and higher-
-priority environment rules take precedence.
+Preserve user changes and all historical evidence. Keep current organization;
+make only necessary additions and small shared-helper refactors. Use the new S2
+report paths. Report actual executions separately from source inspection and
+model-adherence claims. Ask for an amendment only on a genuine contract conflict,
+not to delegate the design back to the implementor. Older task prompts and budgets
+are historical, not active. Higher-priority rules and new owner directions prevail.

@@ -14,8 +14,24 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
-Future slices should use predictable directories such as `docs/slices/p1/`,
-`docs/slices/s2/`, and `docs/slices/v1/`. These are examples, not existing directories.
+New slice documents use `docs/slices/<slice>/`. S2 planning files now exist below.
+P1 and V1 storage/service documents are not yet created by this planning change.
+
+## Active implementation handoff — S2 (plan only)
+
+S1 and its merge-readiness repair were merged in PR #2 at `94d86e0` after the
+submitted repair's Ubuntu/macOS/Windows workflows passed. The next contract is
+model-selected main SKILL.md loading; it is not implemented by the planning PR.
+
+- [S2 contract](slices/s2/CONTRACT.md): Fixed s2.0 library/tool/context behavior,
+  scope, read timing, errors, output boundaries and authorized implementation.
+- [S2 matrix](slices/s2/MATRIX.md): S2-00 through S2-23, initially NOT RUN,
+  offline gates and requirements for the later implementation reports.
+- [S2 implementor prompt](slices/s2/IMPLEMENTOR_PROMPT.md): Concrete offline
+  task prompt; no provider traffic, Git writes or deferred-feature authority.
+
+The future S2 reports will be `slices/s2/VERIFICATION.md` and
+`slices/s2/verification.json`; they do not exist yet and are not acceptance evidence.
 
 ## Current product direction
 

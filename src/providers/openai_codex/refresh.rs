@@ -124,5 +124,5 @@ impl Exchange for RefreshExchange {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-#[path = "refresh_tests.rs"]
+#[path = "tests/authentication/refresh_tests.rs"]
 mod tests;

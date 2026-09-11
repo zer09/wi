@@ -3,47 +3,9 @@ use super::super::observation::{
 };
 use super::*;
 
-fn start(id: &str) -> Value {
-    json!({"type":"response.created","response":{"id":id}})
-}
-fn terminal(id: &str, output: Value) -> Value {
-    json!({"type":"response.completed","response":{"id":id,"status":"completed","output":output}})
-}
-fn message(text: &str) -> Value {
-    json!({"type":"message","id":"m","content":[{"type":"output_text","text":text}]})
-}
-fn frames(values: &[Value]) -> Vec<u8> {
-    values
-        .iter()
-        .map(|value| format!("data: {value}\n\n"))
-        .collect::<String>()
-        .into_bytes()
-}
-async fn reply(tcp: &mut TcpStream, body: &[u8]) {
-    tcp.write_all(
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .as_bytes(),
-    )
-    .await
-    .unwrap();
-    tcp.write_all(body).await.unwrap();
-    tcp.shutdown().await.unwrap();
-}
-async fn open_wire(address: std::net::SocketAddr, observer: Option<SmokeObserver>) -> wire::Wire {
-    wire::Wire::open(
-        Transport::Sse,
-        &format!("http://{address}"),
-        Arc::new(FakeAuth),
-        "synthetic",
-        Duration::from_secs(2),
-        observer.map(|o| (o, SmokeCase::Text)),
-    )
-    .await
-    .unwrap()
-}
+#[path = "../harness/sse_prolog.rs"]
+mod harness;
+use harness::*;
 
 #[tokio::test]
 async fn missing_mime_loopback_proof_before_eof_replays_partial_tail_once_observer_on_off() {

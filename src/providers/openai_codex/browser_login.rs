@@ -516,5 +516,5 @@ async fn exchange(endpoint: &str, code: &str, verifier: &str) -> Result<Profile>
 }
 
 #[cfg(all(test, target_os = "linux"))]
-#[path = "browser_login_tests.rs"]
+#[path = "tests/authentication/browser_login_tests.rs"]
 mod tests;

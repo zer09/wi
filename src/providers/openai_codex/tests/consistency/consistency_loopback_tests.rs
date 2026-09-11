@@ -2,6 +2,10 @@
 use super::*;
 use crate::{DeltaKind, OutputProvenance};
 
+#[path = "../harness/consistency_loopback.rs"]
+mod harness;
+use harness::*;
+
 fn message(id: &str, text: &str) -> Value {
     json!({"type":"message","id":id,"content":[{"type":"output_text","text":text}]})
 }
@@ -20,15 +24,6 @@ fn terminal(id: &str, output: Vec<Value>) -> Value {
 fn started(mut events: Vec<Value>) -> Vec<Value> {
     events.insert(0, json!({"type":"response.created","response":{"id":"r1"}}));
     events
-}
-async fn http_events(tcp: &mut TcpStream, events: Vec<Value>) {
-    let body = events
-        .iter()
-        .map(|event| format!("data: {event}\n\n"))
-        .collect::<String>();
-    // Early consistency rejection can close the client during an oversized stream.
-    let _ = tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
-    let _ = tcp.shutdown().await;
 }
 
 #[tokio::test]

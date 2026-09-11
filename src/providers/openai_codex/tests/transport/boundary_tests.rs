@@ -2,6 +2,10 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Notify;
 
+#[path = "../harness/boundary.rs"]
+mod harness;
+use harness::*;
+
 #[tokio::test]
 async fn cancellation_after_sse_dispatch_is_unknown_without_retry() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -93,29 +97,6 @@ async fn sse_admitted_http_failures_preserve_safe_status_categories() {
     }
 }
 
-struct ReloadAuth {
-    loads: AtomicUsize,
-    mode: u8,
-    entered: Notify,
-}
-#[async_trait]
-impl CredentialSource for ReloadAuth {
-    async fn load(&self) -> Result<SubscriptionCredentials> {
-        if self.loads.fetch_add(1, Ordering::SeqCst) == 0 {
-            return FakeAuth.load().await;
-        }
-        self.entered.notify_one();
-        match self.mode {
-            0 => Err(GatewayError::AuthExpired),
-            1 => SubscriptionCredentials::from_access_token(
-                "synthetic".into(),
-                Some("other-account".into()),
-                None,
-            ),
-            _ => std::future::pending().await,
-        }
-    }
-}
 #[tokio::test]
 async fn sse_preflight_reload_and_account_failure_are_not_submitted() {
     for mode in [0, 1] {

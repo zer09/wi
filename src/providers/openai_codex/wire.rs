@@ -20,7 +20,7 @@ use tokio_tungstenite::{
 };
 
 #[cfg(test)]
-#[path = "sse_prolog_unit_tests.rs"]
+#[path = "tests/wire_format/sse_prolog_unit_tests.rs"]
 mod sse_prolog_unit_tests;
 
 const MAX_FRAME: usize = 8 * 1024 * 1024;

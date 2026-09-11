@@ -12,30 +12,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-async fn collect(session: &mut ProviderSession, _: &str, _: bool) -> Result<ModelResponse> {
-    let mut lifecycle = collect_lifecycle::Lifecycle::default();
-    while let Some(envelope) = session.events.next().await {
-        lifecycle.observe(&envelope.event)?;
-        if let ProviderEvent::ResponseFinished { response } = envelope.event {
-            lifecycle.validate(&response)?;
-            return Ok(response);
-        }
-    }
-    Err(crate::GatewayError::UnexpectedEnd)
-}
+#[path = "../harness/consistency.rs"]
+mod harness;
+use harness::*;
 
-#[derive(Default)]
-struct Control(AtomicUsize);
-#[async_trait::async_trait]
-impl SessionControl for Control {
-    async fn generate(&self, _: Vec<InputItem>) -> Result<RequestReceipt> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(RequestReceipt {
-            request_id: "request".into(),
-        })
-    }
-    fn close(&self) {}
-}
 fn message(text: &str) -> OutputItem {
     OutputItem {
         id: Some("message".into()),
@@ -92,30 +72,6 @@ fn done(item: OutputItem) -> ProviderEvent {
         output_index: 0,
         item,
     }
-}
-fn session(events: Vec<ProviderEvent>) -> (ProviderSession, Arc<Control>) {
-    let control = Arc::new(Control::default());
-    let envelopes = events
-        .into_iter()
-        .enumerate()
-        .map(|(sequence, event)| EventEnvelope {
-            schema_version: 1,
-            sequence: sequence as u64,
-            event_id: "event".into(),
-            session_id: "session".into(),
-            request_id: Some("request".into()),
-            provider: "synthetic".into(),
-            provider_sequence: None,
-            event,
-        });
-    (
-        ProviderSession {
-            id: "session".into(),
-            control: control.clone(),
-            events: Box::pin(futures_util::stream::iter(envelopes)),
-        },
-        control,
-    )
 }
 #[tokio::test]
 async fn collect_rejects_discarded_or_changed_stream_before_second_send_or_execution() {

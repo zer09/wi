@@ -4,6 +4,10 @@ use super::super::observation::{
 use super::*;
 use crate::OutputProvenance;
 
+#[path = "../harness/recovery_loopback.rs"]
+mod harness;
+use harness::*;
+
 fn output(tool: bool, second: bool) -> Vec<Value> {
     if tool && !second {
         vec![
@@ -25,14 +29,6 @@ fn stream(id: &str, items: Vec<Value>) -> Vec<Value> {
         json!({"type":"response.completed","response":{"id":id,"status":"completed","output":[]}}),
     );
     events
-}
-async fn http_events(tcp: &mut TcpStream, events: Vec<Value>) {
-    let body = events
-        .iter()
-        .map(|v| format!("data: {v}\n\n"))
-        .collect::<String>();
-    tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-    tcp.shutdown().await.unwrap();
 }
 fn second_request(first: &Value, second: &Value, transport: Transport, tool: bool) {
     let next = if tool {

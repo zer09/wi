@@ -314,7 +314,7 @@ async fn worker(
 }
 
 #[cfg(test)]
-#[path = "consistency_settlement_tests.rs"]
+#[path = "tests/consistency/consistency_settlement_tests.rs"]
 mod consistency_settlement_tests;
 
 #[allow(clippy::too_many_arguments)]

@@ -9,7 +9,12 @@ use std::{
     },
 };
 use tokio::sync::Notify;
-use wi::*;
+use tokio_util::sync::CancellationToken;
+use wi::{
+    run::*,
+    tools::{Tool, ToolRegistry},
+    *,
+};
 
 pub const ID: &str = "independent-script";
 #[derive(Default)]
@@ -248,5 +253,165 @@ pub fn envelope(sequence: u64, event: ProviderEvent) -> EventEnvelope {
         provider: ID.into(),
         provider_sequence: None,
         event,
+    }
+}
+
+pub(super) struct ProbeTool {
+    pub(super) calls: AtomicUsize,
+    pub(super) dropped: Arc<AtomicUsize>,
+    pub(super) entered: Notify,
+    mode: Mode,
+    pub(super) definitions: AtomicUsize,
+}
+pub(super) enum Mode {
+    Pending,
+    PendingAfterFirst,
+    Large,
+    InvalidDefinition,
+}
+pub(super) struct DropProbe(pub(super) Arc<AtomicUsize>);
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+impl ProbeTool {
+    pub(super) fn new(mode: Mode) -> Arc<Self> {
+        Arc::new(Self {
+            calls: AtomicUsize::new(0),
+            dropped: Arc::new(AtomicUsize::new(0)),
+            entered: Notify::new(),
+            mode,
+            definitions: AtomicUsize::new(0),
+        })
+    }
+}
+#[async_trait]
+impl Tool for ProbeTool {
+    fn definition(&self) -> ToolDefinition {
+        let n = self.definitions.fetch_add(1, Ordering::SeqCst);
+        let mut definition = wi::tools::add_numbers_definition();
+        if matches!(self.mode, Mode::InvalidDefinition) && n > 0 {
+            definition.parameters = Value::Null;
+        }
+        definition
+    }
+    fn validate(&self, args: &Value) -> wi::Result<()> {
+        wi::tools::AddNumbers.validate(args)
+    }
+    async fn execute(&self, args: Value) -> wi::Result<Value> {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        let _drop = DropProbe(self.dropped.clone());
+        self.entered.notify_one();
+        match self.mode {
+            Mode::Pending => pending().await,
+            Mode::PendingAfterFirst => {
+                if n == 0 {
+                    wi::tools::AddNumbers.execute(args).await
+                } else {
+                    pending().await
+                }
+            }
+            Mode::Large => Ok(json!({"value":"x".repeat(70*1024)})),
+            Mode::InvalidDefinition => panic!("invalid definition admitted"),
+        }
+    }
+}
+
+pub(super) async fn observed(
+    gateway: &Gateway,
+    req: RunRequest,
+    tools: &ToolRegistry,
+) -> (RunResult, Vec<RunEventEnvelope>) {
+    let mut events = Vec::new();
+    let result = run(gateway, req, tools, CancellationToken::new(), |event| {
+        events.push(event.clone());
+        Ok(())
+    })
+    .await
+    .unwrap();
+    (result, events)
+}
+pub(super) fn trace(events: &[RunEventEnvelope]) -> Vec<&str> {
+    events
+        .iter()
+        .map(|e| match e.event {
+            RunEvent::RunStarted => "run_started",
+            RunEvent::TurnStarted { .. } => "turn_started",
+            RunEvent::ProviderEvent { .. } => "provider_event",
+            RunEvent::ToolEvent { .. } => "tool_event",
+            RunEvent::TurnFinished { .. } => "turn_finished",
+            RunEvent::RunFinished { .. } => "run_finished",
+        })
+        .collect()
+}
+pub(super) fn failed_as(result: &RunResult, code: &str) {
+    assert_eq!(result.outcome, RunOutcome::Failed { code: code.into() });
+}
+pub(super) fn healthy(result: &RunResult, events: &[RunEventEnvelope], records: &Records) {
+    assert!(result.events_complete);
+    assert_eq!(result.sink_error, None);
+    assert_eq!(count(&records.opens), 1);
+    assert_eq!(count(&records.closes), 1);
+    assert_eq!(
+        result.summary.model_requests_attempted as usize,
+        count(&records.attempts)
+    );
+    assert_eq!(
+        result.summary.model_requests_admitted as usize,
+        count(&records.receipts)
+    );
+    assert_eq!(
+        result.summary.new_tool_dispatches as usize,
+        count(&records.tool_calls)
+    );
+    assert_eq!(count(&records.definitions), 2);
+    assert_eq!(result.summary.turns_started, result.summary.turns_finished);
+    assert_eq!(trace(events).first(), Some(&"run_started"));
+    assert_eq!(trace(events).last(), Some(&"run_finished"));
+    let mut ids = std::collections::HashSet::new();
+    let mut turns = std::collections::HashSet::new();
+    for (i, event) in events.iter().enumerate() {
+        assert_eq!(event.schema_version, 2);
+        assert_eq!(event.sequence, i as u64 + 1);
+        assert_eq!(event.run_id, result.run_id);
+        assert!(uuid::Uuid::parse_str(&event.event_id).is_ok());
+        assert!(ids.insert(&event.event_id));
+        match &event.event {
+            RunEvent::RunStarted => {
+                assert!(
+                    event.session_id.is_none()
+                        && event.turn_id.is_none()
+                        && event.request_id.is_none()
+                );
+            }
+            RunEvent::RunFinished { summary, .. } => {
+                assert!(event.turn_id.is_none());
+                assert_eq!(
+                    serde_json::to_value(summary).unwrap(),
+                    serde_json::to_value(&result.summary).unwrap()
+                );
+            }
+            RunEvent::TurnStarted { number } => {
+                assert!(event.request_id.is_none());
+                assert!(turns.insert(event.turn_id.clone().unwrap()));
+                assert_eq!(*number as usize, turns.len());
+            }
+            RunEvent::ProviderEvent { event: nested } => {
+                assert_eq!(nested.schema_version, 1);
+                assert_eq!(event.request_id, nested.request_id);
+                assert_eq!(event.session_id.as_ref(), Some(&nested.session_id));
+                assert!(
+                    records
+                        .events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|record| serde_json::to_value(record).unwrap()
+                            == serde_json::to_value(nested).unwrap())
+                );
+            }
+            _ => {}
+        }
     }
 }

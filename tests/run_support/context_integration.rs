@@ -1,6 +1,12 @@
-use super::*;
-use std::fs;
-use wi::context::{ContextRoots, discover, prepare_run};
+use super::run_support::*;
+use serde_json::json;
+use std::{fs, sync::Arc};
+use wi::{
+    context::{ContextRoots, discover, prepare_run},
+    run::*,
+    tools::ToolRegistry,
+    *,
+};
 
 #[tokio::test]
 async fn context_prepare_external_provider_receives_snapshot_and_only_ordinary_tool_continuation() {

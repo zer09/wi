@@ -23,12 +23,15 @@ S1 and its merge-readiness repair were merged in PR #2 at `94d86e0` after the
 submitted repair's Ubuntu/macOS/Windows workflows passed. The next contract is
 model-selected main SKILL.md loading; it is not implemented by the planning PR.
 
-- [S2 contract](slices/s2/CONTRACT.md): Fixed s2.0 library/tool/context behavior,
+- [S2 contract](slices/s2/CONTRACT.md): Fixed s2.1 library/tool/context behavior,
   scope, read timing, errors, output boundaries and authorized implementation.
 - [S2 matrix](slices/s2/MATRIX.md): S2-00 through S2-23, initially NOT RUN,
   offline gates and requirements for the later implementation reports.
 - [S2 implementor prompt](slices/s2/IMPLEMENTOR_PROMPT.md): Concrete offline
   task prompt; no provider traffic, Git writes or deferred-feature authority.
+- [S2 documentation validation](slices/s2/VALIDATION.md): Source-based correction
+  of the s2.0 error-category conflict and review of all 24 requirements. Not a
+  Rust test run or S2 acceptance. Existing ToolFailed serializes as gateway_error.
 
 The future S2 reports will be `slices/s2/VERIFICATION.md` and
 `slices/s2/verification.json`; they do not exist yet and are not acceptance evidence.

@@ -1,9 +1,22 @@
 # S2 — model-selected local SKILL.md loading
 
-Contract: **s2.0**. Status: **PLAN ONLY — NOT IMPLEMENTED OR VERIFIED**.
+Contract: **s2.1**. Status: **PLAN ONLY — NOT IMPLEMENTED OR VERIFIED**.
 Prepared: 2026-09-12. Runtime baseline:
 `94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa`, merging accepted S1 repair
 `214a447b43a094640ba46b93462c684f883cf5da`.
+
+### s2.1 documentation correction
+
+This revision supersedes s2.0. The implementor correctly stopped on a conflict:
+s2.0 described `GatewayError::ToolFailed` as serializing to `tool_failed`, but
+`GatewayError::code()` and existing regressions use `gateway_error`. Correct the
+specification, not the production mapping. `src/error.rs`, registry serialization,
+existing error assertions and event schemas must not change to accommodate this
+mistake. The 24 acceptance IDs and feature scope are unchanged.
+
+[VALIDATION.md](VALIDATION.md) records the complete S2 handoff review against the
+pinned source, the confirmed discrepancy, and boundary clarifications. This is
+source/document review, not execution or acceptance evidence for the new feature.
 
 ## 1. Purpose and acceptance boundary
 
@@ -42,12 +55,15 @@ At the pinned baseline:
   their frontmatter, wraps task/project/catalog/active-skill context, and validates
   input/options before provider construction. Its current framing explicitly says
   no skill loader is implied. PreparedRun retains owned prepared text, not a loader.
-- `src/tools.rs::Tool` has definition, pure argument validation, and async execute.
-  ToolRegistry already provides whole-batch preflight, per-run call-result reuse,
-  normal correlated error output and sequential dispatch.
-- The registry currently converts an executed error to `{"error":{"code":...}}`
-  and marks the local finish event is_error=true. Serialized results above its
-  existing 64 KiB bound become tool_output_limit errors, not truncated success.
+- `src/tools.rs::Tool` has definition, argument validation, and async execute.
+  S2's validation must be pure; the trait alone does not enforce purity for arbitrary
+  third-party implementations. ToolRegistry provides whole-batch preflight,
+  per-run call-result reuse, correlated error output and sequential dispatch.
+- The registry converts an executed error with `error.code()` into
+  `{"error":{"code":...}}` and marks the local finish event is_error=true.
+  `GatewayError::ToolFailed` currently yields **gateway_error**, not a dedicated
+  tool_failed wire category. Serialized results above the existing 64 KiB bound
+  become tool_output_limit errors, not truncated success.
 - `src/cli/run_cli.rs` is the context-aware CLI adapter. The reusable run operation
   and ToolRegistry are library-owned; their public protocols do not need redesign.
 
@@ -78,7 +94,9 @@ explicit --use-skill path remains supported. No new CLI enable flag is added.
 ## 4. Required library additions
 
 Add these operations under `wi::context`. The public signatures below are fixed;
-private helper/module names are implementor details.
+private helper/module names are implementor details. These are NEW S2 APIs, not
+symbols claimed to exist in the baseline. Result below is the ordinary two-type
+Rust Result, not the crate's one-error GatewayError alias.
 
 ```rust
 pub struct LoadedSkill { /* private fields, redacted Debug */ }
@@ -113,6 +131,10 @@ and metadata access is sensitive application data, not safe telemetry.
 Existing `prepare_run` must use the shared loader for its explicit bodies while
 retaining its signature, no-loader behavior, framing, validation, and no-context
 byte identity. S2 does not change its defaults behind existing callers' backs.
+In particular, S1 validates ALL selected identities before reading root AGENTS.md
+and then selected bodies in selection order. Do not turn that into a read-as-you-
+validate loop: a later unknown ID must retain precedence over an earlier body's
+read failure. Share a private pure lookup if necessary; do not duplicate file reads.
 
 `prepare_run_with_skill_loading`:
 1. Uses the caller's catalog Arc for both composition and the bound tool. It does
@@ -135,6 +157,9 @@ The built-in Tool type may stay private in context's skill-loading module. It
 owns only Arc<SkillCatalog>; it is stateless with respect to active skills and
 results. No second registry, body/result cache, global singleton or cross-run
 mutable state. Existing ToolRegistry fresh scopes retain their semantics.
+The public run controller itself takes another fresh result scope from the supplied
+registry. Thus returned tools are the registration template for that run, not a
+cache handle that can be inspected for the run's results after completion.
 
 ## 5. Function-tool wire contract
 
@@ -200,6 +225,10 @@ Existing --tool add_numbers and --use-skill selections remain available.
 `wi skills list` remains metadata-only: it must not construct a provider or load
 any body. Legacy generation/demo/smoke commands are not silently converted into
 workspace-aware runs. Update help to describe the actual new wi run behavior.
+Preserve the CLI's existing ordering: discovery diagnostics are delivered even if
+activation/final validation fails, and all preparation/diagnostic failures precede
+provider/auth construction. Do not early-return inside the blocking preparation
+closure in a way that loses already obtained diagnostics.
 
 The loader-enabled preparation keeps S1's four initial JSON fields:
 `task`, `project_instructions`, `available_skills`, `active_skills`.
@@ -264,18 +293,39 @@ and the Linux-only malformed-byte fixture guard.
 
 The shared loader returns existing ContextError categories for local library use.
 The Tool adapter maps read failure, changed metadata, invalid/oversized body, and
-blocking-worker join failure to existing GatewayError::ToolFailed. Thus the
-existing registry emits a correlated static tool_failed error and is_error=true;
-raw paths, text, OS errors or parser excerpts do not leak into model/error logs.
-This intentionally reuses the current error boundary, not a new error framework.
+blocking-worker join failure to `GatewayError::ToolFailed`. The EXISTING
+`GatewayError::code()` mapping serializes this through the registry as:
+
+```json
+{"error":{"code":"gateway_error"}}
+```
+
+The returned InputItem is correlated with the original call_id; the local
+ToolExecutionFinished event has is_error=true. There is no is_error field added
+to the error JSON, and the provider does not emit this local tool-finish event.
+Raw paths, text, OS errors or parser excerpts must not appear in model error results
+or ordinary diagnostics. Do not add `Self::ToolFailed => "tool_failed"`, fabricate
+an Ok error-shaped Value, or alter existing regression expectations. An Ok Value
+would otherwise make the registry report is_error=false.
+
+Keep the layers distinct:
+
+| Condition | Existing/public boundary to preserve | Expected observation |
+|---|---|---|
+| Bad schema or unknown ID | S2 validate returns InvalidToolArguments; registry preflight rejects | No new execution/result/finish from that batch; the controller's existing failure handling applies, not a correlated tool error result. |
+| Known entry fails to load | Public load_skill returns its ContextError; Tool execute maps to ToolFailed | Registry returns the correlated gateway_error JSON above and is_error=true. It can be delivered to the next ordinary model request; it does not automatically fail the whole run. |
+| Successful Value serializes above 64 KiB | Existing registry output-size branch | Correlated `{"error":{"code":"tool_output_limit"}}`, is_error=true; no truncated success. |
+| Cancelled while awaiting a load | Existing controller/registry cancellation path | No new successful result or finish fabricated; cancellation is not converted into gateway_error. |
 
 The current file-read/input guard is 1 MiB and the current serialized tool-result
-guard is 64 KiB. **Do not change either guard in S2.** A body that fits initial
-explicit activation may be too large for an ordinary tool result once metadata
-and JSON escaping are included. The actual registry must return its existing
-tool_output_limit error, with no truncated success and no false loaded-state
-claim. The complete next-input validation also remains in force for combined
-results. Document this existing limitation; no paging/reservation/quota system.
+guard is 64 KiB. **Do not change either guard in S2.** A whole selected file above
+1 MiB fails the shared loader first: ContextErrorKind::InputTooLarge, mapped to
+ToolFailed/gateway_error through the adapter. A successfully loaded file whose
+id/frontmatter/body Value serializes ABOVE 64 KiB reaches tool_output_limit. Exactly
+64 KiB remains permitted by the registry. These are different failure stages; do
+not require both codes for the same stage or classify all oversized inputs alike.
+The complete next-input validation also remains in force for combined results.
+Document this existing limitation; no paging/reservation/quota system.
 
 Malformed arguments/unknown IDs fail during preflight before filesystem work;
 valid IDs whose files became unreadable fail during execution as normal tool
@@ -285,11 +335,18 @@ The model may choose another ordinary iteration, under the unchanged controller.
 
 Controlled cancellation and observer failure retain M3/C1 behavior. If the pending
 tool future is dropped, no successful finish/result/cache entry is fabricated.
+After execution and serialization have completed, the registry ALREADY caches the
+result before emitting ToolExecutionFinished. A failure of that finish observer
+stops remaining work but does not roll back the completed operation or its cache.
+Preserve this ordering; do not require a completed cached result to disappear.
+
 A blocking regular-file read may finish after its awaiting future is cancelled;
 its worker must not mutate a registry/catalog, emit events, submit results, or
 start further work. Do not promise forcible termination of blocking I/O. Test
 cancellation with a deterministic test-only barrier, not long sleeps or new
-runtime deadlines. No active task is detached for later model continuation.
+runtime deadlines. Join-failure tests use a fixed synthetic failure and retain no
+real file text or paths in panic/log output. No active task is detached for later
+model continuation.
 
 ## 9. Allowed implementation footprint
 
@@ -302,7 +359,8 @@ runtime deadlines. No active task is detached for later model continuation.
 - Existing provider loopback test files may gain S2 cases. Production provider
   files, auth, run orchestration, Tool trait and result-cache implementation should
   require no behavior changes. If they appear necessary, report the concrete
-  conflict rather than broadening the task.
+  conflict rather than broadening the task. `src/error.rs` and existing error-code
+  expectations specifically stay unchanged: s2.1 corrects the documentation.
 - `examples/skill_loading_offline.rs` and concise current README/architecture/event
   documentation updates; update docs index without relocating historical records.
 
@@ -335,7 +393,9 @@ schemas remain unchanged: outer run schema 2, nested provider schema 1.
 The offline example uses only temporary skills and a scripted provider. It should
 prove no initial body, one real local load, body in the next model input, and final
 fixture response. A larger integration fixture may then use add_numbers; neither
-example makes provider requests.
+example makes provider requests. A model-generated load naturally requires the
+next ordinary model request to consume its result. The forbidden extra request is
+a separate classifier/selector/preparation-model call, not that tool continuation.
 
 ## 11. Reporting, authorization, and later slices
 

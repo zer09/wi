@@ -1,6 +1,6 @@
 # Wi: active planning handoff S2 — model-selected local skill loading
 
-Contract `s2.0`; accepted runtime baseline:
+Contract `s2.1`; accepted runtime baseline:
 `94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa` (PR #2 merged).
 This branch changes documentation only. Runtime implementation begins when the
 owner supplies the implementor prompt. Execute the fixed contract and matrix;
@@ -11,7 +11,14 @@ Read:
 2. `docs/slices/s2/CONTRACT.md`
 3. `docs/slices/s2/MATRIX.md`
 4. `docs/slices/s2/IMPLEMENTOR_PROMPT.md`
-5. The accepted S1 contract/reports and the relevant current source.
+5. `docs/slices/s2/VALIDATION.md` and the accepted S1 evidence/current source.
+
+s2.1 corrects a designer error in s2.0. Keep GatewayError::ToolFailed mapped by
+existing GatewayError::code() to gateway_error. Do not add a tool_failed category,
+change src/error.rs, fabricate Ok error JSON, or rewrite existing regression
+expectations. The reported assignment_conflict was correct, not an implementation
+failure. Read the corrected failure-stage and cache/event distinctions before
+resuming; the feature scope and 24 matrix IDs are unchanged.
 
 S2 adds one local function tool, `load_skill`, bound to an already discovered
 SkillCatalog. It returns that entry's main SKILL.md instructions through the

@@ -1,9 +1,16 @@
 # S2 acceptance matrix
 
-Contract: **s2.0**. Runtime baseline:
+Contract: **s2.1**. Runtime baseline:
 `94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa`.
 Status of every row: **NOT RUN**. This is a fixed implementation/test contract,
 not evidence that S2 exists. Read [CONTRACT.md](CONTRACT.md) first.
+
+s2.1 corrects s2.0's erroneous tool_failed wire expectation to the existing
+**gateway_error** mapping. It also makes preserved boundary semantics explicit.
+All 24 IDs and the feature scope remain unchanged. [VALIDATION.md](VALIDATION.md)
+records source-to-contract review; it is not a substitute for implementing or
+running these acceptance cases. Do not change src/error.rs or existing error
+assertions to satisfy the superseded wording.
 
 ## Required acceptance rows
 
@@ -14,6 +21,9 @@ baseline. Inspect AGENTS.md, S1/MR reports, current source and verification scri
 Run the isolated baseline gates before edits. Preserve C1 deletion, auth behavior,
 organization and historical documents. No real data/credentials or provider traffic.
 PASS requires separate actual baseline results, not pasted old totals.
+A previous same-source baseline run may be attributed and retained; do not count
+it as S2 execution or relabel the reported assignment_conflict as an implementation
+failure. Record the corrected contract revision used for resumed work.
 
 ### S2-01 — One shared loader, not duplicated reads
 
@@ -21,7 +31,9 @@ Implement context::load_skill and private-field LoadedSkill as specified. S1
 prepare_run uses the same validated lookup/read path and keeps existing behavior.
 Test valid global/project loads and direct invalid SkillId construction. No provider,
 CLI, environment or credential dependency is required by the library operation.
-Existing S1 tests pass without weakening assertions.
+Existing S1 tests pass without weakening assertions. In particular, preserve
+all-selected-ID validation before AGENTS.md/body I/O; a later invalid/unknown
+selection must not become masked by an earlier selected-file read failure.
 
 ### S2-02 — Same-name scopes and metadata-bound identity
 
@@ -38,6 +50,8 @@ only. No hosted/native-search/programmatic/async fields, tools-in-enum catalog
 copy, body content or absolute paths enter the definition. Unknown/missing/wrong-
 typed/null/extra argument fields fail local validation even if the server ignored
 strict mode. All public Tool entry points defensively validate input.
+Direct invalid execute calls return InvalidToolArguments, not an Ok error-shaped
+Value. Do not infer a serialized category from the Rust variant's spelling.
 
 ### S2-04 — Pure full-batch preflight
 
@@ -46,7 +60,8 @@ still succeeds without reopening it; execution fails as a normal tool result.
 In a mixed response containing add_numbers plus a malformed or unknown load ID,
 preflight rejects the whole batch before any new execution, body read, cache entry
 or successful tool event. Preserve unsupported caller/namespace/incomplete-response
-and duplicate/conflicting-call protections with the loader present.
+and duplicate/conflicting-call protections with the loader present. This is a
+preflight Err, not a per-call gateway_error result or ToolExecutionFinished event.
 
 ### S2-05 — Lazy successful result through the real registry
 
@@ -59,11 +74,24 @@ Do not substitute a directly fabricated tool-result Value for this acceptance.
 ### S2-06 — Changed frontmatter and execution errors
 
 After discovery, alter or corrupt the selected frontmatter. Load fails with the
-existing ContextChanged category at the public loader and a correlated tool_failed
-error/is_error=true through the actual registry. Also cover missing/unreadable
-manifest, empty body, non-UTF-8 body, oversized file and worker-join failure where
-applicable. No file contents, host paths, OS strings or parser excerpts escape in
-model errors or ordinary Debug. No automatic rediscovery/retry occurs.
+existing ContextErrorKind::ContextChanged at the public loader. Direct Tool execute
+maps the load failure to GatewayError::ToolFailed. Through the ACTUAL registry,
+assert a correlated output parsing to exactly:
+
+```json
+{"error":{"code":"gateway_error"}}
+```
+
+Assert ToolExecutionFinished has the same call_id and is_error=true; that boolean
+is on the event, not added to the result JSON. Also cover missing/unreadable
+manifest, empty body, non-UTF-8 body, oversized whole file and worker-join failure.
+Use deterministic synthetic worker-failure injection for the join path; no runtime
+hook/API is required. No file contents, host paths, OS strings or parser excerpts
+escape in model errors or ordinary Debug. No automatic rediscovery/retry occurs.
+The model may consume the error in the next normal request; do not require an
+automatic failed run or fabricate a successful load. Keep the existing
+src/tools/tests/execution_results.rs and tests/run_support/tool_execution.rs
+expectations unchanged, including gateway_error versus tool_output_limit.
 
 ### S2-07 — Body read timing and owned results
 
@@ -76,9 +104,11 @@ Files added after discovery remain unavailable. No watcher or implicit refresh.
 
 Execute once, change/delete the file, and resubmit the same call_id/arguments:
 assert the registry reuses the exact saved result and emits reuse without another
-load. Cover saved error reuse and conflicting ID/argument rejection. A separate
-run's fresh result scope performs its own load. Do not add mutable global or per-
-skill activation/body caches to make the test pass.
+load. Cover saved gateway_error and tool_output_limit result reuse and conflicting
+ID/argument rejection. Reuse emits ToolResultReused, not a fresh start/finish pair;
+that reuse event has no is_error field. A separate run's fresh result scope
+performs its own load. Do not add mutable global or per-skill activation/body
+caches to make the test pass.
 
 ### S2-09 — Filesystem boundary preservation
 
@@ -106,6 +136,10 @@ metadata and loader, ordinary tool definitions retained, original options.tools
 must be empty, final validation includes actual definitions, and returned
 options.tools remains empty. A supplied load_skill name collision with a nonempty
 catalog fails before body loading/provider construction and does not replace it.
+The controller still creates its own fresh cache from this registry. Observe run
+results/events rather than expect the returned template's cache to be populated
+by wi::run::run. Automatic registration must still pass existing configuration
+checks; do not widen those checks to fit another definition.
 
 ### S2-12 — Nonempty and empty catalogs
 
@@ -135,11 +169,14 @@ falsely become an automatically updated delivery ledger.
 ### S2-15 — Existing size boundaries and no truncated success
 
 Exercise the current 1 MiB file/input safeguards and 64 KiB serialized tool-result
-boundary with actual registry output, including JSON-escape overhead. At the
-registry bound success is preserved; above it, existing tool_output_limit/is_error
-behavior occurs with no truncated body or false activation claim. Do not widen
-limits, add paging/budgets/reservations or hide that some S1-explicit bodies are
-larger than the S2 tool-result capacity. Combined next-input validation stays.
+boundary with actual registry output, including JSON-escape overhead. A whole
+file above 1 MiB fails loading first (InputTooLarge in the public loader, ToolFailed
+from Tool execute, gateway_error/is_error=true from the registry). A loaded
+id/frontmatter/body Value at exactly 64 KiB serializes successfully; ABOVE that
+boundary the existing registry returns tool_output_limit/is_error=true, without
+truncation. Use different fixtures for these two stages. Do not widen limits,
+add paging/budgets/reservations or hide that some S1-explicit bodies are larger
+than the S2 tool-result capacity. Combined next-input validation stays.
 
 ### S2-16 — Independent provider, public run path
 
@@ -163,8 +200,10 @@ Run S2's public preparation/tool/controller path against both existing loopback
 transports with synthetic credentials. WebSocket second request uses the same
 socket, parent response and only new result input; SSE replays complete effective
 native history including the initial context and load result exactly as expected.
-Retain existing recovery/provenance/consistency handling. Add no model request
-solely to select a skill. This is offline protocol evidence, not a live pass.
+Retain existing recovery/provenance/consistency handling. The ordinary next model
+request consumes the load result; forbid an additional classifier/selector call
+outside that loop, not the required continuation itself. This is offline protocol
+evidence, not a live pass.
 
 ### S2-19 — Cancellation and observer failure
 
@@ -172,17 +211,22 @@ Cancel before dispatch, while the loading future is pending via a deterministic
 test-only barrier, and after a completed load before another call. Preserve M3/C1
 terminal/cancellation ordering and no fabricated successful finish/result after
 interruption. A blocking worker may complete its read but cannot publish/cache or
-submit anything after its waiter is dropped. Test sink failure and pending-future
-drop without adding runtime deadlines, progress APIs or custom executor pools.
+submit anything after its waiter is dropped. Separately, when execution already
+returned and the registry cached the output BEFORE the finish observer failed,
+that completed cache entry is not rolled back; later work still stops. Test sink
+failure and pending-future drop without adding runtime deadlines, progress APIs,
+custom executor pools, or source changes to the existing cancellation semantics.
 
 ### S2-20 — CLI and non-CLI integration
 
 The actual wi run handler uses shared S2 preparation and the returned registry.
 No --tool load_skill or activation enable flag. Existing explicit --tool and
 --use-skill semantics remain; skills list stays metadata-only. Fatal preparation
-errors happen before provider/auth construction. Test injected synthetic factory
-and process-level parsing, using current wrapper targets/layout. A library example
-works with explicit roots and no ambient environment; no subprocess CLI backend.
+errors happen before provider/auth construction. Discovery diagnostics still reach
+the diagnostic sink even when preparation fails; they do not enter run NDJSON.
+Test injected synthetic factory and process-level parsing, using current wrapper
+targets/layout. A library example works with explicit roots and no ambient
+environment; no subprocess CLI backend.
 
 ### S2-21 — Isolation, privacy and schema stability
 
@@ -192,6 +236,7 @@ LoadedSkill/catalog/tool Debug and static error outputs expose no raw bodies or
 host paths. JSON tool/provider output is explicitly sensitive, not a logging mode.
 No RunRequest change; run schema remains 2 and provider schema 1. Auth/store,
 provider feature declarations, RunLimits deletion and existing wire policy remain.
+GatewayError::code and existing consumers/expected categories remain unchanged.
 
 ### S2-22 — Offline example and current documentation
 
@@ -255,7 +300,7 @@ Machine-readable report must include at least:
 
 ```json
 {
-  "contract": "s2.0",
+  "contract": "s2.1",
   "status": "NOT_RUN",
   "accepted": false,
   "baseline": "94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa",

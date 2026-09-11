@@ -376,7 +376,7 @@ fn is_link(meta: &Metadata) -> bool {
     {
         use std::os::windows::fs::MetadataExt;
         // Includes directory junctions, not just symbolic links.
-        return meta.file_attributes() & 0x400 != 0;
+        meta.file_attributes() & 0x400 != 0
     }
     #[cfg(not(windows))]
     meta.file_type().is_symlink()

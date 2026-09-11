@@ -239,3 +239,148 @@ No live, auth, profile, login or renewal command is part of this gate set. Test 
 The permitted initial development dependency fetch is separate from live provider traffic. Pi's authoring conversation is separate from Wi verification.
 
 Generation ledger: **31/50 used, 19 remaining, changed=false; new allocation 0**.
+
+## Merge-readiness follow-up: 2026-09-12 (MR-00 through MR-04)
+
+**Local offline repairs and independent review passed; submitted-revision merge
+readiness remains pending.** This dated follow-up supplements the original Linux
+observations above. It does not revise historical acceptance or claim acceptance
+of a submitted repair revision.
+
+### Revision, observers and failed CI record
+
+- Reviewed and locally confirmed HEAD: `71e0ce8b3ed3c7fb9fd65348a264c789f989280f`,
+  branch `docs/s1-local-skills-context`. The implementor observed a clean initial
+  worktree. Tested repairs are unstaged, uncommitted changes on that HEAD; the SHA
+  does not contain them. No repair revision was submitted.
+- Governing review: [issuecomment-5638072481](https://github.com/zer09/wi/pull/2#issuecomment-5638072481).
+  The implementor retrieved the comment, job outcomes and failure logs using
+  authenticated, read-only `gh api` / `gh run view` commands. The CI outcomes below
+  are GitHub execution evidence, not local native macOS/Windows execution.
+- Preserved failed workflow: [34625704647](https://github.com/zer09/wi/actions/runs/34625704647),
+  started `2026-09-11T17:05:18Z`, conclusion **failure**, at the reviewed SHA.
+
+| Original CI job | fmt | check | test | Clippy `-D warnings` | build | doctests |
+|---|---|---|---|---|---|---|
+| Ubuntu, job `103350146214` | PASS | PASS | PASS | PASS | PASS | PASS |
+| macOS, job `103350146402` | PASS | PASS | FAIL | SKIPPED | SKIPPED | SKIPPED |
+| Windows, job `103350146474` | PASS | PASS | PASS | FAIL | SKIPPED | SKIPPED |
+
+The macOS catalog suite reported **26 passed, 1 failed, 0 ignored, 0 filtered**.
+Its only failure was
+`filesystem_safety::unix::context_catalog_non_utf8_traversal_names_fail_without_lossy_labels`:
+creating the directory from byte `0xff` panicked at
+`tests/context_catalog/filesystem_safety.rs:269:10` in the reviewed revision,
+with OS error **92**, **Illegal byte sequence** (Cargo exit **101**). The fixture
+failed before `discover` ran; it did not demonstrate a discovery-validation defect.
+Windows Clippy rejected `return meta.file_attributes() & 0x400 != 0;` at
+`src/context.rs:379` as `needless_return`. Windows build/doctest results remain
+unknown because those steps were skipped. macOS Clippy/build/doctests were also
+skipped, not passing evidence.
+
+### Focused repairs and platform coverage
+
+- `tests/context_catalog/filesystem_safety.rs:256-274`: apply
+  `#[cfg(target_os = "linux")]` only to the malformed-name test. Move its
+  `OsStringExt` import inside the test so other Unix targets have no unused import.
+  Keep real directory creation, `discover(...).unwrap_err()`, `ReadFailed` and
+  the exact `global:.` label assertion. No I/O error is caught or treated as success.
+- `src/context.rs:374-383`: make the Windows block return its tail expression.
+  `MetadataExt::file_attributes() & 0x400 != 0` still detects reparse points,
+  including junctions. No lint suppression, validation change or link-policy change.
+
+| Platform | Coverage of this uncommitted repair |
+|---|---|
+| Linux x86_64 / WSL2 | Observed focused and full offline passes. The real malformed-name fixture ran and passed; no additional Linux test exclusion. |
+| macOS | NOT RUN locally. Only that exact fixture is newly excluded at compile time. Source/cfg inspection predicts 26 catalog tests instead of the failed run's 27; this is not a native result. All other existing Unix tests retain their guards and assertions. Native suite and downstream gates remain pending. |
+| Windows | NOT RUN or cross-compiled locally. The Windows expression was inspected for equivalence; Linux Clippy does not check it. Existing Unix exclusions are unchanged. Native warning-denied Clippy and remaining gates are pending. |
+| Other Unix targets | NOT RUN. The malformed-name fixture is excluded; all other existing platform guards are unchanged. No native pass is inferred. |
+
+Linux execution used a filesystem that accepted the malformed bytes. The fixture
+still fails on setup errors; an OS guard does not guarantee every Linux filesystem
+supports such names. Existing trusted-owner, hardlink and ancestor-race limitations
+remain unchanged. No module, dependency, feature, CI job or other test was changed.
+
+### Implementor-observed local commands and results
+
+Local execution used Linux `6.18.33.2-microsoft-standard-WSL2`, x86_64, an
+unprivileged process, rustc/cargo `1.98.1`, uv `0.12.10`, and Node `v24.18.0`.
+The shell UTC date was **2026-09-11**; the follow-up heading uses the assigned
+**2026-09-12** review date. These results are this implementor's execution evidence,
+not a restatement of the original parent-supplied report.
+
+Cargo, uv and Node commands used `env -i` with PATH and trusted Cargo/Rustup caches
+preserved. HOME, XDG_CONFIG_HOME, CODEX_HOME and TMPDIR selected synthetic temporary
+roots. Cargo used `CARGO_NET_OFFLINE=true`; uv also used a trusted cache,
+`UV_OFFLINE=true` and `UV_PYTHON_DOWNLOADS=never`. No dependencies were downloaded
+or changed. The table gives exact program arguments; the isolation prefix applies
+to every Cargo/uv/Node row.
+
+| Command | Exit | Observed result |
+|---|---:|---|
+| `cargo test --test context_catalog filesystem_safety` | 0 | 10 passed, 0 failed, 0 ignored, 18 filtered; malformed-name discovery and applicable filesystem protections passed |
+| `cargo fmt --all -- --check` | 0 | PASS |
+| `cargo check --all-targets` | 0 | PASS |
+| `cargo test --all-targets` | 0 | 339 passed, 0 failed, 0 ignored, 0 filtered |
+| `cargo clippy --all-targets -- -D warnings` | 0 | PASS on Linux only |
+| `cargo build --all-targets` | 0 | PASS |
+| `cargo test --doc` | 0 | PASS; 0 doctests |
+| `uv run scripts/verify.py` | 0 | All six Cargo gates passed again; 339 Rust tests, 0 doctests; source_files 113, rust_test_definitions 326, fixture_events 25 |
+| `node scripts/cli_retest.mjs --self-test` | 0 | 152 passed; live_started=false |
+| `cargo run --example run_offline` | 0 | Completed 50; 1 session, 3 scripted model requests, 2 tool executions; offline |
+| `cargo run --example skills_offline` | 0 | Completed 42; 2 catalog entries, 1 active skill, 1 session, 2 scripted model requests, 1 tool execution; offline |
+| `git diff --check` | 0 | Final four-file source, test and report diff passed |
+
+The parent independently repeated the focused filesystem test, `scripts/verify.py`,
+Node self-tests, both offline examples, final JSON parsing, historical-content
+preservation checks and `git diff --check`. Results matched the table. The parent
+observed the six Cargo gates through `scripts/verify.py`, not as six additional
+direct command invocations.
+
+Three independent reviewers inspected the complete four-file repair diff. Review-a,
+review-b and review-c each returned **PASS** with no blocking findings. Review-a
+and review-b repeated the focused filesystem test and diff/report checks. Review-c
+repeated the full offline gate set with 339 Rust tests, 152 Node self-tests and
+both offline examples. No reviewer performed native macOS or Windows execution.
+
+Both implementor full Rust passes had the same breakdown: lib **207**, bin **24**,
+context_catalog **28**, context_prepare **26**, managed_absence_cli **1**,
+provider_contract **5**, run_cli **4**, run_controller **33**, skills_cli **11**,
+example harnesses **0**. All had zero failed, ignored or filtered tests. Each full
+Cargo gate ran once directly and once through the required verification runner;
+no failed local gate or retry occurred. Source inventory **113** reflects the
+current organization, not a change made by this repair; the original **76** remains
+historical evidence. Cross-platform totals are not forced to match Linux.
+
+### MR disposition, changed paths and pending work
+
+| ID | Disposition |
+|---|---|
+| MR-00 | Initial HEAD/clean tree and failed-run record verified; original report content, S1 behavior, organization and no-live boundary preserved. |
+| MR-01 | Focused platform guard implemented; real Linux regression passed. Native macOS closure pending. |
+| MR-02 | Equivalent Windows tail expression implemented without suppressions. Native Windows Clippy closure pending. |
+| MR-03 | Required local offline commands passed. All three OS jobs on a submitted repair revision remain pending; skipped downstream gates are not presumed fixed. |
+| MR-04 | This follow-up and the new top-level JSON `merge_readiness_follow_up` object retain revision-specific evidence. Three independent reviews passed with no blocking findings. Submitted-revision CI remains pending. |
+
+Changed paths are only `src/context.rs`,
+`tests/context_catalog/filesystem_safety.rs`,
+`docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md`, and
+`docs/wi-local-skills-s1-verification.json`. The implementor inspected the focused
+source diff; that inspection alone was not independent review or merge approval.
+The later review-a, review-b and review-c results above independently passed the
+complete diff. No staging, commits, pushes, merges, deployments, releases,
+publication or hosted-service writes occurred. Changes remain unstaged and
+uncommitted.
+
+Live verification is **NOT RUN / not authorized**: **0** real provider requests or
+generations, real credential/profile/auth/login/renewal operations, hosted API
+probes/uploads, and owner global-skill/private-project content reads for tests.
+Synthetic credentials, scripted providers and loopback tests remain offline;
+read-only GitHub evidence retrieval is separate from Wi provider traffic. Pi's
+authoring conversation is separate. Ledger: **31/50 used, 19 remaining,
+changed=false, new allocation 0**.
+
+S2/P1/V1, storage/service/UI work, resource execution, uploads, API-key fallback,
+dependencies, feature additions and reorganization remain outside this increment.
+Submitted-revision CI and native macOS/Windows closure require later authorized
+work; this follow-up does not claim merge readiness.

@@ -963,5 +963,160 @@
     "hosted_service_writes": 0
   },
   "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false},
-  "service_and_storage_implemented": false
+  "service_and_storage_implemented": false,
+  "merge_readiness_follow_up": {
+    "date": "2026-09-12",
+    "scope": ["MR-00", "MR-01", "MR-02", "MR-03", "MR-04"],
+    "status": "LOCAL_OFFLINE_REPAIRS_VERIFIED_MERGE_READINESS_PENDING",
+    "merge_ready": false,
+    "review_comment": "https://github.com/zer09/wi/pull/2#issuecomment-5638072481",
+    "reviewed_revision": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+    "tested_worktree": {
+      "base_head": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+      "branch": "docs/s1-local-skills-context",
+      "initial_clean": true,
+      "observer": "Implementor, direct local Git inspection and offline execution",
+      "repairs_uncommitted": true,
+      "repairs_unstaged": true,
+      "repairs_represented_by_head": false,
+      "submitted_revision": null
+    },
+    "historical_evidence": {
+      "policy": "Append-only follow-up; all original top-level evidence fields and original Markdown content remain unchanged",
+      "failed_run": {
+        "id": 34625704647,
+        "url": "https://github.com/zer09/wi/actions/runs/34625704647",
+        "head_sha": "71e0ce8b3ed3c7fb9fd65348a264c789f989280f",
+        "created_at": "2026-09-11T17:05:18Z",
+        "status": "completed",
+        "conclusion": "failure",
+        "observer": "Implementor retrieved GitHub job metadata and failure logs with authenticated read-only gh; these are GitHub execution outcomes, not local native platform runs",
+        "jobs": [
+          {"os": "ubuntu-latest", "id": 103350146214, "conclusion": "success", "fmt": "PASS", "check": "PASS", "test": "PASS", "clippy_warning_denied": "PASS", "build": "PASS", "doctests": "PASS"},
+          {"os": "macos-latest", "id": 103350146402, "conclusion": "failure", "fmt": "PASS", "check": "PASS", "test": "FAIL", "clippy_warning_denied": "SKIPPED", "build": "SKIPPED", "doctests": "SKIPPED"},
+          {"os": "windows-latest", "id": 103350146474, "conclusion": "failure", "fmt": "PASS", "check": "PASS", "test": "PASS", "clippy_warning_denied": "FAIL", "build": "SKIPPED", "doctests": "SKIPPED"}
+        ],
+        "macos_failure": {
+          "test": "filesystem_safety::unix::context_catalog_non_utf8_traversal_names_fail_without_lossy_labels",
+          "reviewed_location": "tests/context_catalog/filesystem_safety.rs:269:10",
+          "phase": "fs::create_dir of a directory named from byte 0xff, before discover ran",
+          "os_error": 92,
+          "message": "Illegal byte sequence",
+          "cargo_exit_code": 101,
+          "catalog_suite": {"passed": 26, "failed": 1, "ignored": 0, "filtered": 0},
+          "discovery_validation_exercised_by_failing_fixture": false
+        },
+        "windows_failure": {
+          "reviewed_location": "src/context.rs:379",
+          "expression": "return meta.file_attributes() & 0x400 != 0;",
+          "lint": "needless_return",
+          "warning_denied": true
+        }
+      }
+    },
+    "repairs": [
+      {
+        "id": "MR-01",
+        "path": "tests/context_catalog/filesystem_safety.rs",
+        "change": "Apply #[cfg(target_os = \"linux\")] only to the malformed-name fixture and move OsStringExt into that test",
+        "preserved": "Real malformed directory creation, discover(...).unwrap_err(), ReadFailed, exact global:. label, all other existing Unix guards and assertions; no I/O-error catch or production validation change"
+      },
+      {
+        "id": "MR-02",
+        "path": "src/context.rs",
+        "change": "Replace the Windows is_link explicit return with the same tail expression",
+        "preserved": "MetadataExt::file_attributes() & 0x400 != 0 reparse-point and junction detection; no lint suppression or link-policy change"
+      }
+    ],
+    "local_environment": {
+      "observed_utc_date": "2026-09-11",
+      "date_note": "The follow-up date is the assigned 2026-09-12 review date; observed shell UTC execution date is recorded separately",
+      "os": "Linux",
+      "kernel": "6.18.33.2-microsoft-standard-WSL2",
+      "architecture": "x86_64",
+      "unprivileged": true,
+      "rustc": "1.98.1",
+      "cargo": "1.98.1",
+      "uv": "0.12.10",
+      "node": "v24.18.0",
+      "isolation": "Every Cargo/uv/Node command starts with env -i; preserve PATH and trusted Cargo/Rustup caches, select synthetic temporary HOME/XDG_CONFIG_HOME/CODEX_HOME/TMPDIR roots",
+      "cargo_net_offline": true,
+      "uv_cache": "Preserved trusted cache",
+      "uv_offline": true,
+      "uv_python_downloads": "never",
+      "dependency_downloads": 0,
+      "dependency_changes": false
+    },
+    "commands": [
+      {"command": "cargo test --test context_catalog filesystem_safety", "exit_code": 0, "result": "10 passed, 0 failed, 0 ignored, 18 filtered; real malformed-name discovery regression passed"},
+      {"command": "cargo fmt --all -- --check", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo check --all-targets", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo test --all-targets", "exit_code": 0, "result": "339 passed, 0 failed, 0 ignored, 0 filtered"},
+      {"command": "cargo clippy --all-targets -- -D warnings", "exit_code": 0, "result": "PASS on Linux only"},
+      {"command": "cargo build --all-targets", "exit_code": 0, "result": "PASS"},
+      {"command": "cargo test --doc", "exit_code": 0, "result": "PASS; 0 doctests"},
+      {"command": "uv run scripts/verify.py", "exit_code": 0, "result": "All six Cargo gates passed again; 339 Rust tests, 0 doctests", "source_files": 113, "rust_test_definitions": 326, "fixture_events": 25},
+      {"command": "node scripts/cli_retest.mjs --self-test", "exit_code": 0, "result": "152 passed", "live_started": false},
+      {"command": "cargo run --example run_offline", "exit_code": 0, "result": "Completed 50; 1 session, 3 scripted model requests, 2 tool executions; offline"},
+      {"command": "cargo run --example skills_offline", "exit_code": 0, "result": "Completed 42; 2 catalog entries, 1 active skill, 1 session, 2 scripted model requests, 1 tool execution; offline"},
+      {"command": "git diff --check", "exit_code": 0, "result": "Final four-file source, test and report diff passed"}
+    ],
+    "command_observer": "Implementor, direct execution with isolated roots; command entries give exact program arguments without the environment prefix",
+    "parent_verification": {
+      "status": "PASS",
+      "observer": "Parent/orchestrator, independent direct execution and source/report inspection",
+      "results": "Focused filesystem test, scripts/verify.py, Node self-tests, both offline examples, final JSON parsing, historical-content preservation and git diff --check matched the implementor evidence",
+      "cargo_scope": "The parent observed all six Cargo gates through scripts/verify.py, not as six additional direct command invocations",
+      "native_platforms": ["Linux x86_64 / WSL2"],
+      "macos_windows_native": "NOT_RUN"
+    },
+    "local_attempts": {"focused_filesystem": 1, "each_full_cargo_gate": 2, "verify_runner": 1, "node_self_tests": 1, "each_offline_example": 1, "failed_gates": 0, "retries": 0, "note": "Each Cargo gate ran once directly and once through the required verify runner"},
+    "rust_tests": {
+      "full_runs": 2,
+      "passed_per_run": 339,
+      "failed_per_run": 0,
+      "ignored_per_run": 0,
+      "filtered_per_run": 0,
+      "doctests_per_run": 0,
+      "breakdown": {"lib": 207, "bin_wi": 24, "context_catalog": 28, "context_prepare": 26, "managed_absence_cli": 1, "provider_contract": 5, "run_cli": 4, "run_controller": 33, "skills_cli": 11, "example_harnesses": 0},
+      "inventory_note": "113 source files reflects the current organization, not new files or module moves in this repair. Original 76-file evidence remains historical. Platform totals are not forced to match Linux."
+    },
+    "platform_coverage": [
+      {"platform": "Linux x86_64 / WSL2", "status": "LOCAL_OFFLINE_PASS", "coverage": "Real malformed-name fixture and all applicable filesystem tests passed; 339 full-suite tests; no new Linux exclusion"},
+      {"platform": "macOS", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Only the malformed-name fixture is newly compile-time excluded. Source/cfg inspection predicts 26 catalog tests instead of the failed run's 27; this is not a native result. Other existing Unix tests retain guards and assertions. Native suite and downstream gates pending."},
+      {"platform": "Windows", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Source equivalence inspected only; no local native run or cross-compilation. Linux Clippy does not compile the Windows branch. Existing Unix exclusions unchanged; native warning-denied Clippy and remaining gates pending."},
+      {"platform": "Other Unix", "status": "NOT_RUN_FOR_REPAIR", "coverage": "Malformed-name fixture excluded; all other existing platform guards unchanged. No native pass inferred."}
+    ],
+    "matrix": [
+      {"id": "MR-00", "status": "LOCAL_PASS", "evidence": "Initial clean tree and reviewed SHA verified; failed CI record, historical evidence, S1 semantics, organization and no-live boundary preserved"},
+      {"id": "MR-01", "status": "LOCAL_REPAIR_PASS_NATIVE_PENDING", "evidence": "Linux-only fixture guard; real malformed-name discovery passed", "pending": ["Native macOS closure"]},
+      {"id": "MR-02", "status": "SOURCE_REPAIR_NATIVE_PENDING", "evidence": "Equivalent Windows reparse-point tail expression, no suppression", "pending": ["Native Windows warning-denied Clippy closure"]},
+      {"id": "MR-03", "status": "LOCAL_GATES_PASS_SUBMITTED_CI_PENDING", "evidence": "All required local offline commands passed", "pending": ["All three configured OS jobs on a submitted repair revision", "Inspect any newly exposed downstream failures"]},
+      {"id": "MR-04", "status": "REPORTS_APPENDED_REVIEW_PASS_CI_PENDING", "evidence": "Dated Markdown follow-up and new top-level JSON object without historical rewrites; three independent reviews passed with no blocking findings", "pending": ["Submitted-revision CI"]}
+    ],
+    "review": {
+      "status": "PASS",
+      "blocking_findings": 0,
+      "implementor_source_inspection": "Focused diff inspected before independent review; not by itself merge approval",
+      "reviewers": [
+        {"role": "review-a", "result": "PASS", "blocking_findings": 0, "checks": "Focused filesystem test, formatting, diff/report preservation and failed-run metadata"},
+        {"role": "review-b", "result": "PASS", "blocking_findings": 0, "checks": "Focused filesystem test, diff/report preservation and cfg/source behavior"},
+        {"role": "review-c", "result": "PASS", "blocking_findings": 0, "checks": "Full offline gate set, source/report preservation, cfg behavior and platform-claim accuracy"}
+      ],
+      "native_macos_windows": "NOT_RUN",
+      "submitted_revision_ci": "PENDING"
+    },
+    "changed_paths": ["src/context.rs", "tests/context_catalog/filesystem_safety.rs", "docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md", "docs/wi-local-skills-s1-verification.json"],
+    "remaining_risks": [
+      "No native macOS/Windows or submitted-revision CI closure; skipped downstream gates must not be presumed fixed",
+      "Compile-time Linux cfg does not guarantee every Linux filesystem accepts malformed filename bytes; setup failures remain test failures",
+      "Existing trusted-owner, hardlink and ancestor-race limitations are unchanged"
+    ],
+    "retained_constraints": ["S1 semantics and production validation unchanged", "No lint suppression, CI job edits, dependencies, features or module reorganization", "C1/M3 orchestration, cancellation, validation, correlation, result reuse and accepted auth/transport behavior preserved", "No S2/P1/V1, storage, service, UI, resource execution, uploads or API-key fallback"],
+    "live": {"status": "NOT_RUN", "authorized": false, "generations": 0, "provider_requests": 0, "real_credential_auth_profile_login_renewal_operations": 0, "hosted_api_probes": 0, "uploads": 0, "owner_skill_or_private_project_content_reads_for_tests": 0, "note": "Synthetic credentials, scripted providers and loopback tests are offline evidence. Read-only GitHub evidence retrieval and Pi authoring are separate from Wi provider traffic."},
+    "git_and_hosted_transitions": {"stages": 0, "unstages": 0, "commits": 0, "pushes": 0, "merges": 0, "deployments": 0, "releases": 0, "publications": 0, "hosted_service_writes": 0},
+    "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false, "new_allocation": 0},
+    "service_and_storage_implemented": false,
+    "pending": ["Submitted-revision CI on Ubuntu/macOS/Windows", "Native macOS/Windows closure"]
+  }
 }

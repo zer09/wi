@@ -60,10 +60,7 @@ fn context_catalog_existing_wrong_type_roots_fail() {
 mod unix {
     use super::*;
     use std::{
-        os::unix::{
-            ffi::OsStringExt,
-            fs::{PermissionsExt, symlink},
-        },
+        os::unix::fs::{PermissionsExt, symlink},
         path::Path,
     };
 
@@ -256,8 +253,12 @@ mod unix {
         );
     }
 
+    // The macOS runner rejects this name before discovery; exercise it on Linux.
+    #[cfg(target_os = "linux")]
     #[test]
     fn context_catalog_non_utf8_traversal_names_fail_without_lossy_labels() {
+        use std::os::unix::ffi::OsStringExt;
+
         let fixture = Fixture::new();
         fs::create_dir(&fixture.roots.global_skills).unwrap();
         fs::create_dir(

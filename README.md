@@ -1,8 +1,9 @@
 # Wi 0.2.0
 
-A small, headless Rust gateway with compiled-in provider plugins. This milestone
-adds persistent OpenAI/Codex WebSocket sessions, explicit SSE mode, typed output
-items, and one ordinary function-tool round trip.
+A headless Rust library with compiled-in provider plugins, shared workspace context
+preparation, and a cancellation-aware run controller. The CLI calls the library.
+OpenAI/Codex sessions use WebSocket or explicit SSE with typed events and ordinary
+function-tool continuation.
 
 **Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status
@@ -21,6 +22,10 @@ credentials and loopback servers. Offline success does not prove account access.
 
 ```
 CLI / library caller
+        |
+ Context discovery / preparation (S1)
+        |
+ Run controller + registered local tools
         |
      Gateway
         |
@@ -42,6 +47,9 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
 
 ## What is implemented in source
 
+- Shared `wi::context::discover` and `prepare_run` APIs with explicit host-selected roots.
+- Always-discovered global and project skill metadata; explicit qualified body activation.
+- Root workspace `AGENTS.md` preparation and metadata-only `wi skills list`.
 - `Provider` and `SessionControl` Rust traits with an independent example provider.
 - Read-only use of the user's existing Codex/Pi OAuth credential file.
 - WebSocket as the default, with `--transport sse` as an explicit alternative.
@@ -55,10 +63,16 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
   The included tool adds integers and has no external side effects.
 - No automatic retry, reconnect, transport fallback, or API-key billing fallback.
 
-**Native steering, async tool calling, programmatic tool execution, tool search,
-and hosted skills are NOT implemented or verified.** Their required capability
-flags fail before authentication or network access. Their output-item shapes can
-be preserved without executing them. There is no local skill loader yet either.
+**Native steering, async tool calling, programmatic tool execution, and tool search
+are NOT implemented or verified.** Their required capability flags fail before
+authentication or network access. Generic unknown provider-native output remains
+preserved without execution.
+
+Hosted skills are excluded by product choice, not retained as a future capability.
+S1 removes `Feature::HostedSkills` and its `hosted_skills` serialized name.
+Existing required-feature input containing that name now fails unknown-variant
+deserialization before provider/auth work. There is no alias to local skills,
+upload integration, API-key billing fallback, or hosted execution.
 
 ## Build and test first
 
@@ -89,6 +103,9 @@ has not been executed as part of this delivery.
 WebSocket crate versions remain pinned. Use the lockfile for reproducible
 resolution. Managed auth directly uses the already locked `ring` and `rustix`
 crates for secure randomness and safe Linux filesystem operations.
+Local frontmatter uses pinned `yaml-rust2 = 0.12.0` without default features.
+Its parser events let Wi reject unsupported YAML constructs before loading values.
+The offline skills example uses the existing `tempfile` dev dependency.
 
 ## Run controller (C1.1)
 
@@ -171,6 +188,80 @@ validated responses without marking partial output complete. Completed exits 0
 other failures or startup/parse errors exit 1. Help exits 0; old command parse
 errors retain exit 2. Output delivery failure takes precedence and exits 1, even
 after completion; broken stdout stops further work.
+
+## Workspace context and local skills (S1)
+
+Only `wi run` prepares task context. `--workspace PATH` defaults to the CLI cwd;
+relative paths resolve once against that cwd. The library canonicalizes the
+explicit workspace and global roots. No directory is created by preparation.
+
+Global metadata is always discovered from `$XDG_CONFIG_HOME/wi/skills` when
+`XDG_CONFIG_HOME` is nonempty and absolute. Otherwise Wi uses
+`$HOME/.config/wi/skills` with nonempty absolute `HOME`. A nonempty relative XDG
+value is an error, not a fallback. Missing or nonabsolute fallback HOME is an error.
+Project metadata adds `<workspace>/.agents/skills`; it never replaces globals.
+Missing skill directories are empty scopes; unreadable or wrong-type roots fail.
+
+List frontmatter without reading `AGENTS.md`, activating bodies, opening auth,
+constructing a provider, executing tools, or accessing the network:
+
+```bash
+wi skills list --workspace /path/to/workspace
+wi skills list --workspace /path/to/workspace --json
+```
+
+Plain output lists qualified ID/name and description with terminal controls
+filtered. JSON contains `entries` (each with `id`, parsed `frontmatter`, relative
+`source`) and `diagnostics` (`scope`, `source`, static `category` and `message`).
+It excludes bodies and resolved host paths. Metadata is sensitive user data and
+can itself contain private text or paths. Diagnostics also go to stderr.
+Malformed entries are excluded with diagnostics; valid entries remain visible.
+Fatal root errors or duplicate names within one scope exit nonzero.
+
+Both `global:review` and `project:review` can exist. Listing sorts globals by name,
+then projects by name. Repeat `--use-skill global:review` or
+`--use-skill project:review` on `wi run` to activate full instructions. Bare names
+and raw paths are invalid. Selection order is preserved; a repeated ID activates
+once at its first position. No selection is required to include all frontmatter.
+These flags do not extend `generate`, `tool-demo`, `smoke`, or auth commands.
+
+Shared discovery reads only frontmatter. Shared preparation reads root-only
+`AGENTS.md` and explicitly selected bodies. It preserves caller instructions as
+a prefix, then adds fixed framing about context and tool authority. The initial
+user payload is deterministic JSON with `task`, `project_instructions`,
+`available_skills`, and `active_skills`. Task bytes remain unchanged inside that
+payload; file bodies never enter higher-priority instructions. Without context
+or selections, the original prompt and instructions remain byte-identical.
+
+The CLI validates arguments, task, tools and auth shape before preparation. One
+`spawn_blocking` task calls shared discovery and preparation. Final input/options
+validation and diagnostic delivery finish before provider/auth construction.
+The prepared request then uses the existing controller, cancellation and event
+schemas. Skills do not change tools, model, provider, auth source or capabilities.
+Local context can travel to the chosen model; local skills do not mean offline inference.
+
+The synthetic example proves metadata inclusion, explicit body activation and one
+ordinary addition/result continuation without credentials or provider networking:
+
+```bash
+cargo run --example skills_offline
+```
+
+It finishes with `Completed: 42` using two catalog entries and one active skill.
+This is scripted execution evidence, not proof that a live model follows a skill.
+See [the S1 contract](docs/WI_LOCAL_SKILLS_S1.md) for the YAML subset, validation,
+relative labels, activation snapshots and filesystem trust limitations.
+Model-selected loading, resource reads/execution, uploads and watchers are not implemented.
+
+## Future service and storage (not implemented in S1)
+
+The service is for one owner using multiple devices. Browser disconnect must not
+cancel service-owned work. Application sessions must persist in storage. Service
+restart stops active tasks; it must not automatically restart or resume them.
+Continuing requires a new explicit user action. Storage design precedes service
+acceptance and remains deferred. S1 adds no server, storage interface, database,
+recovery worker, or UI. `ProviderSession` is an in-memory transport handle, not a
+persistent application session. See [product direction](docs/WI_PRODUCT_DIRECTION.md).
 
 ## Experimental Wi browser login
 

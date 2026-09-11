@@ -566,7 +566,6 @@ async fn advanced_feature_requirement_fails_before_authentication() {
         Feature::ToolSearch,
         Feature::ProgrammaticTools,
         Feature::AsyncTools,
-        Feature::HostedSkills,
     ] {
         let mut opts = SessionOptions::new("test");
         opts.required_features.push(feature);

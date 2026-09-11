@@ -1,4 +1,7 @@
 //! New-controller transport proofs. Every credential and native field is synthetic.
+#[path = "context_loopback_tests.rs"]
+mod context_loopback;
+
 use super::*;
 use crate::{
     Gateway, OutputProvenance,

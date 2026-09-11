@@ -4,8 +4,10 @@ use std::{
 };
 
 fn invoke(args: &[&str], input: &[u8]) -> Output {
+    let temp = tempfile::tempdir().unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_wi"))
         .args(args)
+        .current_dir(temp.path())
         .env_remove("HOME")
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("CODEX_HOME")
@@ -31,6 +33,8 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
         "--stdin",
         "--instructions",
         "--tool",
+        "--workspace",
+        "--use-skill",
         "--auth-source",
         "--account",
         "--auth-file",
@@ -58,6 +62,8 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
         vec!["--prompt", "hello", "--prompt", "again"],
         vec!["--stdin", "--prompt", "hello"],
         vec!["--prompt", "hello", "--tool", "unknown"],
+        vec!["--prompt", "hello", "--use-skill", "unqualified"],
+        vec!["--prompt", "hello", "--use-skill", "project:../private\x1b"],
         vec!["--prompt", "hello", "--transport", "automatic"],
         vec!["--prompt", "hello", "--auth-source", "automatic"],
         vec![
@@ -87,6 +93,7 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
             "{argv:?}: {diagnostic}"
         );
         assert!(!diagnostic.contains("home directory"));
+        assert!(!diagnostic.chars().any(|c| c.is_control() && c != '\n'));
     }
     let output = invoke(&["run", "--prompt", "hello"], b"");
     assert_eq!(output.status.code(), Some(1));

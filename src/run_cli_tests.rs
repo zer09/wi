@@ -1,3 +1,6 @@
+#[path = "run_cli_context_tests.rs"]
+mod context;
+
 use super::*;
 use async_trait::async_trait;
 use clap::Parser;
@@ -17,6 +20,7 @@ struct Records {
     generates: AtomicUsize,
     closes: AtomicUsize,
     options: Mutex<Vec<SessionOptions>>,
+    inputs: Mutex<Vec<Vec<InputItem>>>,
     entered: tokio::sync::Notify,
 }
 struct Fake {
@@ -30,7 +34,7 @@ struct Control {
 #[async_trait]
 impl SessionControl for Control {
     async fn generate(&self, input: Vec<InputItem>) -> Result<RequestReceipt> {
-        assert!(matches!(&input[..], [InputItem::User { text }] if text == "hello"));
+        self.records.inputs.lock().unwrap().push(input);
         self.records.generates.fetch_add(1, Ordering::SeqCst);
         self.records.entered.notify_one();
         Ok(RequestReceipt {
@@ -123,6 +127,37 @@ fn count(n: &AtomicUsize) -> usize {
     n.load(Ordering::SeqCst)
 }
 
+// Each handler test supplies empty synthetic roots, regardless of the owner's cwd/env.
+async fn handle<R, W, S, B>(
+    args: RunArgs,
+    input: R,
+    build: B,
+    output: &mut W,
+    signal: S,
+) -> CliResult<RunResult>
+where
+    R: AsyncRead + Unpin,
+    W: Write,
+    S: Future<Output = std::io::Result<()>>,
+    B: FnOnce(&crate::AuthArgs) -> Result<Gateway>,
+{
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ContextRoots {
+        workspace: temp.path().to_owned(),
+        global_skills: temp.path().join("missing-global"),
+    };
+    super::handle(
+        args,
+        input,
+        build,
+        output,
+        signal,
+        move |_| Ok(roots),
+        &mut Vec::new(),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn run_cli_real_handler_json_outer_only_defaults_and_opt_in_tools() {
     for selected in [false, true] {
@@ -139,6 +174,9 @@ async fn run_cli_real_handler_json_outer_only_defaults_and_opt_in_tools() {
         assert_eq!(count(&records.opens), 1);
         assert_eq!(count(&records.generates), 1);
         assert_eq!(count(&records.closes), 1);
+        assert!(
+            matches!(&records.inputs.lock().unwrap()[0][..], [InputItem::User { text }] if text == "hello")
+        );
         let opts = records.options.lock().unwrap();
         assert_eq!(opts[0].tools.len(), usize::from(selected));
         assert_eq!(opts[0].instructions, "You are a helpful assistant.");
@@ -358,11 +396,16 @@ async fn run_cli_handler_prevalidates_before_factory_and_reads_bounded_utf8() {
         if case == 7 {
             assert!(matches!(
                 result,
-                Err(GatewayError::InvalidAuth("invalid local profile name"))
+                Err(CliError::Gateway(GatewayError::InvalidAuth(
+                    "invalid local profile name"
+                )))
             ));
         } else {
             assert!(
-                matches!(result, Err(GatewayError::InvalidRequest(_))),
+                matches!(
+                    result,
+                    Err(CliError::Gateway(GatewayError::InvalidRequest(_)))
+                ),
                 "case {case}"
             );
         }

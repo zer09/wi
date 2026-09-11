@@ -1,5 +1,7 @@
 #[path = "run_support/boundaries.rs"]
 mod boundaries;
+#[path = "run_support/context.rs"]
+mod context;
 mod run_support;
 #[path = "run_support/stop.rs"]
 mod stop;
@@ -306,7 +308,7 @@ async fn run_a_b_c_exact_inputs_order_and_lifecycle() {
 
 #[tokio::test]
 async fn run_preadmission_rejects_without_observation_or_work() {
-    for case in 0..15 {
+    for case in 0..14 {
         let mut script = Script::new(vec![]);
         let mut req = request();
         let token = CancellationToken::new();
@@ -326,14 +328,13 @@ async fn run_preadmission_rejects_without_observation_or_work() {
             7 => token.cancel(),
             8 => req.options.model.clear(),
             9 => req.options.instructions = "x".repeat(MAX_INPUT_BYTES),
-            10..=14 => {
+            10..=13 => {
                 req.options.required_features = vec![
                     [
                         Feature::NativeSteering,
                         Feature::ToolSearch,
                         Feature::ProgrammaticTools,
                         Feature::AsyncTools,
-                        Feature::HostedSkills,
                     ][case - 10],
                 ]
             }

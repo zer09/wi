@@ -1,9 +1,11 @@
+use crate::context_cli::{CliError, CliResult, emit_diagnostics, filtered, resolve_roots};
 use clap::{Args, ValueEnum};
-use std::{future::Future, io::Write, sync::Arc};
+use std::{future::Future, io::Write, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::sync::CancellationToken;
 use wi::{
     DeltaKind, Gateway, GatewayError, InputItem, ProviderEvent, Result,
+    context::{ContextRoots, SkillId, discover, prepare_run},
     providers::openai_codex::PROVIDER_ID,
     run::{RunEvent, RunEventEnvelope, RunOutcome, RunRequest, RunResult, RunSinkError},
     tools::{AddNumbers, ToolRegistry},
@@ -27,42 +29,52 @@ pub(crate) struct RunArgs {
     instructions: String,
     #[arg(long, value_enum)]
     tool: Vec<ToolArg>,
+    /// Workspace to prepare; defaults to the CLI working directory.
+    #[arg(long, value_name = "PATH")]
+    workspace: Option<PathBuf>,
+    /// Activate a qualified catalog ID; repeat to select more instructions.
+    #[arg(long, value_name = "global:<name>|project:<name>")]
+    use_skill: Vec<SkillId>,
 }
 
-async fn handle<R, W, S, B>(
+async fn handle<R, W, S, B, F, D>(
     args: RunArgs,
     input: R,
     build: B,
     output: &mut W,
     signal: S,
-) -> Result<RunResult>
+    resolve: F,
+    diagnostics: &mut D,
+) -> CliResult<RunResult>
 where
     R: AsyncRead + Unpin,
     W: Write,
     S: Future<Output = std::io::Result<()>>,
     B: FnOnce(&crate::AuthArgs) -> Result<Gateway>,
+    F: FnOnce(Option<PathBuf>) -> CliResult<ContextRoots> + Send + 'static,
+    D: Write,
 {
     // Validate without locating either external credentials or the managed store.
     if args.stdin == args.prompt.is_some() {
-        return Err(GatewayError::InvalidRequest("require --prompt xor --stdin"));
+        return Err(GatewayError::InvalidRequest("require --prompt xor --stdin").into());
     }
     if args.tool.len() > 1 {
-        return Err(GatewayError::InvalidRequest("duplicate tool selection"));
+        return Err(GatewayError::InvalidRequest("duplicate tool selection").into());
     }
     let auth = &args.base.auth;
     if matches!(auth.auth_source, crate::SourceArg::Gateway) {
         if auth.auth_file.is_some() {
-            return Err(GatewayError::InvalidRequest(
-                "managed auth does not accept --auth-file",
-            ));
+            return Err(
+                GatewayError::InvalidRequest("managed auth does not accept --auth-file").into(),
+            );
         }
         if let Some(name) = &auth.account {
             wi::providers::openai_codex::profile_selection::validate_name(name)?;
         }
     } else if auth.account.is_some() {
-        return Err(GatewayError::InvalidRequest(
-            "--account requires --auth-source gateway",
-        ));
+        return Err(
+            GatewayError::InvalidRequest("--account requires --auth-source gateway").into(),
+        );
     }
     let mut options = crate::options(&args.base);
     options.instructions = args.instructions;
@@ -82,32 +94,42 @@ where
             .await
             .map_err(|e| GatewayError::Io(e.kind()))?;
         if bytes.len() > wi::MAX_INPUT_BYTES {
-            return Err(GatewayError::InvalidRequest("stdin exceeds 1 MiB"));
+            return Err(GatewayError::InvalidRequest("stdin exceeds 1 MiB").into());
         }
         String::from_utf8(bytes).map_err(|_| GatewayError::InvalidRequest("stdin is not UTF-8"))?
     } else {
         args.prompt.unwrap_or_default()
     };
     wi::validate_input(&[InputItem::user(&prompt)])?;
-    let gateway = build(auth)?;
     let request = RunRequest {
         provider_id: PROVIDER_ID.into(),
         options,
         prompt,
     };
+    let (tools, notices, prepared) = tokio::task::spawn_blocking(move || {
+        let catalog = discover(resolve(args.workspace)?)?;
+        let prepared = prepare_run(request, &catalog, &args.use_skill, &tools);
+        // Keep diagnostics visible even when activation or final validation fails.
+        Ok::<_, CliError>((tools, catalog.diagnostics().to_vec(), prepared))
+    })
+    .await
+    .map_err(|_| CliError::PreparationTask)??;
+    emit_diagnostics(diagnostics, &notices)?;
+    let request = prepared?.into_request();
+    let gateway = build(auth)?;
     let cancel = CancellationToken::new();
     let task = wi::run::run(&gateway, request, &tools, cancel.clone(), |event| {
         render(output, args.base.json, event)
     });
     tokio::pin!(task);
     tokio::select! {
-        result = &mut task => result,
+        result = &mut task => result.map_err(Into::into),
         signal_result = signal => {
             cancel.cancel();
             // Await controlled closure and final delivery, even if signal setup failed.
             let result = task.await;
             signal_result.map_err(|e| GatewayError::Io(e.kind()))?;
-            result
+            result.map_err(Into::into)
         }
     }
 }
@@ -118,10 +140,6 @@ fn sink_error(error: std::io::Error) -> RunSinkError {
         std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::NotConnected => RunSinkError::Closed,
         _ => RunSinkError::Failed,
     }
-}
-
-fn filtered(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 fn render<W: Write>(
@@ -189,7 +207,7 @@ fn exit_code(result: &RunResult) -> i32 {
     }
 }
 
-pub(crate) async fn run(args: RunArgs) -> Result<i32> {
+pub(crate) async fn run(args: RunArgs) -> CliResult<i32> {
     let result = handle(
         args,
         tokio::io::stdin(),
@@ -200,6 +218,8 @@ pub(crate) async fn run(args: RunArgs) -> Result<i32> {
         },
         &mut std::io::stdout().lock(),
         tokio::signal::ctrl_c(),
+        resolve_roots,
+        &mut std::io::stderr().lock(),
     )
     .await?;
     if result.sink_error.is_some() {

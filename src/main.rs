@@ -17,8 +17,10 @@ use wi::{
 mod auth_cli;
 #[cfg(test)]
 mod collect_tests;
+mod context_cli;
 mod demo;
 mod run_cli;
+mod skills_cli;
 mod smoke;
 
 #[derive(Parser)]
@@ -37,8 +39,10 @@ enum Command {
     Capabilities,
     /// Generate text; optional follow-up uses the same provider session.
     Generate(GenerateArgs),
-    /// Run one task with optional local addition tools.
+    /// Run a task with workspace context, explicit skills, and optional addition tools.
     Run(run_cli::RunArgs),
+    /// Inspect local skill metadata without credentials or provider work.
+    Skills(skills_cli::SkillsCommand),
     /// Demonstrate one ordinary, bounded, read-only function-tool round trip.
     ToolDemo(ModelArgs),
     /// Opt-in fixed live smoke case; emits only sanitized structural evidence.
@@ -297,9 +301,10 @@ async fn tool_demo(args: ModelArgs) -> Result<()> {
     control.close();
     result
 }
-async fn run(cli: Cli) -> Result<i32> {
+async fn run(cli: Cli) -> context_cli::CliResult<i32> {
     let result = match cli.command {
         Command::Run(args) => return run_cli::run(args).await,
+        Command::Skills(args) => return skills_cli::run(args).await,
         Command::Auth(command) => command.run().await,
         Command::AuthCheck(args) => {
             let auth = credentials(&args)?.load().await?;
@@ -312,12 +317,14 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::ToolDemo(args) => tool_demo(args).await,
         Command::Smoke(args) => smoke::run(args).await,
     };
-    result.map(|()| 0)
+    result.map(|()| 0).map_err(Into::into)
 }
 #[tokio::main]
 async fn main() {
     // Only the root subcommand selects run's startup policy, not later argument values.
-    let is_run = std::env::args_os().nth(1).is_some_and(|arg| arg == "run");
+    let command = std::env::args_os().nth(1);
+    let is_run = command.as_ref().is_some_and(|arg| arg == "run");
+    let is_skills = command.as_ref().is_some_and(|arg| arg == "skills");
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -326,14 +333,29 @@ async fn main() {
                 _ if is_run => 1,
                 _ => error.exit_code(),
             };
-            let _ = error.print();
+            if is_run || is_skills {
+                // Preserve diagnostic lines, but never pass argument control bytes to a terminal.
+                let text = error
+                    .to_string()
+                    .lines()
+                    .map(context_cli::filtered)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if error.use_stderr() {
+                    eprintln!("{text}");
+                } else {
+                    println!("{text}");
+                }
+            } else {
+                let _ = error.print();
+            }
             std::process::exit(code);
         }
     };
     let code = match run(cli).await {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("error: {}", context_cli::filtered(&error.to_string()));
             1
         }
     };

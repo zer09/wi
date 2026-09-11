@@ -100,7 +100,6 @@ impl OpenAiCodexProvider {
                 Feature::ToolSearch,
                 Feature::ProgrammaticTools,
                 Feature::AsyncTools,
-                Feature::HostedSkills,
             ]
             .into_iter()
             .map(|feature| FeatureCapability {

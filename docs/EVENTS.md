@@ -12,14 +12,17 @@ offline evidence. Explicit auth refresh
 returns safe profile metadata, not generation events. SSE prepares the same bound
 profile before submission; established WebSockets never renew mid-session.
 
-## S1 context is pre-run data, not an event stream
+## Context preparation and skill-loading events
 
 Workspace and skill preparation adds no event kinds or envelope fields. Shared
 `discover` returns catalog frontmatter and diagnostics. `prepare_run` returns a
-validated request and a provenance manifest, not lifecycle events. The CLI resolves
-roots and completes discovery, activation and final validation before constructing
-provider/auth objects or entering the run controller. Context failures produce no
-run NDJSON. Diagnostics use static categories and scope-relative source labels
+validated request and an initial `ContextManifest`, not lifecycle events.
+`prepare_run_with_skill_loading` also returns the matching fresh registry; a
+nonempty catalog automatically adds `load_skill` on normal `wi run`, without an
+enable flag. Direct `prepare_run` retains its no-loader semantics. The CLI resolves
+roots and completes discovery, explicit activation and final validation before
+constructing provider/auth objects or entering the same public run controller.
+Preparation failures produce no run NDJSON. Diagnostics use static categories and scope-relative source labels
 on stderr; plain output filters terminal controls and omits file contents.
 
 `wi skills list --json` emits one metadata object, not NDJSON events. Its `entries`
@@ -35,8 +38,16 @@ unchanged inside the payload. All valid global/project frontmatter is included;
 only explicitly selected bodies are included. Sources use scoped relative labels,
 not canonical paths. File content stays out of higher-priority instructions.
 Without context or selections, the original prompt/instructions remain unchanged.
-The snapshot feeds existing session continuation; it is not a stored application
-session, event replay API or mid-run loader. Treat prepared content as sensitive.
+`ContextManifest` records only this initial preparation, including explicitly
+selected `--use-skill` bodies. Later model-selected loads do not update its active
+IDs. The manifest is not proof of result delivery. Treat context and tool data as sensitive.
+
+A model-selected body's first appearance is its normal correlated tool result.
+`load_skill` returns exactly `id`, validated `frontmatter` and the complete Markdown
+`body` from the main `SKILL.md` only. Supporting files/scripts are not read or
+executed; loading is not workflow execution or permission. The same controller and
+[transport continuation](ARCHITECTURE.md#continuation-strategies) consume the result,
+without a separate selector/classifier request.
 
 S1 removes `Feature::HostedSkills` and the serialized `hosted_skills` required
 feature. Old input now fails unknown-variant deserialization before provider/auth
@@ -191,12 +202,38 @@ JSON. Native caller/fingerprint/phase/encrypted fields remain in the item for la
 provider-aware continuation. Advanced/unknown executable output cannot be driven
 by the ordinary continuation/executor path.
 
-## Demonstration executor events
+## Local tool executor events
 
 `tool_execution_started`, `tool_execution_finished`, and `tool_result_reused` are
 emitted by the separate tool registry, not by the provider. Legacy `tool-demo`
 writes raw NDJSON objects distinguished by `type`. `wi run` nests these same objects
 inside `tool_event` with run/turn/session/request correlation. Neither form is durable.
+`load_skill` uses these existing events, not a new skill lifecycle or provider event.
+
+| Loader condition | Existing observation |
+|---|---|
+| Invalid arguments or unknown catalog ID | Pure full-batch preflight returns `InvalidToolArguments` without file I/O; no new execution, correlated result or finish event from that batch. |
+| Successful load | Correlated `InputItem::ToolResult`; `ToolExecutionFinished` carries `call_id`, `tool_name: load_skill`, `is_error: false`. |
+| Known entry fails during loading | `ToolFailed` retains `gateway_error`; the correlated output is exactly `{"error":{"code":"gateway_error"}}`. The finish event has `is_error: true`, not the result JSON. The model can consume this error in an ordinary continuation. |
+| Loaded value serializes above 64 KiB | Correlated `{"error":{"code":"tool_output_limit"}}` and finish `is_error: true`; no truncated success. Exactly 64 KiB is allowed, including metadata and JSON escaping. |
+| Whole main file exceeds 1 MiB | Loading fails first with `InputTooLarge`, then adapter `ToolFailed` and registry `gateway_error`; this is not the serialized-result stage. |
+| Same call ID and arguments recur | Exact saved result, including an error, plus `ToolResultReused`; no file reread or new start/finish. Reuse has no `is_error` field. Conflicting reuse rejects. |
+
+A distinct call ID performs a new read against the captured catalog; see
+[architecture](ARCHITECTURE.md#workspace-context-and-skill-loading-s1--s2) for snapshot
+and read timing. Complete next-input validation still applies after result preparation.
+Raw paths, OS/parser errors and body text do not enter static error results or
+ordinary diagnostics; successful tool/provider data remains sensitive application content.
+
+Cancellation during a pending load fabricates no successful result or finish.
+The blocking read may finish after its waiter is dropped, but cannot publish/cache
+or continue the run. After execution and serialization complete, the registry
+caches the result before calling the finish observer. Observer failure stops later
+work without rolling back that completed cache entry.
+
+The [offline loading example](../examples/skill_loading_offline.rs) exercises these
+events with synthetic roots and a scripted provider. Offline examples and loopbacks
+do not prove live model selection or adherence; those remain NOT RUN.
 
 ## Outer run envelope v2
 
@@ -275,7 +312,7 @@ The future one-owner, multiple-device service must keep work independent of brow
 disconnection and persist application sessions. A client subscription must not
 own this fallible run observer directly. Restart stops active tasks without
 automatically resuming or restarting them. Storage and service design remain
-deferred; S1 implements neither persistence nor a server/UI. Current sequences
+deferred; S1/S2 implement neither persistence nor a server/UI. Current sequences
 and provider-session IDs are not a durable-session design.
 
 ## Not emitted yet

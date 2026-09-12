@@ -6,7 +6,7 @@
 |---|---|
 | `provider.rs` | Traits, session options, normalized items/events, capabilities |
 | `gateway.rs` | Provider registration and selection; no OpenAI protocol/auth logic |
-| `context.rs`, `context/*` | Explicit-root metadata discovery, activation and validated run preparation |
+| `context.rs`, `context/*` | Explicit-root discovery, shared main-file loader, catalog-bound `load_skill` tool and validated preparation |
 | `providers/openai_codex/auth.rs` | Read-only snapshots and explicit external files; separate preparation hook |
 | `providers/openai_codex/managed_auth.rs` | Selected profile binding and cancellation-independent renewal ownership |
 | `providers/openai_codex/browser_login.rs` | Experimental browser login and strict TLS token-response parsing |
@@ -39,11 +39,13 @@ shared-library ABI or runtime code loader. Adding a provider does not require
 implementing OpenAI credentials or modifying the gateway. The external
 `tests/provider_contract.rs` implements a provider without OpenAI imports.
 
-## Workspace context preparation (S1)
+## Workspace context and skill loading (S1 + S2)
 
-`context::discover(ContextRoots)` and `context::prepare_run(request, &catalog,
-&selected, &tools)` are synchronous library boundaries. They read explicit
-absolute host-selected roots, not cwd, HOME or auth-manager configuration. The
+`context::discover(ContextRoots)`, `load_skill(&catalog, &id)`,
+`prepare_run(request, &catalog, selected, &tools)` and
+`prepare_run_with_skill_loading(request, Arc<SkillCatalog>, selected, &tools)`
+are synchronous library boundaries. They use explicit host-selected roots or the
+catalog captured from those roots, not cwd, HOME or auth-manager configuration. The
 CLI resolves cwd once and resolves a relative workspace against that snapshot.
 Its global root is absolute nonempty XDG_CONFIG_HOME plus `wi/skills`, or absolute
 nonempty HOME plus `.config/wi/skills` when XDG is unset/empty. Relative XDG and
@@ -62,9 +64,13 @@ diagnostics but grant no tools or permissions. Malformed files are excluded with
 diagnostics; unreadable traversal directories fail rather than hide a partial catalog.
 
 Preparation reads only root `AGENTS.md` and explicitly selected catalog bodies.
-It revalidates selected metadata against discovery, rejects `context_changed`,
-and produces an owned `PreparedRun` plus a provenance manifest. Selection order
-is preserved with first-position deduplication. All frontmatter enters prepared
+Both preparation paths use the shared `load_skill` operation for explicit bodies.
+It revalidates selected metadata against discovery and reports `context_changed`
+for a mismatch. All selected identities are checked before instruction/body I/O.
+Preparation produces an owned `PreparedRun` plus `ContextManifest`. The manifest
+records initial available IDs, explicitly included active IDs and project source;
+it does not track later loads or delivery. Selection order is preserved with
+first-position deduplication. All frontmatter enters prepared
 context even without activation. No unselected bodies or resolved host paths
 enter the request. Caller instructions remain an unchanged prefix followed by
 fixed framing. Project and skill text is JSON-escaped user context, not system
@@ -72,12 +78,29 @@ instructions or executable configuration. Deterministic payload keys are `task`,
 `project_instructions`, `available_skills`, and `active_skills`. No-context runs
 retain the original prompt and instructions exactly.
 
+`prepare_run_with_skill_loading` pairs preparation with a fresh registry bound to
+the caller's same `Arc<SkillCatalog>`. A nonempty catalog installs one ordinary
+strict `load_skill` definition and actionable loading instructions automatically.
+A name collision fails as `ContextErrorKind::InvalidRequest` before body I/O;
+existing tools are never replaced. Empty catalogs add neither definition nor
+loader framing. Direct `prepare_run` retains its no-loader semantics, even if a
+caller supplies an unrelated tool with that name.
+
+Normal `wi run` uses the paired helper without an enable flag or `--tool load_skill`.
+`--use-skill` still supplies explicit initial bodies. The model may load another
+advertised entry, load an already supplied one, or finish without a load. There is
+no separate classifier, forced load, skill-specific controller branch or second
+model loop. The prepared request and returned registry enter `wi::run::run`.
+The helper preserves the supplied template's cache; the controller uses another
+fresh result scope. The returned registry is not the run's post-execution cache.
+
 Existing input and tools-inclusive options validation applies to the final
 rendered request. `PreparedRun` returns empty `options.tools` for the controller;
 the actual registry remains authoritative. The CLI runs discovery and preparation
 in one `spawn_blocking` task before provider/auth construction and prints sanitized
-relative-label diagnostics on stderr. `skills list` calls discovery only. Its
-JSON output deliberately exposes metadata, never bodies or private source handles.
+relative-label diagnostics on stderr, including when preparation later fails.
+`skills list` calls discovery only. Its JSON output deliberately exposes metadata,
+never bodies or private source handles.
 Content-bearing library Debug implementations redact metadata and prepared input.
 
 Selected roots may canonicalize through links. Descendant links are not followed;
@@ -87,10 +110,50 @@ checks only. Ancestor replacement races and hardlinks remain trust limitations;
 this is an owner-controlled filesystem boundary, not a hostile-filesystem sandbox.
 JSON escaping protects payload structure, not against model prompt injection.
 
-No tool/model loop, skill execution engine or mid-run filesystem loader is added.
-WebSocket continuation uses the original prepared context and subsequent deltas;
-SSE replay retains that same initial context. Session instructions remain fixed.
+The private catalog-bound tool owns no activation state or body cache. Pure
+`validate` checks exactly one string `id`, qualified syntax and catalog membership
+without opening a file. Invalid arguments reject full-batch preflight before any
+new execution. `execute` defensively validates again, then calls the shared loader
+through Tokio's blocking-work facility. It reads only the recorded main `SKILL.md`,
+never a model-supplied path, supporting resource or script. Success returns exactly
+`id`, `frontmatter` and the unchanged Markdown `body` as ordinary JSON tool data.
+Loading instructions does not execute their workflow or grant permissions.
+
+The catalog is the immutable metadata/source-selection snapshot for the run.
+Each new execution reopens the main file and revalidates its frontmatter. Body-only
+edits before that read are allowed; changed metadata fails. Added files require
+fresh discovery. Owned results remain unchanged after edits/deletion. A distinct
+call ID performs a new load; identical call-ID/argument reuse returns the existing
+per-run cached result, including errors, without reading again. Conflicts retain
+registry rejection. No environment change or skill text redirects the catalog.
+
+Known-entry read, metadata, body and blocking-worker failures map to `ToolFailed`.
+The existing registry serializes `{"error":{"code":"gateway_error"}}` and emits
+`ToolExecutionFinished` with `is_error=true`; no flag is added to the result JSON.
+This executed error can enter the next ordinary request. It differs from invalid
+arguments rejected before execution. A whole file above 1 MiB fails loading first
+(`InputTooLarge`, then `ToolFailed`/`gateway_error`). A loaded value whose serialized
+JSON exceeds 64 KiB instead becomes `tool_output_limit` with `is_error=true`.
+Exactly 64 KiB is allowed; metadata/escaping count and no success is truncated.
+Existing combined next-input validation still applies. These guards do not add
+paging, run quotas, deadlines or a resource-budget framework.
+
+Cancellation can drop the awaiting tool future without forcibly stopping its
+blocking read. That worker cannot publish results/events, change the catalog/cache
+or submit continuation. A completed serialized result is cached before the finish
+observer runs; failure of that observer stops later work but does not undo the cache.
+
+The ordinary next model request consumes the skill result on the same session,
+using the [existing continuation strategies](#continuation-strategies). Session
+instructions stay fixed; native recovery and consistency validation are unchanged.
 The CLI and a future service call the same library, not a CLI subprocess.
+
+[`skill_loading_offline.rs`](../examples/skill_loading_offline.rs) exercises discovery,
+the paired helper, registry and public controller using temporary synthetic roots
+and a separate scripted provider. It asserts no initial body, one real load, exact
+follow-up body and final fixture text in two requests. No ambient context/auth
+roots, credentials or provider networking are used. Offline scripts and loopbacks
+do not prove that a live model chooses or follows a skill; that remains NOT RUN.
 
 ## Managed authentication boundary
 
@@ -329,7 +392,7 @@ provider. It renders events and signals cancellation without a second loop.
 
 ## Future service ownership (requirements only)
 
-S1 does not implement a service or persistence. The future service serves one
+S1/S2 do not implement a service or persistence. The future service serves one
 owner across multiple devices. A browser disconnect must not cancel admitted
 service-owned work. A client subscription must not own the controller's observer
 or provider receiver directly, because sink/receiver failure currently stops work.
@@ -346,7 +409,7 @@ application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 - Persistent application sessions/history and durable operation state, branching, queues.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
-- Tool discovery, model-selected skill activation and approved skill resource loading.
+- Tool discovery, supporting skill-file reads, scripts and other resource execution.
 - HTTP server, GUI, keyring and proxy support.
 - Stable provider support for the experimental shared OAuth registration.
   Browser login and explicit renewal have local Linux live evidence. Automatic
@@ -356,7 +419,8 @@ application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 Hosted skills are excluded from the product, not a deferred engine. S1 removes
 `Feature::HostedSkills`, the `hosted_skills` serialized variant and the provider
 capability entry. Old required-feature input rejects as an unknown variant before
-provider/auth construction. Local skills are preparation, not a provider capability.
+provider/auth construction. Local skills use shared preparation and ordinary
+function tools, not a new provider capability.
 No upload, hosted execution or API-key billing path is added.
 
 Other advanced requirements fail closed instead of silently degrading or switching

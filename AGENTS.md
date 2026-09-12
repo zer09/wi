@@ -1,50 +1,66 @@
-# Wi: active task S1 — local workspace context and skills
+# Wi: repository guidance after S2 implementation
 
-Contract `s1.0`; accepted runtime baseline `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c`.
-This branch supplies a documentation-only implementation plan. Start runtime work
-only when the user gives the implementor prompt. The designer has fixed the plan;
-the implementor executes it, rather than commissioning another planning round.
+S2 contract `s2.1` is implemented and offline accepted. The implementation is in
+`97ad00c109040edaf212fc141c34d307bc64442a`; the consistency-audit reports were
+submitted in `48e23b5330ba6aa69be0bf02a4aab6c8d7226426`. The accepted S1 base was
+`94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa` (PR #2). Check the actual HEAD/worktree
+before making changes. This is no longer a documentation-only planning branch.
 
-Read in order:
+Read current behavior and evidence first:
 1. `docs/WI_PRODUCT_DIRECTION.md`
-2. `docs/WI_LOCAL_SKILLS_S1.md`
-3. `docs/WI_LOCAL_SKILLS_S1_MATRIX.md`
-4. `docs/WI_LOCAL_SKILLS_S1_PROMPT.md`
+2. `docs/ARCHITECTURE.md` and `docs/EVENTS.md`
+3. `docs/slices/s2/VERIFICATION.md` and `docs/slices/s2/verification.json`
+4. `docs/slices/s2/CONTRACT.md`, `MATRIX.md`, and `VALIDATION.md` in that directory.
 
-Implement shared Rust workspace/context preparation, always-discovered global
-skill frontmatter plus project skill frontmatter when present, catalog listing,
-and explicit skill activation. Remove HostedSkills/hosted_skills scaffolding from
-active source/capability reporting. Do not add uploads, API-key fallback, or hosted
-execution. The CLI is a caller of the library, not the future product architecture.
+The S2 contract and matrix remain the acceptance specification. Their planning
+status and the original `IMPLEMENTOR_PROMPT.md` are preserved phase records, not
+an instruction to reimplement completed work. Verification reports retain their
+pre-push observations; later submission/CI/merge evidence belongs to the PR and
+Git history. Do not rewrite historical observations as though later checks had
+already happened. Local 374-test/152-self-test evidence and submitted-head CI are
+separate observations, not live model-selection or adherence proof.
 
-The service is for one owner using multiple devices. Browser disconnection does
-not cancel service-owned work. Service restart stops active tasks; none restart or
-resume automatically. Application sessions must persist. These are confirmed
-future-service requirements, NOT authorization to implement storage or the server
-in S1. Storage design is deferred and precedes service acceptance. Do not invent a
-database, persistence interface, migration scheme, or background recovery worker.
+s2.1 corrected a designer error in s2.0. `GatewayError::ToolFailed` still maps
+through `GatewayError::code()` to `gateway_error`. Do not introduce `tool_failed`,
+fabricate Ok error-shaped JSON, or change regression expectations to match the
+superseded plan. Preserve the preflight/execution and cache/event distinctions.
 
-C1 c1.1 is complete. Do not restore RunLimits, budgets, run timers, quotas, or the
-withdrawn M4 timeout/progress proposal. Preserve M3/C1 orchestration, cancellation,
-correlation, validation, result reuse, and accepted authentication/transport behavior.
-A bounded implementation matrix does not impose a runtime work budget.
+S2 exposes one local function tool, `load_skill`, bound to the already discovered
+SkillCatalog. It returns the selected entry's main SKILL.md instructions through
+the existing registry and continuation. Global/project metadata remains automatic;
+normal context-aware `wi run` exposes the tool for nonempty catalogs. Explicit
+`--use-skill` and the direct S1 no-loader preparation API remain supported. The
+shared library owns this behavior; the CLI is a thin caller, not the final product.
 
-Authorized implementation work: this contract's source, test, and active-document
-changes plus OFFLINE verification using synthetic workspaces, skills, credentials,
-scripted providers, and loopback transports. No real credential/profile commands,
-login, renewal experiments, provider requests, hosted API probes, commits, pushes,
-merge, release, or publication. Normal trusted development dependency operations
-follow the user's local permissions. Pi's authoring conversation is separate.
-The generation ledger stays 31/50 used, 19 remaining, with zero new allocation.
+Inherited audit findings A-01 through A-05 remain OPEN and are documented in the
+S2 verification report. S2 neither introduced nor fixed them. Repairs require a
+separately approved scope and focused regressions; do not mark them resolved from
+passing S2 tests. Production-provider restructuring also remains DEFERRED.
 
-Preserve existing user changes, historical reports/manifests, and accepted behavior.
-Do not read the owner's actual global skill files or private projects for tests;
-isolate HOME/XDG_CONFIG_HOME and use explicit temporary roots. Keep sensitive text
-out of ordinary logs and reports. Observed test execution, source review, and live
-evidence are different categories. Report blockers truthfully rather than weakening
-validation or silently broadening scope. Private implementation details may vary;
-public contract decisions require an explicit amendment if genuinely contradictory.
+Do not add generic file/resource/script execution, hosted skills/uploads,
+provider-native search, PTC, async tools, steering, permissions, skill-body caching,
+or a replacement resource-budget framework without a new approved requirement.
+C1 deletion remains complete: no RunLimits, count quotas, whole-run timers,
+optional replacement budgets, or the withdrawn M4 timeout/progress proposal.
+Preserve existing validation, cancellation, correlation, output provenance,
+result ordering/reuse, event-delivery semantics, authentication and transports.
 
-Older M3/C1/repair prompts and their historical permissions are not active task
-instructions. Their evidence remains intact. New user instructions and higher-
-priority environment rules take precedence.
+The final product is a one-owner multi-device service. Browser disconnect is not
+cancellation. Application sessions persist; service restart stops tasks without
+automatic replay/resumption. These recorded requirements do not themselves
+start P1 storage or V1 service/UI implementation. Do not invent a database or
+session-store interface without its approved design.
+
+No new implementation, live validation, credential access, auth/profile/login/
+renewal operation, private workspace/skill test, or release/deployment follows
+automatically from S2 acceptance. Git writes and merge actions follow the owner's
+explicit current authorization, not an old implementor prompt. Verification work
+uses synthetic roots, scripted providers and loopback services unless separately
+authorized otherwise. Trusted build tooling follows local permissions.
+
+Pi authoring traffic is separate from Wi verification. The generation ledger is
+unchanged at 31/50 used, 19 remaining; remaining balance is not authorization.
+Preserve user work and the current organization. Report source inspection,
+executed tests, hosted CI and live behavior separately. Flag an actual contract
+conflict rather than silently changing semantics. Higher-priority rules and new
+owner instructions prevail over historical task instructions.

@@ -1,0 +1,543 @@
+{
+  "schema_version": 1,
+  "contract": "s2.1",
+  "status": "OFFLINE_ACCEPTED",
+  "accepted": true,
+  "verdict": "All required offline execution gates passed and all 24 matrix rows PASS. The pre-push repository audit corroborates five inherited open findings that do not conflict with or result from S2. Three fresh independent complete-diff reviewers returned PASS with no blocking findings.",
+  "baseline": "94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa",
+  "tested_revision": "97ad00c109040edaf212fc141c34d307bc64442a",
+  "tested_worktree_description": "Commit 97ad00c contains the complete 25-path S2 implementation and original reports. The pre-audit worktree was clean with no untracked files. Only the later audit amendments to both verification reports are currently unstaged and are not represented by tested_revision.",
+  "worktree": {
+    "original_implementation_start_clean": true,
+    "original_clean_observer": "P: supplied parent observation, not this delegate's initial state",
+    "reporting_delegate_initial_dirty": true,
+    "initial_modified_tracked_files": 13,
+    "initial_untracked_files": 10,
+    "final_modified_tracked_files": 13,
+    "final_untracked_files": 12,
+    "staged_changes_at_original_report": false,
+    "implementation_represented_by_head": true,
+    "baseline_ancestry_check": "PASS",
+    "pre_audit_head": "97ad00c109040edaf212fc141c34d307bc64442a",
+    "pre_audit_worktree_clean": true,
+    "pre_audit_untracked_files": 0,
+    "current_unstaged_audit_report_amendments": ["docs/slices/s2/VERIFICATION.md", "docs/slices/s2/verification.json"],
+    "audit_report_amendments_represented_by_head": false,
+    "preserved_fingerprint": {
+      "algorithm": "sha256(sorted UTF-8 path NUL contents NUL)",
+      "files": 182,
+      "sha256": "a1504c1c4866f2d9292f01f69d0447f5d761d40222b299be21ff3fc5fbfa446d",
+      "excluded": ["docs/README.md", "docs/slices/s2/VERIFICATION.md", "docs/slices/s2/verification.json"],
+      "meaning": "All tracked and untracked nonignored files except the three authorized report/index paths; preservation identity, not a commit or behavioral proof."
+    }
+  },
+  "environment": {
+    "observer": "D: reporting delegate actual local command execution",
+    "observed_date_utc": "2026-09-11",
+    "gate_started_at": "2026-09-11T21:54:21.084Z",
+    "gate_finished_at": "2026-09-11T21:55:23.027Z",
+    "date_note": "Governing documents use prepared date 2026-09-12; local execution timestamps are retained without changing the observed clock.",
+    "os": "openSUSE 20260902.0.0",
+    "kernel": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "kernel_build": "#1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026",
+    "architecture": "x86_64",
+    "host": "x86_64-unknown-linux-gnu",
+    "rustc": "1.98.1 (48a229cea 2026-09-01)",
+    "rustc_commit": "48a229ceaefd4985c50990b14116b6d856af0985",
+    "llvm": "22.1.8",
+    "cargo": "1.98.1 (797e8a9bc 2026-08-05)",
+    "cargo_commit": "797e8a9bca276c1c9f9f738d2a20f484fa4eea9d",
+    "toolchain": "stable-x86_64-unknown-linux-gnu via rust-toolchain.toml",
+    "rustfmt": "1.9.0-stable (48a229ceae 2026-09-01)",
+    "clippy": "0.1.98 (48a229ceae 2026-09-01)",
+    "uv": "0.12.10 (x86_64-unknown-linux-gnu)",
+    "python": "3.14.6",
+    "node": "v24.18.0",
+    "git": "2.55.0",
+    "isolation": {
+      "wrapper": "/tmp/wi-s2-final-k5UCVkK4/gate.mjs",
+      "strategy": "Temporary Node spawnSync wrapper passes exact command arguments and an allowlisted environment, prints timestamps/exit codes, and stops the command chain on nonzero exit.",
+      "cwd": "/home/gc/projects/wi",
+      "synthetic_root": "/tmp/wi-s2-final-k5UCVkK4",
+      "HOME": "/tmp/wi-s2-final-k5UCVkK4/home",
+      "XDG_CONFIG_HOME": "/tmp/wi-s2-final-k5UCVkK4/xdg",
+      "CODEX_HOME": "/tmp/wi-s2-final-k5UCVkK4/codex",
+      "TMPDIR": "/tmp/wi-s2-final-k5UCVkK4/tmp",
+      "root_creation_mode": "0700",
+      "trusted_cache_locations_redacted": {"CARGO_HOME": "$ORIGINAL_HOME/.cargo", "RUSTUP_HOME": "$ORIGINAL_HOME/.rustup", "UV_CACHE_DIR": "$ORIGINAL_HOME/.cache/uv"},
+      "trusted_PATH_preserved": true,
+      "CARGO_NET_OFFLINE": "true",
+      "UV_OFFLINE": "true",
+      "UV_PYTHON_DOWNLOADS": "never",
+      "GIT_OPTIONAL_LOCKS": "0",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "ambient_auth_environment_inherited": false,
+      "fixture_roots": "Tests/examples create independent temporary workspaces, skills and synthetic credential roots. Only scripted providers and literal loopback servers are used.",
+      "io_audit_claimed": false
+    }
+  },
+  "observers": {
+    "D": "This reporting delegate directly executed the local commands in this report.",
+    "S": "This reporting delegate inspected current source and mapped named assertions to D's passing full suites; not separately filtered executions.",
+    "P": "Owner-supplied parent/prior-delegate baseline, increment execution and review summary; not new execution or independent review by this delegate.",
+    "live": "NOT_RUN; scripts and loopbacks do not prove live model selection or adherence."
+  },
+  "baseline_comparison": {
+    "observer": "P",
+    "contract_used_for_resumed_work": "s2.1",
+    "comparison_only_not_S2_acceptance": true,
+    "head_from_supplied_summary": "24aab8396303dac1de17284e0d4fbee4e5b3bc1a",
+    "six_cargo_gates": "PASS",
+    "rust_tests_passed": 339,
+    "verify": {"status": "PASS", "source_files": 113, "rust_test_definitions": 326, "fixture_events": 25},
+    "node_self_tests": {"passed": 152, "live_started": false},
+    "run_offline": {"status": "PASS", "answer": "50"},
+    "skills_offline": {"status": "PASS", "answer": "42"},
+    "diff_check": "PASS",
+    "exact_command_exit_codes": null,
+    "exact_command_timestamps": null,
+    "note": "The assignment supplies passing baseline outcomes and totals, not the original complete logs or exact exit/timing/filter records. Historical S1/MR pending-at-that-time CI text remains unchanged; later baseline acceptance is separate owner-supplied history."
+  },
+  "source_changes_and_compatibility": {
+    "observer": "S plus protected-path Git diff checks by D",
+    "implementation": [
+      "Private-field LoadedSkill and shared load_skill reuse catalog lookup and SkillSource opening; src/context/skill_loading.rs:13-177.",
+      "Paired helper uses the same Arc catalog and a fresh registry; both preparation paths validate all selected IDs before I/O; src/context/preparation.rs:104-184.",
+      "Thin CLI registers loader automatically for a nonempty catalog and preserves diagnostics before provider construction; src/cli/run_cli.rs:112-123.",
+      "Tests, public-controller scripted providers, WS/SSE loopbacks, example and current behavior documentation are preserved from increments 1-3."
+    ],
+    "unchanged": ["src/error.rs", "src/tools.rs", "src/run", "src/provider.rs", "production provider/auth behavior", "existing error regression expectations", "Cargo.toml", "Cargo.lock", "historical reports and planning documents"],
+    "tool_failed_wire_category_added": false,
+    "ToolFailed_code": "gateway_error",
+    "fake_Ok_error_JSON_added": false,
+    "run_schema": 2,
+    "provider_schema": 1,
+    "RunRequest_fields": ["provider_id", "options", "prompt"],
+    "whole_file_guard_bytes": 1048576,
+    "serialized_tool_result_guard_bytes": 65536,
+    "C1_deletion_preserved": true,
+    "RunLimits_added": false,
+    "whole_run_timers_or_count_quotas_added": false,
+    "optional_replacement_budgets_or_M4_progress_added": false,
+    "skill_body_cache_added": false,
+    "dependency_changes": false,
+    "production_provider_restructuring": "DEFERRED"
+  },
+  "commands": [
+    {"id": "C01", "command": "cargo fmt --all -- --check", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:54:21.084Z", "finished_at": "2026-09-11T21:54:21.518Z"},
+    {"id": "C02", "command": "cargo check --all-targets", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:54:21.591Z", "finished_at": "2026-09-11T21:54:21.832Z"},
+    {"id": "C03", "command": "cargo test --all-targets", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "passed": 374, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0, "started_at": "2026-09-11T21:54:21.889Z", "finished_at": "2026-09-11T21:54:40.457Z"},
+    {"id": "C04", "command": "cargo clippy --all-targets -- -D warnings", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:54:50.121Z", "finished_at": "2026-09-11T21:54:50.443Z"},
+    {"id": "C05", "command": "cargo build --all-targets", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:54:50.512Z", "finished_at": "2026-09-11T21:54:50.823Z"},
+    {"id": "C06", "command": "cargo test --doc", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "passed": 0, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0, "started_at": "2026-09-11T21:54:50.895Z", "finished_at": "2026-09-11T21:54:51.534Z"},
+    {"id": "C07", "command": "uv run scripts/verify.py", "observer": "D", "execution": "direct runner with six internal required Cargo repetitions", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:00.472Z", "finished_at": "2026-09-11T21:55:21.241Z", "inventory": {"source_files": 123, "rust_test_definitions": 361, "fixture_events": 25}},
+    {"id": "C08", "command": "node scripts/cli_retest.mjs --self-test", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:21.290Z", "finished_at": "2026-09-11T21:55:22.121Z", "output": {"self_test": "passed", "tests": 152, "live_started": false}},
+    {"id": "C09", "command": "cargo run --example run_offline", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:22.184Z", "finished_at": "2026-09-11T21:55:22.388Z", "summary": "Completed: 50 (1 session, 3 model requests, 2 tool executions; offline)", "scripted_sessions": 1, "scripted_model_requests": 3, "tool_executions": 2},
+    {"id": "C10", "command": "cargo run --example skills_offline", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:22.459Z", "finished_at": "2026-09-11T21:55:22.680Z", "summary": "Completed: 42 (2 catalog entries, 1 active skill, 1 session, 2 model requests, 1 tool execution; offline)", "catalog_entries": 2, "initial_active_skills": 1, "scripted_sessions": 1, "scripted_model_requests": 2, "tool_executions": 1},
+    {"id": "C11", "command": "cargo run --example skill_loading_offline", "observer": "D", "execution": "direct", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:22.749Z", "finished_at": "2026-09-11T21:55:22.940Z", "summary": "Completed: Reviewed offline. (1 session, 2 model requests, 1 tool execution; offline)", "catalog_entries": 2, "initial_active_skills": 0, "scripted_sessions": 1, "scripted_model_requests": 2, "tool_executions": 1},
+    {"id": "C12", "command": "git diff --check", "observer": "D", "execution": "direct before report/index edits", "attempts": 1, "exit_code": 0, "status": "PASS", "started_at": "2026-09-11T21:55:23.007Z", "finished_at": "2026-09-11T21:55:23.027Z"}
+  ],
+  "verify_internal_commands": [
+    {"command": "cargo fmt --all -- --check", "exit_code": 0, "status": "PASS"},
+    {"command": "cargo check --all-targets", "exit_code": 0, "status": "PASS"},
+    {"command": "cargo test --all-targets", "exit_code": 0, "status": "PASS", "passed": 374, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0},
+    {"command": "cargo clippy --all-targets -- -D warnings", "exit_code": 0, "status": "PASS"},
+    {"command": "cargo build --all-targets", "exit_code": 0, "status": "PASS"},
+    {"command": "cargo test --doc", "exit_code": 0, "status": "PASS", "passed": 0, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}
+  ],
+  "verify_internal_attribution": "D observed the runner print all six commands, matching test summaries and successful completion. scripts/verify.py:53-66 stops at the first nonzero return; internal exit codes follow from that control flow and runner exit 0. These are not additional direct gates or distinct coverage.",
+  "rust_tests": {
+    "direct_passed": 374,
+    "verify_internal_passed": 374,
+    "failed_per_execution": 0,
+    "ignored_per_execution": 0,
+    "measured_per_execution": 0,
+    "filtered_per_execution": 0,
+    "platform_excluded_total": null,
+    "breakdown_each_execution": {"lib": 213, "bin_wi": 27, "context_catalog": 28, "context_prepare": 26, "managed_absence_cli": 1, "provider_contract": 5, "run_cli": 5, "run_controller": 38, "skill_loading": 20, "skills_cli": 11, "example_harnesses": 0},
+    "example_harnesses": ["run_offline", "skill_loading_offline", "skills_offline", "two_turns"],
+    "doctests_each_execution": 0,
+    "counting_note": "374 per full execution, not an inflated sum of reruns. 361 source definitions are a separate inventory. Fixture-loop variations are not separate named tests. The two_turns harness has zero tests and its live main was not run."
+  },
+  "verify_inventory": {"source_files": 123, "rust_test_definitions": 361, "fixture_events": 25},
+  "node_self_tests": {"passed": 152, "live_started": false},
+  "report_validation": {
+    "status": "PASS",
+    "observer": "D",
+    "command": "node /tmp/wi-s2-final-k5UCVkK4/report-check.mjs",
+    "isolation": "Same gate.mjs wrapper and synthetic environment as C01-C12",
+    "exit_code": 0,
+    "started_at": "2026-09-11T22:10:12.756Z",
+    "finished_at": "2026-09-11T22:10:12.896Z",
+    "checks": ["JSON parsing", "24 unique matrix IDs and matching Markdown statuses", "named source assertions and line ranges", "command/count consistency", "pending final review and CI attribution", "zero live/credential/provider activity and unchanged ledger", "report/index links", "HEAD/index/dirty inventory", "182-file preservation fingerprint", "protected baseline paths", "static inventory 123/361/25", "report/index whitespace"],
+    "post_draft_diff_check": {
+      "command": "git diff --check", "observer": "D", "exit_code": 0, "status": "PASS",
+      "started_at": "2026-09-11T22:10:12.967Z", "finished_at": "2026-09-11T22:10:12.987Z",
+      "scope": "After report/index creation, before factual validation-status update; second diff-check execution, justified by new edits, not a failed-gate retry."
+    },
+    "note": "Report checks are not extra Rust coverage. Final factual status edits receive the same read-only consistency/whitespace check without another runtime suite."
+  },
+  "matrix_summary": {"total": 24, "pass": 24, "pending_final_review": 0, "failed": 0},
+  "matrix": [
+    {
+      "id": "S2-00", "title": "Baseline, scope and preservation", "status": "PASS", "observer": "D + S; P for pre-edit baseline and original clean state",
+      "tests": [],
+      "assertions": ["Actual HEAD and dirty unstaged inventory match the handoff", "Accepted baseline is an ancestor", "Corrected s2.1 and unchanged protected production/history paths", "C01-C12 pass under synthetic isolation"],
+      "sources": ["AGENTS.md", "docs/WI_PRODUCT_DIRECTION.md", "docs/slices/s2/CONTRACT.md", "docs/slices/s2/MATRIX.md", "docs/slices/s2/IMPLEMENTOR_PROMPT.md", "docs/slices/s2/VALIDATION.md", "docs/WI_LOCAL_SKILLS_S1_VERIFICATION.md", "scripts/verify.py:1-71"],
+      "actual_evidence": "D observed 13 modified and 10 new implementation files, empty index, HEAD and ancestry. P supplies pre-edit 339 Rust/152 Node and inventory 113/326/25 only as comparison. D's current gates are separate S2 evidence.", "blockers": []
+    },
+    {
+      "id": "S2-01", "title": "Shared loader and S1 read order", "status": "PASS", "observer": "D + S",
+      "tests": ["shared_loader_preserves_scoped_identity_frontmatter_and_owned_body", "all_selected_ids_precede_project_and_body_io_and_keep_error_order"],
+      "sources": ["tests/skill_loading/loading.rs:8-119", "src/context/preparation.rs:104-184"],
+      "assertions": ["Global/project exact body and frontmatter", "S1 prepare_run uses shared loader", "All selected IDs validated before project/body I/O"],
+      "actual_evidence": "C03/C07 passed these assertions and all 26 retained context_prepare tests. Later unknown/invalid ID retains precedence over an earlier missing body and invalid AGENTS.md.", "blockers": []
+    },
+    {
+      "id": "S2-02", "title": "Scoped catalog identity", "status": "PASS", "observer": "D + S",
+      "tests": ["shared_loader_preserves_scoped_identity_frontmatter_and_owned_body", "directly_constructed_invalid_ids_and_unknown_ids_never_select_paths", "direct_validation_is_strict_pure_and_execute_defends_itself"],
+      "sources": ["tests/skill_loading/loading.rs:8-84", "src/context/skill_loading/tests.rs:126-192"],
+      "assertions": ["Same-name scopes load distinct bodies", "Directory mismatch does not change identity", "Bare/path/URL/unknown and directly constructed invalid names reject"],
+      "actual_evidence": "C03/C07 passed global/project selection, invalid-ID and strict argument cases. No cross-workspace lookup is used.", "blockers": []
+    },
+    {
+      "id": "S2-03", "title": "Strict ordinary definition", "status": "PASS", "observer": "D + S",
+      "tests": ["registered_definition_and_lazy_success_are_exact_and_correlated", "direct_validation_is_strict_pure_and_execute_defends_itself"],
+      "sources": ["tests/skill_loading/registry.rs:5-39", "src/context/skill_loading/tests.rs:126-192"],
+      "assertions": ["Exact strict schema: one required string id, additionalProperties false", "Main-file-only description; no body/path/catalog enum or advanced fields", "Direct validate and execute reject invalid input as InvalidToolArguments"],
+      "actual_evidence": "C03/C07 passed exact definition equality and malformed/missing/null/extra/wrong-type argument cases; invalid direct execute never returns an Ok error value.", "blockers": []
+    },
+    {
+      "id": "S2-04", "title": "Pure full-batch preflight", "status": "PASS", "observer": "D + S",
+      "tests": ["invalid_load_or_unsupported_authority_rejects_whole_batch_without_execution", "direct_validation_is_strict_pure_and_execute_defends_itself"],
+      "sources": ["tests/skill_loading/registry.rs:42-139", "src/context/skill_loading/tests.rs:126-192"],
+      "assertions": ["Valid ID still validates after source deletion", "Invalid mixed batch has zero earlier execution/events/cache reuse", "Unsupported caller/namespace/incomplete/duplicate protections remain"],
+      "actual_evidence": "C03/C07 passed rejection cases with panic-on-event observers and zero recorded add calls; later valid batch executes normally and returns correlated gateway_error for the missing source.", "blockers": []
+    },
+    {
+      "id": "S2-05", "title": "Real lazy registry success", "status": "PASS", "observer": "D + S",
+      "tests": ["registered_definition_and_lazy_success_are_exact_and_correlated"],
+      "sources": ["tests/skill_loading/registry.rs:5-39"],
+      "assertions": ["No initial unselected body", "Exactly id/frontmatter/body from actual registry", "Markdown/CRLF/whitespace and array order retained; nested objects sorted", "Correlated success start/finish events"],
+      "actual_evidence": "C03/C07 passed real execute_response output equality, serialized ordering and call_id/event equality. No fabricated Value substitutes for registry execution.", "blockers": []
+    },
+    {
+      "id": "S2-06", "title": "Executed failures and sanitization", "status": "PASS", "observer": "D + S",
+      "tests": ["known_load_failures_are_sanitized_correlated_error_results", "missing_or_directory_manifest_fails_only_when_executed", "worker_join_failure_uses_existing_tool_failed_mapping_and_error_event"],
+      "sources": ["tests/skill_loading/boundaries.rs:8-61", "tests/skill_loading/filesystem.rs:5-34", "src/context/skill_loading/tests.rs:195-222"],
+      "assertions": ["ContextChanged for changed/invalid metadata", "ReadFailed/InvalidBody/InputTooLarge retained at public loader", "ToolFailed maps to gateway_error through unchanged registry", "Exact correlated error JSON; is_error true only on finish event", "Synthetic join failure and redacted Debug/errors"],
+      "actual_evidence": "C03/C07 passed changed/corrupt/non-UTF-8 metadata, empty/non-UTF-8/oversized body, missing/directory source and test-only worker panic. S2-03 covers direct ToolFailed mapping; S2-09 covers denied files. Existing error tests remain unchanged.", "blockers": []
+    },
+    {
+      "id": "S2-07", "title": "Read timing and owned results", "status": "PASS", "observer": "D + S",
+      "tests": ["new_calls_reread_bodies_cached_calls_reuse_and_fresh_scopes_stay_independent", "paired_preparation_keeps_metadata_explicit_order_and_truthful_framing"],
+      "sources": ["tests/skill_loading/registry.rs:142-224", "tests/skill_loading/preparation.rs:6-119"],
+      "assertions": ["Body-only edit visible to a distinct new call", "Returned bytes survive edit/deletion", "Added file unavailable to captured catalog"],
+      "actual_evidence": "C03/C07 passed FIRST/SECOND/THIRD body observations, saved-result ownership and unknown added-entry rejection. No watcher or implicit refresh exists.", "blockers": []
+    },
+    {
+      "id": "S2-08", "title": "Existing call-result reuse", "status": "PASS", "observer": "D + S",
+      "tests": ["new_calls_reread_bodies_cached_calls_reuse_and_fresh_scopes_stay_independent", "exactly_64_kib_is_allowed_escape_overhead_counts_and_output_errors_are_reused"],
+      "sources": ["tests/skill_loading/registry.rs:142-224", "tests/skill_loading/boundaries.rs:96-150"],
+      "assertions": ["Identical call reuses exact success and saved gateway_error/tool_output_limit", "Reuse emits only ToolResultReused with no is_error field", "Conflicting reuse rejects", "Fresh scopes read independently"],
+      "actual_evidence": "C03/C07 passed reuse after edits/deletion and fresh-scope executions; source adds no separate mutable body/activation cache.", "blockers": []
+    },
+    {
+      "id": "S2-09", "title": "Filesystem protections", "status": "PASS", "observer": "D Linux execution + S; no native Windows/macOS execution",
+      "tests": ["manifest_and_ancestor_replacement_links_and_denied_sources_fail_closed", "canonical_selected_roots_cannot_be_redirected_by_replacing_root_aliases", "fifo_and_device_link_manifests_are_not_read", "context_catalog_non_utf8_traversal_names_fail_without_lossy_labels"],
+      "sources": ["tests/skill_loading/filesystem.rs:60-234", "tests/context_catalog/filesystem_safety.rs:256-274", "src/context/preparation.rs:206-216"],
+      "assertions": ["Actual existing SkillSource open path reused", "Selected manifest/ancestor links, denied files and special files reject", "Canonical selected roots remain fixed", "Real Linux malformed-byte fixture retained"],
+      "actual_evidence": "C03/C07 passed Linux filesystem cases. Windows reparse/junction logic is unchanged source only; aggregate platform-excluded counts are unmeasured. No hardlink/ancestor-race or hostile-filesystem isolation claim.", "blockers": []
+    },
+    {
+      "id": "S2-10", "title": "No supporting-file or execution side effects", "status": "PASS", "observer": "D + S",
+      "tests": ["resource_commands_urls_and_allowed_tools_remain_inert_instruction_data"],
+      "sources": ["tests/skill_loading/filesystem.rs:148-195", "src/context/skill_loading.rs:128-177"],
+      "assertions": ["Denied references/scripts/assets do not affect main-file load", "No resource/script canary in output or process marker", "No synthetic listener connection", "Definitions remain unchanged"],
+      "actual_evidence": "C03/C07 passed real registry load with inert commands, URL, allowed-tools and auth/root directives. Source only opens the catalog main file; this is instruction loading, not workflow completion or a system-wide I/O audit.", "blockers": []
+    },
+    {
+      "id": "S2-11", "title": "Preparation and registry pairing", "status": "PASS", "observer": "D + S",
+      "tests": ["helper_retains_ordinary_definitions_without_sharing_template_results", "collision_and_all_id_validation_precede_file_io", "automatic_definition_and_framing_use_existing_configuration_limits"],
+      "sources": ["tests/skill_loading/registry.rs:227-267", "tests/skill_loading/preparation.rs:174-290", "src/context/preparation.rs:104-184"],
+      "assertions": ["Same Arc catalog composes metadata and binds loader", "Template definitions/cache preserved and result scope fresh", "Collision rejects before I/O", "Actual definitions participate in validation; caller tools reject and returned options.tools is empty"],
+      "actual_evidence": "C03/C07 passed cached ordinary-template result isolation, collision precedence, 32-tool/configuration-byte boundary and empty-options assertions. Public run retains its own fresh scope; event/results observation is used instead of inspecting its registration template cache.", "blockers": []
+    },
+    {
+      "id": "S2-12", "title": "Nonempty and empty catalogs", "status": "PASS", "observer": "D + S",
+      "tests": ["empty_catalog_keeps_no_context_bytes_and_project_only_semantics", "run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller", "run_cli_empty_catalog_preserves_project_context_without_loader_claim"],
+      "sources": ["tests/skill_loading/preparation.rs:122-171", "src/cli/run_cli_context_tests.rs:98-235", "src/cli/run_cli_context_tests.rs:392-425"],
+      "assertions": ["Global-only and combined catalogs register loader without flags/selections", "Empty catalog adds no loader or false framing", "No-context byte identity and project-only behavior retained"],
+      "actual_evidence": "C03/C07 passed actual handler options and shared-helper byte comparisons; unrelated supplied tools and legacy no-loader semantics remain.", "blockers": []
+    },
+    {
+      "id": "S2-13", "title": "Initial context and truthful framing", "status": "PASS", "observer": "D + S",
+      "tests": ["paired_preparation_keeps_metadata_explicit_order_and_truthful_framing"],
+      "sources": ["tests/skill_loading/preparation.rs:6-119"],
+      "assertions": ["Caller prefix/task retained exactly", "Four initial JSON fields; all metadata and only explicit bodies", "Escaped injection-shaped task remains data", "Legacy prepare_run does not infer loader framing from a registered name"],
+      "actual_evidence": "C03/C07 passed JSON/prefix/body separation and actionable suffix assertions. Source uses explicit framing choice, not caller substring replacement; no prompt-injection immunity is claimed.", "blockers": []
+    },
+    {
+      "id": "S2-14", "title": "Explicit and model-selected paths coexist", "status": "PASS", "observer": "D + S; independent scripted Provider",
+      "tests": ["paired_preparation_keeps_metadata_explicit_order_and_truthful_framing", "skill_loading_public_run_delivers_real_body_with_explicit_selections_or_without"],
+      "sources": ["tests/skill_loading/preparation.rs:6-119", "tests/run_support/skill_loading.rs:172-235"],
+      "assertions": ["Explicit order and deduplication retained", "Second or already-active body can be requested", "Manifest remains initial provenance"],
+      "actual_evidence": "C03/C07 passed actual registry and public-controller loads with none/global/project initial selections; later execution does not mutate active manifest IDs.", "blockers": []
+    },
+    {
+      "id": "S2-15", "title": "Separate size failure stages", "status": "PASS", "observer": "D + S",
+      "tests": ["whole_file_limit_precedes_serialized_output_limit_without_truncation", "exactly_64_kib_is_allowed_escape_overhead_counts_and_output_errors_are_reused"],
+      "sources": ["tests/skill_loading/boundaries.rs:64-150"],
+      "assertions": ["Exactly 1 MiB file can load; above it returns InputTooLarge/gateway_error", "Exactly 64 KiB serialized output succeeds; above it returns tool_output_limit", "JSON escape overhead counts", "Complete aggregate input validation remains"],
+      "actual_evidence": "C03/C07 passed distinct whole-file and serialized-output fixtures with actual registry events/results, plus aggregate-input rejection. No truncation, paging, limit change or new budget.", "blockers": []
+    },
+    {
+      "id": "S2-16", "title": "Independent provider and public run path", "status": "PASS", "observer": "D + S; independent scripted Provider, not live model",
+      "tests": ["skill_loading_public_run_delivers_real_body_with_explicit_selections_or_without"],
+      "sources": ["tests/run_support/skill_loading.rs:89-235"],
+      "assertions": ["Provider receives metadata and strict normal definition", "Real returned registry loads correlated main body", "Same session continues and returns final fixture text", "Options and envelope correlation remain exact"],
+      "actual_evidence": "C03/C07 passed one-session/two-request public helper/run() flow with exact follow-up InputItem and success events. Scripted choice is not model-adherence proof.", "blockers": []
+    },
+    {
+      "id": "S2-17", "title": "Load then ordinary tool cycle", "status": "PASS", "observer": "D + S; independent scripted Provider",
+      "tests": ["skill_loading_public_run_loads_workflow_then_adds_in_three_requests", "skill_loading_public_run_can_complete_without_loading"],
+      "sources": ["tests/run_support/skill_loading.rs:238-334"],
+      "assertions": ["One session, load_skill then add_numbers then final", "Ordered exact inputs/results/events", "Separate one-request final answer forces no load"],
+      "actual_evidence": "C03/C07 passed three requests/two dispatches/final 42 and no-load completion after fixture main files were deleted. Arithmetic operands stay in fixtures, not production loader/controller.", "blockers": []
+    },
+    {
+      "id": "S2-18", "title": "WebSocket and SSE continuation", "status": "PASS", "observer": "D + S; actual loopback transports with synthetic credentials",
+      "tests": ["skill_loading_websocket_uses_one_session_parent_and_only_correlated_result", "skill_loading_sse_replays_exact_prepared_context_native_call_and_result"],
+      "assertion_helpers": ["assert_skill_first", "assert_skill_second", "assert_skill_success"],
+      "sources": ["src/providers/openai_codex/tests/context_integration/context_loopback_tests.rs:88-156", "src/providers/openai_codex/tests/harness/context.rs:213-322"],
+      "assertions": ["WS same socket/parent/new-result delta", "SSE full effective native-history replay with initial context, opaque item, call and result", "Native and recovered output; SSE explicit and missing MIME", "Exactly two ordinary requests, no extra classifier/reopen"],
+      "actual_evidence": "C03/C07 passed both named loopback tests. Two WS and four SSE fixture variations are within those two tests, not six extra test-count entries. Native provenance and synthetic auth counts matched.", "blockers": []
+    },
+    {
+      "id": "S2-19", "title": "Cancellation and observer failure", "status": "PASS", "observer": "D + S; deterministic barriers and scripted public-controller fixtures",
+      "tests": ["pending_blocking_load_cancel_or_waiter_drop_cannot_publish_or_cache", "cancellation_and_sink_failure_keep_completed_cache_and_stop_later_loads", "skill_loading_public_run_cancels_before_dispatch_or_before_later_call", "skill_loading_public_run_observer_failure_stops_later_work_and_delivery"],
+      "sources": ["src/context/skill_loading/tests.rs:237-415", "tests/run_support/skill_loading.rs:337-505"],
+      "assertions": ["Pending cancel/drop publishes no finish/result/cache", "Abandoned blocking worker cannot publish after release", "Completed cache survives finish-observer failure", "Before/start/after-load cancellation and Full/Closed/Failed sinks stop later work"],
+      "actual_evidence": "C03/C07 passed barriers, cache reread/reuse checks, run terminal ordering, one-session/no-follow-up observations and stopped later arithmetic. No new runtime deadline or cancellation semantics.", "blockers": []
+    },
+    {
+      "id": "S2-20", "title": "CLI and library integration", "status": "PASS", "observer": "D + S; injected handler, process tests and offline example",
+      "tests": ["run_cli_context_errors_and_final_validation_precede_all_constructors", "run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson", "run_cli_unselected_body_is_not_validated_before_provider_construction", "run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory", "run_binary_explicit_selections_and_tools_preserve_preparation_diagnostics", "skills_binary_both_global_routes_project_addition_and_metadata_only_output"],
+      "sources": ["src/cli/run_cli_context_tests.rs:238-468", "tests/cli/run_cli.rs:115-190", "tests/cli/skills_cli.rs:103-168", "src/cli/run_cli.rs:112-123"],
+      "assertions": ["Thin handler uses shared pair before factory/auth", "Fatal preparation and diagnostic sink failures preserve ordering", "Diagnostics never enter run NDJSON", "Explicit flags/parser and metadata-only listing retained", "Non-CLI example uses no subprocess backend"],
+      "actual_evidence": "C03/C07 passed actual handler and isolated binary assertions; C11 completed through public library path with explicit roots and no ambient auth.", "blockers": []
+    },
+    {
+      "id": "S2-21", "title": "Isolation, privacy and stable schemas", "status": "PASS", "observer": "D + S",
+      "tests": ["concurrent_same_id_workspaces_keep_sources_results_and_catalogs_separate", "shared_loader_preserves_scoped_identity_frontmatter_and_owned_body", "direct_validation_is_strict_pure_and_execute_defends_itself"],
+      "assertion_helpers": ["assert_completed_session"],
+      "sources": ["tests/skill_loading/boundaries.rs:153-195", "tests/skill_loading/loading.rs:8-46", "src/context/skill_loading/tests.rs:126-192", "tests/run_support/skill_loading.rs:119-156"],
+      "assertions": ["Concurrent identical project IDs stay workspace-bound", "Debug omits host paths/body/metadata", "Run schema 2 and provider schema 1", "RunRequest/auth/features/C1/error-code boundaries unchanged"],
+      "actual_evidence": "C03/C07 passed isolated outputs and redaction/correlation assertions; S2-08/11 cover fresh caches. Protected diffs are empty and the full retained auth/recovery/C1 regression suite passed. Explicit successful content remains sensitive, not safe telemetry.", "blockers": []
+    },
+    {
+      "id": "S2-22", "title": "Offline example and current docs", "status": "PASS", "observer": "D C11 + S current docs/example/index inspection",
+      "tests": [],
+      "assertion_helpers": ["Control::generate", "main"],
+      "sources": ["examples/skill_loading_offline.rs:35-111", "examples/skill_loading_offline.rs:164-282", "README.md", "docs/ARCHITECTURE.md", "docs/EVENTS.md", "docs/README.md"],
+      "assertions": ["No initial unselected body; exact real body in follow-up", "One successful load and final Reviewed offline.", "Docs explain automatic/explicit paths, manifest, timing/cache, 64 KiB guard and main-file-only scope", "Index links both accepted reports"],
+      "actual_evidence": "C11 exited 0 with one session/two scripted requests/one load. Current docs and report links describe offline acceptance while preserving live-adherence and native/current-CI limits; historical PLAN ONLY text is untouched.", "blockers": []
+    },
+    {
+      "id": "S2-23", "title": "Final gates, review and evidence", "status": "PASS", "technical_status": "PASS", "observer": "D for execution/reporting; P for prior increment reviews; parent-orchestrated review-a, review-b and review-c for final accumulated review",
+      "tests": [],
+      "assertions": ["All required offline execution gates passed", "All 24 distinct rows have attributable evidence", "Three fresh independent accumulated complete-diff reviews passed with no blocking findings"],
+      "actual_evidence": "C01-C12 and report/index consistency, preservation and post-draft whitespace checks pass. Review-a and review-b independently repeated cargo test --all-targets with 374 passing tests. Review-c repeated the complete required offline gate set with matching 374 Rust tests, 152 Node self-tests, inventory 123/361/25 and all three examples. All three inspected the complete implementation plus reports/index and returned PASS with no blocking findings. Native/current submitted CI and live checks remain separately unrun.",
+      "blockers": []
+    }
+  ],
+  "failures_and_fixes": [
+    {"stage": "s2.0", "observer": "P and S validation document", "kind": "specification_conflict", "status": "CORRECTED_IN_S2.1", "description": "assignment_conflict was justified: designer required tool_failed despite unchanged GatewayError::code mapping to gateway_error. Corrected specification, not production mapping or regressions."},
+    {"stage": "increment_2", "observer": "P", "kind": "test_only_diagnostic_label", "status": "FIXED_BEFORE_FOCUSED_GATES_PASSED", "description": "Initially wrong relative diagnostic label was corrected. Exact failed command/exit/timestamp was not supplied.", "failed_command": null, "exit_code": null},
+    {"stage": "prior_authoring_attempt", "observer": "P", "kind": "workflow_attempt_budget", "status": "OWNER_DIRECTED_CONTINUATION_COMPLETED_AND_AUDITED", "description": "A delegate exhausted its attempt budget after partial edits. This is workflow history, not an implementation test failure."},
+    {"stage": "reporting_increment_runtime_gates", "observer": "D", "failed_gates": 0, "failure_triggered_reruns": 0, "description": "All gates passed first direct execution; verify.py internal repeats are required verification, not retries."}
+  ],
+  "reviews": [
+    {"scope": "increment_1_core_loader_helper", "observer": "P: owner-supplied prior review summary", "status": "PASS", "independent_pass_reviews": 3, "reported_rust_tests_passed": 363, "blocking_findings_remaining": 0, "reviewer_identities": null, "review_timestamps": null},
+    {"scope": "increment_2_CLI_and_public_controller", "observer": "P: owner-supplied prior review summary", "status": "PASS", "independent_pass_reviews": 3, "blocking_findings_remaining": 0, "note": "Test-only diagnostic label corrected before focused gates passed.", "reviewer_identities": null, "review_timestamps": null},
+    {"scope": "increment_3_loopbacks_example_current_docs", "observer": "P: owner-supplied prior review summary", "status": "PASS", "independent_pass_reviews": 3, "reported_rust_tests_passed": 374, "reported_requested_checks": "PASS", "blocking_findings_remaining": 0, "reviewer_identities": null, "review_timestamps": null},
+    {"scope": "final_accumulated_complete_diff_including_reports_and_index", "observer": "Parent-orchestrated independent review-a, review-b and review-c", "status": "PASS", "independent_pass_reviews": 3, "blocking_findings_remaining": 0, "reviewer_identities": ["review-a", "review-b", "review-c"], "review_timestamps": null, "note": "All three inspected the accumulated implementation, tests, example, current docs, reports and index. Review-a and review-b repeated the 374-test suite; review-c repeated the complete required offline gate set. Reviewer command-setup mistakes before successful reruns were not product failures."}
+  ],
+  "nonblocking_review_notes": {
+    "observer": "P",
+    "remediation_required": false,
+    "notes": ["Brittle Arc strong_count assertion in tests/skill_loading/preparation.rs:34", "Redundant CODEX_HOME env_remove in one process test", "Minor documentation wording ambiguities"]
+  },
+  "ci": [
+    {"platform": "ubuntu-latest", "scope": "current S2 submitted-revision workflow", "status": "NOT_SUBMITTED_NOT_RUN", "observer": "S: local .github/workflows/ci.yml:1-24 only", "run_id": null, "tested_revision": null},
+    {"platform": "macos-latest", "scope": "current S2 submitted-revision workflow", "status": "NOT_SUBMITTED_NOT_RUN", "observer": "S: local .github/workflows/ci.yml:1-24 only", "run_id": null, "tested_revision": null},
+    {"platform": "windows-latest", "scope": "current S2 submitted-revision workflow", "status": "NOT_SUBMITTED_NOT_RUN", "observer": "S: local .github/workflows/ci.yml:1-24 only", "run_id": null, "tested_revision": null}
+  ],
+  "platform_limits": {
+    "local_linux": "PASS for recorded offline gates and offline technical acceptance",
+    "native_macos": "NOT_RUN",
+    "native_windows": "NOT_RUN",
+    "cross_compilation": "NOT_RUN",
+    "platform_excluded_total": null,
+    "observable_guards": ["Linux-only real malformed-byte fixture retained at tests/context_catalog/filesystem_safety.rs:256-274", "Linux-only S2 FIFO/device-link fixture at tests/skill_loading/filesystem.rs:198-234", "Three S2 Unix filesystem cases at tests/skill_loading/filesystem.rs:36-196; remain applicable on macOS"],
+    "note": "Zero ignored/filtered Linux tests does not mean every platform ran. Compile-time exclusions are not listed in Rust execution summaries; aggregate count is unmeasured. Linux Clippy does not verify Windows reparse code. No workflow or warning-denied gate was disabled."
+  },
+  "changed_paths": {
+    "reporting_increment": ["docs/slices/s2/VERIFICATION.md", "docs/slices/s2/verification.json", "docs/README.md"],
+    "preserved_initial_modified": ["README.md", "docs/ARCHITECTURE.md", "docs/EVENTS.md", "docs/README.md", "src/cli/run_cli.rs", "src/cli/run_cli_context_tests.rs", "src/context.rs", "src/context/preparation.rs", "src/providers/openai_codex/tests/context_integration/context_loopback_tests.rs", "src/providers/openai_codex/tests/harness/context.rs", "tests/cli/run_cli.rs", "tests/cli/skills_cli.rs", "tests/run_controller.rs"],
+    "preserved_initial_untracked": ["examples/skill_loading_offline.rs", "src/context/skill_loading.rs", "src/context/skill_loading/tests.rs", "tests/run_support/skill_loading.rs", "tests/skill_loading.rs", "tests/skill_loading/boundaries.rs", "tests/skill_loading/filesystem.rs", "tests/skill_loading/loading.rs", "tests/skill_loading/preparation.rs", "tests/skill_loading/registry.rs"],
+    "temporary_helpers_outside_repository": ["/tmp/wi-s2-final-k5UCVkK4/gate.mjs", "/tmp/wi-s2-final-k5UCVkK4/report-check.mjs"]
+  },
+  "pre_push_consistency_audit": {
+    "status": "PASS",
+    "source": {
+      "url": "https://github.com/zer09/wi/pull/3#issuecomment-5640780593",
+      "comment_id": 5640780593,
+      "author": "zer09",
+      "created_at": "2026-09-11T21:21:17Z",
+      "reviewed_runtime": "94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa",
+      "reviewed_planning_head": "24aab8396303dac1de17284e0d4fbee4e5b3bc1a",
+      "local_S2_unseen_by_designer": true
+    },
+    "local_review": {
+      "observer": "parent/orchestrator source and complete baseline-to-HEAD diff inspection",
+      "tested_revision": "97ad00c109040edaf212fc141c34d307bc64442a",
+      "pre_audit_worktree_clean": true,
+      "untracked_implementation_files": 0,
+      "S2_commit_paths": 25,
+      "s2_1_unsatisfiable": false,
+      "production_paths_changed_among_A01_A05": ["src/cli/run_cli.rs"],
+      "run_cli_render_changed": false,
+      "all_other_cited_production_paths_byte_identical_to_baseline": true
+    },
+    "findings": [
+      {
+        "id": "A-01", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/cli/mod.rs:156-209 sends delta, terminal suffix and fallback bytes through unfiltered write_text; the file is byte-identical to baseline.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-02", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/cli/context_cli.rs:66-68 removes all Unicode controls and src/cli/run_cli.rs:150-185 applies it to response text, collapsing LF/tab. S2 changed run_cli help/preparation only; render and the filter are unchanged.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-03", "severity": "low_medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "Legacy generate opens a provider session at src/cli/mod.rs:210-264 before SessionControl::generate validates input at src/providers/openai_codex/session.rs:54-72. Legacy paths are unchanged; S2 wi run validates before construction.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-04", "severity": "low", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/error.rs:35-38 says the gateway never rotates refresh tokens while src/providers/openai_codex/managed_auth.rs:207-263 implements managed renewal. Error/auth production paths are byte-identical to baseline and auth_expired code is unchanged.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-05", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/providers/openai_codex/codec.rs:24-165,239-324 accepts string-typed empty response identity and session drive can settle it, while src/run/collect.rs:13-60 rejects empty IDs. All cited production paths are byte-identical to baseline; normal S2 run uses the rejecting collector.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      }
+    ],
+    "additional_inherited_notes": [
+      "Active README retains historical hosted-CI wording that can be misread without its date/stage context.",
+      "scripts/cli_retest.mjs retains a historical lifecycle-guard literal whose current producer correspondence is not established.",
+      "GitHub CI runs six Cargo gates, not Node self-tests, verify.py or examples; evidence categories remain separate.",
+      "Static verifier inventory is not an executed-test count.",
+      "Root AGENTS.md retains planning-handoff wording that predates the authorized S2 implementation commit; this inherited phase-documentation note does not affect runtime or an S2 matrix row."
+    ],
+    "producer_consumer_verification": [
+      {"path": "loader_error_to_registry_result", "status": "CORROBORATED", "sources": ["src/context/skill_loading.rs:128-177", "src/tools.rs:181-248", "src/error.rs:102-124", "src/run/mod.rs:238-295,341-401"], "tests": ["known_load_failures_are_sanitized_correlated_error_results", "worker_join_failure_uses_existing_tool_failed_mapping_and_error_event", "skill_loading_public_run_delivers_real_body_with_explicit_selections_or_without"]},
+      {"path": "mixed_batch_preflight", "status": "CORROBORATED", "sources": ["src/tools.rs:104-181"], "tests": ["invalid_load_or_unsupported_authority_rejects_whole_batch_without_execution"]},
+      {"path": "metadata_revalidation", "status": "CORROBORATED", "sources": ["src/context/skill_loading.rs:51-72,157-177"], "tests": ["shared_loader_preserves_scoped_identity_frontmatter_and_owned_body", "all_selected_ids_precede_project_and_body_io_and_keep_error_order", "known_load_failures_are_sanitized_correlated_error_results"]},
+      {"path": "cache_before_finish_and_reuse", "status": "CORROBORATED", "sources": ["src/tools.rs:190-236"], "tests": ["new_calls_reread_bodies_cached_calls_reuse_and_fresh_scopes_stay_independent", "exactly_64_kib_is_allowed_escape_overhead_counts_and_output_errors_are_reused", "cancellation_and_sink_failure_keep_completed_cache_and_stop_later_loads"]},
+      {"path": "cancellation", "status": "CORROBORATED", "sources": ["src/run/mod.rs:71-90,238-295,341-401", "src/tools.rs:181-248"], "tests": ["pending_blocking_load_cancel_or_waiter_drop_cannot_publish_or_cache", "skill_loading_public_run_cancels_before_dispatch_or_before_later_call", "skill_loading_public_run_observer_failure_stops_later_work_and_delivery"]},
+      {"path": "catalog_registry_pairing", "status": "CORROBORATED", "sources": ["src/context/preparation.rs:104-121", "src/run/mod.rs"], "tests": ["helper_retains_ordinary_definitions_without_sharing_template_results", "paired_preparation_keeps_metadata_explicit_order_and_truthful_framing", "concurrent_same_id_workspaces_keep_sources_results_and_catalogs_separate"]},
+      {"path": "diagnostics_before_provider_construction", "status": "CORROBORATED", "sources": ["src/cli/run_cli.rs:107-127"], "tests": ["run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson", "run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory", "run_binary_prevalidation_precedes_external_and_managed_auth_location"]}
+    ],
+    "post_audit_execution": {
+      "observer": "parent/orchestrator",
+      "completed_at": "2026-09-12T05:55:35Z",
+      "isolation": "env -i with synthetic /tmp/wi-s2-audit-final HOME, XDG_CONFIG_HOME, CODEX_HOME and TMPDIR; trusted Cargo/Rustup/uv caches; CARGO_NET_OFFLINE=true; UV_OFFLINE=true; UV_PYTHON_DOWNLOADS=never",
+      "platform": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+      "toolchain": {"rustc": "1.98.1", "cargo": "1.98.1", "uv": "0.12.10", "node": "v24.18.0", "git": "2.55.0"},
+      "commands": [
+        {"command": "cargo fmt --all -- --check", "status": "PASS", "exit_code": 0},
+        {"command": "cargo check --all-targets", "status": "PASS", "exit_code": 0},
+        {"command": "cargo test --all-targets", "status": "PASS", "exit_code": 0, "passed": 374, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0},
+        {"command": "cargo clippy --all-targets -- -D warnings", "status": "PASS", "exit_code": 0},
+        {"command": "cargo build --all-targets", "status": "PASS", "exit_code": 0},
+        {"command": "cargo test --doc", "status": "PASS", "exit_code": 0, "doctests": 0},
+        {"command": "uv run scripts/verify.py", "status": "PASS", "exit_code": 0, "inventory": {"source_files": 123, "rust_test_definitions": 361, "fixture_events": 25}, "internal_cargo_gates": "PASS"},
+        {"command": "node scripts/cli_retest.mjs --self-test", "status": "PASS", "exit_code": 0, "passed": 152, "live_started": false},
+        {"command": "cargo run --example run_offline", "status": "PASS", "exit_code": 0, "answer": "50"},
+        {"command": "cargo run --example skills_offline", "status": "PASS", "exit_code": 0, "answer": "42"},
+        {"command": "cargo run --example skill_loading_offline", "status": "PASS", "exit_code": 0, "answer": "Reviewed offline."},
+        {"command": "git diff --check", "status": "PASS", "exit_code": 0, "phase": "before audit report amendments"}
+      ],
+      "failed_gates": 0,
+      "failure_triggered_retries": 0,
+      "A01_A05_counterexample_regressions_executed": false,
+      "live_started": false,
+      "real_credential_reads": 0,
+      "provider_generations": 0
+    },
+    "independent_complete_diff_review": {
+      "status": "PASS",
+      "scope": "Complete baseline-to-current diff 94d86e0c..97ad00c, all current worktree changes/untracked state, A-01 through A-05, all seven required producer-to-consumer paths, s2.1 and all 24 matrix rows",
+      "reviewers": [
+        {"reviewer": "review-a", "status": "PASS", "blocking_findings": 0, "independent_execution": "cargo test --all-targets: 374 passed; git diff --check: PASS"},
+        {"reviewer": "review-b", "status": "PASS", "blocking_findings": 0, "independent_execution": "Focused read-only complete-diff, worktree, JSON, whitespace and authenticated audit-comment checks"},
+        {"reviewer": "review-c", "status": "PASS", "blocking_findings": 0, "independent_execution": "Complete isolated offline gate set: 374 Rust tests; verifier 123/361/25; Node 152 live_started=false; three examples; all other gates PASS"}
+      ],
+      "blocking_findings": 0,
+      "classification_confirmed": "A-01 through A-05 are OPEN_INHERITED_CORROBORATED, not fixed, not introduced/worsened by S2, and not s2.1 blockers",
+      "s2_1_satisfiable": true,
+      "matrix_complete": true,
+      "matrix_passed": 24,
+      "remediation_required": false
+    }
+  },
+  "remaining_limits": [
+    "A-01 through A-05 remain open inherited findings. They are corroborated but not fixed; focused counterexample regressions are NOT_RUN because no unrelated repair was authorized.",
+    "No live model choice/adherence proof; NOT_RUN and not authorized.",
+    "Native macOS/Windows, cross-compilation and current submitted-revision CI are NOT_RUN; local Linux evidence is not their substitute.",
+    "Only catalog main SKILL.md is read. Supporting references/assets/files/scripts, generic readers, process/network tools, hosted operations, provider-native search, PTC, async tools and steering remain excluded or separately deferred.",
+    "Existing 1 MiB file/input and 64 KiB serialized-result guards remain, including JSON overhead and complete next-input validation. Some explicit bodies exceed tool-result capacity; no truncation, paging or new budget.",
+    "Trusted-owner filesystem boundary is not hostile-filesystem or hardlink/ancestor-race isolation. Buffered metadata I/O may read ahead; JSON framing is not prompt-injection immunity.",
+    "Owned results survive source changes; each new execution rereads metadata/body, identical call IDs reuse saved results. No new body cache or automatic rescan.",
+    "Blocking read may finish after waiter cancellation but cannot publish/cache/continue. Finish-observer failure does not undo an already cached completed operation.",
+    "P1 storage and V1 one-owner multi-device service remain deferred. Browser disconnect must not cancel service-owned work; restart stops tasks without automatic resume/replay. Storage must precede service acceptance. No database/store interface/server/session owner/UI is added.",
+    "Production-provider restructuring remains DEFERRED; C1 deletion and retained run/auth/transport behavior remain unchanged."
+  ],
+  "live_started": false,
+  "live_model_selection": "NOT_RUN",
+  "live_model_adherence": "NOT_RUN",
+  "real_credential_reads": 0,
+  "provider_generations": 0,
+  "live_provider_requests": 0,
+  "private_owner_skill_project_reads_for_tests": 0,
+  "real_auth_profile_login_refresh_operations": 0,
+  "hosted_probes_uploads_operations": 0,
+  "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false},
+  "new_live_allocation": 0,
+  "authorization": {
+    "used": "Scoped implementation/report/index work, offline synthetic verification, owner-authorized staging and commit 97ad00c, read-only independent reviews, repository consistency audit, and unstaged factual report amendments only; trusted local build tooling and loopbacks permitted.",
+    "pi_authoring_separate_from_Wi_test_traffic": true,
+    "remaining_ledger_balance_is_authorization": false,
+    "staging": true, "staging_authorized": true, "unstaging": false, "commits": true, "commit_authorized": true,
+    "commit": "97ad00c109040edaf212fc141c34d307bc64442a", "pushes": false, "merges": false,
+    "audit_report_amendments_staged": false, "audit_report_amendments_committed": false,
+    "deployments": false, "releases": false, "publication": false, "hosted_service_writes": false,
+    "reset_clean_stash_revert": false, "owner_changes_overwritten": false,
+    "new_agents_or_subagents_launched": true,
+    "final_read_only_review_delegates_launched": 6,
+    "delegate_activity_is_Wi_provider_traffic": false,
+    "dependency_downloads": false
+  },
+  "service_implemented": false,
+  "storage_implemented": false,
+  "ui_implemented": false,
+  "service_and_storage_implemented": false,
+  "P1": "DEFERRED",
+  "V1": "DEFERRED"
+}

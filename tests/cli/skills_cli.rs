@@ -115,6 +115,10 @@ fn skills_binary_both_global_routes_project_addition_and_metadata_only_output() 
         let before = f.files();
         for project in [false, true] {
             let mut command = f.command(xdg);
+            command.env_remove("CODEX_HOME");
+            if xdg {
+                command.env_remove("HOME");
+            }
             command.args(["skills", "list", "--json"]);
             if project {
                 command.args(["--workspace", "project"]);
@@ -127,6 +131,7 @@ fn skills_binary_both_global_routes_project_addition_and_metadata_only_output() 
             );
             f.assert_safe(&out);
             assert!(out.stderr.is_empty());
+            assert!(!String::from_utf8_lossy(&out.stdout).contains("load_skill"));
             let value: Value = serde_json::from_slice(&out.stdout).unwrap();
             assert_eq!(value.as_object().unwrap().len(), 2);
             assert_eq!(value["diagnostics"], json!([]));
@@ -538,6 +543,7 @@ fn skills_binary_help_parser_is_metadata_only_and_capabilities_exclude_hosted() 
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("--workspace"));
     assert!(text.contains("--json"));
+    assert!(!text.contains("load_skill"));
     for flag in ["--use-skill", "--auth-source", "--model", "--tool"] {
         assert!(!text.contains(flag));
     }

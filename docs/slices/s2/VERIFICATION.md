@@ -16,14 +16,15 @@ compliance. See [verification.json](verification.json) for structured evidence.
 | Item | Observed value / attribution |
 |---|---|
 | Accepted runtime baseline | `94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa`, PR #2 merge; acceptance supplied by the owner |
-| Tested HEAD | `24aab8396303dac1de17284e0d4fbee4e5b3bc1a` |
-| Revision meaning | HEAD contains the planning history, **not** the S2 implementation or these reports |
-| Original implementation start | Clean worktree, according to the supplied parent observation; not this delegate's initial state |
+| Current audit-tested HEAD | `97ad00c109040edaf212fc141c34d307bc64442a` |
+| Current revision meaning | HEAD contains the complete 25-path S2 implementation and original verification reports. The later consistency-audit report amendments are unstaged and are not represented by that SHA. |
+| Original pre-commit gate basis | Uncommitted S2 worktree on planning HEAD `24aab8396303dac1de17284e0d4fbee4e5b3bc1a`; retained as historical execution evidence below |
+| Original implementation start | Clean worktree, according to the supplied parent observation; not the reporting delegate's initial state |
 | Reporting delegate's initial state | Dirty: 13 modified tracked files and 10 untracked implementation files; no staged changes |
-| Tested source | Preserved increments 1-3 on that HEAD; source/tests/examples were not edited by this delegate |
-| This increment | Creates these two reports and updates only the S2 report links/state in `docs/README.md` |
-| Resulting inventory | 13 modified tracked files and 12 untracked files, including both reports; all unstaged/uncommitted |
-| Baseline ancestry | Reporting delegate's `git merge-base --is-ancestor` check passed |
+| Original reporting increment | Created these two reports and updated only the S2 report links/state in `docs/README.md` |
+| Original resulting inventory | 13 modified tracked files and 12 untracked files, including both reports; all were later committed in `97ad00c` |
+| Pre-audit worktree | Clean with no untracked files at `97ad00c`; observed by the parent before the audit follow-up |
+| Baseline ancestry | `94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa` is an ancestor of current HEAD |
 
 Before report edits, the delegate hashed all 182 tracked/untracked, nonignored
 files except the three authorized report/index paths. Algorithm: SHA-256 over
@@ -340,11 +341,13 @@ no permanent verification framework or source reorganization is added.
   and current submitted CI remain unrun. Live model choice/adherence has no proof
   and remains NOT RUN.
 
-Authorization used: scoped report/index changes and offline synthetic verification
-only. **No staging, unstaging, commits, pushes, merges, deployment, release,
-publication or hosted-service writes.** No reset, clean, stash, overwrite of
-owner work, or revert. The parent launched three read-only final review delegates;
-that Pi authoring work did not create Wi provider traffic or change the ledger.
+The original reporting phase used scoped report/index changes and offline synthetic
+verification only. The owner later separately authorized staging and commit
+`97ad00c109040edaf212fc141c34d307bc64442a`. The pre-push audit made only unstaged
+report amendments. **No push, merge, deployment, release, publication or hosted-
+service write occurred.** No reset, clean, stash, overwrite of owner work, revert,
+or unauthorized Git write occurred. Pi review work did not create Wi provider
+traffic or change the ledger.
 
 `live_started=false`, `real_credential_reads=0`, `provider_generations=0`.
 Real owner skills/projects/auth/profile/login/refresh/provider/hosted operations
@@ -354,3 +357,98 @@ Ledger: **31/50 used, 19 remaining, changed=false; new allocation 0**.
 Remaining balance is not authorization. Offline technical acceptance is complete;
 Git submission, native CI, and live verification remain separate and unauthorized
 or unrun as stated above.
+
+## Pre-push repository-consistency audit follow-up — 2026-09-12
+
+Audit source: [PR #3 issue comment 5640780593](https://github.com/zer09/wi/pull/3#issuecomment-5640780593).
+The designer reviewed baseline `94d86e0c` and planning head `24aab839`; the reviewer
+could not see the local S2 implementation. The parent retrieved the complete comment
+with authenticated read-only `gh api` and compared it with current local commit
+`97ad00c109040edaf212fc141c34d307bc64442a`. The pre-audit worktree was clean and
+had no untracked implementation files. The 25 implementation/report paths are all
+represented by that commit. No hosted mutation occurred.
+
+### A-01 through A-05 disposition
+
+All five findings are **corroborated, inherited, open, and not S2 blockers**. No
+counterexample regression or repair was added because the audit did not authorize
+unrelated cleanup. None makes s2.1 unsatisfiable. A path-limited baseline-to-HEAD
+diff is empty for every cited production path except `src/cli/run_cli.rs`; its S2
+hunks change loader preparation and help only, not `render`.
+
+| ID | Status and current source evidence | S2 impact | Repair evidence |
+|---|---|---|---|
+| A-01 | **OPEN_INHERITED_CORROBORATED (medium).** Legacy `collect` passes streamed deltas, terminal suffixes and fallback text to byte-preserving `write_text` (`src/cli/mod.rs:156-209`). Unsupported terminal controls therefore reach plain `generate`/`tool-demo`. | `src/cli/mod.rs` is byte-identical to baseline. S2 does not use or modify this legacy renderer. Not introduced or worsened. | NOT RUN; no approved fix or focused control-sequence regression. |
+| A-02 | **OPEN_INHERITED_CORROBORATED (medium).** `context_cli::filtered` removes every Unicode control (`src/cli/context_cli.rs:66-68`); `run_cli::render` applies it to deltas and final text (`src/cli/run_cli.rs:150-185`), so LF/tab formatting collapses with unsafe controls. | `src/cli/run_cli.rs` changed for help and preparation/registry pairing only. The render body and shared filter are unchanged. S2 can produce ordinary model text but does not introduce or worsen the presentation rule. | NOT RUN; existing control filtering test does not prove multiline/code-block preservation. |
+| A-03 | **OPEN_INHERITED_CORROBORATED (low/medium).** Legacy `generate` calls `open` before its first `SessionControl::generate`, where input validation occurs (`src/cli/mod.rs:145-150,210-264`; `src/providers/openai_codex/session.rs:54-72`). Invalid prompt validation can therefore follow credential/provider/session work. | Legacy CLI and provider/session paths are unchanged. S2 `wi run` validates prompt/options at `src/cli/run_cli.rs:60-106` before discovery, diagnostics and provider construction. Not introduced or worsened. | NOT RUN; no approved legacy-ordering repair or new injected-counter regression. |
+| A-04 | **OPEN_INHERITED_CORROBORATED (low).** `AuthExpired` still says the gateway never rotates refresh tokens (`src/error.rs:35-38`), while managed credentials renew in `ManagedCredentials::prepare` (`src/providers/openai_codex/managed_auth.rs:207-263`). Exported code remains `auth_expired` (`src/error.rs:102-124`). | Error/auth/managed-auth files are byte-identical to baseline. S2 does not alter authentication or error categories. Not introduced or worsened. | NOT RUN; no wording change or auth regression was authorized. |
+| A-05 | **OPEN_INHERITED_CORROBORATED (medium).** Decoder `required_str` checks type but not nonempty identity. `ResponseDecoder::apply` and `parse_response` can produce and settle a terminal-only completed response with `id:""` (`src/providers/openai_codex/codec.rs:24-165,239-324`; `session.rs:321-378`), while `run::Collector::observe` rejects empty IDs (`src/run/collect.rs:13-60`). Strict missing-Content-Type SSE admission is a separate earlier check. | Codec, consistency, state, wire, run collector and production provider files are byte-identical to baseline. Normal S2 runs still pass through the rejecting collector; loopbacks use valid IDs. Not introduced or worsened. | NOT RUN; no approved decoder/loopback empty-ID regression or fix. |
+
+The audit's additional README wording, stale Node diagnostic literal, workflow
+coverage and static-inventory notes are also inherited review notes. S2 did not
+change `scripts/cli_retest.mjs` or `.github/workflows/ci.yml`; local examples,
+Node self-tests, verifier output and hosted CI remain separately attributed.
+No claim marks those notes fixed.
+
+### S2 producer-to-consumer corroboration
+
+| Required path | Actual production path | Executed regression evidence |
+|---|---|---|
+| Loader failure to correlated error/event | `load_skill` returns `ContextError`; `SkillLoader::execute` maps load/join failure to `ToolFailed` (`src/context/skill_loading.rs:128-177`); registry converts `error.code()` to JSON, caches it, emits finish `is_error=true`, then returns correlated `InputItem::ToolResult` (`src/tools.rs:181-248`). `GatewayError::code()` leaves ToolFailed on wildcard `gateway_error` (`src/error.rs:102-124`). `run::prepare_tools` sends that real result into the next ordinary turn (`src/run/mod.rs:238-295,341-401`). | `known_load_failures_are_sanitized_correlated_error_results`; `worker_join_failure_uses_existing_tool_failed_mapping_and_error_event`; public scripted-provider and loopback continuations. |
+| Mixed-batch preflight | `ToolRegistry::preflight` validates the entire response and every tool argument before it returns `PreparedBatch`; execution starts only afterward (`src/tools.rs:104-181`). | `invalid_load_or_unsupported_authority_rejects_whole_batch_without_execution` asserts mixed `add_numbers`/bad-load rejection with no execution, event or cache result. |
+| Metadata identity and read timing | Catalog lookup selects only the captured entry. Each new `load_skill` read reparses frontmatter and compares it before decoding/returning the owned body (`src/context/skill_loading.rs:51-72,157-177`). | `shared_loader_preserves_scoped_identity_frontmatter_and_owned_body`; `all_selected_ids_precede_project_and_body_io_and_keep_error_order`; changed/corrupt metadata cases in `known_load_failures_are_sanitized_correlated_error_results`. |
+| Cache-before-finish and reuse | Registry inserts the serialized success/error result at `src/tools.rs:224-231` before emitting finish at `:232-236`; exact same call ID/arguments returns saved output and emits only reuse at `:190-199`. | `new_calls_reread_bodies_cached_calls_reuse_and_fresh_scopes_stay_independent`; `exactly_64_kib_is_allowed_escape_overhead_counts_and_output_errors_are_reused`; `cancellation_and_sink_failure_keep_completed_cache_and_stop_later_loads`. |
+| Cancellation | Run checkpoints and biased cancellation surround generate/preflight/each execution/result validation (`src/run/mod.rs:71-90,238-295,341-401`). A dropped pending loader future cannot insert or emit because registry mutation occurs only after awaited execution returns. | Deterministic `pending_blocking_load_cancel_or_waiter_drop_cannot_publish_or_cache` plus public-run cancellation and observer-failure tests. |
+| Catalog/registry pairing | Helper clones one caller `Arc<SkillCatalog>` into the loader and uses the same catalog for composition, returning a fresh registration scope (`src/context/preparation.rs:104-121`). Public `run` takes a new result scope while preserving registrations. | `helper_retains_ordinary_definitions_without_sharing_template_results`; `paired_preparation_keeps_metadata_explicit_order_and_truthful_framing`; concurrent same-ID workspace test; scripted provider and both transport loopbacks. |
+| Diagnostic delivery before construction | CLI captures diagnostics before preparation, returns both without an early preparation `?`, emits notices, unwraps preparation, then calls provider/auth factory (`src/cli/run_cli.rs:107-127`). | `run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson`; `run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory`; process-level auth-precedence tests. |
+
+This is path verification, not a fabricated expected-JSON review: the named tests
+exercise the actual registry and public controller. Direct tool tests separately
+prove the intermediate `ToolFailed` variant. The source trace confirms preflight
+errors never become correlated execution results, file-size and serialization-size
+failures occur at different stages, and no production error category changed.
+
+### Fresh post-audit offline gates
+
+Parent-observed execution used synthetic `/tmp/wi-s2-audit-final` HOME,
+XDG_CONFIG_HOME, CODEX_HOME and TMPDIR, trusted Cargo/Rustup/uv caches, an allowlisted
+`env -i`, `CARGO_NET_OFFLINE=true`, `UV_OFFLINE=true`, and
+`UV_PYTHON_DOWNLOADS=never`. Platform/toolchain at completion: Linux
+`6.18.33.2-microsoft-standard-WSL2` x86_64; rustc/cargo 1.98.1; uv 0.12.10;
+Node v24.18.0; Git 2.55.0. Completion observation: `2026-09-12T05:55:35Z`.
+
+All required commands exited 0: format, check, **374 Rust tests**, warning-denied
+Clippy, build, zero doctests, `uv run scripts/verify.py` with inventory
+**123 source files / 361 Rust test definitions / 25 fixture events** and its six
+internal Cargo gates, **152 Node self-tests** with `live_started=false`, all three
+offline examples (50, 42, and Reviewed offline), and `git diff --check`. No gate
+failed or required a retry. This repeats unchanged S2 runtime evidence after reading
+the audit; it does not execute A-01 through A-05 counterexample regressions.
+
+### Follow-up independent complete-diff review
+
+**PASS.** Three fresh parent-launched reviewers independently inspected
+`94d86e0c..97ad00c`, both unstaged report amendments, the complete worktree and the
+seven required producer-to-consumer paths. Each returned PASS with no blocking
+findings:
+
+- review-a corroborated all five inherited classifications and all seven paths,
+  then independently ran all 374 Rust tests and `git diff --check` successfully;
+- review-b corroborated the complete diff, source paths, report JSON and audit
+  comment with focused read-only checks; and
+- review-c independently reran the complete isolated offline set with matching
+  374/152/123/361/25 results and all three examples.
+
+The review confirms A-01 through A-05 remain open inherited findings, are not
+introduced or worsened by S2, and do not make s2.1 unsatisfiable. No reviewer
+recommended an S2 remediation. The S2 matrix remains **24/24 PASS** and its status
+remains **OFFLINE_ACCEPTED**. The unrelated inherited findings have no claim of a
+fix or executed counterexample regression. A reviewer also noted that the root
+`AGENTS.md` planning-handoff sentence is stale after the authorized implementation
+commit; it is an inherited phase-documentation note, not a runtime or S2 matrix
+failure, and was not changed under this audit.
+
+Native macOS/Windows, submitted-revision CI and live model adherence remain NOT
+RUN. No real credentials/authentication commands/provider traffic, hosted mutation,
+or new ledger allocation occurred. These report amendments remain unstaged and
+uncommitted; push remains separately unauthorized.

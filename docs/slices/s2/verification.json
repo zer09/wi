@@ -3,10 +3,10 @@
   "contract": "s2.1",
   "status": "OFFLINE_ACCEPTED",
   "accepted": true,
-  "verdict": "All required offline execution gates passed. All 24 matrix rows PASS. Three fresh independent accumulated complete-diff reviews returned PASS with no blocking findings.",
+  "verdict": "All required offline execution gates passed and all 24 matrix rows PASS. The pre-push repository audit corroborates five inherited open findings that do not conflict with or result from S2. Three fresh independent complete-diff reviewers returned PASS with no blocking findings.",
   "baseline": "94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa",
-  "tested_revision": "24aab8396303dac1de17284e0d4fbee4e5b3bc1a",
-  "tested_worktree_description": "Dirty, unstaged, uncommitted accumulated S2 increments 1-3 on the tested HEAD. HEAD does not contain the implementation or these reports. The reporting increment and parent final-status update changed only the two reports and the docs index.",
+  "tested_revision": "97ad00c109040edaf212fc141c34d307bc64442a",
+  "tested_worktree_description": "Commit 97ad00c contains the complete 25-path S2 implementation and original reports. The pre-audit worktree was clean with no untracked files. Only the later audit amendments to both verification reports are currently unstaged and are not represented by tested_revision.",
   "worktree": {
     "original_implementation_start_clean": true,
     "original_clean_observer": "P: supplied parent observation, not this delegate's initial state",
@@ -15,9 +15,14 @@
     "initial_untracked_files": 10,
     "final_modified_tracked_files": 13,
     "final_untracked_files": 12,
-    "staged_changes": false,
-    "implementation_represented_by_head": false,
+    "staged_changes_at_original_report": false,
+    "implementation_represented_by_head": true,
     "baseline_ancestry_check": "PASS",
+    "pre_audit_head": "97ad00c109040edaf212fc141c34d307bc64442a",
+    "pre_audit_worktree_clean": true,
+    "pre_audit_untracked_files": 0,
+    "current_unstaged_audit_report_amendments": ["docs/slices/s2/VERIFICATION.md", "docs/slices/s2/verification.json"],
+    "audit_report_amendments_represented_by_head": false,
     "preserved_fingerprint": {
       "algorithm": "sha256(sorted UTF-8 path NUL contents NUL)",
       "files": 182,
@@ -384,7 +389,116 @@
     "preserved_initial_untracked": ["examples/skill_loading_offline.rs", "src/context/skill_loading.rs", "src/context/skill_loading/tests.rs", "tests/run_support/skill_loading.rs", "tests/skill_loading.rs", "tests/skill_loading/boundaries.rs", "tests/skill_loading/filesystem.rs", "tests/skill_loading/loading.rs", "tests/skill_loading/preparation.rs", "tests/skill_loading/registry.rs"],
     "temporary_helpers_outside_repository": ["/tmp/wi-s2-final-k5UCVkK4/gate.mjs", "/tmp/wi-s2-final-k5UCVkK4/report-check.mjs"]
   },
+  "pre_push_consistency_audit": {
+    "status": "PASS",
+    "source": {
+      "url": "https://github.com/zer09/wi/pull/3#issuecomment-5640780593",
+      "comment_id": 5640780593,
+      "author": "zer09",
+      "created_at": "2026-09-11T21:21:17Z",
+      "reviewed_runtime": "94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa",
+      "reviewed_planning_head": "24aab8396303dac1de17284e0d4fbee4e5b3bc1a",
+      "local_S2_unseen_by_designer": true
+    },
+    "local_review": {
+      "observer": "parent/orchestrator source and complete baseline-to-HEAD diff inspection",
+      "tested_revision": "97ad00c109040edaf212fc141c34d307bc64442a",
+      "pre_audit_worktree_clean": true,
+      "untracked_implementation_files": 0,
+      "S2_commit_paths": 25,
+      "s2_1_unsatisfiable": false,
+      "production_paths_changed_among_A01_A05": ["src/cli/run_cli.rs"],
+      "run_cli_render_changed": false,
+      "all_other_cited_production_paths_byte_identical_to_baseline": true
+    },
+    "findings": [
+      {
+        "id": "A-01", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/cli/mod.rs:156-209 sends delta, terminal suffix and fallback bytes through unfiltered write_text; the file is byte-identical to baseline.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-02", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/cli/context_cli.rs:66-68 removes all Unicode controls and src/cli/run_cli.rs:150-185 applies it to response text, collapsing LF/tab. S2 changed run_cli help/preparation only; render and the filter are unchanged.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-03", "severity": "low_medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "Legacy generate opens a provider session at src/cli/mod.rs:210-264 before SessionControl::generate validates input at src/providers/openai_codex/session.rs:54-72. Legacy paths are unchanged; S2 wi run validates before construction.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-04", "severity": "low", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/error.rs:35-38 says the gateway never rotates refresh tokens while src/providers/openai_codex/managed_auth.rs:207-263 implements managed renewal. Error/auth production paths are byte-identical to baseline and auth_expired code is unchanged.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      },
+      {
+        "id": "A-05", "severity": "medium", "status": "OPEN_INHERITED_CORROBORATED", "introduced_by_S2": false, "worsened_by_S2": false,
+        "evidence": "src/providers/openai_codex/codec.rs:24-165,239-324 accepts string-typed empty response identity and session drive can settle it, while src/run/collect.rs:13-60 rejects empty IDs. All cited production paths are byte-identical to baseline; normal S2 run uses the rejecting collector.",
+        "focused_counterexample_regression": "NOT_RUN", "fixed": false, "S2_blocker": false
+      }
+    ],
+    "additional_inherited_notes": [
+      "Active README retains historical hosted-CI wording that can be misread without its date/stage context.",
+      "scripts/cli_retest.mjs retains a historical lifecycle-guard literal whose current producer correspondence is not established.",
+      "GitHub CI runs six Cargo gates, not Node self-tests, verify.py or examples; evidence categories remain separate.",
+      "Static verifier inventory is not an executed-test count.",
+      "Root AGENTS.md retains planning-handoff wording that predates the authorized S2 implementation commit; this inherited phase-documentation note does not affect runtime or an S2 matrix row."
+    ],
+    "producer_consumer_verification": [
+      {"path": "loader_error_to_registry_result", "status": "CORROBORATED", "sources": ["src/context/skill_loading.rs:128-177", "src/tools.rs:181-248", "src/error.rs:102-124", "src/run/mod.rs:238-295,341-401"], "tests": ["known_load_failures_are_sanitized_correlated_error_results", "worker_join_failure_uses_existing_tool_failed_mapping_and_error_event", "skill_loading_public_run_delivers_real_body_with_explicit_selections_or_without"]},
+      {"path": "mixed_batch_preflight", "status": "CORROBORATED", "sources": ["src/tools.rs:104-181"], "tests": ["invalid_load_or_unsupported_authority_rejects_whole_batch_without_execution"]},
+      {"path": "metadata_revalidation", "status": "CORROBORATED", "sources": ["src/context/skill_loading.rs:51-72,157-177"], "tests": ["shared_loader_preserves_scoped_identity_frontmatter_and_owned_body", "all_selected_ids_precede_project_and_body_io_and_keep_error_order", "known_load_failures_are_sanitized_correlated_error_results"]},
+      {"path": "cache_before_finish_and_reuse", "status": "CORROBORATED", "sources": ["src/tools.rs:190-236"], "tests": ["new_calls_reread_bodies_cached_calls_reuse_and_fresh_scopes_stay_independent", "exactly_64_kib_is_allowed_escape_overhead_counts_and_output_errors_are_reused", "cancellation_and_sink_failure_keep_completed_cache_and_stop_later_loads"]},
+      {"path": "cancellation", "status": "CORROBORATED", "sources": ["src/run/mod.rs:71-90,238-295,341-401", "src/tools.rs:181-248"], "tests": ["pending_blocking_load_cancel_or_waiter_drop_cannot_publish_or_cache", "skill_loading_public_run_cancels_before_dispatch_or_before_later_call", "skill_loading_public_run_observer_failure_stops_later_work_and_delivery"]},
+      {"path": "catalog_registry_pairing", "status": "CORROBORATED", "sources": ["src/context/preparation.rs:104-121", "src/run/mod.rs"], "tests": ["helper_retains_ordinary_definitions_without_sharing_template_results", "paired_preparation_keeps_metadata_explicit_order_and_truthful_framing", "concurrent_same_id_workspaces_keep_sources_results_and_catalogs_separate"]},
+      {"path": "diagnostics_before_provider_construction", "status": "CORROBORATED", "sources": ["src/cli/run_cli.rs:107-127"], "tests": ["run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson", "run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory", "run_binary_prevalidation_precedes_external_and_managed_auth_location"]}
+    ],
+    "post_audit_execution": {
+      "observer": "parent/orchestrator",
+      "completed_at": "2026-09-12T05:55:35Z",
+      "isolation": "env -i with synthetic /tmp/wi-s2-audit-final HOME, XDG_CONFIG_HOME, CODEX_HOME and TMPDIR; trusted Cargo/Rustup/uv caches; CARGO_NET_OFFLINE=true; UV_OFFLINE=true; UV_PYTHON_DOWNLOADS=never",
+      "platform": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+      "toolchain": {"rustc": "1.98.1", "cargo": "1.98.1", "uv": "0.12.10", "node": "v24.18.0", "git": "2.55.0"},
+      "commands": [
+        {"command": "cargo fmt --all -- --check", "status": "PASS", "exit_code": 0},
+        {"command": "cargo check --all-targets", "status": "PASS", "exit_code": 0},
+        {"command": "cargo test --all-targets", "status": "PASS", "exit_code": 0, "passed": 374, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0},
+        {"command": "cargo clippy --all-targets -- -D warnings", "status": "PASS", "exit_code": 0},
+        {"command": "cargo build --all-targets", "status": "PASS", "exit_code": 0},
+        {"command": "cargo test --doc", "status": "PASS", "exit_code": 0, "doctests": 0},
+        {"command": "uv run scripts/verify.py", "status": "PASS", "exit_code": 0, "inventory": {"source_files": 123, "rust_test_definitions": 361, "fixture_events": 25}, "internal_cargo_gates": "PASS"},
+        {"command": "node scripts/cli_retest.mjs --self-test", "status": "PASS", "exit_code": 0, "passed": 152, "live_started": false},
+        {"command": "cargo run --example run_offline", "status": "PASS", "exit_code": 0, "answer": "50"},
+        {"command": "cargo run --example skills_offline", "status": "PASS", "exit_code": 0, "answer": "42"},
+        {"command": "cargo run --example skill_loading_offline", "status": "PASS", "exit_code": 0, "answer": "Reviewed offline."},
+        {"command": "git diff --check", "status": "PASS", "exit_code": 0, "phase": "before audit report amendments"}
+      ],
+      "failed_gates": 0,
+      "failure_triggered_retries": 0,
+      "A01_A05_counterexample_regressions_executed": false,
+      "live_started": false,
+      "real_credential_reads": 0,
+      "provider_generations": 0
+    },
+    "independent_complete_diff_review": {
+      "status": "PASS",
+      "scope": "Complete baseline-to-current diff 94d86e0c..97ad00c, all current worktree changes/untracked state, A-01 through A-05, all seven required producer-to-consumer paths, s2.1 and all 24 matrix rows",
+      "reviewers": [
+        {"reviewer": "review-a", "status": "PASS", "blocking_findings": 0, "independent_execution": "cargo test --all-targets: 374 passed; git diff --check: PASS"},
+        {"reviewer": "review-b", "status": "PASS", "blocking_findings": 0, "independent_execution": "Focused read-only complete-diff, worktree, JSON, whitespace and authenticated audit-comment checks"},
+        {"reviewer": "review-c", "status": "PASS", "blocking_findings": 0, "independent_execution": "Complete isolated offline gate set: 374 Rust tests; verifier 123/361/25; Node 152 live_started=false; three examples; all other gates PASS"}
+      ],
+      "blocking_findings": 0,
+      "classification_confirmed": "A-01 through A-05 are OPEN_INHERITED_CORROBORATED, not fixed, not introduced/worsened by S2, and not s2.1 blockers",
+      "s2_1_satisfiable": true,
+      "matrix_complete": true,
+      "matrix_passed": 24,
+      "remediation_required": false
+    }
+  },
   "remaining_limits": [
+    "A-01 through A-05 remain open inherited findings. They are corroborated but not fixed; focused counterexample regressions are NOT_RUN because no unrelated repair was authorized.",
     "No live model choice/adherence proof; NOT_RUN and not authorized.",
     "Native macOS/Windows, cross-compilation and current submitted-revision CI are NOT_RUN; local Linux evidence is not their substitute.",
     "Only catalog main SKILL.md is read. Supporting references/assets/files/scripts, generic readers, process/network tools, hosted operations, provider-native search, PTC, async tools and steering remain excluded or separately deferred.",
@@ -407,14 +521,16 @@
   "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false},
   "new_live_allocation": 0,
   "authorization": {
-    "used": "Scoped implementation/report/index work, offline synthetic verification, three read-only final reviews, and factual acceptance-status updates only; trusted local build tooling and loopbacks permitted.",
+    "used": "Scoped implementation/report/index work, offline synthetic verification, owner-authorized staging and commit 97ad00c, read-only independent reviews, repository consistency audit, and unstaged factual report amendments only; trusted local build tooling and loopbacks permitted.",
     "pi_authoring_separate_from_Wi_test_traffic": true,
     "remaining_ledger_balance_is_authorization": false,
-    "staging": false, "unstaging": false, "commits": false, "pushes": false, "merges": false,
+    "staging": true, "staging_authorized": true, "unstaging": false, "commits": true, "commit_authorized": true,
+    "commit": "97ad00c109040edaf212fc141c34d307bc64442a", "pushes": false, "merges": false,
+    "audit_report_amendments_staged": false, "audit_report_amendments_committed": false,
     "deployments": false, "releases": false, "publication": false, "hosted_service_writes": false,
     "reset_clean_stash_revert": false, "owner_changes_overwritten": false,
     "new_agents_or_subagents_launched": true,
-    "final_read_only_review_delegates_launched": 3,
+    "final_read_only_review_delegates_launched": 6,
     "delegate_activity_is_Wi_provider_traffic": false,
     "dependency_downloads": false
   },

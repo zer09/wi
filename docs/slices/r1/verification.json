@@ -14,6 +14,7 @@
   },
   "post_acceptance_follow_up": {
     "id": "NB-02",
+    "revision": "f8a55f82244bd886fe8cbd8b1236b6e2f6fe1c26",
     "status": "RESOLVED_COMMITTED",
     "scope": "Legacy RequestFailed diagnostic presentation only",
     "source_references": ["src/cli/mod.rs:175-237", "src/cli/collect_tests.rs:320-363"],

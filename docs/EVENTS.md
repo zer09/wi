@@ -257,8 +257,10 @@ by the ordinary continuation/executor path.
 
 `tool_execution_started`, `tool_execution_finished`, and `tool_result_reused` are
 emitted by the separate tool registry, not by the provider. Legacy `tool-demo`
-writes raw NDJSON objects distinguished by `type`. `wi run` nests these same objects
-inside `tool_event` with run/turn/session/request correlation. Neither form is durable.
+writes raw `ToolExecutionEvent` NDJSON objects distinguished by `type` to stdout only
+with `--json`. Without `--json`, tool execution events are Debug diagnostics on stderr.
+`wi run` nests these same objects inside `tool_event` with run/turn/session/request
+correlation. Neither form is durable.
 `load_skill` uses these existing events, not a new skill lifecycle or provider event.
 
 | Loader condition | Existing observation |

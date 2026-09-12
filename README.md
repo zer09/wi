@@ -502,9 +502,11 @@ lifecycle proof, and tool assertions remain unchanged.
 `terminal_text_state` distinguishes `available`, `no_ordinary_parts`,
 `missing_or_invalid_output`, `malformed_content`, `unsupported_kind_or_part`,
 `over_limit`, and `no_terminal`. `streamed_text_state` distinguishes `available`,
-`no_deltas`, `malformed_content`, and `over_limit`. Each equality has a corresponding
-`*_unavailable` reason: null when compared, otherwise one of these static states,
-`not_validated`, or `not_applicable`. First-turn tool expected text is not applicable.
+`no_deltas`, `malformed_content`, and `over_limit`. The three native equalities have
+corresponding `*_unavailable` reason fields: null when compared, otherwise one of
+these static states, `not_validated`, or `not_applicable`. First-turn tool expected
+text is not applicable. Effective equality fields are nullable and have no dedicated
+`*_unavailable` fields.
 Terminal shape is captured before decoding; validation is recorded only after parsing.
 `finalized_items` counts total, message, function_call, reasoning, other, and malformed
 done events, including duplicates. Counters saturate at 4096 per request;

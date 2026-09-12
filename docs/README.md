@@ -17,6 +17,20 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 New slice documents use `docs/slices/<slice>/`. S2's governing contract and
 implementation handoff are below. P1/V1 storage and service design remain deferred.
 
+## Historical-citation errata (2026-09-12 UTC)
+
+These citation corrections leave the four historical report files unchanged.
+
+- C1: `src/run/events.rs:35-59` should read `src/run/events.rs:35-58`
+  in `docs/WI_EXECUTION_POLICY_C1_VERIFICATION.md:110,150` and evidence `E01`
+  in `docs/wi-execution-policy-c1-verification.json`.
+- S2: `.github/workflows/ci.yml:1-24` should read `.github/workflows/ci.yml:1-23`
+  in `docs/slices/s2/VERIFICATION.md:263` and the `ci` observations in
+  `docs/slices/s2/verification.json`.
+
+Both behavioral claims remain correct: `RunEvent` has four lifecycle kinds and
+two wrappers; CI configures Ubuntu, Windows and macOS with all six Cargo gates.
+
 ## Offline-accepted repair: R1
 
 S2 merged in PR #3 at `4eed18b`. R1 contract **r1.0** repairs inherited A-01..A-05:

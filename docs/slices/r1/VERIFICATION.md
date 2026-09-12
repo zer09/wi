@@ -496,4 +496,6 @@ The final product's one-owner multi-device service requirements do not begin her
 Browser disconnect must not own service cancellation; persistent application
 sessions and restart-without-replay still require later design. Neither local
 repair evidence nor the unchanged ledger authorizes later product or live work. The
-owner authorized only implementation commit `88b76c5`; no push or merge occurred.
+owner authorized implementation commit `88b76c50756255193d0b681da748ed96ceec9f74`
+and NB-02 follow-up commit `f8a55f82244bd886fe8cbd8b1236b6e2f6fe1c26`;
+no push or merge occurred.

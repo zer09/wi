@@ -9,6 +9,9 @@ use serde_json::Value;
 #[cfg(test)]
 #[path = "tests/recovery/recovery_tests.rs"]
 mod recovery_tests;
+#[cfg(test)]
+#[path = "tests/wire_format/response_identity_tests.rs"]
+mod response_identity_tests;
 
 const MAX_ITEMS: usize = 512;
 
@@ -36,7 +39,7 @@ impl ResponseDecoder {
                 let response = value
                     .get("response")
                     .ok_or(GatewayError::Protocol("response missing"))?;
-                let id = required_str(response, "id")?;
+                let id = required_response_id(response)?;
                 if self.response_id.is_some() {
                     return Err(GatewayError::Protocol("duplicate response.created"));
                 }
@@ -237,7 +240,7 @@ pub(super) fn parse_item(native: Value) -> Result<OutputItem> {
 }
 
 pub(super) fn parse_response(native: Value) -> Result<ModelResponse> {
-    let id = required_str(&native, "id")?.to_owned();
+    let id = required_response_id(&native)?.to_owned();
     let outcome = match required_str(&native, "status")? {
         "completed" => ResponseOutcome::Completed,
         "incomplete" => ResponseOutcome::Incomplete {
@@ -315,6 +318,15 @@ pub(super) fn parse_response(native: Value) -> Result<ModelResponse> {
         usage,
         native,
     })
+}
+
+// Keep identity validation separate because empty text and delta strings are valid.
+fn required_response_id(v: &Value) -> Result<&str> {
+    let id = required_str(v, "id")?;
+    if id.is_empty() {
+        return Err(GatewayError::Protocol("empty response identity"));
+    }
+    Ok(id)
 }
 
 fn required_str<'a>(v: &'a Value, field: &str) -> Result<&'a str> {

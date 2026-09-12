@@ -33,7 +33,7 @@ pub enum GatewayError {
     #[error("invalid subscription credentials: {0}")]
     InvalidAuth(&'static str),
     #[error(
-        "login expired or expires within 30 seconds; refresh in Codex/Pi, then open a NEW session; the gateway never rotates refresh tokens"
+        "login expired or expires within 30 seconds; renew Wi-managed credentials through Wi, or external credentials through Codex/Pi; then open a new provider session; established WebSockets cannot renew in place"
     )]
     AuthExpired,
     #[error("credential account changed during this session; open a new session explicitly")]
@@ -121,5 +121,34 @@ impl GatewayError {
             Self::Http { .. } => "http_error",
             _ => "gateway_error",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::openai_codex::auth::SubscriptionCredentials;
+
+    #[test]
+    fn r1_a04_synthetic_freshness_error_has_owner_specific_display() {
+        let error = SubscriptionCredentials::from_access_token(
+            "synthetic-oauth-token".into(),
+            Some("synthetic-account".into()),
+            Some(1),
+        )
+        .unwrap_err();
+        assert!(matches!(error, GatewayError::AuthExpired));
+        assert_eq!(error.code(), "auth_expired");
+        assert_eq!(
+            format!("{error}"),
+            "login expired or expires within 30 seconds; renew Wi-managed credentials through Wi, or external credentials through Codex/Pi; then open a new provider session; established WebSockets cannot renew in place"
+        );
+    }
+
+    #[test]
+    fn r1_a04_error_codes_remain_compatible() {
+        assert_eq!(GatewayError::AuthExpired.code(), "auth_expired");
+        assert_eq!(GatewayError::ToolFailed.code(), "gateway_error");
+        assert_eq!(GatewayError::Protocol("synthetic").code(), "protocol_error");
     }
 }

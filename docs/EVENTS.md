@@ -1,6 +1,11 @@
 # Event contracts (Wi 0.2.0)
 
 Provider events use schema 1; outer run events use schema 2 under C1.1.
+R1 changes no public event schema. Its repairs are locally implemented and
+offline accepted in the uncommitted worktree. The
+[verification report](slices/r1/VERIFICATION.md) records local PASS evidence and
+repeated complete-diff review; `accepted=true`. Exact-head cross-platform CI is
+NOT RUN.
 
 Managed authentication does not change the event JSON schema. The CLI reports
 only the validated selected profile alias on stderr. Provider account IDs and
@@ -11,6 +16,31 @@ explicit renewal has live L1 evidence; automatic expiry and failure paths have
 offline evidence. Explicit auth refresh
 returns safe profile metadata, not generation events. SSE prepares the same bound
 profile before submission; established WebSockets never renew mid-session.
+`AuthExpired` retains `auth_expired` with owner-specific renewal guidance through
+Wi for managed credentials or Codex/Pi for external credentials, followed by a new
+provider session. The [exact message](WI_AUTH.md#expiry-guidance-r1) changes no
+freshness, renewal or upstream-outcome behavior.
+
+## Plain presentation and legacy preflight (R1)
+
+Plain answer bodies from legacy `generate`/`tool-demo` and `wi run` preserve LF,
+HT and all non-control Unicode scalars, dropping other controls. CRLF becomes LF;
+spaces, indentation and fences remain without trimming. Filtering is stateless
+across deltas and applies to terminal-only, suffix and labelled fallback bodies.
+One-line diagnostics, source labels and catalog descriptions still remove all
+controls. Labels, flushes and sink failure/exit behavior remain unchanged.
+The filter is not an ANSI parser or a general Unicode/terminal security guarantee.
+
+Presentation does not mutate raw prefix comparisons, `ModelResponse`, native
+objects or tool data. After JSON/NDJSON parsing, text still equals the original
+control-containing data. These records remain sensitive application data.
+
+After parsing, legacy `generate` validates the initial one-item input, a supplied
+follow-up separately, and actual options before provider/auth construction.
+Source-read errors precede validation. Invalid input/follow-up/options emit no
+response bytes or JSON events and exit 1; malformed legacy Clap syntax retains
+exit 2. Valid inputs retain their bytes and one-session flow, without S1/S2
+preparation or a new combined quota.
 
 ## Context preparation and skill-loading events
 
@@ -110,6 +140,27 @@ Local closure during active generation does not emit a fabricated upstream
 emits `response_started` to expose its identity. This synthetic normalized start
 does not prove that native `response.created` was received. The opt-in smoke
 observer counts native-created events separately, without changing this contract.
+
+The shared decoder rejects empty required response IDs in `response.created` and
+terminal parsing with static `Protocol("empty response identity")`, exported as
+`protocol_error`. Rejection precedes assignment of the empty ID, synthesized start,
+successful finish, `terminal_received`, recovery and settlement. A valid earlier
+start remains visible if a later terminal fails. Missing/null/non-string IDs retain
+the existing required-string failure. Nonempty IDs remain opaque, without trimming
+or new length/character rules; empty text/refusal/delta strings remain compatible.
+
+A post-send WS or labelled-SSE identity failure emits `request_failed` with
+`protocol_error` and `unknown`, closes the session and admits no continuation.
+A terminal type string alone cannot establish `terminal_received`. Missing-MIME
+SSE rejects an invalid first identity in its earlier prolog as
+`unexpected_content_type`/`unknown`; that is preserved admission behavior, not a
+new decoder category. Valid parsed/correlated terminals followed by later local
+recovery, consistency or delivery failure can still retain `terminal_received`.
+
+Through the public run controller, an actual adapter failure keeps outer
+`provider_request_failed` and the nested provider error/outcome, with no tool
+execution or follow-up. A fake provider bypassing the decoder still exercises the
+existing `provider_correlation` guard. No new run outcome is added.
 
 `response.output_item.added` / `.done` → item started / finished.
 

@@ -1,5 +1,10 @@
 # Wi architecture and ownership
 
+R1 repairs are locally implemented and offline accepted in the uncommitted
+worktree. The [R1 evidence](slices/r1/VERIFICATION.md) records passing local gates
+and repeated complete-diff review; `accepted=true`. Exact-head cross-platform CI
+is NOT RUN. S1/S2 ownership and public schemas remain unchanged.
+
 ## One crate, explicit module boundaries
 
 | Module | Responsibility |
@@ -155,6 +160,32 @@ follow-up body and final fixture text in two requests. No ambient context/auth
 roots, credentials or provider networking are used. Offline scripts and loopbacks
 do not prove that a live model chooses or follows a skill; that remains NOT RUN.
 
+## CLI presentation and legacy preflight (R1)
+
+Plain answer presentation shares a private stateless filter across legacy
+`generate`/`tool-demo` collection and `wi run` rendering. It keeps non-control
+Unicode scalars plus LF and HT, and drops other controls. CRLF becomes LF; spaces,
+indentation and Markdown fences remain without trimming. The filter is not an
+ANSI parser: sequence-shaped payload text can remain after controls are removed.
+Diagnostics, source labels and catalog descriptions retain the separate one-line
+filter that removes all controls.
+
+Filtering applies only to displayed bodies, including legacy deltas, terminal-only
+text, suffixes and labelled fallback. Raw prefix comparison, returned response/native
+data, JSON/NDJSON, labels, flushing and I/O failure propagation remain unchanged.
+Private writer seams let tests capture the actual consumers without global stdout
+redirection. This is not a general Unicode or terminal-emulator security guarantee.
+
+The actual legacy `generate` handler reads the initial source, validates that
+one-item input, validates a supplied follow-up as its own one-item input, then
+validates actual session options before provider/auth/session construction.
+An invalid follow-up consumes no first generation. Source errors precede input
+errors; initial input precedes follow-up, which precedes options. Existing stdin
+byte/UTF-8 checks, accepted bytes and provider-side defensive validation remain.
+Valid requests retain one session and normal close. Runtime validation exits 1
+with empty stdout; malformed legacy Clap syntax retains exit 2. No aggregate
+request quota or implicit S1/S2 preparation is added to the legacy flow.
+
 ## Managed authentication boundary
 
 The package, library, and CLI are `wi`; `Gateway` remains the routing abstraction.
@@ -171,7 +202,11 @@ parser and fixed-TLS-response trust model. It permits no proxy, redirect, or ret
 connect/read limits are 10 seconds, exchange time 30 seconds, and response size
 65536 bytes. Explicit renewal has live L1 evidence; automatic expiry and failure
 paths have offline evidence.
-See [Wi auth](WI_AUTH.md).
+`AuthExpired` now directs Wi-managed renewal through Wi and external renewal
+through Codex/Pi, followed by a new provider session. Established WebSockets
+cannot renew in place. Only display wording changes; `auth_expired`, the freshness
+margin and all selection, renewal and persistence rules remain unchanged.
+See [Wi auth](WI_AUTH.md#expiry-guidance-r1).
 
 ## Two interfaces, not one borrowed stream
 
@@ -309,6 +344,24 @@ uncertain. Only a codec-validated terminal changes the outcome to
 `TerminalReceived`, including when local finalized-item recovery, delivery, or settlement fails.
 The decoder records this boundary before recovery and exposes it even on an error.
 Invalid or mismatched terminal responses do not cross this boundary.
+
+The shared decoder requires nonempty IDs for `response.created` and terminal
+response parsing, including terminal-only synthesis and recovered effective output.
+It rejects an empty ID as `Protocol("empty response identity")` before assigning
+that identity, publishing a start/finish or setting `terminal_received`.
+Missing/null/non-string required IDs retain their existing required-string error.
+Nonempty IDs remain opaque without trimming or new length/format restrictions;
+empty text and delta fields retain their own semantics. A previously valid start
+need not be retracted when a later terminal is invalid.
+
+After send, WS and labelled SSE use the existing `RequestFailed` path with
+`protocol_error` and unknown upstream outcome, close the session and permit no
+continuation. Missing-MIME SSE retains earlier prolog rejection with
+`unexpected_content_type` and unknown outcome for an invalid first identity.
+The public run consumer retains `provider_request_failed` with the nested adapter
+error/outcome. A fake provider bypassing the adapter still meets the controller's
+separate `provider_correlation` defense. No actor, registry or public API change
+implements this repair.
 
 The optional smoke observer belongs to one transport instance. It compares the
 serialized WebSocket frame or built HTTP body at dispatch, not the model's claims.

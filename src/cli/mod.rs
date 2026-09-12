@@ -1,10 +1,11 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use futures_util::StreamExt;
 use std::{
+    future::Future,
     io::{self, Write},
     sync::Arc,
 };
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use wi::providers::openai_codex::{
     OpenAiCodexProvider, PROVIDER_ID,
     auth::{AuthSource, CredentialSource, LocalAuthFile},
@@ -19,6 +20,10 @@ mod auth_cli;
 mod collect_tests;
 mod context_cli;
 mod demo;
+#[cfg(test)]
+mod generate_tests;
+#[cfg(test)]
+mod presentation_tests;
 mod run_cli;
 mod skills_cli;
 mod smoke;
@@ -149,13 +154,14 @@ async fn open(args: &ModelArgs, options: SessionOptions) -> Result<ProviderSessi
     gateway.open_session(PROVIDER_ID, options).await
 }
 fn line_json(value: &impl serde::Serialize) -> Result<()> {
-    let mut out = io::stdout().lock();
-    serde_json::to_writer(&mut out, value).map_err(|_| GatewayError::Serialization)?;
+    line_json_to(&mut io::stdout().lock(), value)
+}
+fn line_json_to(out: &mut impl Write, value: &impl serde::Serialize) -> Result<()> {
+    serde_json::to_writer(&mut *out, value).map_err(|_| GatewayError::Serialization)?;
     writeln!(out).map_err(|e| GatewayError::Io(e.kind()))
 }
-fn write_text(text: &str) -> Result<()> {
-    let mut out = io::stdout().lock();
-    out.write_all(text.as_bytes())
+fn write_text(out: &mut impl Write, text: &str) -> Result<()> {
+    out.write_all(context_cli::filtered_multiline(text).as_bytes())
         .and_then(|_| out.flush())
         .map_err(|e| GatewayError::Io(e.kind()))
 }
@@ -164,10 +170,18 @@ async fn collect(
     request_id: &str,
     json_mode: bool,
 ) -> Result<ModelResponse> {
+    collect_to(session, request_id, json_mode, &mut io::stdout()).await
+}
+async fn collect_to(
+    session: &mut ProviderSession,
+    request_id: &str,
+    json_mode: bool,
+    out: &mut impl Write,
+) -> Result<ModelResponse> {
     let mut rendered = String::new();
     while let Some(envelope) = session.events.next().await {
         if json_mode {
-            line_json(&envelope)?;
+            line_json_to(out, &envelope)?;
         }
         if let ProviderEvent::SessionClosed { .. } = &envelope.event {
             return Err(GatewayError::SessionClosed);
@@ -182,19 +196,20 @@ async fn collect(
                 ..
             } => {
                 if !json_mode {
+                    // Compare raw text, because display filtering can remove prefix bytes.
                     rendered.push_str(&delta);
-                    write_text(&delta)?;
+                    write_text(out, &delta)?;
                 }
             }
             ProviderEvent::ResponseFinished { response } => {
                 if !json_mode {
                     if let Some(suffix) = response.text.strip_prefix(&rendered) {
-                        write_text(suffix)?;
+                        write_text(out, suffix)?;
                     } else {
-                        write_text("\n[Authoritative final response]\n")?;
-                        write_text(&response.text)?;
+                        write_text(out, "\n[Authoritative final response]\n")?;
+                        write_text(out, &response.text)?;
                     }
-                    write_text("\n")?;
+                    write_text(out, "\n")?;
                 }
                 return Ok(response);
             }
@@ -208,9 +223,32 @@ async fn collect(
     Err(GatewayError::UnexpectedEnd)
 }
 async fn generate(args: GenerateArgs) -> Result<()> {
+    generate_with(
+        args,
+        tokio::io::stdin(),
+        |base, options| async move { open(&base, options).await },
+        &mut io::stdout(),
+        tokio::signal::ctrl_c(),
+    )
+    .await
+}
+async fn generate_with<R, W, S, O, F>(
+    args: GenerateArgs,
+    input: R,
+    open_session: O,
+    out: &mut W,
+    signal: S,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: Write,
+    S: Future<Output = io::Result<()>>,
+    O: FnOnce(ModelArgs, SessionOptions) -> F,
+    F: Future<Output = Result<ProviderSession>>,
+{
     let prompt = if args.stdin {
         let mut bytes = Vec::new();
-        tokio::io::stdin()
+        input
             .take((wi::MAX_INPUT_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .await
@@ -222,13 +260,22 @@ async fn generate(args: GenerateArgs) -> Result<()> {
     } else {
         args.prompt.unwrap_or_default()
     };
+    let initial = vec![InputItem::user(prompt)];
+    wi::validate_input(&initial)?;
+    let follow_up = args.follow_up.map(|text| vec![InputItem::user(text)]);
+    // Reject a known-invalid second request before opening or consuming the first.
+    if let Some(input) = &follow_up {
+        wi::validate_input(input)?;
+    }
     let mut options = options(&args.base);
     options.instructions = args.instructions;
-    let mut session = open(&args.base, options).await?;
+    options.validate()?;
+    let json_mode = args.base.json;
+    let mut session = open_session(args.base, options).await?;
     let control = session.control.clone();
     let task = async {
-        let receipt = control.generate(vec![InputItem::user(prompt)]).await?;
-        let first = collect(&mut session, &receipt.request_id, args.base.json).await?;
+        let receipt = control.generate(initial).await?;
+        let first = collect_to(&mut session, &receipt.request_id, json_mode, out).await?;
         if first.outcome != ResponseOutcome::Completed {
             return Err(GatewayError::NotCompleted);
         }
@@ -239,9 +286,9 @@ async fn generate(args: GenerateArgs) -> Result<()> {
         {
             return Err(GatewayError::UnsupportedOutput);
         }
-        if let Some(follow_up) = args.follow_up {
-            let receipt = control.generate(vec![InputItem::user(follow_up)]).await?;
-            let next = collect(&mut session, &receipt.request_id, args.base.json).await?;
+        if let Some(follow_up) = follow_up {
+            let receipt = control.generate(follow_up).await?;
+            let next = collect_to(&mut session, &receipt.request_id, json_mode, out).await?;
             if next.outcome != ResponseOutcome::Completed {
                 return Err(GatewayError::NotCompleted);
             }
@@ -257,7 +304,7 @@ async fn generate(args: GenerateArgs) -> Result<()> {
     };
     let result = tokio::select! {
         r = task => r,
-        _ = tokio::signal::ctrl_c() => Err(GatewayError::Cancelled),
+        _ = signal => Err(GatewayError::Cancelled),
     };
     control.close();
     result

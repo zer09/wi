@@ -1,6 +1,8 @@
 //! New-controller transport proofs. Every credential and native field is synthetic.
 #[path = "../context_integration/context_loopback_tests.rs"]
 mod context_loopback;
+#[path = "../wire_format/response_identity_loopback_tests.rs"]
+mod response_identity_loopback;
 
 use super::*;
 use crate::{

@@ -1,4 +1,6 @@
-use crate::cli::context_cli::{CliError, CliResult, emit_diagnostics, filtered, resolve_roots};
+use crate::cli::context_cli::{
+    CliError, CliResult, emit_diagnostics, filtered_multiline, resolve_roots,
+};
 use clap::{Args, ValueEnum};
 use std::{future::Future, io::Write, path::PathBuf, sync::Arc};
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -168,7 +170,8 @@ fn render<W: Write>(
                     delta,
                     ..
                 } => {
-                    writeln!(out, "[Provisional text] {}", filtered(delta)).map_err(sink_error)?;
+                    writeln!(out, "[Provisional text] {}", filtered_multiline(delta))
+                        .map_err(sink_error)?;
                 }
                 ProviderEvent::ResponseFinished { response } => {
                     let status = match response.outcome {
@@ -180,7 +183,7 @@ fn render<W: Write>(
                     writeln!(
                         out,
                         "[Authoritative validated final response; {status}]\n{}",
-                        filtered(&response.text)
+                        filtered_multiline(&response.text)
                     )
                     .map_err(sink_error)?;
                 }

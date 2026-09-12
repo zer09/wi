@@ -1,24 +1,30 @@
-# Wi: active R1 consistency-repair handoff
+# Wi: R1 offline-accepted closure handoff
 
 Contract **r1.0**, runtime baseline
 `4eed18be8baaf43be886164d192021b2e2e5aa28` (S2 merged in PR #3).
-This planning commit changes documentation only; R1 repairs are NOT RUN.
-The owner requested the five inherited repairs and a fixed implementor assignment.
+R1 A-01..A-05 are locally implemented and offline accepted in the uncommitted,
+unstaged worktree on planning HEAD `b714ecac3825b1397274e5d252232a793fff726d`.
+No R1 implementation commit exists. Status is **OFFLINE_ACCEPTED**,
+**accepted=true**. The repeated complete-diff review passed with no actionable
+findings. Exact-head cross-platform CI is **NOT RUN**, not part of local evidence.
 
 Read in order:
 1. `docs/slices/r1/CONTRACT.md`
 2. `docs/slices/r1/MATRIX.md`
 3. `docs/slices/r1/VALIDATION.md`
 4. `docs/slices/r1/IMPLEMENTOR_PROMPT.md`
-5. Current source/docs and A-01..A-05 in `docs/slices/s2/VERIFICATION.md`.
+5. `docs/slices/r1/VERIFICATION.md` and `docs/slices/r1/verification.json`.
+6. Current source/docs and the historical A-01..A-05 record in
+   `docs/slices/s2/VERIFICATION.md`.
 
-Execute the contract rather than replanning. Scope is plain presentation A-01/A-02,
-legacy generate preflight A-03, AuthExpired wording A-04, and nonempty response
-identity A-05. Prove each with focused failing-before/passing-after regressions.
-Use the real CLI/provider/registry consumers, not parallel test-only algorithms.
+Preserve the implemented repairs and their regressions. Plain answers retain LF/HT
+but drop other controls; diagnostics remain one-line. Legacy generate validates
+initial input, supplied follow-up and options before provider/auth construction.
+AuthExpired gives owner-specific renewal guidance. The shared decoder rejects
+empty response identities; missing-MIME SSE retains its earlier admission category.
+The reports map observed red/green evidence through actual CLI/provider/run paths.
 
-R1 authorizes narrow source/tests/current-doc changes after the owner supplies the
-prompt. It overrides the prior statement that these five repairs were unassigned.
+The owner authorized the scoped local R1 repairs, not another plan or later feature.
 It does NOT authorize changes to GatewayError::code(), ToolFailed/gateway_error,
 S2 behavior, auth implementations, public APIs/event schemas, provider policies,
 dependencies, CI weakening, or unrelated cleanup. The AuthExpired display attribute
@@ -36,10 +42,14 @@ shell/file executor, storage, service, GUI, retry/failover or new feature framew
 Private writer/open seams and an identity helper are sufficient; do not restructure
 other modules. The prior S2 implementation instructions are historical.
 
-Complete R1-00..R1-19, obtain independent accumulated-diff review and produce
-`docs/slices/r1/VERIFICATION.md` and `docs/slices/r1/verification.json`. Current
-claims must cite observed results; preserve older reports unchanged. A new genuine
-contract conflict needs its source chain, not an unauthorized behavior change.
+The [verification report](docs/slices/r1/VERIFICATION.md) and
+[machine report](docs/slices/r1/verification.json) record R1-00..R1-19 PASS.
+Local final code gates passed: 421 Rust tests, 152 Node self-tests, inventory
+127/408/25 and three offline examples. Two complete-diff review rounds examined
+code, tests, docs and reports. The repeated round passed with no actionable
+findings. Do not mark CI complete without exact-head submitted evidence.
+Preserve older reports and plan-time wording unchanged. A new genuine contract
+conflict needs its source chain, not an unauthorized behavior change.
 Higher-priority rules and new owner directions prevail.
 
 ## Accepted baseline and continuing project boundaries
@@ -53,9 +63,11 @@ ARCHITECTURE, EVENTS, WI_AUTH and the S2 evidence before claiming a behavior cha
 The S2 contract/matrix/prompts preserve their original phase. They are not orders
 to repeat completed work or perform old live tests. Its reported local 374 Rust
 and 152 Node passes, and exact-head cross-platform CI, are separate from new R1
-execution. All R1 acceptance rows begin NOT RUN. No complete-security claim follows.
+execution. R1 planning records retain their initial NOT RUN statuses; the new
+reports describe local execution and offline acceptance. No complete-security
+claim follows.
 
-A-01..A-05 remain open until their authorized regressions/fixes demonstrate closure.
+A-01..A-05 have local offline PASS evidence and R1-19 review closure.
 Other source-audit notes, including the older Node diagnostic classification, are
 not extra repair assignments. Document any new finding and keep it out of the
 patch unless a source-linked in-scope dependency is resolved by the contract.

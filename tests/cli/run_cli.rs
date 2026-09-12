@@ -227,6 +227,58 @@ fn removed_run_flags_are_unknown_before_auth_setup() {
 }
 
 #[test]
+fn r1_a03_generate_binary_runtime_and_parse_exit_codes_before_auth() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let config = temp.path().join("config");
+    let codex = temp.path().join("codex");
+    // Auth reads would fail because each synthetic root is a file, not a directory.
+    for root in [&home, &config, &codex] {
+        std::fs::write(root, b"not a directory").unwrap();
+    }
+    for json in [false, true] {
+        for (extra, code, expected) in [
+            (
+                vec!["--prompt", ""],
+                1,
+                "error: invalid request: empty user input\n",
+            ),
+            (
+                vec!["--prompt", "initial", "--instructions", " "],
+                1,
+                "error: invalid request: model and instructions are required\n",
+            ),
+            (
+                vec!["--prompt"],
+                2,
+                "error: a value is required for '--prompt <PROMPT>' but none was supplied",
+            ),
+        ] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_wi"));
+            command
+                .env_clear()
+                .env("HOME", &home)
+                .env("XDG_CONFIG_HOME", &config)
+                .env("CODEX_HOME", &codex)
+                .current_dir(temp.path())
+                .args(["generate", "--model", "synthetic"]);
+            if json {
+                command.arg("--json");
+            }
+            let output = command.args(&extra).output().unwrap();
+            assert_eq!(output.status.code(), Some(code), "{extra:?}, json={json}");
+            assert!(output.stdout.is_empty(), "{extra:?}, json={json}");
+            let diagnostic = String::from_utf8(output.stderr).unwrap();
+            if code == 1 {
+                assert_eq!(diagnostic, expected, "{extra:?}, json={json}");
+            } else {
+                assert!(diagnostic.starts_with(expected), "{diagnostic}");
+            }
+        }
+    }
+}
+
+#[test]
 fn legacy_parse_errors_and_help_keep_clap_exit_behavior() {
     for args in [
         vec![],

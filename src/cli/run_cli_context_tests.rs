@@ -96,18 +96,17 @@ fn run_cli_parser_requires_qualified_ids_and_keeps_selection_order() {
 
 #[tokio::test]
 async fn run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller() {
-    for (project, selected, stdin) in [
-        (false, false, false),
-        (true, false, true),
-        (true, true, false),
+    for (project, selected, stdin, ordinary_tool) in [
+        (false, false, false, false),
+        (true, false, true, false),
+        (true, false, false, true),
+        (true, true, false, true),
     ] {
         let f = Fixture::new();
         f.skills(project);
         f.file("workspace/AGENTS.md", "PROJECT_INSTRUCTIONS");
         let mut a = args(&[
             "--json",
-            "--tool",
-            "add_numbers",
             "--transport",
             "sse",
             "--auth-source",
@@ -115,6 +114,9 @@ async fn run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller(
             "--account",
             "synthetic",
         ]);
+        if ordinary_tool {
+            a.tool.push(ToolArg::AddNumbers);
+        }
         a.instructions = "CALLER_PREFIX".into();
         a.workspace = Some("relative".into());
         let task = " \nhello\t ";
@@ -205,8 +207,23 @@ async fn run_cli_prepared_catalog_and_explicit_bodies_reach_existing_controller(
         assert_eq!(options[0].model, "synthetic");
         assert_eq!(options[0].transport, Transport::Sse);
         assert!(options[0].required_features.is_empty());
-        assert_eq!(options[0].tools.len(), 1);
-        assert_eq!(options[0].tools[0].name, "add_numbers");
+        let names: Vec<_> = options[0]
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect();
+        let expected = if ordinary_tool {
+            vec!["add_numbers", "load_skill"]
+        } else {
+            vec!["load_skill"]
+        };
+        assert_eq!(names, expected);
+        assert!(options[0].instructions.contains("call load_skill"));
+        assert!(
+            !options[0]
+                .instructions
+                .contains("does not imply a skill loader")
+        );
         for line in String::from_utf8(out).unwrap().lines() {
             let event: Value = serde_json::from_str(line).unwrap();
             assert_eq!(event["schema_version"], 2);
@@ -311,6 +328,7 @@ impl Write for Notices {
 #[tokio::test]
 async fn run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson() {
     let f = Fixture::new();
+    f.skills(true);
     f.file(
         "global/bad/SKILL.md",
         "---\nname: bad\ndescription: false\n---\nPRIVATE_BODY",
@@ -339,5 +357,112 @@ async fn run_cli_diagnostics_are_delivered_before_construction_and_not_to_ndjson
     assert!(!String::from_utf8_lossy(&out).contains("invalid_frontmatter"));
     for line in String::from_utf8(out).unwrap().lines() {
         serde_json::from_str::<RunEventEnvelope>(line).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn run_cli_unselected_body_is_not_validated_before_provider_construction() {
+    let f = Fixture::new();
+    f.file(
+        "global/review/SKILL.md",
+        b"---\nname: review\ndescription: GLOBAL_METADATA\n---\n\xff",
+    );
+    let (gateway, records) = setup(response(), false);
+    let result = super::super::handle(
+        args(&[]),
+        &b""[..],
+        |_| Ok(gateway),
+        &mut Vec::new(),
+        pending(),
+        move |_| Ok(f.roots.clone()),
+        &mut Vec::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert_eq!(result.summary.new_tool_dispatches, 0);
+    assert_eq!(count(&records.opens), 1);
+    assert_eq!(
+        records.options.lock().unwrap()[0].tools[0].name,
+        "load_skill"
+    );
+}
+
+#[tokio::test]
+async fn run_cli_empty_catalog_preserves_project_context_without_loader_claim() {
+    let f = Fixture::new();
+    f.file("workspace/AGENTS.md", "PROJECT_INSTRUCTIONS");
+    let (gateway, records) = setup(response(), false);
+    let roots = f.roots.clone();
+    let result = super::super::handle(
+        args(&["--tool", "add_numbers"]),
+        &b""[..],
+        |_| Ok(gateway),
+        &mut Vec::new(),
+        pending(),
+        move |_| Ok(roots),
+        &mut Vec::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    let options = records.options.lock().unwrap();
+    assert_eq!(options[0].tools.len(), 1);
+    assert_eq!(options[0].tools[0].name, "add_numbers");
+    assert!(!options[0].instructions.contains("load_skill"));
+    let inputs = records.inputs.lock().unwrap();
+    let [InputItem::User { text }] = &inputs[0][..] else {
+        panic!()
+    };
+    let payload: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(payload["task"], "hello");
+    assert_eq!(payload["available_skills"], json!([]));
+    assert_eq!(payload["active_skills"], json!([]));
+    assert_eq!(
+        payload["project_instructions"]["text"],
+        "PROJECT_INSTRUCTIONS"
+    );
+}
+
+#[tokio::test]
+async fn run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory() {
+    for invalid_selection in [false, true] {
+        let f = Fixture::new();
+        f.skills(false);
+        f.file(
+            "global/bad/SKILL.md",
+            "---\nname: bad\ndescription: false\n---\nPRIVATE_BODY",
+        );
+        let mut a = args(&["--json"]);
+        if invalid_selection {
+            a.use_skill = vec!["global:absent".parse().unwrap()];
+        }
+        let mut diagnostics = Broken {
+            kind: std::io::ErrorKind::BrokenPipe,
+            final_only: false,
+            writes_after_failure: 0,
+            failed: false,
+        };
+        let roots = f.roots.clone();
+        let mut out = Vec::new();
+        let result = super::super::handle(
+            a,
+            &b""[..],
+            |_| panic!("provider/auth constructed after diagnostic failure"),
+            &mut out,
+            pending(),
+            move |_| Ok(roots),
+            &mut diagnostics,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(CliError::Gateway(GatewayError::Io(
+                std::io::ErrorKind::BrokenPipe
+            )))
+        ));
+        assert!(diagnostics.failed);
+        assert_eq!(diagnostics.writes_after_failure, 0);
+        assert!(out.is_empty());
     }
 }

@@ -11,6 +11,8 @@ mod output_delivery;
 #[path = "run_support/result_reuse.rs"]
 mod result_reuse;
 mod run_support;
+#[path = "run_support/skill_loading.rs"]
+mod skill_loading;
 #[path = "run_support/tool_execution.rs"]
 mod tool_execution;
 #[path = "run_support/validation.rs"]

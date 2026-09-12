@@ -25,7 +25,7 @@ credentials and loopback servers. Offline success does not prove account access.
 ```
 CLI / library caller
         |
- Context discovery / preparation (S1)
+ Context discovery / preparation (S1 + S2)
         |
  Run controller + registered local tools
         |
@@ -49,8 +49,10 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
 
 ## What is implemented in source
 
-- Shared `wi::context::discover` and `prepare_run` APIs with explicit host-selected roots.
-- Always-discovered global and project skill metadata; explicit qualified body activation.
+- Shared `wi::context::discover`, `load_skill`, `prepare_run` and
+  `prepare_run_with_skill_loading` APIs with explicit host-selected roots.
+- Always-discovered global and project skill metadata; explicit initial bodies
+  and model-selected main `SKILL.md` loading through an ordinary function tool.
 - Root workspace `AGENTS.md` preparation and metadata-only `wi skills list`.
 - `Provider` and `SessionControl` Rust traits with an independent example provider.
 - Read-only use of the user's existing Codex/Pi OAuth credential file.
@@ -62,7 +64,7 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
   output item, and tool call remain distinct.
 - Completed, incomplete, failed, cancelled, and uncertain transport outcomes.
 - A local function executor with argument validation and in-memory result reuse.
-  The included tool adds integers and has no external side effects.
+  `add_numbers` adds integers; `load_skill` reads main instructions from the bound catalog.
 - No automatic retry, reconnect, transport fallback, or API-key billing fallback.
 
 **Native steering, async tool calling, programmatic tool execution, and tool search
@@ -107,7 +109,7 @@ resolution. Managed auth directly uses the already locked `ring` and `rustix`
 crates for secure randomness and safe Linux filesystem operations.
 Local frontmatter uses pinned `yaml-rust2 = 0.12.0` without default features.
 Its parser events let Wi reject unsupported YAML constructs before loading values.
-The offline skills example uses the existing `tempfile` dev dependency.
+The offline skills examples use the existing `tempfile` dev dependency.
 
 ## Run controller (C1.1)
 
@@ -150,9 +152,10 @@ Use exactly one of `--prompt` or `--stdin`; input must pass the existing 1 MiB
 serialized-input bound. `--instructions` defaults to `You are a helpful assistant.`
 The default auth source is Codex and transport is WebSocket; SSE requires
 `--transport sse`. Managed auth requires explicit `--auth-source gateway` and
-accepts `--account`, not `--auth-file`. No tools are enabled by default.
-Only `--tool add_numbers` is available; duplicate or unknown selections fail.
-There is no follow-up, resume or steering option.
+accepts `--account`, not `--auth-file`. A nonempty skill catalog automatically
+exposes `load_skill`; no `--tool` or enable flag is needed. An empty catalog adds
+no loader. `--tool add_numbers` enables the other shipped tool; duplicate or unknown
+selections fail. There is no follow-up, resume or steering option.
 
 `wi run` has no model-request count, tool-execution count or whole-run deadline
 flags. Deleted flags are unknown-argument errors before provider construction or
@@ -191,7 +194,7 @@ other failures or startup/parse errors exit 1. Help exits 0; old command parse
 errors retain exit 2. Output delivery failure takes precedence and exits 1, even
 after completion; broken stdout stops further work.
 
-## Workspace context and local skills (S1)
+## Workspace context and local skills (S1 + S2)
 
 Only `wi run` prepares task context. `--workspace PATH` defaults to the CLI cwd;
 relative paths resolve once against that cwd. The library canonicalizes the
@@ -222,10 +225,18 @@ Fatal root errors or duplicate names within one scope exit nonzero.
 
 Both `global:review` and `project:review` can exist. Listing sorts globals by name,
 then projects by name. Repeat `--use-skill global:review` or
-`--use-skill project:review` on `wi run` to activate full instructions. Bare names
-and raw paths are invalid. Selection order is preserved; a repeated ID activates
-once at its first position. No selection is required to include all frontmatter.
-These flags do not extend `generate`, `tool-demo`, `smoke`, or auth commands.
+`--use-skill project:review` on `wi run` to include main `SKILL.md` instructions
+initially. Bare names and raw paths are invalid. Selection order is preserved;
+a repeated ID activates once at its first position. No selection is required to
+include all frontmatter. These flags do not extend `generate`, `tool-demo`,
+`smoke`, or auth commands.
+
+Normal `wi run` also exposes `load_skill` when the catalog is nonempty. The model
+can request `load_skill({"id":"project:review"})` to read advertised instructions
+when needed. Unselected bodies first appear in correlated tool results, not in
+the initial request. The model may finish without loading any skill, load another
+skill, or request an already explicit body. Wi runs no separate classifier or
+selection model. The ordinary next model request consumes the tool result.
 
 Shared discovery reads only frontmatter. Shared preparation reads root-only
 `AGENTS.md` and explicitly selected bodies. It preserves caller instructions as
@@ -234,34 +245,92 @@ user payload is deterministic JSON with `task`, `project_instructions`,
 `available_skills`, and `active_skills`. Task bytes remain unchanged inside that
 payload; file bodies never enter higher-priority instructions. Without context
 or selections, the original prompt and instructions remain byte-identical.
+`ContextManifest` records initial preparation only: available IDs, explicitly
+included active IDs and the project-instruction source. It is not a live ledger
+of later loads or proof that the provider received a result.
+
+Library callers use `prepare_run_with_skill_loading(request, Arc<SkillCatalog>,
+selected, &tools)` and pass its prepared request and returned registry to
+`wi::run::run`. The helper binds metadata and the tool to the same catalog.
+Direct `prepare_run` retains its no-loader behavior. An empty catalog adds no
+loader or loader instructions. See [architecture](docs/ARCHITECTURE.md) for registry
+pairing and cache ownership.
 
 The CLI validates arguments, task, tools and auth shape before preparation. One
 `spawn_blocking` task calls shared discovery and preparation. Final input/options
 validation and diagnostic delivery finish before provider/auth construction.
 The prepared request then uses the existing controller, cancellation and event
-schemas. Skills do not change tools, model, provider, auth source or capabilities.
-Local context can travel to the chosen model; local skills do not mean offline inference.
+schemas. Skill text grants no tools, permissions, model/provider selection, auth
+changes or capabilities. The same WebSocket parent/delta and SSE full-history
+continuation consumes skill results; session instructions stay fixed. Local context
+can travel to the chosen model; local skills do not mean offline inference.
 
-The synthetic example proves metadata inclusion, explicit body activation and one
-ordinary addition/result continuation without credentials or provider networking:
+### Loading boundaries
+
+`load_skill` reads only the catalog entry's main `SKILL.md`. It returns exactly
+`id`, validated `frontmatter` and the complete Markdown `body`. Supporting files,
+references, assets and scripts are not read or executed. Loading does not perform
+the workflow described by the skill. There is no generic file reader, shell or
+network tool, upload integration, watcher or automatic rediscovery.
+
+- Preflight checks argument shape, qualified ID and catalog membership without
+  filesystem I/O. Malformed or unknown IDs reject the whole batch before any new
+  execution; they do not produce a correlated skill error result.
+- A valid entry that fails during loading returns the existing correlated
+  `{"error":{"code":"gateway_error"}}` through the registry. `ToolFailed` keeps
+  that code. `ToolExecutionFinished` has `is_error=true`; the result JSON does not.
+  The next ordinary model request can consume this error; it need not fail the run.
+- The whole-file guard is 1 MiB. A larger file fails loading first and follows the
+  `gateway_error` path. A successfully loaded value whose JSON serialization exceeds
+  64 KiB instead returns `tool_output_limit`, also with `is_error=true`. Exactly
+  64 KiB is allowed. JSON escaping and metadata count; Wi does not truncate success.
+  Some explicitly selectable bodies therefore do not fit a loader result. Existing
+  complete next-input validation still applies.
+- The catalog fixes metadata and source selection at discovery. Each new execution
+  rereads the main file and revalidates frontmatter. Body-only edits before that read
+  are allowed; changed metadata fails. Returned text is owned and cannot change
+  after later edits or deletion. Added files require fresh discovery/preparation.
+- The same call ID and arguments reuse the saved per-run result, including errors,
+  without reopening the file. Conflicting reuse fails. A distinct call ID performs
+  a new load and can observe a body-only edit. There is no separate skill-body cache.
+
+Existing no-follow, regular-file and root checks remain. Owner-controlled roots,
+ancestor races and hardlinks remain trust limits; JSON framing is not a
+prompt-injection sandbox. See [architecture](docs/ARCHITECTURE.md) and
+[events](docs/EVENTS.md) for cancellation, cache ordering and sensitive-data handling.
+
+### Offline examples
+
+The explicit-selection example proves metadata inclusion, initial body activation
+and one ordinary addition/result continuation without credentials or networking:
 
 ```bash
 cargo run --example skills_offline
 ```
 
 It finishes with `Completed: 42` using two catalog entries and one active skill.
-This is scripted execution evidence, not proof that a live model follows a skill.
-See [the S1 contract](docs/WI_LOCAL_SKILLS_S1.md) for the YAML subset, validation,
-relative labels, activation snapshots and filesystem trust limitations.
-Model-selected loading, resource reads/execution, uploads and watchers are not implemented.
+The [model-selected loading example](examples/skill_loading_offline.rs) uses
+synthetic temporary workspace/global roots and a separate in-process provider:
 
-## Future service and storage (not implemented in S1)
+```bash
+cargo run --example skill_loading_offline
+```
+
+It asserts absent initial bodies, one real `load_skill` execution and exact body
+text in the follow-up input. It finishes with `Completed: Reviewed offline.`
+using one session and two scripted model requests. Neither example uses ambient
+context/auth roots, real credentials or provider networking. Scripted and loopback
+checks do **not** prove live model selection or adherence; that remains NOT RUN.
+See [S1](docs/WI_LOCAL_SKILLS_S1.md) for metadata parsing and filesystem limits,
+and [S2](docs/slices/s2/CONTRACT.md) for main-file loading semantics.
+
+## Future service and storage (not implemented)
 
 The service is for one owner using multiple devices. Browser disconnect must not
 cancel service-owned work. Application sessions must persist in storage. Service
 restart stops active tasks; it must not automatically restart or resume them.
 Continuing requires a new explicit user action. Storage design precedes service
-acceptance and remains deferred. S1 adds no server, storage interface, database,
+acceptance and remains deferred. S1/S2 add no server, storage interface, database,
 recovery worker, or UI. `ProviderSession` is an in-memory transport handle, not a
 persistent application session. See [product direction](docs/WI_PRODUCT_DIRECTION.md).
 

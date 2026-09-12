@@ -14,14 +14,19 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
-New slice documents use `docs/slices/<slice>/`. S2 planning files now exist below.
-P1 and V1 storage/service documents are not yet created by this planning change.
+New slice documents use `docs/slices/<slice>/`. S2's governing contract and
+implementation handoff are below. P1/V1 storage and service design remain deferred.
 
-## Active implementation handoff — S2 (plan only)
+## Completed offline implementation: S2
 
 S1 and its merge-readiness repair were merged in PR #2 at `94d86e0` after the
-submitted repair's Ubuntu/macOS/Windows workflows passed. The next contract is
-model-selected main SKILL.md loading; it is not implemented by the planning PR.
+submitted repair's Ubuntu/macOS/Windows workflows passed. Current source adds
+model-selected main `SKILL.md` loading through the shared preparation helper,
+registry and public controller. Normal `wi run` exposes `load_skill` automatically
+for nonempty catalogs; explicit `--use-skill` remains available. Supporting files
+and scripts are not read or executed. The S2 reports record passing local offline
+gates and three passing independent accumulated reviews. S2 is offline accepted.
+Live model selection/adherence is NOT RUN.
 
 - [S2 contract](slices/s2/CONTRACT.md): Fixed s2.1 library/tool/context behavior,
   scope, read timing, errors, output boundaries and authorized implementation.
@@ -33,8 +38,13 @@ model-selected main SKILL.md loading; it is not implemented by the planning PR.
   of the s2.0 error-category conflict and review of all 24 requirements. Not a
   Rust test run or S2 acceptance. Existing ToolFailed serializes as gateway_error.
 
-The future S2 reports will be `slices/s2/VERIFICATION.md` and
-`slices/s2/verification.json`; they do not exist yet and are not acceptance evidence.
+- [S2 verification report](slices/s2/VERIFICATION.md): Actual local offline execution,
+  24-row evidence mapping, attributed increment reviews, and three passing independent
+  accumulated reviews. Status is OFFLINE_ACCEPTED.
+- [S2 machine verification report](slices/s2/verification.json): Structured command,
+  matrix, environment, review and authorization evidence; accepted=true.
+  Neither report claims current submitted-revision CI success, native macOS/Windows
+  execution, or live model adherence.
 
 ## Current product direction
 
@@ -44,11 +54,24 @@ The future S2 reports will be `slices/s2/VERIFICATION.md` and
 ## Active architecture and event documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): Current module ownership, workspace context,
-  authentication, transport, tools, and run-controller behavior.
-- [EVENTS.md](EVENTS.md): Current provider and run event schemas, correlation,
-  output validation, cancellation, and delivery semantics.
+  catalog-bound main-file loading, read timing, result reuse, authentication,
+  transport, tools and run-controller behavior.
+- [EVENTS.md](EVENTS.md): Current provider and run event schemas, initial manifest
+  semantics, preflight versus executed errors, output boundaries, cancellation
+  and delivery semantics.
 - [WI_AUTH.md](WI_AUTH.md): Current managed authentication, experimental login and
   renewal, external credential sources, and documented trust limits.
+
+## Offline examples
+
+- [skills_offline.rs](../examples/skills_offline.rs): Explicit initial body selection
+  through the compatible no-loader `prepare_run` API.
+- [skill_loading_offline.rs](../examples/skill_loading_offline.rs): Discovery,
+  `prepare_run_with_skill_loading`, returned registry and `wi::run::run` with a
+  separate scripted provider. Asserts absent initial bodies, one real load, exact
+  follow-up body and final fixture text. Uses temporary synthetic roots without
+  ambient context/auth configuration, credentials or provider networking.
+  Run with `cargo run --example skill_loading_offline`; this is not live model evidence.
 
 ## Completed contracts and matrices
 

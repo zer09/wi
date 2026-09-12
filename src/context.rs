@@ -8,8 +8,10 @@
 
 mod frontmatter;
 mod preparation;
+mod skill_loading;
 
-pub use preparation::{ContextManifest, PreparedRun, prepare_run};
+pub use preparation::{ContextManifest, PreparedRun, prepare_run, prepare_run_with_skill_loading};
+pub use skill_loading::{LoadedSkill, load_skill};
 
 use std::{
     collections::BTreeMap,

@@ -44,7 +44,12 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
     ] {
         assert!(help.contains(flag), "{flag}");
     }
+    assert!(help.contains("A nonempty catalog exposes load_skill"));
+    assert!(help.contains("supporting files and scripts are not read or executed"));
+    assert!(help.contains("Use --use-skill to include selected instructions initially"));
     for flag in [
+        "--auto-skills",
+        "--enable-loader",
         "--follow-up",
         "--resume",
         "--steer",
@@ -62,6 +67,9 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
         vec!["--prompt", "hello", "--prompt", "again"],
         vec!["--stdin", "--prompt", "hello"],
         vec!["--prompt", "hello", "--tool", "unknown"],
+        vec!["--prompt", "hello", "--tool", "load_skill"],
+        vec!["--prompt", "hello", "--auto-skills"],
+        vec!["--prompt", "hello", "--enable-loader"],
         vec!["--prompt", "hello", "--use-skill", "unqualified"],
         vec!["--prompt", "hello", "--use-skill", "project:../private\x1b"],
         vec!["--prompt", "hello", "--transport", "automatic"],
@@ -101,6 +109,84 @@ fn run_binary_help_and_clap_conflicts_do_not_need_auth_locations() {
     let diagnostic = String::from_utf8_lossy(&output.stderr);
     assert_eq!(diagnostic.matches("error:").count(), 1);
     assert!(diagnostic.contains("--model"));
+}
+
+#[test]
+fn run_binary_explicit_selections_and_tools_preserve_preparation_diagnostics() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    let config = temp.path().join("config");
+    for (path, bytes) in [
+        (
+            config.join("wi/skills/review/SKILL.md"),
+            &b"---\nname: review\ndescription: GLOBAL_METADATA\n---\n \t"[..],
+        ),
+        (
+            workspace.join(".agents/skills/review/SKILL.md"),
+            &b"---\nname: review\ndescription: PROJECT_METADATA\n---\n\xff"[..],
+        ),
+        (
+            config.join("wi/skills/bad/SKILL.md"),
+            &b"---\nname: bad\ndescription: false\n---\nPRIVATE_BODY"[..],
+        ),
+    ] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    for source in ["codex", "pi", "gateway"] {
+        for (first, second, expected, label) in [
+            (
+                "global:review",
+                "project:review",
+                "invalid_body",
+                "global:review/SKILL.md",
+            ),
+            (
+                "project:review",
+                "global:review",
+                "read_failed",
+                "project:.agents/skills/review/SKILL.md",
+            ),
+        ] {
+            let out = Command::new(env!("CARGO_BIN_EXE_wi"))
+                .current_dir(&workspace)
+                .env("XDG_CONFIG_HOME", &config)
+                .env_remove("HOME")
+                .env_remove("CODEX_HOME")
+                .args([
+                    "run",
+                    "--model",
+                    "synthetic",
+                    "--prompt",
+                    "hello",
+                    "--json",
+                    "--auth-source",
+                    source,
+                    "--tool",
+                    "add_numbers",
+                    "--use-skill",
+                    first,
+                    "--use-skill",
+                    first,
+                    "--use-skill",
+                    second,
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(1));
+            assert!(out.stdout.is_empty());
+            let diagnostic = String::from_utf8(out.stderr).unwrap();
+            let lines: Vec<_> = diagnostic.lines().collect();
+            assert_eq!(lines.len(), 2, "{diagnostic}");
+            assert!(lines[0].starts_with("context: invalid_frontmatter:"));
+            assert!(lines[0].contains("global:bad/SKILL.md"));
+            assert!(lines[1].starts_with(&format!("error: {expected}:")));
+            assert!(lines[1].contains(label), "{diagnostic}");
+            assert!(!diagnostic.contains("PRIVATE"));
+            assert!(!diagnostic.contains(temp.path().to_str().unwrap()));
+            assert!(!diagnostic.contains("home directory"));
+        }
+    }
 }
 
 #[test]

@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::sync::CancellationToken;
 use wi::{
     DeltaKind, Gateway, GatewayError, InputItem, ProviderEvent, Result,
-    context::{ContextRoots, SkillId, discover, prepare_run},
+    context::{ContextRoots, SkillId, discover, prepare_run_with_skill_loading},
     providers::openai_codex::PROVIDER_ID,
     run::{RunEvent, RunEventEnvelope, RunOutcome, RunRequest, RunResult, RunSinkError},
     tools::{AddNumbers, ToolRegistry},
@@ -18,6 +18,9 @@ enum ToolArg {
 }
 
 #[derive(Args)]
+#[command(
+    after_help = "Global and project skill metadata is included automatically. A nonempty catalog exposes load_skill without --tool or an enable flag. The model can load main SKILL.md instructions when needed; supporting files and scripts are not read or executed. Use --use-skill to include selected instructions initially."
+)]
 pub(crate) struct RunArgs {
     #[command(flatten)]
     base: crate::cli::ModelArgs,
@@ -106,16 +109,18 @@ where
         options,
         prompt,
     };
-    let (tools, notices, prepared) = tokio::task::spawn_blocking(move || {
-        let catalog = discover(resolve(args.workspace)?)?;
-        let prepared = prepare_run(request, &catalog, &args.use_skill, &tools);
+    let (notices, prepared) = tokio::task::spawn_blocking(move || {
+        let catalog = Arc::new(discover(resolve(args.workspace)?)?);
+        let notices = catalog.diagnostics().to_vec();
+        let prepared = prepare_run_with_skill_loading(request, catalog, &args.use_skill, &tools);
         // Keep diagnostics visible even when activation or final validation fails.
-        Ok::<_, CliError>((tools, catalog.diagnostics().to_vec(), prepared))
+        Ok::<_, CliError>((notices, prepared))
     })
     .await
     .map_err(|_| CliError::PreparationTask)??;
     emit_diagnostics(diagnostics, &notices)?;
-    let request = prepared?.into_request();
+    let (prepared, tools) = prepared?;
+    let request = prepared.into_request();
     let gateway = build(auth)?;
     let cancel = CancellationToken::new();
     let task = wi::run::run(&gateway, request, &tools, cancel.clone(), |event| {

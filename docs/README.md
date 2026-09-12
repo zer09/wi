@@ -17,6 +17,28 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 New slice documents use `docs/slices/<slice>/`. S2's governing contract and
 implementation handoff are below. P1/V1 storage and service design remain deferred.
 
+## Active repair plan: R1
+
+S2 merged in PR #3 at `4eed18b`. R1 contract **r1.0** is a documentation-only
+handoff for inherited A-01..A-05: plain terminal rendering, multiline preservation,
+legacy input preflight, one expiry message, and empty response identity. R1 is
+NOT IMPLEMENTED/NOT RUN in this planning commit. It adds no feature or runtime
+budget and does not reopen S2 or managed authentication.
+
+- [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
+  allowed edits, implementation sequence and authorization.
+- [R1 matrix](slices/r1/MATRIX.md): R1-00..R1-19, all initially NOT RUN;
+  failing-before/passing-after evidence, offline gates and report structure.
+- [R1 source validation](slices/r1/VALIDATION.md): Pinned source-to-contract map,
+  actual codes/order and explicit limits of planning review, not test results.
+- [R1 implementor prompt](slices/r1/IMPLEMENTOR_PROMPT.md): Execute the fixed
+  scoped repair, offline verification and independent review; no Git/live work
+  without separate authorization.
+
+Future implementation evidence belongs in `docs/slices/r1/VERIFICATION.md` and
+`docs/slices/r1/verification.json`; no completed R1 report exists yet. The S2
+reports' inherited findings remain historical observations and are not rewritten.
+
 ## Completed offline implementation: S2
 
 S1 and its merge-readiness repair were merged in PR #2 at `94d86e0` after the
@@ -115,7 +137,7 @@ Live model selection/adherence is NOT RUN.
 - [WI_EXECUTION_POLICY_C1_VERIFICATION.md](WI_EXECUTION_POLICY_C1_VERIFICATION.md):
   C1.1 offline acceptance, run-limit removal, retained constraints, and review evidence.
 - [wi-execution-policy-c1-verification.json](wi-execution-policy-c1-verification.json):
-  Machine-readable C1.1 checks, matrix results, and review evidence.
+  Machine-readable C1.1 checks, matrix results, and evidence attribution.
 - [WI_LOCAL_SKILLS_S1_VERIFICATION.md](WI_LOCAL_SKILLS_S1_VERIFICATION.md): S1
   offline acceptance, preparation and activation evidence, reviews, and trust limits.
 - [wi-local-skills-s1-verification.json](wi-local-skills-s1-verification.json):

@@ -149,6 +149,64 @@ async fn run_collector_rejects_identity_order_idle_close_eof_and_accepts_gaps() 
 }
 
 #[tokio::test]
+async fn r1_a05_public_run_fake_provider_empty_identity_keeps_correlation_guard() {
+    for started in [false, true] {
+        for terminal in [false, true] {
+            let mut supplied = vec![];
+            if started {
+                supplied.push(envelope(
+                    1,
+                    ProviderEvent::ResponseStarted {
+                        response_id: "r1".into(),
+                    },
+                ));
+            }
+            let invalid = if terminal {
+                ProviderEvent::ResponseFinished {
+                    response: response("", vec![call("c1", 17, 25)], ""),
+                }
+            } else {
+                ProviderEvent::ResponseStarted {
+                    response_id: "".into(),
+                }
+            };
+            supplied.push(envelope(2, invalid));
+            // This provider bypasses the codec. Its events must not become adapter failures.
+            let (gateway, script, tools) = setup(vec![Step::Events(supplied)]);
+            let (result, events) = observed(&gateway, request(), &tools).await;
+            failed_as(&result, "provider_correlation");
+            assert_eq!(
+                result.summary.last_upstream_outcome,
+                Some(UpstreamOutcome::Unknown)
+            );
+            assert_eq!(result.summary.model_requests_attempted, 1);
+            assert_eq!(result.summary.model_requests_admitted, 1);
+            assert_eq!(result.summary.new_tool_dispatches, 0);
+            assert_eq!(result.summary.tool_results_prepared, 0);
+            assert!(result.last_response.is_none());
+            assert_eq!(count(&script.records.tool_calls), 0);
+            assert_eq!(script.records.inputs.lock().unwrap().len(), 1);
+            let forwarded: Vec<_> = events
+                .iter()
+                .filter_map(|envelope| match &envelope.event {
+                    RunEvent::ProviderEvent { event } => Some(&event.event),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(forwarded.len(), usize::from(started));
+            for event in forwarded {
+                assert!(matches!(
+                    event,
+                    ProviderEvent::ResponseStarted { response_id } if response_id == "r1"
+                ));
+            }
+            assert!(!trace(&events).contains(&"tool_event"));
+            healthy(&result, &events, &script.records);
+        }
+    }
+}
+
+#[tokio::test]
 async fn run_cross_turn_sequence_failure_keeps_prior_validated_response() {
     let mut end = envelope(
         1,

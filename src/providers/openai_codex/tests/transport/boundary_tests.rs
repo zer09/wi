@@ -204,7 +204,7 @@ async fn expired_websocket_preflight_does_not_write_generation() {
         SessionOptions::new("test"),
         session::Timeouts::default(),
     );
-    session
+    let receipt = session
         .control
         .generate(vec![InputItem::user("synthetic")])
         .await
@@ -213,9 +213,30 @@ async fn expired_websocket_preflight_does_not_write_generation() {
         .await
         .unwrap()
         .unwrap();
-    assert!(
-        matches!(event.event,ProviderEvent::RequestFailed { upstream_outcome:UpstreamOutcome::NotSubmitted, code, .. } if code == "auth_expired")
+    assert_eq!(
+        event.request_id.as_deref(),
+        Some(receipt.request_id.as_str())
     );
+    let ProviderEvent::RequestFailed {
+        code,
+        message,
+        upstream_outcome,
+    } = &event.event
+    else {
+        panic!("expected an expiry request failure")
+    };
+    assert_eq!(code, "auth_expired");
+    assert_eq!(*upstream_outcome, UpstreamOutcome::NotSubmitted);
+    assert_eq!(
+        message,
+        "login expired or expires within 30 seconds; renew Wi-managed credentials through Wi, or external credentials through Codex/Pi; then open a new provider session; established WebSockets cannot renew in place"
+    );
+    let encoded = serde_json::to_value(&event).unwrap();
+    assert_eq!(encoded["schema_version"], 1);
+    assert_eq!(encoded["type"], "request_failed");
+    assert_eq!(encoded["code"], "auth_expired");
+    assert_eq!(encoded["message"], message.as_str());
+    assert_eq!(encoded["upstream_outcome"], "not_submitted");
     timeout(Duration::from_secs(2), server)
         .await
         .unwrap()

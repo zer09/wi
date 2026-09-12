@@ -440,7 +440,10 @@ async fn run_cli_diagnostic_sink_failure_precedes_preparation_error_and_factory(
         let mut diagnostics = Broken {
             kind: std::io::ErrorKind::BrokenPipe,
             final_only: false,
+            on_flush: false,
+            final_seen: false,
             writes_after_failure: 0,
+            flushes_after_failure: 0,
             failed: false,
         };
         let roots = f.roots.clone();

@@ -106,6 +106,30 @@ digits, hyphens, and underscores, with a maximum length of 64.
 There is no migration, credential copying, ambient source search, or API-key fallback.
 `auth-check` remains the external-source snapshot check; use `auth status` for Wi.
 
+## Expiry guidance (R1)
+
+`AuthExpired` displays exactly:
+
+> login expired or expires within 30 seconds; renew Wi-managed credentials through Wi, or external credentials through Codex/Pi; then open a new provider session; established WebSockets cannot renew in place
+
+This replaces inaccurate guidance that denied Wi-managed rotation. The exported
+code remains `auth_expired`; the 30-second freshness margin, credential selection,
+renewal, persistence and transport behavior are unchanged. The message performs no
+auth operation. Managed renewal belongs to Wi; external renewal belongs to the
+selected Codex/Pi owner. Established WebSockets still require a new session.
+
+Legacy `generate` now validates initial input, any supplied follow-up separately,
+and actual options before constructing provider/auth objects. Invalid operations
+therefore perform no credential lookup or first generation. This ordering change
+does not alter authentication implementations or add context preparation.
+
+R1 is offline accepted in commit `88b76c5`. The
+[R1 report](slices/r1/VERIFICATION.md) records synthetic freshness/display and
+actual loopback RequestFailed regressions, not new live auth evidence. The repeated
+complete-diff review passed; `accepted=true`. The NB-02 follow-up changes only
+legacy diagnostic presentation. Exact-head cross-platform CI is NOT
+RUN. No real credential reads or auth commands ran for R1 or the follow-up.
+
 ## File protection
 
 The managed store is `$XDG_CONFIG_HOME/wi/auth/openai-codex.json`, otherwise

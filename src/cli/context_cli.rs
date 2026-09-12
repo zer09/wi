@@ -67,6 +67,12 @@ pub(crate) fn filtered(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
+pub(super) fn filtered_multiline(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+        .collect()
+}
+
 pub(crate) fn diagnostic_category(diagnostic: &ContextDiagnostic) -> &'static str {
     match diagnostic.kind() {
         DiagnosticKind::Excluded(kind) => kind.category(),

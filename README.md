@@ -11,9 +11,18 @@ See the [documentation index](docs/README.md) for current documentation and hist
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
 passing, 374 local Rust tests and 152 Node self-tests. Submitted-head CI for
 `48e23b5` passed on Ubuntu, macOS and Windows; see the dated CI references below.
-Live model selection/adherence remains NOT RUN. The inherited A-01 through A-05
-findings in that report remain open; S2 did not repair them. Planning documents
-and pre-push reports retain their original phase-specific wording as evidence.
+Live model selection/adherence remains NOT RUN. S2 did not repair its inherited
+A-01 through A-05 findings. Planning documents and older reports retain their
+original phase-specific wording as evidence.
+
+**R1 status: OFFLINE_ACCEPTED in commit `88b76c5`.**
+The [R1 verification report](docs/slices/r1/VERIFICATION.md) and
+[machine report](docs/slices/r1/verification.json) record A-01..A-05 and
+R1-00..R1-19 PASS, 421 Rust tests and 152 Node self-tests. The repeated
+complete-diff review passed with no actionable findings; `accepted=true`.
+A small follow-up closes NB-02 by applying the existing one-line filter to legacy
+RequestFailed diagnostics. Its full Rust suite passes 422 tests.
+Exact-head cross-platform CI is NOT RUN. No live checks or push occurred.
 
 **Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status
@@ -201,8 +210,13 @@ the generic `Tool` trait and shipped `add_numbers` define no timeout option.
 `--json` emits only outer schema-2 `RunEventEnvelope` NDJSON on stdout. `run_started`
 has no event-specific payload; nested provider events remain schema 1. Nested native
 items, text and tool data are sensitive application data, not sanitized telemetry.
-Diagnostics remain on stderr. Plain output filters terminal controls and labels
-validated responses without marking partial output complete. Completed exits 0
+Diagnostics remain on stderr and use the one-line filter, which removes all
+control scalars. Plain answer output preserves LF, HT, indentation and non-control
+Unicode scalars but drops other controls, including CR, ESC and C1 controls.
+CRLF becomes LF without trimming or normalization. Labels still distinguish
+provisional output from validated responses. JSON/NDJSON and returned response
+text remain unchanged. This is a control-character policy, not an ANSI parser or
+a general Unicode/terminal security guarantee. Completed exits 0
 (including refusal, not proof of correctness), local cancellation exits 130, and
 other failures or startup/parse errors exit 1. Help exits 0; old command parse
 errors retain exit 2. Output delivery failure takes precedence and exits 1, even
@@ -410,8 +424,11 @@ The external-source reader never logs, writes, copies, or refreshes credentials.
 Wi-owned profiles use a separate protected file store; see [Wi auth](docs/WI_AUTH.md).
 JWT decoding provides hints only; OpenAI authenticates the token cryptographically.
 
-**WebSocket:** credentials and account are fixed at the handshake. Expired auth
-requires refresh in Codex/Pi followed by an explicitly new gateway session.
+**WebSocket:** credentials and account are fixed at the handshake. Renew expired
+external credentials through Codex/Pi or Wi-managed credentials through Wi, then
+open a new provider session. Established WebSockets cannot renew in place.
+`AuthExpired` retains code `auth_expired` and the 30-second freshness margin;
+[R1 changes its guidance only](docs/WI_AUTH.md#expiry-guidance-r1), not auth behavior.
 
 **SSE:** the selected file is reread before each request; a changed account is
 rejected to avoid sending the previous account's conversation to a new account.
@@ -485,9 +502,11 @@ lifecycle proof, and tool assertions remain unchanged.
 `terminal_text_state` distinguishes `available`, `no_ordinary_parts`,
 `missing_or_invalid_output`, `malformed_content`, `unsupported_kind_or_part`,
 `over_limit`, and `no_terminal`. `streamed_text_state` distinguishes `available`,
-`no_deltas`, `malformed_content`, and `over_limit`. Each equality has a corresponding
-`*_unavailable` reason: null when compared, otherwise one of these static states,
-`not_validated`, or `not_applicable`. First-turn tool expected text is not applicable.
+`no_deltas`, `malformed_content`, and `over_limit`. The three native equalities have
+corresponding `*_unavailable` reason fields: null when compared, otherwise one of
+these static states, `not_validated`, or `not_applicable`. First-turn tool expected
+text is not applicable. Effective equality fields are nullable and have no dedicated
+`*_unavailable` fields.
 Terminal shape is captured before decoding; validation is recorded only after parsing.
 `finalized_items` counts total, message, function_call, reasoning, other, and malformed
 done events, including duplicates. Counters saturate at 4096 per request;
@@ -676,10 +695,23 @@ cargo run -- generate --auth-source pi \
   --model "YOUR_ENABLED_CODEX_MODEL_ID" --stdin < prompt.txt
 ```
 
+After parsing, legacy `generate` reads the chosen prompt source, validates its
+one-item input, validates any supplied follow-up separately, then validates the
+actual session options before provider/auth construction. An invalid follow-up
+prevents even the first generation. Existing stdin byte/UTF-8 checks and validation
+errors remain; accepted input bytes are not trimmed. There is no combined quota
+for the two requests. Validly parsed invalid operations exit 1 with empty stdout;
+malformed legacy Clap syntax retains exit 2. This does not add S1/S2 preparation
+to legacy commands.
+
 `--json` emits NDJSON. **This includes native provider items and opaque continuation
 material and must be treated as sensitive application data.** Normal text mode
-prints exposed text/refusal content, not reasoning summaries. Final response text
-is authoritative. Both modes treat streamed output as provisional. If a completed
+prints exposed text/refusal content, not reasoning summaries. Legacy `generate`
+and `tool-demo` use the same multiline answer policy as `wi run`, including deltas,
+terminal-only text, suffixes and labelled authoritative fallback. Filtering is
+stateless across fragments; escape-sequence payload characters can remain visible.
+Raw prefix comparisons, returned responses, JSON and writer errors are unchanged.
+Final response text is authoritative. Both modes treat streamed output as provisional. If a completed
 effective output omits or conflicts with streamed nonempty text/refusal or finalized
 message/function-call output, the adapter rejects before settlement or successful terminal publication, and the
 CLI exits nonzero before tool execution or follow-up. Recovery and consistency
@@ -693,6 +725,12 @@ and the separate rendered-text copy against a cumulative 1 MiB. It permits at mo
 indexes below 512. Private retained text copies are each bounded by 1 MiB; finalized
 native items share the cumulative byte budget. All adapter consistency tracking resets at each request.
 Conflicting identities or finalized native content fail closed, even if only metadata differs.
+The shared decoder rejects empty created and terminal response IDs before publishing
+an invalid start/finish or settling conversation state. Nonempty IDs remain opaque,
+without trimming or a new format rule. Post-send WS/labelled-SSE rejection is
+`protocol_error` with unknown upstream outcome. Missing-MIME SSE rejects an invalid
+first identity earlier as `unexpected_content_type`; that distinction is unchanged.
+See [event identity rules](docs/EVENTS.md#native-mapping).
 
 ```bash
 cargo run -- capabilities

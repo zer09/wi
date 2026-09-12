@@ -1,66 +1,93 @@
-# Wi: repository guidance after S2 implementation
+# Wi: R1 accepted implementation and NB-02 follow-up handoff
 
-S2 contract `s2.1` is implemented and offline accepted. The implementation is in
-`97ad00c109040edaf212fc141c34d307bc64442a`; the consistency-audit reports were
-submitted in `48e23b5330ba6aa69be0bf02a4aab6c8d7226426`. The accepted S1 base was
-`94d86e0c9db62d9fec208a26f5b4bb2487bcb5fa` (PR #2). Check the actual HEAD/worktree
-before making changes. This is no longer a documentation-only planning branch.
+Contract **r1.0**, runtime baseline
+`4eed18be8baaf43be886164d192021b2e2e5aa28` (S2 merged in PR #3).
+R1 A-01..A-05 are offline accepted in implementation commit
+`88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
+**accepted=true**. The repeated complete-diff review passed with no actionable
+findings. Exact-head cross-platform CI is **NOT RUN**, not part of local evidence.
+The follow-up closes documented residual NB-02 by filtering legacy RequestFailed
+diagnostics through the one-line policy; it adds one regression test.
 
-Read current behavior and evidence first:
-1. `docs/WI_PRODUCT_DIRECTION.md`
-2. `docs/ARCHITECTURE.md` and `docs/EVENTS.md`
-3. `docs/slices/s2/VERIFICATION.md` and `docs/slices/s2/verification.json`
-4. `docs/slices/s2/CONTRACT.md`, `MATRIX.md`, and `VALIDATION.md` in that directory.
+Read in order:
+1. `docs/slices/r1/CONTRACT.md`
+2. `docs/slices/r1/MATRIX.md`
+3. `docs/slices/r1/VALIDATION.md`
+4. `docs/slices/r1/IMPLEMENTOR_PROMPT.md`
+5. `docs/slices/r1/VERIFICATION.md` and `docs/slices/r1/verification.json`.
+6. Current source/docs and the historical A-01..A-05 record in
+   `docs/slices/s2/VERIFICATION.md`.
 
-The S2 contract and matrix remain the acceptance specification. Their planning
-status and the original `IMPLEMENTOR_PROMPT.md` are preserved phase records, not
-an instruction to reimplement completed work. Verification reports retain their
-pre-push observations; later submission/CI/merge evidence belongs to the PR and
-Git history. Do not rewrite historical observations as though later checks had
-already happened. Local 374-test/152-self-test evidence and submitted-head CI are
-separate observations, not live model-selection or adherence proof.
+Preserve the implemented repairs and their regressions. Plain answers retain LF/HT
+but drop other controls; diagnostics remain one-line. Legacy generate validates
+initial input, supplied follow-up and options before provider/auth construction.
+AuthExpired gives owner-specific renewal guidance. The shared decoder rejects
+empty response identities; missing-MIME SSE retains its earlier admission category.
+The reports map observed red/green evidence through actual CLI/provider/run paths.
 
-s2.1 corrected a designer error in s2.0. `GatewayError::ToolFailed` still maps
-through `GatewayError::code()` to `gateway_error`. Do not introduce `tool_failed`,
-fabricate Ok error-shaped JSON, or change regression expectations to match the
-superseded plan. Preserve the preflight/execution and cache/event distinctions.
+The owner authorized the scoped local R1 repairs, not another plan or later feature.
+It does NOT authorize changes to GatewayError::code(), ToolFailed/gateway_error,
+S2 behavior, auth implementations, public APIs/event schemas, provider policies,
+dependencies, CI weakening, or unrelated cleanup. The AuthExpired display attribute
+is the only production error.rs edit; its exported code remains auth_expired.
 
-S2 exposes one local function tool, `load_skill`, bound to the already discovered
-SkillCatalog. It returns the selected entry's main SKILL.md instructions through
-the existing registry and continuation. Global/project metadata remains automatic;
-normal context-aware `wi run` exposes the tool for nonempty catalogs. Explicit
-`--use-skill` and the direct S1 no-loader preparation API remain supported. The
-shared library owns this behavior; the CLI is a thin caller, not the final product.
+Use synthetic roots/credentials and offline/loopback checks only. No real private
+skill/project inputs, auth/profile/login/refresh commands, provider traffic, hosted
+probes, additional commits/pushes/merges, release or deployment without separate
+owner authorization. Do not reset/clean/stash or overwrite user work. The owner
+authorized R1 commit `88b76c5`; leave later changes uncommitted unless separately
+authorized.
+Ledger unchanged: **31/50 used, 19 remaining**. Balance is not authorization.
 
-Inherited audit findings A-01 through A-05 remain OPEN and are documented in the
-S2 verification report. S2 neither introduced nor fixed them. Repairs require a
-separately approved scope and focused regressions; do not mark them resolved from
-passing S2 tests. Production-provider restructuring also remains DEFERRED.
+No runtime quotas/deadlines/RunLimits, optional budget replacement, progress API,
+shell/file executor, storage, service, GUI, retry/failover or new feature framework.
+Private writer/open seams and an identity helper are sufficient; do not restructure
+other modules. The prior S2 implementation instructions are historical.
 
-Do not add generic file/resource/script execution, hosted skills/uploads,
-provider-native search, PTC, async tools, steering, permissions, skill-body caching,
-or a replacement resource-budget framework without a new approved requirement.
-C1 deletion remains complete: no RunLimits, count quotas, whole-run timers,
-optional replacement budgets, or the withdrawn M4 timeout/progress proposal.
-Preserve existing validation, cancellation, correlation, output provenance,
-result ordering/reuse, event-delivery semantics, authentication and transports.
+The [verification report](docs/slices/r1/VERIFICATION.md) and
+[machine report](docs/slices/r1/verification.json) record R1-00..R1-19 PASS.
+Local R1 code gates passed: 421 Rust tests, 152 Node self-tests, inventory
+127/408/25 and three offline examples. Two complete-diff review rounds examined
+code, tests, docs and reports. The repeated round passed with no actionable
+findings. The NB-02 follow-up has red/green collector evidence, a 422-test full
+Rust pass and three independent PASS reviews with no actionable
+findings; Node remains 152. Do not mark CI complete without exact-head submitted
+evidence.
+Preserve older reports and plan-time wording unchanged. A new genuine contract
+conflict needs its source chain, not an unauthorized behavior change.
+Higher-priority rules and new owner directions prevail.
 
-The final product is a one-owner multi-device service. Browser disconnect is not
-cancellation. Application sessions persist; service restart stops tasks without
-automatic replay/resumption. These recorded requirements do not themselves
-start P1 storage or V1 service/UI implementation. Do not invent a database or
-session-store interface without its approved design.
+## Accepted baseline and continuing project boundaries
 
-No new implementation, live validation, credential access, auth/profile/login/
-renewal operation, private workspace/skill test, or release/deployment follows
-automatically from S2 acceptance. Git writes and merge actions follow the owner's
-explicit current authorization, not an old implementor prompt. Verification work
-uses synthetic roots, scripted providers and loopback services unless separately
-authorized otherwise. Trusted build tooling follows local permissions.
+S2 s2.1 is implemented and offline accepted: implementation `97ad00c`, audit
+reports `48e23b5`, documentation closure `c186211`, merge `4eed18b`. Its main-file
+load_skill tool, initial catalog/body preparation, direct S1 no-loader API and
+provider-neutral run/registry ownership must remain intact. Read current README,
+ARCHITECTURE, EVENTS, WI_AUTH and the S2 evidence before claiming a behavior change.
 
-Pi authoring traffic is separate from Wi verification. The generation ledger is
-unchanged at 31/50 used, 19 remaining; remaining balance is not authorization.
-Preserve user work and the current organization. Report source inspection,
-executed tests, hosted CI and live behavior separately. Flag an actual contract
-conflict rather than silently changing semantics. Higher-priority rules and new
-owner instructions prevail over historical task instructions.
+The S2 contract/matrix/prompts preserve their original phase. They are not orders
+to repeat completed work or perform old live tests. Its reported local 374 Rust
+and 152 Node passes, and exact-head cross-platform CI, are separate from new R1
+execution. R1 planning records retain their initial NOT RUN statuses; the new
+reports describe local execution and offline acceptance. No complete-security
+claim follows.
+
+A-01..A-05 have local offline PASS evidence and R1-19 review closure.
+Other source-audit notes, including the older Node diagnostic classification, are
+not extra repair assignments. Document any new finding and keep it out of the
+patch unless a source-linked in-scope dependency is resolved by the contract.
+
+C1 deletion remains complete. Preserve cooperative cancellation, correlation,
+full-batch authority/argument checks, result caching and ordering, validated
+recovery/provenance, execution-versus-delivery semantics, managed/external auth
+ownership and both transport paths. Production-provider reorganization is deferred.
+
+The final product is a one-owner multi-device service. Browser disconnect does
+not cancel service-owned work. Application sessions persist; service restart stops
+tasks without automatic replay/resumption. P1 storage design precedes V1 service
+acceptance, but neither begins here. Hosted skills/uploads are excluded. No database,
+permission manager, replay engine or generic tool is implied by this repair.
+
+Pi authoring traffic is distinct from Wi verification. Report source inspection,
+executed tests, CI and live behavior separately. Preserve the repository's current
+organization and historical evidence. Future work needs an explicit requirement.

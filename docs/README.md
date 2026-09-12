@@ -17,6 +17,51 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 New slice documents use `docs/slices/<slice>/`. S2's governing contract and
 implementation handoff are below. P1/V1 storage and service design remain deferred.
 
+## Historical-citation errata (2026-09-12 UTC)
+
+These citation corrections leave the four historical report files unchanged.
+
+- C1: `src/run/events.rs:35-59` should read `src/run/events.rs:35-58`
+  in `docs/WI_EXECUTION_POLICY_C1_VERIFICATION.md:110,150` and evidence `E01`
+  in `docs/wi-execution-policy-c1-verification.json`.
+- S2: `.github/workflows/ci.yml:1-24` should read `.github/workflows/ci.yml:1-23`
+  in `docs/slices/s2/VERIFICATION.md:263` and the `ci` observations in
+  `docs/slices/s2/verification.json`.
+
+Both behavioral claims remain correct: `RunEvent` has four lifecycle kinds and
+two wrappers; CI configures Ubuntu, Windows and macOS with all six Cargo gates.
+
+## Offline-accepted repair: R1
+
+S2 merged in PR #3 at `4eed18b`. R1 contract **r1.0** repairs inherited A-01..A-05:
+plain terminal rendering, multiline preservation, legacy input preflight, one
+expiry message, and empty response identity. The repairs are implemented in commit
+`88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
+**accepted=true**. Local R1 gates passed with 421 Rust tests, 152 Node self-tests
+and all three offline examples. The repeated complete-diff review passed with no
+actionable findings. A small follow-up closes NB-02 and passes 422 Rust tests. Exact-head cross-platform CI is **NOT RUN**. R1 adds no feature or runtime
+budget and does not reopen S2 or managed authentication.
+
+- [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
+  allowed edits, implementation sequence and authorization.
+- [R1 matrix](slices/r1/MATRIX.md): R1-00..R1-19, all initially NOT RUN;
+  failing-before/passing-after evidence, offline gates and report structure.
+- [R1 source validation](slices/r1/VALIDATION.md): Pinned source-to-contract map,
+  actual codes/order and explicit limits of planning review, not test results.
+- [R1 implementor prompt](slices/r1/IMPLEMENTOR_PROMPT.md): Execute the fixed
+  scoped repair, offline verification and independent review; no Git/live work
+  without separate authorization.
+
+- [R1 verification report](slices/r1/VERIFICATION.md): Actual local evidence and
+  attributed red/green, increment-review and final-review history; A-01..A-05 and
+  R1-00..R1-19 PASS.
+- [R1 machine verification report](slices/r1/verification.json): Commands, counts,
+  worktree, offline acceptance, pending CI, zero-live accounting and unchanged
+  31/50 ledger.
+
+The R1 plan records and S2 reports retain their original phase and findings
+byte-for-byte. Later evidence is recorded here, not retroactively in those files.
+
 ## Completed offline implementation: S2
 
 S1 and its merge-readiness repair were merged in PR #2 at `94d86e0` after the
@@ -115,7 +160,7 @@ Live model selection/adherence is NOT RUN.
 - [WI_EXECUTION_POLICY_C1_VERIFICATION.md](WI_EXECUTION_POLICY_C1_VERIFICATION.md):
   C1.1 offline acceptance, run-limit removal, retained constraints, and review evidence.
 - [wi-execution-policy-c1-verification.json](wi-execution-policy-c1-verification.json):
-  Machine-readable C1.1 checks, matrix results, and review evidence.
+  Machine-readable C1.1 checks, matrix results, and evidence attribution.
 - [WI_LOCAL_SKILLS_S1_VERIFICATION.md](WI_LOCAL_SKILLS_S1_VERIFICATION.md): S1
   offline acceptance, preparation and activation evidence, reviews, and trust limits.
 - [wi-local-skills-s1-verification.json](wi-local-skills-s1-verification.json):

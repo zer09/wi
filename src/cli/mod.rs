@@ -178,6 +178,16 @@ async fn collect_to(
     json_mode: bool,
     out: &mut impl Write,
 ) -> Result<ModelResponse> {
+    let mut diagnostics = io::stderr();
+    collect_to_with_diagnostics(session, request_id, json_mode, out, &mut diagnostics).await
+}
+async fn collect_to_with_diagnostics(
+    session: &mut ProviderSession,
+    request_id: &str,
+    json_mode: bool,
+    out: &mut impl Write,
+    diagnostics: &mut impl Write,
+) -> Result<ModelResponse> {
     let mut rendered = String::new();
     while let Some(envelope) = session.events.next().await {
         if json_mode {
@@ -214,7 +224,8 @@ async fn collect_to(
                 return Ok(response);
             }
             ProviderEvent::RequestFailed { message, .. } => {
-                eprintln!("{message}");
+                writeln!(diagnostics, "{}", context_cli::filtered(&message))
+                    .map_err(|error| GatewayError::Io(error.kind()))?;
                 return Err(GatewayError::ProviderFailed);
             }
             _ => {}

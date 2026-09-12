@@ -1,12 +1,13 @@
-# Wi: R1 offline-accepted closure handoff
+# Wi: R1 accepted implementation and NB-02 follow-up handoff
 
 Contract **r1.0**, runtime baseline
 `4eed18be8baaf43be886164d192021b2e2e5aa28` (S2 merged in PR #3).
-R1 A-01..A-05 are locally implemented and offline accepted in the uncommitted,
-unstaged worktree on planning HEAD `b714ecac3825b1397274e5d252232a793fff726d`.
-No R1 implementation commit exists. Status is **OFFLINE_ACCEPTED**,
+R1 A-01..A-05 are offline accepted in implementation commit
+`88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
 **accepted=true**. The repeated complete-diff review passed with no actionable
 findings. Exact-head cross-platform CI is **NOT RUN**, not part of local evidence.
+The follow-up closes documented residual NB-02 by filtering legacy RequestFailed
+diagnostics through the one-line policy; it adds one regression test.
 
 Read in order:
 1. `docs/slices/r1/CONTRACT.md`
@@ -32,9 +33,10 @@ is the only production error.rs edit; its exported code remains auth_expired.
 
 Use synthetic roots/credentials and offline/loopback checks only. No real private
 skill/project inputs, auth/profile/login/refresh commands, provider traffic, hosted
-probes, implementation commits/pushes/merges, release or deployment without separate
-owner authorization. Do not reset/clean/stash or overwrite user work. Leave the
-implementation uncommitted for review unless new owner instructions permit writes.
+probes, additional commits/pushes/merges, release or deployment without separate
+owner authorization. Do not reset/clean/stash or overwrite user work. The owner
+authorized R1 commit `88b76c5`; leave later changes uncommitted unless separately
+authorized.
 Ledger unchanged: **31/50 used, 19 remaining**. Balance is not authorization.
 
 No runtime quotas/deadlines/RunLimits, optional budget replacement, progress API,
@@ -44,10 +46,13 @@ other modules. The prior S2 implementation instructions are historical.
 
 The [verification report](docs/slices/r1/VERIFICATION.md) and
 [machine report](docs/slices/r1/verification.json) record R1-00..R1-19 PASS.
-Local final code gates passed: 421 Rust tests, 152 Node self-tests, inventory
+Local R1 code gates passed: 421 Rust tests, 152 Node self-tests, inventory
 127/408/25 and three offline examples. Two complete-diff review rounds examined
 code, tests, docs and reports. The repeated round passed with no actionable
-findings. Do not mark CI complete without exact-head submitted evidence.
+findings. The NB-02 follow-up has red/green collector evidence, a 422-test full
+Rust pass and three independent PASS reviews with no actionable
+findings; Node remains 152. Do not mark CI complete without exact-head submitted
+evidence.
 Preserve older reports and plan-time wording unchanged. A new genuine contract
 conflict needs its source chain, not an unauthorized behavior change.
 Higher-priority rules and new owner directions prevail.

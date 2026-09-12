@@ -1,11 +1,11 @@
 # Event contracts (Wi 0.2.0)
 
 Provider events use schema 1; outer run events use schema 2 under C1.1.
-R1 changes no public event schema. Its repairs are locally implemented and
-offline accepted in the uncommitted worktree. The
-[verification report](slices/r1/VERIFICATION.md) records local PASS evidence and
-repeated complete-diff review; `accepted=true`. Exact-head cross-platform CI is
-NOT RUN.
+R1 changes no public event schema. Its repairs are offline accepted in commit
+`88b76c5`. The [verification report](slices/r1/VERIFICATION.md) records local PASS
+evidence and repeated complete-diff review; `accepted=true`. The NB-02 follow-up
+filters only stderr presentation and leaves event data unchanged.
+Exact-head cross-platform CI is NOT RUN.
 
 Managed authentication does not change the event JSON schema. The CLI reports
 only the validated selected profile alias on stderr. Provider account IDs and

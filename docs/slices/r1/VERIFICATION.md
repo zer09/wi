@@ -2,28 +2,30 @@
 
 Contract: **r1.0**. Status: **OFFLINE_ACCEPTED**. Accepted: **true**.
 
-A-01..A-05 and **R1-00..R1-19 PASS** in the uncommitted worktree. The first
-final complete-diff review returned three PASS verdicts with nonblocking report
+A-01..A-05 and **R1-00..R1-19 PASS** in the accepted worktree. The first final
+complete-diff review returned three PASS verdicts with nonblocking report
 observations. Verification confirmed the observations, report-only remediation
 resolved them, and the repeated review returned three PASS verdicts with no
-actionable findings. Exact-head cross-platform CI is **NOT RUN**. No R1
-implementation commit exists. See [verification.json](verification.json) for
-structured evidence and [MATRIX.md](MATRIX.md) for the governing requirements.
+actionable findings. The owner later authorized implementation commit
+`88b76c50756255193d0b681da748ed96ceec9f74`. Exact-head cross-platform CI is
+**NOT RUN**. See [verification.json](verification.json) for structured evidence
+and [MATRIX.md](MATRIX.md) for the governing requirements.
 
 ## Revision, worktree and attribution
 
 | Item | Evidence |
 |---|---|
 | Runtime baseline | `4eed18be8baaf43be886164d192021b2e2e5aa28`, S2 merge in PR #3 |
-| Planning/current HEAD | `b714ecac3825b1397274e5d252232a793fff726d` |
-| Ancestry | Both supplied revisions are ancestors of HEAD; checked again by this delegate |
-| Tested revision | `null`: HEAD does not contain the uncommitted repairs or these reports |
+| Planning/accepted-evidence HEAD | `b714ecac3825b1397274e5d252232a793fff726d` |
+| Ancestry | Both supplied revisions are ancestors of the accepted-evidence HEAD |
+| Tested revision | `null`: acceptance tests and reviews covered the uncommitted worktree, not a commit |
+| Later implementation commit | `88b76c50756255193d0b681da748ed96ceec9f74`, owner-authorized after offline acceptance |
 | Implementation start | Clean worktree, supplied parent observation before edits |
 | Prior reporting route start, D | 12 modified tracked and four untracked source/test files; nothing staged |
 | Restart start, E | 18 modified tracked and six untracked paths, including existing docs/reports; nothing staged |
 | Draft footprint | Six current documentation edits and two new reports, in addition to preserved source/tests |
 | Final code-gate time | Owner-supplied observation: 2026-09-12, around 12:13 UTC; individual command timestamps were not supplied |
-| Git authority | Leave all work uncommitted and unstaged; no stage/commit/push/merge performed |
+| Git authority | No Git write occurred during acceptance. The owner later authorized commit `88b76c5`; no push or merge followed. |
 
 **P** denotes owner-supplied parent/delegate execution or review history.
 **S** denotes reporting source/diff inspection.
@@ -387,7 +389,7 @@ from source inspection alone.
 | R1-16 | PASS | `r1_a05_nonempty_terminal_only_and_matching_created_ids_remain_opaque`, `r1_a05_empty_content_deltas_and_initial_arguments_remain_valid`, `r1_a05_recovered_output_preserves_opaque_identity_and_state_continuation`, `r1_a05_valid_terminal_keeps_received_after_consistency_rejection` (`src/providers/openai_codex/tests/wire_format/response_identity_tests.rs:174-430`); actual public-run valid content/tool/failure controls (`response_identity_loopback_tests.rs:326-497` in the same directory); G08-G10/F03. |
 | R1-17 | PASS | F01-F12; retained S1/S2 and registry/run/auth suites. `skill_loading_websocket_uses_one_session_parent_and_only_correlated_result` and `skill_loading_sse_replays_exact_prepared_context_native_call_and_result` (`src/providers/openai_codex/tests/context_integration/context_loopback_tests.rs:88-156`); all three offline examples. Protected behavior/files remain unchanged. |
 | R1-18 | PASS | Both reports, exact five findings/20 rows, current docs and attributed commands/reviews; D/E report-shape/preservation checks recorded above. Historical reports and ledger remain unchanged. |
-| R1-19 | PASS | P F01-F12 all PASS and completed increment reviews below. First final complete-diff round: three PASS verdicts with nonblocking observations, verification-confirmed and remediated in these reports. Repeated review: three PASS verdicts with no actionable findings. Source remains uncommitted; exact-head cross-platform CI is a separate subsequent gate. |
+| R1-19 | PASS | P F01-F12 all PASS and completed increment reviews below. First final complete-diff round: three PASS verdicts with nonblocking observations, verification-confirmed and remediated in these reports. Repeated review: three PASS verdicts with no actionable findings. Source was uncommitted during review and was later committed as `88b76c5`; exact-head cross-platform CI remains separate. |
 
 ## Independent review history, P
 
@@ -426,22 +428,29 @@ evidence. This remediation changes only the two reports, not source or tests.
 | review-b | PASS | No findings. |
 | review-c | PASS | Nonblocking count ambiguity and deferred residual NB-02. The A-01/A-02 explanation now records the positive control added between R01 and G01; NB-02 is recorded below and in JSON. |
 
-NB-02: `collect_to` prints `ProviderEvent::RequestFailed.message` directly to
-stderr at `src/cli/mod.rs:216-218`, without either presentation filter. Current
-concrete production `GatewayError` strings do not expose arbitrary model/server
-content (`src/error.rs:5-88`), so no present C0/C1 leak was demonstrated. Contract
-section 3.2 enumerates response-body stdout consumers, not diagnostic stderr.
-NB-02 is out of R1 scope, not a sixth A-finding or acceptance blocker. It remains
-deferred; no code fix is included. Coverage claims refer to all
-contract-enumerated response-body branches, not every stderr path.
+NB-02 originally identified that `collect_to` printed
+`ProviderEvent::RequestFailed.message` directly to stderr without either
+presentation filter. Contract section 3.2 did not require this diagnostic branch,
+so the finding did not block R1 acceptance.
 
-The three report observations were verification-confirmed and remediated. The
-repeated complete-diff review passed with no actionable findings. NB-02's code path
-remains unchanged and deferred. R1-19 passes and local offline acceptance is complete.
+After acceptance, the owner authorized and committed the small follow-up.
+`src/cli/mod.rs:226-229` applies the existing one-line filter
+before writing the diagnostic. The real collector regression at
+`src/cli/collect_tests.rs:320-363` preserves raw JSON event data and the returned
+`ProviderFailed` error while requiring control-free stderr with one newline.
+Before the semantic fix, the focused command failed 0/1 because stderr retained
+ESC, LF, HT and C1 controls. After the fix it passed 1/1, the CLI suite passed
+52/52, and the complete Rust suite passed 422 tests. Static inventory is
+127/409/25; Node remains 152 with `live_started=false`. Three independent
+follow-up reviewers returned PASS with no actionable findings. Review-a observed
+one unchanged loopback timing failure on its first full-verifier attempt; its
+permitted full-suite rerun passed 422 tests. Review-b and review-c passed their
+checks without that observation. NB-02 is resolved and independently accepted in
+this committed follow-up.
 
 ## Footprint, compatibility and remaining limits
 
-Preserved implementation paths, all unstaged/uncommitted:
+R1 implementation paths are committed in `88b76c5`:
 
 - Modified production/private seams: `src/cli/mod.rs:156-311`,
   `src/cli/context_cli.rs:66-74`, `src/cli/run_cli.rs:1-3,152-190`,
@@ -456,12 +465,10 @@ Preserved implementation paths, all unstaged/uncommitted:
   `src/providers/openai_codex/tests/wire_format/response_identity_tests.rs:1-430`,
   `src/providers/openai_codex/tests/wire_format/response_identity_loopback_tests.rs:1-539`.
 
-The earlier reporting increment changed `AGENTS.md`, `README.md`, `docs/README.md`,
-`docs/ARCHITECTURE.md`, `docs/EVENTS.md`, `docs/WI_AUTH.md` and the two new R1 reports.
-This focused remediation changes only `docs/slices/r1/VERIFICATION.md` and
-`docs/slices/r1/verification.json`; it preserves the six existing current-doc edits.
-Current docs describe observed repairs, local offline acceptance and pending CI.
-AGENTS is a closure handoff, not a claim that a repair commit exists.
+The R1 commit includes `AGENTS.md`, `README.md`, `docs/README.md`,
+`docs/ARCHITECTURE.md`, `docs/EVENTS.md`, `docs/WI_AUTH.md` and both R1 reports.
+The committed follow-up changes the private diagnostic sink, its collector test
+and current status documentation. Exact-head CI remains pending.
 
 Deliberate compatibility changes are limited to plain presentation, legacy input
 validation precedence, one AuthExpired sentence and rejection of empty decoded
@@ -476,16 +483,17 @@ budget replacement, dependencies, manifest/lock/CI/script changes or CI weakenin
 |---|---|
 | Linux local code gates | PASS; local offline evidence only |
 | Final complete-diff independent review | First round: three PASS verdicts with report observations; verification-confirmed remediation; repeated round: three PASS verdicts with no actionable findings |
-| Submitted R1 CI | NOT RUN; head null, runs empty; no implementation commit/push authorized |
+| Submitted R1 CI | NOT RUN; head null, runs empty; implementation commit `88b76c5` exists but was not pushed |
 | Native macOS/Windows | NOT RUN locally; compile-time exclusions unmeasured |
 | Exact-head CI after separate Git authorization | Both configured push/PR workflows and Ubuntu/macOS/Windows jobs must pass on the submitted head; historical S2 CI is not R1 evidence |
 | Live model behavior/auth | NOT RUN; not authorized; no account access, model choice or adherence claim |
 | Broader safety | Control filtering is not Unicode/bidi/prompt-injection or terminal-emulator certification; filesystem/other retained trust limits remain |
-| NB-02, diagnostic stderr | `collect_to` prints RequestFailed.message without presentation filters (`src/cli/mod.rs:216-218`); no present C0/C1 leak demonstrated. Deferred outside contract section 3.2; not a sixth A-finding or acceptance blocker |
+| NB-02, diagnostic stderr | RESOLVED in the committed follow-up; focused red 0/1, green 1/1, CLI 52/52, complete Rust 422/422; raw JSON and ProviderFailed preserved |
 | Unrelated audit notes | Older Node diagnostic classification and other non-R1 notes remain outside this patch |
 | Later product work | Provider reorganization, storage/P1, service/V1, GUI, generic tools, retries/failover and new feature frameworks remain deferred |
 
 The final product's one-owner multi-device service requirements do not begin here.
 Browser disconnect must not own service cancellation; persistent application
 sessions and restart-without-replay still require later design. Neither local
-repair evidence nor the unchanged ledger authorizes that work or Git/live writes.
+repair evidence nor the unchanged ledger authorizes later product or live work. The
+owner authorized only implementation commit `88b76c5`; no push or merge occurred.

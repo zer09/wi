@@ -123,11 +123,12 @@ and actual options before constructing provider/auth objects. Invalid operations
 therefore perform no credential lookup or first generation. This ordering change
 does not alter authentication implementations or add context preparation.
 
-R1 is locally implemented and offline accepted in the uncommitted worktree. The
+R1 is offline accepted in commit `88b76c5`. The
 [R1 report](slices/r1/VERIFICATION.md) records synthetic freshness/display and
 actual loopback RequestFailed regressions, not new live auth evidence. The repeated
-complete-diff review passed; `accepted=true`. Exact-head cross-platform CI is NOT
-RUN. No real credential reads or auth commands ran for R1.
+complete-diff review passed; `accepted=true`. The NB-02 follow-up changes only
+legacy diagnostic presentation. Exact-head cross-platform CI is NOT
+RUN. No real credential reads or auth commands ran for R1 or the follow-up.
 
 ## File protection
 

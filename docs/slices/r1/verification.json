@@ -6,6 +6,37 @@
   "observed_head": "b714ecac3825b1397274e5d252232a793fff726d",
   "tested_revision": null,
   "tested_worktree_description": "Uncommitted, unstaged R1 A-01..A-05 source/tests on planning HEAD b714ecac3825b1397274e5d252232a793fff726d, plus six current documentation edits and two new reports. HEAD alone does not identify the tested implementation.",
+  "implementation_commit": {
+    "revision": "88b76c50756255193d0b681da748ed96ceec9f74",
+    "message": "Implement R1 repair contract",
+    "authorized_after_acceptance": true,
+    "pushed": false
+  },
+  "post_acceptance_follow_up": {
+    "id": "NB-02",
+    "status": "RESOLVED_COMMITTED",
+    "scope": "Legacy RequestFailed diagnostic presentation only",
+    "source_references": ["src/cli/mod.rs:175-237", "src/cli/collect_tests.rs:320-363"],
+    "test": "request_failed_diagnostic_is_one_line_and_raw_json_is_unchanged",
+    "behavior": "The existing one-line filter removes payload control characters before stderr receives one writer-owned newline. Raw JSON event data, error code, upstream outcome and returned ProviderFailed remain unchanged.",
+    "red": {"command": "cargo test --bin wi request_failed_diagnostic_is_one_line_and_raw_json_is_unchanged", "passed": 0, "failed": 1, "filtered": 51, "reason": "Captured stderr retained ESC, LF, HT and C1 controls."},
+    "green": {"command": "cargo test --bin wi request_failed_diagnostic_is_one_line_and_raw_json_is_unchanged", "passed": 1, "failed": 0, "filtered": 51},
+    "cli_suite": {"command": "cargo test --bin wi cli::", "passed": 52, "failed": 0},
+    "full_suite": {"command": "cargo test --all-targets", "passed": 422, "failed": 0},
+    "node_self_test": {"command": "node scripts/cli_retest.mjs --self-test", "passed": 152, "live_started": false},
+    "inventory": {"source_files": 127, "rust_test_definitions": 409, "fixture_events": 25},
+    "format_clippy_diff": "PASS",
+    "independent_review": {
+      "status": "PASS",
+      "reviewer_count": 3,
+      "results": ["PASS", "PASS", "PASS"],
+      "blocking_findings": [],
+      "actionable_nonblocking_findings": [],
+      "review_a_observation": "The first full-verifier attempt encountered an unchanged loopback timing failure with timeout instead of protocol_error. The permitted full-suite rerun passed 422 tests.",
+      "review_b_observation": null,
+      "review_c_observation": "Independently reproduced the behavioral red in an out-of-tree copy, then passed all assigned offline checks."
+    }
+  },
   "status": "OFFLINE_ACCEPTED",
   "accepted": true,
   "next_gate": null,
@@ -77,8 +108,8 @@
       "status": "PASS",
       "checked_at": "2026-09-12T12:33:35.790Z"
     },
-    "implementation_commit_exists": false,
-    "git_writes_performed": false,
+    "at_acceptance_implementation_commit_exists": false,
+    "git_writes_performed_during_acceptance": false,
     "historical_evidence_policy": "Preserve all S2 and older evidence plus R1 planning records byte-for-byte."
   },
   "implementation_history": [
@@ -297,7 +328,7 @@
       "nonblocking_findings": [
         {"id": "report-reference-accuracy", "description": "A-02 actual-handler evidence and the modified writer-fixture footprint were misreferenced.", "resolution": "Markdown now cites src/cli/run_cli_tests.rs:343-450 for the handler and src/cli/run_cli_context_tests.rs:443-444,446 for writer-fixture wiring. JSON retains the accurate broader handler range and removes the stale context-test range. R1-03 references remain unchanged."},
         {"id": "report-count-reconciliation", "description": "The report did not explain nine focused tests in R01 versus ten in G01, with 27 filtered in both.", "resolution": "Both reports now record r1_single_line_diagnostics_still_drop_all_controls as a positive compatibility control added after R01 and before G01, not behavioral red evidence.", "evidence": ["commands.R01.selected_tests", "commands.G01.count_reconciliation", "src/cli/presentation_tests.rs:70-80"]},
-        {"id": "NB-02", "description": "Legacy RequestFailed diagnostic stderr bypasses presentation filters; no present C0/C1 leak was demonstrated.", "resolution": "Recorded under deferred_residuals as out of contract section 3.2, not a sixth A-finding or acceptance blocker. Coverage wording now names contract-enumerated response-body branches; no code change."}
+        {"id": "NB-02", "description": "Legacy RequestFailed diagnostic stderr bypasses presentation filters; no present C0/C1 leak was demonstrated.", "resolution": "Initially recorded as out of R1 section 3.2 and nonblocking. The later owner-authorized committed follow-up resolves it; see review_residuals and post_acceptance_follow_up."}
       ],
       "verification_status": "CONFIRMED",
       "report_remediation_status": "REMEDIATED",
@@ -313,22 +344,22 @@
           {"reviewer": "review-c", "verdict": "PASS", "findings": [], "reproduced_full_local_gates": true}
         ]
       },
-      "note": "The first-round observations were verification-confirmed and remediated. Three fresh repeated complete-diff reviews inspected the remediated accumulated worktree and returned PASS with no actionable findings. NB-02 remains a documented, nonblocking deferred residual."
+      "note": "The first-round observations were verification-confirmed and remediated. Three fresh repeated complete-diff reviews inspected the remediated accumulated worktree and returned PASS with no actionable findings. NB-02 did not block R1 and was later resolved by the owner-authorized committed follow-up."
     }
   ],
   "review_identity_limit": "Increment reviewer identities were not supplied. First final-round labels review-a, review-b and review-c are owner-supplied, not personal identities. Exact review invocations and individual timestamps were not supplied; no additional reviews invented.",
-  "deferred_residuals": [
+  "review_residuals": [
     {
-      "id": "NB-02", "status": "DEFERRED_OUT_OF_SCOPE", "observer": "P verification confirmation; S source inspection",
-      "summary": "collect_to prints ProviderEvent::RequestFailed.message directly to stderr without either presentation filter.",
-      "source_references": ["src/cli/mod.rs:216-218", "src/error.rs:5-88"],
-      "current_production_constraint": "Current concrete production GatewayError strings do not expose arbitrary model/server content.",
-      "present_c0_c1_leak_demonstrated": false,
-      "contract_scope": "CONTRACT.md section 3.2 enumerates response-body stdout consumers, not diagnostic stderr; this residual is outside R1.",
+      "id": "NB-02", "status": "RESOLVED_COMMITTED", "observer": "P verification confirmation; S source inspection; owner-authorized direct follow-up",
+      "summary": "The accepted R1 review found that collect_to printed ProviderEvent::RequestFailed.message directly to stderr without either presentation filter.",
+      "original_source_references": ["src/cli/mod.rs:216-218", "src/error.rs:5-88"],
+      "resolution_source_references": ["src/cli/mod.rs:175-237", "src/cli/collect_tests.rs:320-363"],
+      "contract_scope": "The finding was outside R1 contract section 3.2 and did not block R1 acceptance.",
       "additional_a_finding": false,
       "acceptance_blocker": false,
-      "resolution": "Documented and deferred; no source or test change.",
-      "review_evidence": "independent_reviews.final_complete_diff_docs_reports, round 1, review-c"
+      "resolution": "The committed follow-up applies context_cli::filtered before diagnostic output and proves raw JSON and ProviderFailed preservation through the real collector path.",
+      "review_evidence": "independent_reviews.final_complete_diff_docs_reports, round 1, review-c",
+      "follow_up_evidence": "post_acceptance_follow_up"
     }
   ],
   "submitted_ci": {"status": "NOT_RUN", "head": null, "runs": []},
@@ -341,17 +372,17 @@
   },
   "report_validation": {"status": "PASS", "finding_count": 5, "matrix_count": 20, "matrix_pass": 19, "matrix_review_pending": 1, "observer": "D", "checked_at": "2026-09-12T12:33:35.790Z", "source_test_preservation": "PASS", "historical_evidence_preservation": "PASS", "failed_checks": 0, "note": "Prior reporting-route checks, preserved as recorded. Restart checks are separate; final independent review remains pending."},
   "restart_validation": {"status": "PASS", "observer": "E", "start_preservation": "PASS", "start_checked_at": "2026-09-12T12:40:00.133Z", "protected_files": 187, "slice_files_matching_head": 10, "head_and_ancestry": "PASS", "toolchain_matches": true, "finding_count": 5, "matrix_count": 20, "matrix_pass": 19, "matrix_review_pending": 1, "shape_checked_at": "2026-09-12T12:43:26.511Z", "command_ids": ["E00", "E01", "E02", "E03", "E04", "E05"], "failed_checks": 0, "note": "Only report attribution, one source-line range and fresh results changed after restart; six active-doc edits preserved. Final read-only consistency/preservation/whitespace check followed result insertion. This record predates independent review and acceptance closure."},
-  "closure_validation": {"status": "PASS", "observer": "P", "finding_count": 5, "matrix_count": 20, "matrix_pass": 20, "matrix_review_pending": 0, "first_review_results": ["PASS", "PASS", "PASS"], "verified_report_findings": 3, "report_remediation": "PASS", "repeated_review_results": ["PASS", "PASS", "PASS"], "blocking_findings": 0, "actionable_nonblocking_findings": 0, "accepted": true, "source_revision": null, "submitted_ci": "NOT_RUN", "note": "Final factual closure on the uncommitted worktree. Exact-head CI, live checks and Git writes remain separate and unauthorized."},
+  "closure_validation": {"status": "PASS", "observer": "P", "finding_count": 5, "matrix_count": 20, "matrix_pass": 20, "matrix_review_pending": 0, "first_review_results": ["PASS", "PASS", "PASS"], "verified_report_findings": 3, "report_remediation": "PASS", "repeated_review_results": ["PASS", "PASS", "PASS"], "blocking_findings": 0, "actionable_nonblocking_findings": 0, "accepted": true, "source_revision": null, "submitted_ci": "NOT_RUN", "note": "Final factual closure covered the uncommitted acceptance worktree. The owner later authorized implementation commit 88b76c5. Exact-head CI, live checks, push and merge remain separate and unauthorized."},
   "limitations": [
     "OFFLINE_ACCEPTED/accepted=true applies to the tested uncommitted worktree; it is not merge readiness or exact-head cross-platform CI evidence.",
     "P red/green/baseline/final-code/review history is supplied evidence; D/E do not claim to have rerun earlier failures or inspected private logs. D checks remain attributed to the prior reporting route; E checks are new restart execution.",
     "Linux-only local evidence does not prove native macOS/Windows execution; compile-time exclusions are unmeasured, not zero ignored tests.",
-    "No exact submitted R1 revision or CI run exists because changes remain uncommitted and unstaged.",
+    "No submitted R1 CI run exists. Implementation commit 88b76c5 and the NB-02 follow-up remain local and unpushed.",
     "Control filtering is not an ANSI parser, Unicode/bidi/prompt-injection defense or general terminal-emulator security certification.",
     "No kernel-level credential I/O audit; no-live accounting follows controlled environment and synthetic fixture boundaries.",
     "Missing-MIME empty-identity rejection is earlier preserved unexpected_content_type behavior, not A-05 decoder red evidence.",
     "Public-run helper lacks a total forwarded provider-event count assertion; contract-critical no invalid start/finish, one failure, no tools/second send assertions pass. No code change required.",
-    "NB-02: collect_to RequestFailed stderr bypasses presentation filters, but no present C0/C1 leak was demonstrated. Deferred outside contract section 3.2, not a sixth A-finding or acceptance blocker; see deferred_residuals and the first final-review record.",
+    "NB-02 was outside R1 section 3.2 and did not block acceptance. The owner-authorized committed follow-up resolves it; see review_residuals and post_acceptance_follow_up.",
     "Older unrelated Node diagnostic classification and other non-R1 audit notes are deferred, not silently repaired.",
     "Provider schema 1, run schema 2, S1 direct no-loader API, S2 catalog/registry pairing, cache/order/cancellation/recovery, managed/external auth ownership and no-RunLimits behavior remain intact.",
     "No source/tests, manifests/lock/CI/scripts or runtime behavior changed in this documentation increment. Storage/P1, service/V1, GUI, generic tools, provider reorganization, retries/failover and new frameworks remain deferred."
@@ -364,9 +395,9 @@
     "hosted_probes": 0,
     "live_smoke_runs": 0,
     "two_turns_main_runs": 0,
-    "git_writes": 0,
+    "git_writes": 2,
     "release_or_deploy": 0,
-    "note": "Pi authoring traffic is separate from Wi verification; synthetic provider submissions do not consume the live ledger. No Git or hosted transitions authorized."
+    "note": "Pi authoring traffic is separate from Wi verification; synthetic provider submissions do not consume the live ledger. The owner authorized implementation commit 88b76c5 and the NB-02 follow-up commit. No push, merge, hosted transition, release or deployment was authorized."
   },
   "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false}
 }

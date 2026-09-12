@@ -1,9 +1,10 @@
 # Wi architecture and ownership
 
-R1 repairs are locally implemented and offline accepted in the uncommitted
-worktree. The [R1 evidence](slices/r1/VERIFICATION.md) records passing local gates
-and repeated complete-diff review; `accepted=true`. Exact-head cross-platform CI
-is NOT RUN. S1/S2 ownership and public schemas remain unchanged.
+R1 repairs are offline accepted in commit `88b76c5`. The
+[R1 evidence](slices/r1/VERIFICATION.md) records passing local gates and repeated
+complete-diff review; `accepted=true`. The follow-up closes NB-02 for legacy
+RequestFailed diagnostics. Exact-head cross-platform CI is NOT RUN.
+S1/S2 ownership and public schemas remain unchanged.
 
 ## One crate, explicit module boundaries
 

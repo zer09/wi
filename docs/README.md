@@ -21,13 +21,12 @@ implementation handoff are below. P1/V1 storage and service design remain deferr
 
 S2 merged in PR #3 at `4eed18b`. R1 contract **r1.0** repairs inherited A-01..A-05:
 plain terminal rendering, multiline preservation, legacy input preflight, one
-expiry message, and empty response identity. The repairs are locally implemented
-in the uncommitted worktree on planning HEAD `b714ecac3825b1397274e5d252232a793fff726d`.
-Status is **OFFLINE_ACCEPTED**, **accepted=true**. Local code gates passed with
-421 Rust tests, 152 Node self-tests and all three offline examples. The repeated
-complete-diff review including docs/reports passed with no actionable findings.
-Exact-head cross-platform CI is **NOT RUN**. R1 adds no feature or runtime budget
-and does not reopen S2 or managed authentication.
+expiry message, and empty response identity. The repairs are implemented in commit
+`88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
+**accepted=true**. Local R1 gates passed with 421 Rust tests, 152 Node self-tests
+and all three offline examples. The repeated complete-diff review passed with no
+actionable findings. A small follow-up closes NB-02 and passes 422 Rust tests. Exact-head cross-platform CI is **NOT RUN**. R1 adds no feature or runtime
+budget and does not reopen S2 or managed authentication.
 
 - [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
   allowed edits, implementation sequence and authorization.

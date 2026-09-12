@@ -15,12 +15,14 @@ Live model selection/adherence remains NOT RUN. S2 did not repair its inherited
 A-01 through A-05 findings. Planning documents and older reports retain their
 original phase-specific wording as evidence.
 
-**R1 status: OFFLINE_ACCEPTED in the uncommitted worktree.**
+**R1 status: OFFLINE_ACCEPTED in commit `88b76c5`.**
 The [R1 verification report](docs/slices/r1/VERIFICATION.md) and
 [machine report](docs/slices/r1/verification.json) record A-01..A-05 and
 R1-00..R1-19 PASS, 421 Rust tests and 152 Node self-tests. The repeated
 complete-diff review passed with no actionable findings; `accepted=true`.
-Exact-head cross-platform CI is NOT RUN. No live checks or Git writes occurred.
+A small follow-up closes NB-02 by applying the existing one-line filter to legacy
+RequestFailed diagnostics. Its full Rust suite passes 422 tests.
+Exact-head cross-platform CI is NOT RUN. No live checks or push occurred.
 
 **Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status

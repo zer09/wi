@@ -318,6 +318,51 @@ async fn collect_preserves_terminal_only_suffix_and_authoritative_fallback() {
     }
 }
 #[tokio::test]
+async fn request_failed_diagnostic_is_one_line_and_raw_json_is_unchanged() {
+    let message = "\x1b[31mline\n\tindented\u{009b}tail";
+    for json_mode in [false, true] {
+        let mut session = session(vec![ProviderEvent::RequestFailed {
+            code: "protocol_error".into(),
+            message: message.into(),
+            upstream_outcome: wi::UpstreamOutcome::TerminalReceived,
+        }]);
+        let mut out = Captured::default();
+        let mut diagnostics = Captured::default();
+        let result = collect_to_with_diagnostics(
+            &mut session,
+            "request",
+            json_mode,
+            &mut out,
+            &mut diagnostics,
+        )
+        .await;
+
+        assert!(matches!(result, Err(GatewayError::ProviderFailed)));
+        assert_eq!(
+            String::from_utf8(diagnostics.bytes).unwrap(),
+            "[31mlineindentedtail\n"
+        );
+        assert_eq!(diagnostics.flushes, 0);
+        if json_mode {
+            let envelope: EventEnvelope = serde_json::from_slice(&out.bytes).unwrap();
+            let ProviderEvent::RequestFailed {
+                code,
+                message: actual_message,
+                upstream_outcome,
+            } = envelope.event
+            else {
+                panic!("expected request failure")
+            };
+            assert_eq!(code, "protocol_error");
+            assert_eq!(actual_message, message);
+            assert_eq!(upstream_outcome, wi::UpstreamOutcome::TerminalReceived);
+        } else {
+            assert!(out.bytes.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
 async fn collect_preserves_correlation_failure_and_eof() {
     for mode in [false, true] {
         assert!(

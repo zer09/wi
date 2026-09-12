@@ -7,6 +7,14 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
+**S2 status: implemented and offline accepted under contract s2.1.**
+The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
+passing, 374 local Rust tests and 152 Node self-tests. Submitted-head CI for
+`48e23b5` passed on Ubuntu, macOS and Windows; see the dated CI references below.
+Live model selection/adherence remains NOT RUN. The inherited A-01 through A-05
+findings in that report remain open; S2 did not repair them. Planning documents
+and pre-push reports retain their original phase-specific wording as evidence.
+
 **Status: Wi managed-auth login, explicit renewal and all six generation cases passed on local Linux.**
 Wi persisted its own eligible profile and confirmed it through fresh metadata status
 both after login and after renewal. Automatic expiry-triggered renewal has offline evidence.
@@ -99,9 +107,15 @@ uv run scripts/verify.py
 
 The tests use synthetic credentials and local loopback HTTP/WebSocket servers.
 They do not read your auth files or consume your subscription. Cargo dependency
-downloads still need network access. GitHub Actions runs the same Rust checks on
-Linux, macOS, and Windows after this project is put in a repository; that workflow
-has not been executed as part of this delivery.
+downloads still need network access. GitHub Actions runs the six Cargo gates on
+Ubuntu, macOS and Windows. On 2026-09-12, both the
+[push run](https://github.com/zer09/wi/actions/runs/34678063675) and the
+[PR run](https://github.com/zer09/wi/actions/runs/34678065367) passed every configured
+OS job at `48e23b5330ba6aa69be0bf02a4aab6c8d7226426`. These are revision-specific
+results, not a claim about later commits or live provider behavior. Node
+self-tests, Python inventory checks and executed examples are separate local
+evidence; the GitHub workflow does not run those commands. The original
+uncompiled-delivery report remains historical and is not current CI status.
 
 `Cargo.lock` is retained after local dependency resolution. The direct HTTP and
 WebSocket crate versions remain pinned. Use the lockfile for reproducible
@@ -422,10 +436,13 @@ timeout 180s target/debug/wi smoke --auth-source pi --transport websocket \
   --model gpt-6-astra --case tool
 ```
 
-Select `--transport sse` explicitly for equivalent SSE cases. Count every attempt,
-including ambiguous writes, against the handoff's 10-submission total budget (five
-per transport for the complete matrix). Stop a failed sequence. These examples are not evidence that this model or account is supported.
-No real credentials or live calls were used to implement the helper.
+Select `--transport sse` explicitly for equivalent SSE cases. The original handoff's
+10-submission allowance (five per transport) is historical, not a renewed allocation.
+Count every attempt, including ambiguous writes, under the owner's current explicit
+authorization and stop a failed sequence. The recorded cumulative ledger remains
+31/50 used, 19 remaining; the balance alone authorizes no requests. These examples
+are not evidence that this model or account is supported. No real credentials or
+live calls were used to implement the helper.
 
 The single JSON summary contains only static categories, counts, and booleans.
 `submissions` records dispatch attempts, transport, socket reuse, request-body

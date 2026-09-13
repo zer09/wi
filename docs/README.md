@@ -14,8 +14,31 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
-New slice documents use `docs/slices/<slice>/`. S2's governing contract and
-implementation handoff are below. P1/V1 storage and service design remain deferred.
+New slice documents use `docs/slices/<slice>/`. P1-A is now a fixed planning handoff,
+not implemented storage. P1-B runtime persistence and V1 service remain deferred.
+
+## Current planning handoff: P1-A
+
+Contract **p1a.0**, runtime baseline `dd720c0` (R1/NB-02 merged). This documentation
+selects SQLite with the minimal SQLx 0.9.0 SQLite/Tokio features, per-session canonical
+databases and a session catalog. It does not install the driver or change runtime.
+All 32 acceptance rows are **NOT RUN**. Human-readable files, a network DB server,
+run limits and automatic task resumption are excluded.
+
+- [P1-A contract](slices/p1a/CONTRACT.md): Exact storage-only scope, API, ownership,
+  creation, acknowledgments, catalog refresh/repair and restart semantics.
+- [P1-A schema](slices/p1a/SCHEMA.md): First catalog/session DDL and source-aligned
+  record/projection contracts; not a claim of an installed database.
+- [P1-A matrix](slices/p1a/MATRIX.md): P1A-00..P1A-31, real SQLite/process oracles,
+  regression gates, performance observations and future report requirements.
+- [P1-A validation](slices/p1a/VALIDATION.md): Checkpoint/new local report intake,
+  current Rust source mapping, driver references and planning-validation limits.
+- [P1-A implementor prompt](slices/p1a/IMPLEMENTOR_PROMPT.md): Fresh local agent
+  assignment; implementation/offline tests only, no independent replanning or Git/live work.
+
+The implementor will create `docs/slices/p1a/VERIFICATION.md` and `verification.json`
+after observed work. Ordinary `wi run` persistence, valid provider-history restoration,
+service and GUI are not delivered by this planning PR or by P1-A's storage library.
 
 ## Historical-citation errata (2026-09-12 UTC)
 
@@ -31,7 +54,7 @@ These citation corrections leave the four historical report files unchanged.
 Both behavioral claims remain correct: `RunEvent` has four lifecycle kinds and
 two wrappers; CI configures Ubuntu, Windows and macOS with all six Cargo gates.
 
-## Offline-accepted repair: R1
+## Offline-accepted and merged repair: R1
 
 S2 merged in PR #3 at `4eed18b`. R1 contract **r1.0** repairs inherited A-01..A-05:
 plain terminal rendering, multiline preservation, legacy input preflight, one
@@ -39,8 +62,11 @@ expiry message, and empty response identity. The repairs are implemented in comm
 `88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
 **accepted=true**. Local R1 gates passed with 421 Rust tests, 152 Node self-tests
 and all three offline examples. The repeated complete-diff review passed with no
-actionable findings. A small follow-up closes NB-02 and passes 422 Rust tests. Exact-head cross-platform CI is **NOT RUN**. R1 adds no feature or runtime
-budget and does not reopen S2 or managed authentication.
+actionable findings. A small follow-up closes NB-02 and passes 422 Rust tests.
+The committed reports describe the pre-push stage. Subsequent submitted-head CI and
+merge closure are recorded in [PR #4](https://github.com/zer09/wi/pull/4): final head
+`a4ee1db`, merge `dd720c0`. R1 adds no feature or runtime budget and does not reopen
+S2 or managed authentication. These earlier results are not P1-A execution evidence.
 
 - [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
   allowed edits, implementation sequence and authorization.

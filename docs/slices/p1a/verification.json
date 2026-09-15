@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "contract": "p1a.0",
-  "status": "ACCEPTED",
-  "accepted": true,
+  "status": "LOCAL_ACCEPTANCE_PASSED_HOSTED_CI_PENDING",
+  "accepted": false,
   "local_acceptance": "PASS",
   "baseline": "dd720c0e66eceaaea831ad03e489656f77fc1cec",
   "planning_head": "21b1feacd2a278d74452fefd970a016170a83917",
-  "observed_head": "2fb600a545dfdf8adf89e34609e00fc07d95027b",
-  "tested_revision": "2fb600a545dfdf8adf89e34609e00fc07d95027b",
-  "tested_worktree_description": "Commit 2fb600a contains the complete implementation plus the test-only macOS Unix-socket path remediation. The later evidence-only documentation update records both passing exact-head workflows and does not change production or test behavior.",
+  "observed_head": "2d26cd9b6f3230ab16537f7d0663b8a4fdadd8e0",
+  "tested_revision": null,
+  "tested_worktree_description": "Uncommitted explicit healthy-lease unlock remediation plus its duplicate-descriptor regression and current evidence updates. Full local gates pass. Exact-head Ubuntu/macOS/Windows CI is pending.",
   "implementation_commit": {
     "revision": "d4291817e9668456e3b8f6c8a07cb76927edb853",
     "message": "feat(storage): add durable application session storage",
@@ -119,8 +119,8 @@
     {"id":"P1A-27","status":"PASS","observer":"D+S","commands":["F03","F15"],"tests":["storage_error_namespace_and_certainty_are_static","p1a27_fault_real_sqlite_full_and_constraint_roll_back_whole_mutation","rename_busy_is_not_committed_and_identical_waiters_converge"],"source":["src/storage/fault_tests.rs:390-437","src/storage/database.rs:9-27","tests/storage/sessions.rs:223-273"],"assertions":"Real busy/constraint and SQLite max_page_count FULL simulation preserve atomic rollback and primary static error; labeled I/O/commit/close injections check certainty. No physical device-full/power-loss evidence.","blockers":[]},
     {"id":"P1A-28","status":"PASS","observer":"D+S","commands":["F01-F11"],"tests":["p1a28_process_normal_cli_help_and_noop_create_no_storage"],"source":["tests/storage/cli.rs:4-39","src/lib.rs:1-12"],"assertions":"All retained tests pass; protected run/provider/auth/context/tools/CLI source unchanged. Four CLI invocations create no storage. RunRequest and runtime/provider schemas 2/1 unchanged; no runtime persistence seam.","blockers":[]},
     {"id":"P1A-29","status":"PASS","observer":"D+S","commands":["F12"],"tests":[],"source":["examples/storage_offline.rs:125-482"],"assertions":"Three real finite example samples capture context, execute registry outside storage, record supplied trace, refresh/list/page, remove synthetic context, close/reopen and assert retained data/receipts. Latencies, bytes, transaction sizes and probe connection cost recorded; no SLA or fastest claim.","blockers":[]},
-    {"id":"P1A-30","status":"PASS","observer":"D+S+P","commands":["F17-F19","R01","CI-PUSH","CI-PR"],"tests":[],"source":["README.md:1","docs/ARCHITECTURE.md:1","docs/EVENTS.md:1","docs/README.md:1","AGENTS.md:1"],"assertions":"Five current docs and two reports distinguish local and hosted acceptance, all 32 PASS dispositions, completed final review, exact-head CI, deferred runtime/P1-B/V1 behavior, unchanged historical records and ledger.","blockers":[]},
-    {"id":"P1A-31","status":"PASS","observer":"D+P+S","commands":["F01-F19","R01","CI-PUSH","CI-PR"],"tests":["filesystem::storage_special_files_and_hardlinks_are_rejected_without_opening_them"],"source":[".github/workflows/ci.yml:1-23","tests/storage/filesystem.rs:329-371","tests/storage/fixtures.rs:21-31"],"assertions":"Required local gates and repeated increment reviews pass. Three fresh reviewers examined the complete accumulated diff and reports. Review-b and review-c passed; review-a's sole proposed blocker was independently rejected against SCHEMA.md:217-223. The first d429181 workflows exposed a macOS SUN_LEN fixture failure. Test-only commit 2fb600a uses a short private Unix fixture root, and exact-head push run 34928386247 plus PR run 34928389304 passed all six Cargo steps on Ubuntu, macOS and Windows.","blockers":[]}
+    {"id":"P1A-30","status":"PASS","observer":"D+S+P","commands":["F17-F19","R01","R02","CI-PUSH","CI-PR"],"tests":[],"source":["README.md:1","docs/ARCHITECTURE.md:1","docs/EVENTS.md:1","docs/README.md:1","AGENTS.md:1"],"assertions":"Five current docs and two reports distinguish local, prior hosted and pending exact-head evidence; P1-B/V1 remain deferred and the ledger is unchanged.","blockers":[]},
+    {"id":"P1A-31","status":"LOCAL_PASS_HOSTED_CI_PENDING","observer":"D+P+S","commands":["F01-F19","R01","R02","CI-PUSH","CI-PR"],"tests":["filesystem::storage_special_files_and_hardlinks_are_rejected_without_opening_them","storage_close_explicitly_unlocks_before_all_duplicate_descriptors_close","storage_reservations_recover_missing_zero_length_empty_and_postcommit_evidence"],"source":[".github/workflows/ci.yml:1-23","src/storage/lifecycle.rs:100-164","src/storage/operation_tests.rs:130-181","tests/storage/filesystem.rs:329-371","tests/storage/fixtures.rs:21-31"],"assertions":"Local gates and complete-diff review pass. Both 2fb600a workflows passed all OS jobs. At 2d26cd9, push run 34929149332 passed, but PR run 34929152971 failed macOS immediate reopen with storage.busy while Ubuntu/Windows passed. Explicit healthy unlock and a duplicate-descriptor regression pass locally.","blockers":["Exact-head Ubuntu/macOS/Windows CI pending for the explicit-unlock remediation."]}
   ],
   "test_counts": {
     "full_direct": {"passed":535,"failed":0,"ignored":1,"measured":0,"filtered":0},
@@ -193,8 +193,10 @@
     {"id":"final-complete-diff","observer":"P","reviewers":["review-a","review-b","review-c"],"completed_record_utc":"2026-09-15T02:45:43Z","status":"PASS","findings":"Three fresh reviewers inspected the complete accumulated implementation, tests, untracked files, docs and reports. Review-b and review-c passed. Review-a proposed that supplemental RunResult summary/delivery fields must equal RunFinished; independent verification rejected the finding because SCHEMA.md:217-223 requires equality only for run identity, provider session and complete outcome, and existing tests intentionally preserve separate delivery metadata. Review-c observed one unnamed full-suite failure that did not reproduce in five reruns; retained as a low hosted-CI flake risk, not a contract blocker."}
   ],
   "submitted_ci": [
-    {"id":"CI-PUSH","event":"push","run_id":34928386247,"head_sha":"2fb600a545dfdf8adf89e34609e00fc07d95027b","url":"https://github.com/zer09/wi/actions/runs/34928386247","status":"PASS","jobs":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},"steps":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]},
-    {"id":"CI-PR","event":"pull_request","run_id":34928389304,"head_sha":"2fb600a545dfdf8adf89e34609e00fc07d95027b","url":"https://github.com/zer09/wi/actions/runs/34928389304","status":"PASS","jobs":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},"steps":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]}
+    {"id":"CI-2FB-PUSH","event":"push","run_id":34928386247,"head_sha":"2fb600a545dfdf8adf89e34609e00fc07d95027b","url":"https://github.com/zer09/wi/actions/runs/34928386247","status":"PASS","jobs":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},"steps":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]},
+    {"id":"CI-2FB-PR","event":"pull_request","run_id":34928389304,"head_sha":"2fb600a545dfdf8adf89e34609e00fc07d95027b","url":"https://github.com/zer09/wi/actions/runs/34928389304","status":"PASS","jobs":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},"steps":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]},
+    {"id":"CI-2D-PUSH","event":"push","run_id":34929149332,"head_sha":"2d26cd9b6f3230ab16537f7d0663b8a4fdadd8e0","url":"https://github.com/zer09/wi/actions/runs/34929149332","status":"PASS","jobs":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"}},
+    {"id":"CI-2D-PR","event":"pull_request","run_id":34929152971,"head_sha":"2d26cd9b6f3230ab16537f7d0663b8a4fdadd8e0","url":"https://github.com/zer09/wi/actions/runs/34929152971","status":"FAIL","jobs":{"ubuntu-latest":"PASS","macos-latest":"FAIL","windows-latest":"PASS"},"failure":"cargo test --all-targets: storage::operation_tests::storage_reservations_recover_missing_zero_length_empty_and_postcommit_evidence returned storage.busy at src/storage/operation_tests.rs:164"}
   ],
   "post_submission_remediation": {
     "failed_revision":"d4291817e9668456e3b8f6c8a07cb76927edb853",
@@ -204,20 +206,30 @@
     "production_files_changed":0,
     "local_full_gate":{"id":"R01","command":"node /tmp/wi-p1a-inc6-final-wNEdt9eR/gate.mjs full","started":"2026-09-15T04:17:48.220Z","finished":"2026-09-15T04:19:12.258Z","status":"PASS","gates":12,"rust_tests":{"passed":535,"failed":0,"ignored":1},"node_self_tests":{"passed":152,"live_started":false},"examples":["run_offline","skills_offline","skill_loading_offline","storage_offline"]}
   },
+  "current_remediation": {
+    "cause":"Healthy lease retirement depended only on dropping the owned File. A concurrent process spawn can briefly retain a duplicate descriptor and delay OS lock release after SessionStore::close returns.",
+    "fix":"Explicitly unlock a healthy lease before dropping the owned descriptor; on unlock uncertainty retain ownership and return storage.io.",
+    "scope":["src/storage/lifecycle.rs","current documentation and evidence"],
+    "regression":"storage_close_explicitly_unlocks_before_all_duplicate_descriptors_close",
+    "first_local_command":{"command":"cargo test --locked --lib storage::lifecycle::tests::storage_close_explicitly_unlocks_before_all_duplicate_descriptors_close storage::operation_tests::storage_reservations_recover_missing_zero_length_empty_and_postcommit_evidence","status":"COMMAND_ERROR","exit":1,"reason":"Cargo accepts one TESTNAME filter; no tests executed."},
+    "focused":{"command":"cargo test --locked --lib storage::","status":"PASS","passed":40,"ignored":1},
+    "local_full_gate":{"id":"R02","command":"node /tmp/wi-p1a-inc6-final-wNEdt9eR/gate.mjs full","started":"2026-09-15T04:38:11.682Z","finished":"2026-09-15T04:39:47.568Z","status":"PASS","gates":12,"rust_tests":{"passed":536,"failed":0,"ignored":1},"node_self_tests":{"passed":152,"live_started":false},"source_inventory":[171,526,25],"examples":["run_offline","skills_offline","skill_loading_offline","storage_offline"]},
+    "exact_head_ci":"PENDING"
+  },
   "platform_status": {
-    "linux_local": "PASS",
-    "hosted_macos": "PASS at 2fb600a in push and PR workflows",
-    "hosted_windows": "PASS at 2fb600a in push and PR workflows, including Windows-only storage tests",
-    "exact_head_ubuntu": "PASS",
-    "exact_head_macos": "PASS",
-    "exact_head_windows": "PASS",
-    "workflow_scope": ".github/workflows/ci.yml:1-23 ran all six Cargo gates on ubuntu-latest/windows-latest/macos-latest. Node self-tests, Python inventory and example mains are separate local evidence. No CI/lint/platform weakening."
+    "linux_local": "PASS for current explicit-unlock remediation",
+    "prior_hosted_macos": "PASS at 2fb600a in push and PR workflows; 2d26cd9 push PASS and PR FAIL",
+    "prior_hosted_windows": "PASS at 2fb600a and 2d26cd9, including Windows-only storage tests",
+    "exact_head_ubuntu": "PENDING",
+    "exact_head_macos": "PENDING",
+    "exact_head_windows": "PENDING",
+    "workflow_scope": ".github/workflows/ci.yml:1-23 runs six Cargo gates on ubuntu-latest/windows-latest/macos-latest. Node self-tests, Python inventory and example mains are separate local evidence. No CI/lint/platform weakening."
   },
   "report_validation": {"status":"PASS","checked_at_utc":"2026-09-15T03:51:21.607Z","scope":"historical pre-commit report validation","checks":["JSON parses and has exactly P1A-00 through P1A-31 once","Markdown/JSON statuses, command/count/sample/limit agreement","Named source paths/ranges and current-doc report links exist","Complete final inventory and protected-file/index fingerprints","Every untracked path whitespace check; parent repeated F17 after final status edits","Final complete-diff review status and hosted-CI-only pending boundary reconciled","Owner-authorized staged inventory recorded as 8 modified plus 49 added paths with no unstaged/untracked paths"],"final_recheck":"Parent repeated JSON parsing, row/status consistency, pending-boundary search and tracked/untracked/staged diff whitespace checks during commit preparation.","not_independent_review":true,"independent_review_recorded_separately":true},
-  "post_ci_report_validation": {"status":"PASS","checked_at_utc":"2026-09-15T04:30:07Z","checks":["JSON parses","exactly 32 ordered unique matrix rows are PASS","tested revision is 2fb600a","two submitted CI runs match 2fb600a and all six OS jobs passed","current documentation contains no stale P1-A pending/unverified status","git diff --check passes"],"personal_no_delegate_audit":true},
+  "post_ci_report_validation": {"status":"SUPERSEDED_BY_2D26CD9_FAILURE","checked_at_utc":"2026-09-15T04:30:07Z","checks":["JSON parsed","32 rows were PASS at 2fb600a","both 2fb600a workflows passed"],"personal_no_delegate_audit":true},
   "commit_preparation": {"status":"PASS","gate_window_utc":["2026-09-15T03:49:59.062Z","2026-09-15T03:51:21.607Z"],"isolated_wrapper":"/tmp/wi-p1a-inc6-final-wNEdt9eR/gate.mjs full","gates":12,"all_exit_zero":true,"rust_tests":{"passed":535,"failed":0,"ignored":1},"node_self_tests":{"passed":152,"live_started":false},"examples":["run_offline","skills_offline","skill_loading_offline","storage_offline"],"index":{"staged_modified":8,"staged_added":49,"unstaged":0,"untracked":0},"commit_created_at_snapshot":false,"push_performed_at_snapshot":false},
   "limitations": [
-    "Local storage-only acceptance, independent complete-diff review, and exact-head Ubuntu/macOS/Windows CI passed. P1A-00 through P1A-31 are PASS.",
+    "Local storage-only acceptance and independent complete-diff review passed. P1A-00 through P1A-30 are PASS; P1A-31 awaits exact-head lease-remediation CI.",
     "Windows file symlink tests require Developer Mode or SeCreateSymbolicLinkPrivilege; fixture failures are not skipped. Hosted Windows execution passed. Caller must supply protected Windows root ACLs; Unix modes are not Windows ACL enforcement.",
     "Static path/link/reparse checks do not eliminate hostile same-user check-then-open/ancestor TOCTOU. No network-filesystem, encryption/keyring, backup/export or adversarial filesystem certification.",
     "Process exit/SIGKILL and real SQLite FULL under max_page_count do not certify physical power-loss/device-full behavior. WAL/FULL configuration is not a device guarantee. Labeled commit/cleanup injections are not real ambiguous storage-hardware failures.",
@@ -235,6 +247,6 @@
   "live_started": false,
   "real_credential_reads": 0,
   "provider_generations": 0,
-  "authorization": {"original_increment6":{"source_or_test_edits":0,"new_agents_launched":0,"git_writes":0,"hosted_actions":0},"owner_authorized_commits":["d4291817e9668456e3b8f6c8a07cb76927edb853","2fb600a545dfdf8adf89e34609e00fc07d95027b"],"owner_authorized_pushes":2,"manual_workflow_dispatches":0,"auth_profile_login_refresh_commands":0,"private_skill_access":0,"new_live_allocation":0},
+  "authorization": {"original_increment6":{"source_or_test_edits":0,"new_agents_launched":0,"git_writes":0,"hosted_actions":0},"owner_authorized_commits":["d4291817e9668456e3b8f6c8a07cb76927edb853","2fb600a545dfdf8adf89e34609e00fc07d95027b","2d26cd9b6f3230ab16537f7d0663b8a4fdadd8e0"],"owner_authorized_pushes":3,"current_loop_authorizes_required_remediation_commit_and_push":true,"manual_workflow_dispatches":0,"auth_profile_login_refresh_commands":0,"private_skill_access":0,"new_live_allocation":0},
   "ledger": {"used":31,"cap":50,"remaining":19,"changed":false}
 }

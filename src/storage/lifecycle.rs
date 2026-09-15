@@ -109,13 +109,25 @@ impl Lifecycle {
                     if state.unhealthy {
                         return Err(StorageError::new(StorageErrorKind::Io));
                     }
-                    state.lease.take();
-                    return Ok(());
+                    return release_lease(&mut state);
                 }
             }
             changed.await;
         }
     }
+}
+
+fn release_lease(state: &mut State) -> Result<(), StorageError> {
+    let Some(lease) = state.lease.as_ref() else {
+        return Ok(());
+    };
+    if lease.unlock().is_err() {
+        // Keep uncertain ownership until process exit instead of permitting a racing owner.
+        state.unhealthy = true;
+        return Err(StorageError::new(StorageErrorKind::Io));
+    }
+    state.lease.take();
+    Ok(())
 }
 
 impl Drop for OperationGuard {
@@ -129,7 +141,7 @@ impl Drop for OperationGuard {
         state.admitted -= 1;
         if state.admitted == 0 {
             if state.closing && !state.unhealthy {
-                state.lease.take();
+                let _ = release_lease(&mut state);
             }
             self.lifecycle.changed.notify_waiters();
         }
@@ -182,5 +194,18 @@ mod tests {
         lifecycle.close().await.unwrap();
         lifecycle.close().await.unwrap();
         drop(filesystem::acquire_lease(&root).unwrap());
+    }
+
+    #[tokio::test]
+    async fn storage_close_explicitly_unlocks_before_all_duplicate_descriptors_close() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = filesystem::resolve_root(temp.path().join("root")).unwrap();
+        let lease = filesystem::acquire_lease(&root).unwrap();
+        let inherited = lease.try_clone().unwrap();
+        let lifecycle = Lifecycle::new(lease);
+
+        lifecycle.close().await.unwrap();
+        drop(filesystem::acquire_lease(&root).unwrap());
+        drop(inherited);
     }
 }

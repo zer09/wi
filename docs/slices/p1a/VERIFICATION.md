@@ -1,15 +1,15 @@
 # Wi P1-A verification report
 
-Contract **p1a.0**. Status: **ACCEPTED**. Final acceptance: **accepted=true**.
+Contract **p1a.0**. Status: **LOCAL ACCEPTANCE PASSED; EXACT-HEAD CI PENDING**.
+Final acceptance: **accepted=false**.
 
-**P1A-00..P1A-31 PASS.** The required local gates and independent complete-diff
-review passed. The first submitted implementation head, `d429181`, passed Ubuntu and
-Windows but exposed a macOS-only test-fixture failure: its temporary Unix socket path
-exceeded `SUN_LEN` at `tests/storage/filesystem.rs:345`. Commit `2fb600a` uses a
-short private `/tmp` fixture root for that socket test without changing production
-code or weakening the special-file assertion. The complete local gate set then passed.
-Exact-head push run 34928386247 and PR run 34928389304 passed every configured Cargo
-step on Ubuntu, macOS and Windows at `2fb600a545dfdf8adf89e34609e00fc07d95027b`.
+**P1A-00..P1A-30 PASS; P1A-31 LOCAL_PASS_HOSTED_CI_PENDING.** The required local
+gates and independent complete-diff review passed. Commit `2fb600a` fixed the first
+macOS fixture failure and passed both exact-head workflows. The later evidence commit
+`2d26cd9` exposed a separate macOS lease-release race in one of two workflows.
+The current source explicitly unlocks a healthy lease before dropping its file and
+adds a duplicate-descriptor regression. The focused and full local gates pass. Final
+acceptance awaits exact-head Ubuntu/macOS/Windows CI for the remediation commit.
 
 Increments 1-5 passed their three-review gates after confirmed remediations. Three
 fresh reviewers examined the final complete diff. Two passed without blocking
@@ -337,8 +337,8 @@ controls, exact command associations and blockers for each row.
 | P1A-27 | PASS | `p1a27_fault_real_sqlite_full_and_constraint_roll_back_whole_mutation` (`src/storage/fault_tests.rs:390-437`), busy/static-error/commit controls: real SQLite constraints/FULL simulation and labeled injections; no physical power-loss/device-full claim. |
 | P1A-28 | PASS | F01-F11 retain old regression assertions. `p1a28_process_normal_cli_help_and_noop_create_no_storage` (`tests/storage/cli.rs:4-39`): four CLI invocations create nothing. Protected production schemas/errors/runtime unchanged. |
 | P1A-29 | PASS | F12 actual `examples/storage_offline.rs:125-482` main: three finite samples, synthetic capture, real registry output, explicit refresh/list/page and retained-data reopen after context deletion. Exact samples below, no SLA. |
-| P1A-30 | PASS | Five current docs plus these two reports distinguish local and hosted evidence. P1-B/V1 remain unimplemented; final complete-diff review and exact-head CI passed; ledger unchanged. |
-| P1A-31 | PASS | F01-F19 local acceptance and repeated increment reviews passed. Three fresh final reviewers examined the complete accumulated diff. Review-a's sole blocker was independently rejected against `SCHEMA.md:217-223`; review-b/review-c passed. After the first macOS fixture failure was remediated, exact-head push run 34928386247 and PR run 34928389304 passed all six Cargo steps on Ubuntu, macOS and Windows at `2fb600a`. |
+| P1A-30 | PASS | Five current docs plus these two reports distinguish local, prior hosted and pending exact-head evidence. P1-B/V1 remain unimplemented; final complete-diff review passed; ledger unchanged. |
+| P1A-31 | LOCAL_PASS_HOSTED_CI_PENDING | F01-F19 local acceptance and repeated increment reviews passed. Three fresh final reviewers examined the complete accumulated diff. Review-a's sole blocker was independently rejected against `SCHEMA.md:217-223`; review-b/review-c passed. Both `2fb600a` workflows passed all OS jobs. At `2d26cd9`, push run 34929149332 passed, but PR run 34929152971 failed one macOS lease-reopen test while Ubuntu/Windows passed. The explicit-unlock remediation and full local gate pass; exact-head remediation CI is pending. |
 
 ## First failures, fixes and prior commands
 
@@ -361,7 +361,8 @@ missing invocation details. Counts overlap subsequent full suites.
 | P06, prior increment 6 | Terminal assignment_conflict at 2026-09-15T00:54:47.719Z. Assignment named nonexistent `docs/INDEX.md`; this assignment corrects the path to `docs/README.md`. No report drafts existed at D start. The earlier blocked attempt is not relabeled completed. |
 | D06, this increment | No production/test changes or failed runtime gate. Early artifact-location inspection found no var/tmp match and denied access to unrelated systemd temporary directories; those paths are not acceptance inputs. Required verifier repetitions and focused probes are identified separately. |
 | P06, final complete-diff review | Three fresh reviewers inspected the entire accumulated diff and reports. Review-b and review-c passed. Review-a proposed that supplemental RunResult summary/delivery fields must equal RunFinished; independent verification rejected the claim because `SCHEMA.md:217-223` requires equality only for run identity, provider session and complete outcome. Existing P1A-16 and repair tests exercise differing delivery metadata. Review-c observed one unnamed, unreproduced full-suite failure followed by five passing reruns; this remained a low hosted-CI flake risk, not evidence of a contract defect. |
-| Post-submission remediation | Both `d429181` workflows passed Ubuntu/Windows and failed one macOS test before reaching later Cargo steps. `UnixListener::bind` rejected the long temporary path at `tests/storage/filesystem.rs:345` with `path must be shorter than SUN_LEN`. Commit `2fb600a` adds a short private Unix fixture constructor and uses it only for socket cases. The focused test passed, then the isolated 12-gate wrapper passed from 04:17:48.220Z through 04:19:12.258Z with 535 Rust passes, one helper ignored, 152 Node passes, four offline examples and `live_started=false`. Both exact-head workflows subsequently passed every configured OS job and Cargo step. |
+| Post-submission remediation 1 | Both `d429181` workflows passed Ubuntu/Windows and failed one macOS test before reaching later Cargo steps. `UnixListener::bind` rejected the long temporary path at `tests/storage/filesystem.rs:345` with `path must be shorter than SUN_LEN`. Commit `2fb600a` adds a short private Unix fixture constructor and uses it only for socket cases. The focused test passed, then the isolated 12-gate wrapper passed from 04:17:48.220Z through 04:19:12.258Z with 535 Rust passes, one helper ignored, 152 Node passes, four offline examples and `live_started=false`. Both exact-head workflows subsequently passed every configured OS job and Cargo step. |
+| Post-submission remediation 2 | At evidence commit `2d26cd9`, push run 34929149332 passed all jobs. PR run 34929152971 passed Ubuntu/Windows but failed macOS at `src/storage/operation_tests.rs:164`: immediate reopen after `SessionStore::close()` returned `storage.busy`. The lease was released only by dropping the file descriptor, so a concurrent process spawn could briefly retain a duplicate. `src/storage/lifecycle.rs` now explicitly calls `File::unlock()` on healthy retirement and retains ownership on unlock uncertainty. A regression keeps a cloned descriptor open while proving immediate reacquisition. An initial focused command was malformed with two Cargo filters and exited 1 before execution; `cargo test --locked --lib storage::` then passed 40 tests. The isolated 12-gate wrapper passed from 04:38:11.682Z through 04:39:47.568Z with 536 Rust passes, one helper ignored, 152 Node passes, four offline examples and `live_started=false`. Exact-head remediation CI is pending. |
 
 All completed implementation/remediation stages also reported format, all-target
 check, warning-denied Clippy and whitespace passes. Initial increment-2/3 commands
@@ -495,27 +496,27 @@ creation/repair, privacy and DTO compatibility were reviewed as each scope lande
 | I5-three-review-repeat | 2026-09-15T00:52:18.118Z | Three PASS after 00:18:21Z missing Windows test finding, verification 00:23:42Z, remediation 00:33:40Z; native execution remained unverified at that stage |
 | final-complete-diff | 2026-09-15T02:45:43Z | Three fresh reviewers inspected the complete implementation, tests and reports. Review-b/review-c passed; review-a's RunResult claim was rejected against `SCHEMA.md:217-223`. |
 
-No confirmed in-scope product finding remains open. The owner-requested personal
-source-to-contract audit found no production semantic discrepancy. That audit found
-the stale report state and observed the submitted macOS fixture failure. The fixture
-was corrected without production changes, and both exact-head workflows then passed.
-Remaining observations concern explicit Windows ACL, symlink privilege and same-user
-TOCTOU limits, not permission to weaken tests.
+The owner-requested personal source-to-contract audit found no storage semantic
+mismatch at `2fb600a`. It also corrected stale report state and the first macOS
+fixture failure. A later duplicate workflow at `2d26cd9` exposed a real healthy-lease
+release race. The explicit-unlock remediation is locally verified; exact-head CI is
+pending. Remaining observations concern explicit Windows ACL, symlink privilege and
+same-user TOCTOU limits, not permission to weaken tests.
 
 | Platform/evidence | Status |
 |---|---|
-| Local Linux | Required gates PASS at accepted source revision |
-| Hosted exact-head Ubuntu | PASS in push and PR workflows |
-| Hosted exact-head macOS | PASS in push and PR workflows after the fixture remediation |
-| Hosted exact-head Windows | PASS in push and PR workflows, including Windows-only storage tests |
-| Exact-head push run | [34928386247](https://github.com/zer09/wi/actions/runs/34928386247), PASS |
-| Exact-head PR run | [34928389304](https://github.com/zer09/wi/actions/runs/34928389304), PASS |
+| Local Linux | Required gates PASS for the current remediation; 536 Rust passes, one helper ignored |
+| Prior exact-head `2fb600a` | Push 34928386247 and PR 34928389304 PASS on Ubuntu/macOS/Windows |
+| `2d26cd9` push | [34929149332](https://github.com/zer09/wi/actions/runs/34929149332), all OS jobs PASS |
+| `2d26cd9` PR | [34929152971](https://github.com/zer09/wi/actions/runs/34929152971), Ubuntu/Windows PASS; macOS FAIL at immediate lease reopen |
+| Current remediation exact-head | PENDING owner-authorized commit/push |
 
-Each submitted job passed checkout, stable toolchain setup, `cargo fmt --all --
---check`, `cargo check --all-targets`, `cargo test --all-targets`, `cargo clippy
---all-targets -- -D warnings`, `cargo build --all-targets`, and `cargo test --doc`.
-The workflow does not implicitly run Node self-tests, Python inventory or example
-mains. No job, lint or platform check was weakened.
+Every successful `2fb600a` job passed checkout, stable toolchain setup, `cargo fmt
+--all -- --check`, `cargo check --all-targets`, `cargo test --all-targets`, `cargo
+clippy --all-targets -- -D warnings`, `cargo build --all-targets`, and `cargo test
+--doc`. The failed `2d26cd9` macOS job stopped at `cargo test --all-targets`; no later
+step is claimed. The workflow does not implicitly run Node self-tests, Python inventory
+or example mains. No job, lint or platform check was weakened.
 
 The three Windows-only tests are:
 
@@ -538,8 +539,10 @@ Applicable Unix/macOS tests remain configured. The later hosted macOS and Window
 
 Original report validation passed at **2026-09-15T02:11:10.995Z**; final review
 status was reconciled at **2026-09-15T02:45:43Z**. This evidence update records
-exactly **32** ordered unique row IDs, all **PASS**, target sum **535**, initial
-untracked count **47**, and process totals **26/17/7/2**.
+exactly **32** ordered unique row IDs: 31 **PASS** and P1A-31
+**LOCAL_PASS_HOSTED_CI_PENDING**. The current local target sum is **536** after one
+lease regression was added. Initial untracked count **47** and process totals
+**26/17/7/2** remain historical implementation evidence.
 JSON/Markdown statuses, command/count/sample values, source names/ranges and current-doc
 links agree. Before owner-authorized staging, all **242** protected files and the
 index matched the initial fingerprints. The verified implementation snapshot was
@@ -552,8 +555,10 @@ The original report validation is not runtime execution or independent review. T
 subsequent independent complete-diff review is recorded above. During commit preparation,
 the isolated wrapper repeated all 12 required Cargo/Python/Node/example gates from
 **2026-09-15T03:49:59.062Z through 03:51:21.607Z**; all exited 0, including 535 Rust
-passes with one ignored helper and 152 Node passes with `live_started=false`. JSON,
-row/status consistency and staged whitespace checks also pass.
+passes with one ignored helper and 152 Node passes with `live_started=false`. After
+the lease remediation, a new 12-gate run passed from **04:38:11.682Z through
+04:39:47.568Z** with **536 Rust passes**, one ignored helper, 152 Node passes and all
+four offline examples. JSON, row/status consistency and whitespace checks pass.
 
 Deliberate remaining limits:
 
@@ -583,5 +588,5 @@ release, deploy or publication occurred.
 
 **live_started=false; real_credential_reads=0; provider_generations=0.**
 Ledger remains exactly **31/50 used, 19 remaining, changed=false; new allocation 0**.
-The remaining balance is not authorization. Final independent review and exact-head
-hosted CI passed. Merge remains a separate owner action.
+The remaining balance is not authorization. Final independent review passed. Exact-head
+hosted CI for the lease remediation is pending. Merge remains a separate owner action.

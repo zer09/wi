@@ -1,12 +1,10 @@
-# Wi: P1-A post-submission remediation handoff
+# Wi: P1-A accepted implementation handoff
 
-P1-A durable application-session storage, contract **p1a.0**, is implemented on this
-branch. Local acceptance and final complete-diff review passed. Exact-head commit
-`2d26cd9` passed Ubuntu and Windows in both workflows and one macOS workflow, but the
-other macOS run exposed delayed OS lease release after `SessionStore::close()`.
-The current remediation explicitly unlocks a healthy lease before dropping its file
-and adds a duplicate-descriptor regression. Full local gates pass. Final acceptance is
-pending exact-head Ubuntu/macOS/Windows CI for the remediation commit.
+P1-A durable application-session storage, contract **p1a.0**, is implemented and
+accepted on this branch. Local acceptance, final complete-diff review, and exact-head
+Ubuntu/macOS/Windows CI passed. Commit `0839af9` explicitly releases healthy OS leases
+before dropping their files and adds a duplicate-descriptor regression. Push run
+34930157178 and PR run 34930160788 passed every configured job.
 Runtime baseline: `dd720c0e66eceaaea831ad03e489656f77fc1cec` (R1/NB-02 merged).
 See docs/slices/p1a/VERIFICATION.md and verification.json for all 32 dispositions.
 Frozen planning NOT RUN headings are not current acceptance evidence.

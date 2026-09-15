@@ -6,10 +6,10 @@ complete-diff review; `accepted=true`. The follow-up closes NB-02 for legacy
 RequestFailed diagnostics. Exact-head cross-platform CI is NOT RUN.
 S1/S2 ownership and public schemas remain unchanged.
 
-P1-A adds storage-only `wi::storage`; local acceptance and final complete-diff review
-passed under p1a.0. A post-submission macOS lease-release race is remediated locally;
-exact-head Ubuntu/macOS/Windows CI is pending. See
-[P1-A verification](slices/p1a/VERIFICATION.md). Ordinary run persistence is not implemented.
+P1-A adds storage-only `wi::storage`; local acceptance, final complete-diff review,
+and exact-head Ubuntu/macOS/Windows CI passed under p1a.0 after both post-submission
+macOS findings were remediated. See [P1-A verification](slices/p1a/VERIFICATION.md).
+Ordinary run persistence is not implemented.
 
 ## One crate, explicit module boundaries
 
@@ -494,8 +494,8 @@ registry definitions. It never constructs providers, reads credentials, rediscov
 skills or executes tools. New Unix directories/files use 0700/0600. Static link/reparse
 substitutions and special files fail closed; same-user TOCTOU remains a trust limit.
 Windows protected-root ACLs remain caller-owned, not Unix-mode protection. Windows
-symlink tests require privilege. Prior hosted Windows/macOS jobs passed; exact-head
-CI for the lease-release remediation is pending.
+symlink tests require privilege. Exact-head hosted Windows/macOS jobs passed after the
+lease-release remediation.
 See [P1-A verification](slices/p1a/VERIFICATION.md) for exact process/fault evidence.
 
 ## Future service ownership (requirements only)

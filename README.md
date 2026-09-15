@@ -7,12 +7,12 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
-**P1-A status: local acceptance passed; exact-head remediation CI pending under contract p1a.0.**
+**P1-A status: accepted under contract p1a.0.**
 The shared `wi::storage` library records supplied validated data in per-session
 SQLite databases and a session catalog. Ordinary `wi run` persistence and P1-B
-provider-history restoration remain **NOT IMPLEMENTED**. Local acceptance and final
-complete-diff review passed. A post-submission macOS lease-release race is remediated
-locally; final acceptance awaits exact-head Ubuntu/macOS/Windows CI. See the
+provider-history restoration remain **NOT IMPLEMENTED**. Local acceptance, final
+complete-diff review, and exact-head Ubuntu/macOS/Windows CI passed after both
+post-submission macOS findings were remediated. See the
 [P1-A verification report](docs/slices/p1a/VERIFICATION.md) for evidence and limits.
 
 **S2 status: implemented and offline accepted under contract s2.1.**

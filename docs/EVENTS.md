@@ -23,10 +23,10 @@ freshness, renewal or upstream-outcome behavior.
 
 ## Stored application events v1 (P1-A, storage only)
 
-P1-A local acceptance and final complete-diff review passed. A post-submission macOS
-lease-release race is remediated locally; exact-head Ubuntu/macOS/Windows CI is pending.
-See [P1-A verification](slices/p1a/VERIFICATION.md). The shared `wi::storage` library
-records supplied validated DTOs, not ordinary `wi run` output.
+P1-A local acceptance, final complete-diff review, and exact-head
+Ubuntu/macOS/Windows CI passed after both post-submission macOS findings were
+remediated. See [P1-A verification](slices/p1a/VERIFICATION.md). The shared
+`wi::storage` library records supplied validated DTOs, not ordinary `wi run` output.
 Its storage envelope version 1 contains application-session identity, a store-owned
 sequence, event UUID, Unix-millisecond timestamp, event type/version and typed payload.
 Nested runtime/provider envelopes remain schema 2/1 with their original correlations.

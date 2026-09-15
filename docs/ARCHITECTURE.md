@@ -6,8 +6,8 @@ complete-diff review; `accepted=true`. The follow-up closes NB-02 for legacy
 RequestFailed diagnostics. Exact-head cross-platform CI is NOT RUN.
 S1/S2 ownership and public schemas remain unchanged.
 
-P1-A adds storage-only `wi::storage`; local acceptance and final complete-diff
-review passed under p1a.0. Hosted exact-head CI remains pending. See
+P1-A adds storage-only `wi::storage`; local acceptance, final complete-diff review,
+and exact-head Ubuntu/macOS/Windows CI passed under p1a.0. See
 [P1-A verification](slices/p1a/VERIFICATION.md). Ordinary run persistence is not implemented.
 
 ## One crate, explicit module boundaries

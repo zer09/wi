@@ -1,11 +1,10 @@
-# Wi: P1-A local acceptance and hosted-CI handoff
+# Wi: P1-A accepted implementation handoff
 
-P1-A durable application-session storage, contract **p1a.0**, is implemented on
-this branch. Local acceptance gates and final complete-diff review passed. The owner
-authorized committing and pushing the current P1-A diff. Hosted exact-head
-Ubuntu/macOS/Windows CI remains **PENDING**.
+P1-A durable application-session storage, contract **p1a.0**, is implemented and
+accepted on this branch. Local acceptance, final complete-diff review, and exact-head
+Ubuntu/macOS/Windows CI passed. The implementation commit is `d429181`; commit
+`2fb600a` fixes the macOS Unix-socket fixture path without changing production code.
 Runtime baseline: `dd720c0e66eceaaea831ad03e489656f77fc1cec` (R1/NB-02 merged).
-Planning HEAD `21b1feacd2a278d74452fefd970a016170a83917` does not contain the implementation.
 See docs/slices/p1a/VERIFICATION.md and verification.json for all 32 dispositions.
 Frozen planning NOT RUN headings are not current acceptance evidence.
 
@@ -65,10 +64,9 @@ historical, not P1-A evidence or a test-count target. Never weaken CI/lints/plat
 checks to force acceptance. New direct SQLite dependency is permitted; unrelated
 upgrades are not. Compile/run all required old and new gates.
 
-The owner authorized committing and pushing the current P1-A diff. Do not merge,
-release, deploy, publish or start P1-B/V1 automatically. A final report
-must distinguish local tests from later exact-head hosted CI and from live provider
-claims. The planning contract/schema are not implemented acceptance evidence.
+The owner authorized the P1-A commits and pushes recorded in the verification report.
+Do not merge, release, deploy, publish or start P1-B/V1 automatically. The final report
+distinguishes local tests, exact-head hosted CI, and live provider claims. The planning contract/schema are not implemented acceptance evidence.
 
 ## Completed work and enduring direction
 

@@ -23,8 +23,8 @@ freshness, renewal or upstream-outcome behavior.
 
 ## Stored application events v1 (P1-A, storage only)
 
-P1-A local acceptance and final complete-diff review passed; hosted exact-head CI
-remains pending. See [P1-A verification](slices/p1a/VERIFICATION.md). The shared
+P1-A local acceptance, final complete-diff review, and exact-head
+Ubuntu/macOS/Windows CI passed. See [P1-A verification](slices/p1a/VERIFICATION.md). The shared
 `wi::storage` library records supplied validated DTOs, not ordinary `wi run` output.
 Its storage envelope version 1 contains application-session identity, a store-owned
 sequence, event UUID, Unix-millisecond timestamp, event type/version and typed payload.

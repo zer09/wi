@@ -1,18 +1,21 @@
-# Wi P1-A local verification report
+# Wi P1-A verification report
 
-Contract **p1a.0**. Status: **LOCAL_ACCEPTANCE_PASSED_HOSTED_CI_PENDING**.
-Local acceptance and independent complete-diff review: **PASS**. Final acceptance:
-**accepted=false** because exact-head hosted CI is not authorized or run.
+Contract **p1a.0**. Status: **ACCEPTED**. Final acceptance: **accepted=true**.
 
-**P1A-00..P1A-30 PASS locally. P1A-31 is LOCAL_PASS_HOSTED_CI_PENDING.**
-The required local gates passed on the accumulated pre-commit implementation snapshot.
+**P1A-00..P1A-31 PASS.** The required local gates and independent complete-diff
+review passed. The first submitted implementation head, `d429181`, passed Ubuntu and
+Windows but exposed a macOS-only test-fixture failure: its temporary Unix socket path
+exceeded `SUN_LEN` at `tests/storage/filesystem.rs:345`. Commit `2fb600a` uses a
+short private `/tmp` fixture root for that socket test without changing production
+code or weakening the special-file assertion. The complete local gate set then passed.
+Exact-head push run 34928386247 and PR run 34928389304 passed every configured Cargo
+step on Ubuntu, macOS and Windows at `2fb600a545dfdf8adf89e34609e00fc07d95027b`.
+
 Increments 1-5 passed their three-review gates after confirmed remediations. Three
-fresh reviewers examined the final complete diff, including these reports. Two passed
-without blocking findings. One proposed a RunResult equality blocker; independent
-verification rejected it against the exact rule in `SCHEMA.md:217-223` and existing
-runtime delivery-distinction tests. Hosted exact-head Ubuntu/macOS/Windows jobs are
-**PENDING owner-authorized push**; native Windows/macOS behavior is unverified. No
-implementation commit exists.
+fresh reviewers examined the final complete diff. Two passed without blocking
+findings. One proposed a RunResult equality blocker; independent verification rejected
+it against the exact rule in `SCHEMA.md:217-223` and existing runtime
+delivery-distinction tests.
 
 P1-A is a shared storage library, not ordinary `wi run` persistence. P1-B's awaited
 runtime seam and provider-history restoration remain **NOT IMPLEMENTED**. Service,
@@ -25,16 +28,14 @@ named-test map, and [MATRIX.md](MATRIX.md) for the frozen requirements.
 | Item | Observation |
 |---|---|
 | Runtime baseline | `dd720c0e66eceaaea831ad03e489656f77fc1cec`, R1/NB-02 merge |
-| Planning/current HEAD | `21b1feacd2a278d74452fefd970a016170a83917` |
-| Ancestry | HEAD's immediate parent is the exact runtime baseline |
-| Planning scope | Only AGENTS, docs index and five P1-A plan documents changed; no storage source at HEAD |
-| Tested revision | `null`: uncommitted accumulated worktree, not implementation in HEAD |
-| Increment-6 start | 3 modified tracked / 47 untracked / 0 staged files |
-| Increment-6 footprint | Five current-doc edits and two new reports only |
-| Verification snapshot | 8 modified tracked / 49 untracked / 0 staged files |
-| Commit preparation | 57 staged paths: 8 modified and 49 added; 0 unstaged/untracked |
-| Runtime gate window | 2026-09-15T01:46:59.098Z through 01:48:19.853Z, actual UTC clock |
-| Runtime versus docs | Runtime gates precede current-doc/report edits; source/test/dependency preservation is checked afterward |
+| Planning HEAD | `21b1feacd2a278d74452fefd970a016170a83917`; documentation-only child of the runtime baseline |
+| Implementation commit | `d4291817e9668456e3b8f6c8a07cb76927edb853` |
+| Accepted source revision | `2fb600a545dfdf8adf89e34609e00fc07d95027b`; implementation plus macOS fixture remediation |
+| Remediation scope | `tests/storage/fixtures.rs` and `tests/storage/filesystem.rs`; no production change |
+| Original verification snapshot | 8 modified tracked / 49 untracked / 0 staged files, later committed as `d429181` |
+| Original commit preparation | 57 staged paths: 8 modified and 49 added; 0 unstaged/untracked |
+| Final local gate window | 2026-09-15T04:17:48.220Z through 04:19:12.258Z, actual UTC clock |
+| Current report edits | Documentation-only evidence update after both `2fb600a` workflows completed successfully |
 
 **D** means this increment's actual execution. **S** means current source, config,
 diff or inventory inspection. **P** means prior parent/delegate evidence, verified
@@ -336,8 +337,8 @@ controls, exact command associations and blockers for each row.
 | P1A-27 | PASS | `p1a27_fault_real_sqlite_full_and_constraint_roll_back_whole_mutation` (`src/storage/fault_tests.rs:390-437`), busy/static-error/commit controls: real SQLite constraints/FULL simulation and labeled injections; no physical power-loss/device-full claim. |
 | P1A-28 | PASS | F01-F11 retain old regression assertions. `p1a28_process_normal_cli_help_and_noop_create_no_storage` (`tests/storage/cli.rs:4-39`): four CLI invocations create nothing. Protected production schemas/errors/runtime unchanged. |
 | P1A-29 | PASS | F12 actual `examples/storage_offline.rs:125-482` main: three finite samples, synthetic capture, real registry output, explicit refresh/list/page and retained-data reopen after context deletion. Exact samples below, no SLA. |
-| P1A-30 | PASS | Five current docs plus these two reports; F17-F19 validate row/status/count/evidence consistency and preservation. P1-B/V1 remain unimplemented; final complete-diff review passed; hosted CI remains pending; ledger unchanged. |
-| P1A-31 | LOCAL_PASS_HOSTED_CI_PENDING | F01-F19 local acceptance and repeated increment reviews passed. Three fresh final reviewers examined the complete accumulated diff. Review-a's sole blocker was independently rejected against `SCHEMA.md:217-223`; review-b/review-c passed. Hosted exact-head Ubuntu/macOS/Windows jobs are PENDING owner-authorized push; no native Windows/macOS pass claimed. |
+| P1A-30 | PASS | Five current docs plus these two reports distinguish local and hosted evidence. P1-B/V1 remain unimplemented; final complete-diff review and exact-head CI passed; ledger unchanged. |
+| P1A-31 | PASS | F01-F19 local acceptance and repeated increment reviews passed. Three fresh final reviewers examined the complete accumulated diff. Review-a's sole blocker was independently rejected against `SCHEMA.md:217-223`; review-b/review-c passed. After the first macOS fixture failure was remediated, exact-head push run 34928386247 and PR run 34928389304 passed all six Cargo steps on Ubuntu, macOS and Windows at `2fb600a`. |
 
 ## First failures, fixes and prior commands
 
@@ -356,10 +357,11 @@ missing invocation details. Counts overlap subsequent full suites.
 | P04, remediation 1 | Reviews/verification confirmed repair lost valid incomplete reservations, bootstrap rejected malformed generated entries before explicit repair, and repair missed run projections. Five new tests failed; complement control passed. Preserve matching creating reservations, mark malformed layout as repair evidence without following it, and validate all run projections. Unit 24 passed; integration initially 67/1 on an obsolete bootstrap expectation, then 68 passed after aligning it without weakening no-follow checks. Added-file whitespace status 1 was initially misclassified, not a whitespace defect. |
 | P04, remediation 2 | Further review/verification confirmed incomplete run/tool replay and malformed paired reservation acceptance. Three regression tests reproduced eight run mutations, fifteen tool mutations and 31 malformed reservations. Full indexed run replay, bidirectional tool validation and transactional paired-reservation validation fixed them without rewriting canonical events/projections. `cargo test --locked --lib --test storage repair_integrity_` passed 7; unit 26/integration 73 passed. |
 | P05, increment 5 | Initial compilation needed correct HistoryPage accessor use and fixed PRAGMA SQL. Fault run was 5 passed/1 failed: SQLite auto-rollback masked primary storage.io; preserving the precommit error fixed it. Process run was 6 passed/1 failed: add missing TurnStarted fixture. Storage/full suites exposed an older private fixture without lifecycle admission; add guard and tracked close. Whitespace wrapper exit 123 misclassified new-file diff status 1. Final locked full suite passed 535 with one helper ignored; unit 39/integration 74, process parents 7, fault tests 6; 152 Node passes, zero doctests and four example mains passed. `uv run scripts/verify.py --static-only` reported 171/522/25; full wrapper was not repeated by that implementor. |
-| P05, Windows remediation | Review/verification confirmed absent native Windows junction/reparse test coverage. Three nonignored cfg(windows) tests now assert real fixture creation, reparse flags, public API rejection and preservation. No production or Unix test change. Locked Linux filesystem/session subsets passed 7/5; storage integration 74 and unit 39 passed with helper ignored. Formatting corrected. Final static definitions become 525; Linux runtime count stays 535 because the three Windows tests are excluded here. Native execution is still unverified. |
+| P05, Windows remediation | Review/verification confirmed absent native Windows junction/reparse test coverage. Three nonignored cfg(windows) tests now assert real fixture creation, reparse flags, public API rejection and preservation. No production or Unix test change. Locked Linux filesystem/session subsets passed 7/5; storage integration 74 and unit 39 passed with helper ignored. Formatting corrected. Final static definitions become 525; Linux runtime count stays 535 because the three Windows tests are excluded here. Native execution was unverified at that stage; the later `2fb600a` Windows jobs passed. |
 | P06, prior increment 6 | Terminal assignment_conflict at 2026-09-15T00:54:47.719Z. Assignment named nonexistent `docs/INDEX.md`; this assignment corrects the path to `docs/README.md`. No report drafts existed at D start. The earlier blocked attempt is not relabeled completed. |
 | D06, this increment | No production/test changes or failed runtime gate. Early artifact-location inspection found no var/tmp match and denied access to unrelated systemd temporary directories; those paths are not acceptance inputs. Required verifier repetitions and focused probes are identified separately. |
-| P06, final complete-diff review | Three fresh reviewers inspected the entire accumulated diff and reports. Review-b and review-c passed. Review-a proposed that supplemental RunResult summary/delivery fields must equal RunFinished; independent verification rejected the claim because `SCHEMA.md:217-223` requires equality only for run identity, provider session and complete outcome. Existing P1A-16 and repair tests exercise differing delivery metadata. Review-c observed one unnamed, unreproduced full-suite failure followed by five passing reruns; this remains a low hosted-CI flake risk, not evidence of a contract defect. |
+| P06, final complete-diff review | Three fresh reviewers inspected the entire accumulated diff and reports. Review-b and review-c passed. Review-a proposed that supplemental RunResult summary/delivery fields must equal RunFinished; independent verification rejected the claim because `SCHEMA.md:217-223` requires equality only for run identity, provider session and complete outcome. Existing P1A-16 and repair tests exercise differing delivery metadata. Review-c observed one unnamed, unreproduced full-suite failure followed by five passing reruns; this remained a low hosted-CI flake risk, not evidence of a contract defect. |
+| Post-submission remediation | Both `d429181` workflows passed Ubuntu/Windows and failed one macOS test before reaching later Cargo steps. `UnixListener::bind` rejected the long temporary path at `tests/storage/filesystem.rs:345` with `path must be shorter than SUN_LEN`. Commit `2fb600a` adds a short private Unix fixture constructor and uses it only for socket cases. The focused test passed, then the isolated 12-gate wrapper passed from 04:17:48.220Z through 04:19:12.258Z with 535 Rust passes, one helper ignored, 152 Node passes, four offline examples and `live_started=false`. Both exact-head workflows subsequently passed every configured OS job and Cargo step. |
 
 All completed implementation/remediation stages also reported format, all-target
 check, warning-denied Clippy and whitespace passes. Initial increment-2/3 commands
@@ -476,7 +478,7 @@ list 8.030/6.467/6.723; page 17.457/26.511/16.684; close_reopen
 They are not substituted for F12 or used as a speed-regression comparison. No
 percentile, cache-disabled, cross-engine, largest-scale, fastest or CI SLA claim.
 
-## Independent review history and pending boundary
+## Independent review and submitted-CI boundary
 
 All entries below are **P** completion records, not reviews performed by D.
 Reviewer role labels identify review-a/review-b/review-c; repeated roles are not
@@ -490,31 +492,30 @@ creation/repair, privacy and DTO compatibility were reviewed as each scope lande
 | I2-three-review-repeat | 2026-09-13T10:57:26.910Z | Three PASS after accepted-create availability/receipt finding, independently confirmed 10:41:33Z and remediated 10:49:40Z; two red/green regressions |
 | I3-three-review-repeat | 2026-09-13T12:18:28.684Z | Three PASS after 11:43:12Z correlation findings, verification 11:49:35Z and remediation 12:06:50Z; real producer DTO controls retained |
 | I4-three-review-second-repeat | 2026-09-14T09:12:11.084Z | Three PASS after 07:59:48Z reservation/bootstrap/projection findings and 08:35:11Z run/tool replay/malformed reservation findings; independently confirmed, second remediation 08:59:40Z |
-| I5-three-review-repeat | 2026-09-15T00:52:18.118Z | Three PASS after 00:18:21Z missing Windows test finding, verification 00:23:42Z, remediation 00:33:40Z; native execution still unverified |
-| final-complete-diff | PENDING | Parent must review the full accumulated implementation, untracked files, current docs and both reports after this increment |
+| I5-three-review-repeat | 2026-09-15T00:52:18.118Z | Three PASS after 00:18:21Z missing Windows test finding, verification 00:23:42Z, remediation 00:33:40Z; native execution remained unverified at that stage |
+| final-complete-diff | 2026-09-15T02:45:43Z | Three fresh reviewers inspected the complete implementation, tests and reports. Review-b/review-c passed; review-a's RunResult claim was rejected against `SCHEMA.md:217-223`. |
 
-No confirmed in-scope product finding remains open in the supplied completed
-increment reviews. Remaining review observations concern explicit Windows ACL,
-symlink privilege and same-user TOCTOU limits, not permission to weaken tests.
-Prior reviewer references/file counts describe their earlier tree, not today's
-complete inventory. Final approval is withheld until the parent-owned review.
+No confirmed in-scope product finding remains open. The owner-requested personal
+source-to-contract audit found no production semantic discrepancy. That audit found
+the stale report state and observed the submitted macOS fixture failure. The fixture
+was corrected without production changes, and both exact-head workflows then passed.
+Remaining observations concern explicit Windows ACL, symlink privilege and same-user
+TOCTOU limits, not permission to weaken tests.
 
 | Platform/evidence | Status |
 |---|---|
-| Local Linux | Required gates PASS |
-| Native macOS | UNVERIFIED |
-| Native Windows | UNVERIFIED |
-| Windows cross-build | No successful build/execution evidence claimed; earlier reviewers reported unavailable prerequisites; D did not attempt it |
-| Hosted exact-head Ubuntu | PENDING owner-authorized push |
-| Hosted exact-head macOS | PENDING owner-authorized push |
-| Hosted exact-head Windows | PENDING owner-authorized push |
-| Submitted CI runs/job/step results | None; submitted_ci=[] |
+| Local Linux | Required gates PASS at accepted source revision |
+| Hosted exact-head Ubuntu | PASS in push and PR workflows |
+| Hosted exact-head macOS | PASS in push and PR workflows after the fixture remediation |
+| Hosted exact-head Windows | PASS in push and PR workflows, including Windows-only storage tests |
+| Exact-head push run | [34928386247](https://github.com/zer09/wi/actions/runs/34928386247), PASS |
+| Exact-head PR run | [34928389304](https://github.com/zer09/wi/actions/runs/34928389304), PASS |
 
-`.github/workflows/ci.yml:1-23` is **source inspection only**: it configures six
-Cargo gates, including warning-denied Clippy, on ubuntu-latest/windows-latest/
-macos-latest. It does not implicitly run Node self-tests, Python inventory or example
-mains. Historical R1/S2 hosted acceptance is not this uncommitted implementation's
-exact-head CI. No job, lint or platform check is weakened.
+Each submitted job passed checkout, stable toolchain setup, `cargo fmt --all --
+--check`, `cargo check --all-targets`, `cargo test --all-targets`, `cargo clippy
+--all-targets -- -D warnings`, `cargo build --all-targets`, and `cargo test --doc`.
+The workflow does not implicitly run Node self-tests, Python inventory or example
+mains. No job, lint or platform check was weakened.
 
 The three Windows-only tests are:
 
@@ -531,14 +532,14 @@ Junction coverage uses `mklink /J`. Windows root ACL protection remains caller-o
 Unix 0700/0600 claims are not Windows ACL enforcement. Static reparse checks do not
 eliminate the check-file/open-file race or hostile concurrent same-user ancestor
 replacement. These tests and Linux checks are not a hostile-filesystem sandbox.
-Applicable Unix/macOS tests remain configured; no native platform pass is inferred.
+Applicable Unix/macOS tests remain configured. The later hosted macOS and Windows jobs provide native CI execution evidence, not certification of every owner machine or filesystem.
 
 ## Report checks, limitations and authorization
 
-Report validation **PASS**, exit **0**, at **2026-09-15T02:11:10.995Z**;
-final review status was reconciled at **2026-09-15T02:45:43Z**. The report has
-exactly **32** ordered unique row IDs, **31 PASS + 1 LOCAL_PASS_HOSTED_CI_PENDING**,
-target sum **535**, initial untracked count **47**, and process totals **26/17/7/2**.
+Original report validation passed at **2026-09-15T02:11:10.995Z**; final review
+status was reconciled at **2026-09-15T02:45:43Z**. This evidence update records
+exactly **32** ordered unique row IDs, all **PASS**, target sum **535**, initial
+untracked count **47**, and process totals **26/17/7/2**.
 JSON/Markdown statuses, command/count/sample values, source names/ranges and current-doc
 links agree. Before owner-authorized staging, all **242** protected files and the
 index matched the initial fingerprints. The verified implementation snapshot was
@@ -574,15 +575,13 @@ Deliberate remaining limits:
 - Earlier summary gaps are labeled, not fabricated. Temporary synthetic gate roots
   remain outside Git for local inspection; no owner data was deleted or overwritten.
 
-No credential/auth/profile/login/refresh command, private-skill access, live provider
-request, hosted action or Git write occurred. Synthetic auth regression tests are
-not owner account operations. These are controlled-command/source observations,
-not a kernel-level I/O audit. No agent was started or delegated by this increment.
-This report was finalized from 57 staged paths before the owner-authorized commit
-and push. Staging followed local acceptance. No reset, clean, stash, checkout, revert,
-merge, release, deploy or publication occurred during implementation and verification.
+No credential/auth/profile/login/refresh command, private-skill access or live provider
+request occurred. Synthetic auth regression tests are not owner account operations.
+The owner authorized the recorded commits and pushes. No agent was delegated for the
+personal audit or macOS remediation. No reset, clean, stash, forced checkout, merge,
+release, deploy or publication occurred.
 
 **live_started=false; real_credential_reads=0; provider_generations=0.**
 Ledger remains exactly **31/50 used, 19 remaining, changed=false; new allocation 0**.
-The remaining balance is not authorization. Final independent review passed.
-Owner-authorized submission and exact-head hosted CI remain separate pending actions.
+The remaining balance is not authorization. Final independent review and exact-head
+hosted CI passed. Merge remains a separate owner action.

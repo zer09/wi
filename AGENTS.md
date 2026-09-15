@@ -1,93 +1,86 @@
-# Wi: R1 accepted implementation and NB-02 follow-up handoff
+# Wi: P1-A accepted implementation handoff
 
-Contract **r1.0**, runtime baseline
-`4eed18be8baaf43be886164d192021b2e2e5aa28` (S2 merged in PR #3).
-R1 A-01..A-05 are offline accepted in implementation commit
-`88b76c50756255193d0b681da748ed96ceec9f74`. Status is **OFFLINE_ACCEPTED**,
-**accepted=true**. The repeated complete-diff review passed with no actionable
-findings. Exact-head cross-platform CI is **NOT RUN**, not part of local evidence.
-The follow-up closes documented residual NB-02 by filtering legacy RequestFailed
-diagnostics through the one-line policy; it adds one regression test.
+P1-A durable application-session storage, contract **p1a.0**, is implemented and
+accepted on this branch. Local acceptance, final complete-diff review, and exact-head
+Ubuntu/macOS/Windows CI passed. Commit `0839af9` explicitly releases healthy OS leases
+before dropping their files and adds a duplicate-descriptor regression. Push run
+34930157178 and PR run 34930160788 passed every configured job.
+Runtime baseline: `dd720c0e66eceaaea831ad03e489656f77fc1cec` (R1/NB-02 merged).
+See docs/slices/p1a/VERIFICATION.md and verification.json for all 32 dispositions.
+Frozen planning NOT RUN headings are not current acceptance evidence.
 
 Read in order:
-1. `docs/slices/r1/CONTRACT.md`
-2. `docs/slices/r1/MATRIX.md`
-3. `docs/slices/r1/VALIDATION.md`
-4. `docs/slices/r1/IMPLEMENTOR_PROMPT.md`
-5. `docs/slices/r1/VERIFICATION.md` and `docs/slices/r1/verification.json`.
-6. Current source/docs and the historical A-01..A-05 record in
-   `docs/slices/s2/VERIFICATION.md`.
+1. docs/slices/p1a/CONTRACT.md
+2. docs/slices/p1a/SCHEMA.md
+3. docs/slices/p1a/MATRIX.md
+4. docs/slices/p1a/VALIDATION.md
+5. docs/slices/p1a/IMPLEMENTOR_PROMPT.md
+6. Current source paths in VALIDATION.md and completed R1/S2 verification records.
 
-Preserve the implemented repairs and their regressions. Plain answers retain LF/HT
-but drop other controls; diagnostics remain one-line. Legacy generate validates
-initial input, supplied follow-up and options before provider/auth construction.
-AuthExpired gives owner-specific renewal guidance. The shared decoder rejects
-empty response identities; missing-MIME SSE retains its earlier admission category.
-The reports map observed red/green evidence through actual CLI/provider/run paths.
+Preserve the reviewed implementation. Do not begin P1-B or another
+architecture-planning exercise. Report
+a genuine source/contract conflict before changing scope. Preserve local user work:
+no reset, clean, forced checkout, unsolicited stash or overwrite.
 
-The owner authorized the scoped local R1 repairs, not another plan or later feature.
-It does NOT authorize changes to GatewayError::code(), ToolFailed/gateway_error,
-S2 behavior, auth implementations, public APIs/event schemas, provider policies,
-dependencies, CI weakening, or unrelated cleanup. The AuthExpired display attribute
-is the only production error.rs edit; its exported code remains auth_expired.
+## Scope
 
-Use synthetic roots/credentials and offline/loopback checks only. No real private
-skill/project inputs, auth/profile/login/refresh commands, provider traffic, hosted
-probes, additional commits/pushes/merges, release or deployment without separate
-owner authorization. Do not reset/clean/stash or overwrite user work. The owner
-authorized R1 commit `88b76c5`; leave later changes uncommitted unless separately
-authorized.
-Ledger unchanged: **31/50 used, 19 remaining**. Balance is not authorization.
+The shared wi::storage library uses SQLite through minimal SQLx 0.9.0 features,
+one canonical database per application session and a session catalog, with
+create/rename/receipts, typed history and minimal projections, explicit catalog refresh
+and repair, short cursor queries, safe DB ownership, lazy interruption of prior-instance
+recorded work, and offline/process evidence. Canonical writes require explicit catalog
+refresh; lost-catalog repair is explicit. Receipt retries do not repeat effects.
+Handles retain no idle connection; close drains admitted operations before lease release.
 
-No runtime quotas/deadlines/RunLimits, optional budget replacement, progress API,
-shell/file executor, storage, service, GUI, retry/failover or new feature framework.
-Private writer/open seams and an identity helper are sufficient; do not restructure
-other modules. The prior S2 implementation instructions are historical.
+P1-A does not integrate ordinary wi run with storage. It records supplied validated
+DTOs; P1-B will separately add the awaited runtime seam and explicit new submissions
+using preserved provider history. No new CLI/server/GUI is part of this assignment.
+Application session IDs/sequences are not provider-session IDs or run-local sequences.
+History is not reconstructed from terminal output or by rereading changed skills.
 
-The [verification report](docs/slices/r1/VERIFICATION.md) and
-[machine report](docs/slices/r1/verification.json) record R1-00..R1-19 PASS.
-Local R1 code gates passed: 421 Rust tests, 152 Node self-tests, inventory
-127/408/25 and three offline examples. Two complete-diff review rounds examined
-code, tests, docs and reports. The repeated round passed with no actionable
-findings. The NB-02 follow-up has red/green collector evidence, a 422-test full
-Rust pass and three independent PASS reviews with no actionable
-findings; Node remains 152. Do not mark CI complete without exact-head submitted
-evidence.
-Preserve older reports and plan-time wording unchanged. A new genuine contract
-conflict needs its source chain, not an unauthorized behavior change.
-Higher-priority rules and new owner directions prevail.
+Only the planned new storage modules/export, specified dependency and necessary
+lockfile resolution, focused new tests/example and current documentation may change.
+Do not change accepted run/provider/auth/context/tool/CLI semantics. Use actual current
+DTO getters and serializers; GatewayError::code and run/provider schemas 2/1 stay intact.
+ToolFailed remains gateway_error; storage errors have their own static namespace.
 
-## Accepted baseline and continuing project boundaries
+No RunLimits, optional budgets, model/tool quotas, whole-run timers, installation
+history/session caps, auto-deletion, auto-resume or effect retry. No hosted skills,
+API-key billing, extra providers, permission system, shell/resource executors,
+search/compaction, arbitrary SQL API, plugin framework or production reorganization.
 
-S2 s2.1 is implemented and offline accepted: implementation `97ad00c`, audit
-reports `48e23b5`, documentation closure `c186211`, merge `4eed18b`. Its main-file
-load_skill tool, initial catalog/body preparation, direct S1 no-loader API and
-provider-neutral run/registry ownership must remain intact. Read current README,
-ARCHITECTURE, EVENTS, WI_AUTH and the S2 evidence before claiming a behavior change.
+## Verification and authority
 
-The S2 contract/matrix/prompts preserve their original phase. They are not orders
-to repeat completed work or perform old live tests. Its reported local 374 Rust
-and 152 Node passes, and exact-head cross-platform CI, are separate from new R1
-execution. R1 planning records retain their initial NOT RUN statuses; the new
-reports describe local execution and offline acceptance. No complete-security
-claim follows.
+Use temporary synthetic data roots, workspaces, skills and credentials. No real
+credential/private-skill access, auth/profile/login/refresh commands, provider requests
+or live probes. Normal locked build/dependency fetching is permitted development
+traffic. Keep the ledger unchanged: **31/50 used, 19 remaining**.
 
-A-01..A-05 have local offline PASS evidence and R1-19 review closure.
-Other source-audit notes, including the older Node diagnostic classification, are
-not extra repair assignments. Document any new finding and keep it out of the
-patch unless a source-linked in-scope dependency is resolved by the contract.
+Keep docs/slices/p1a/VERIFICATION.md and verification.json aligned with actual
+P1A-00..P1A-31 evidence, failures/fixes, commands/counts, SQLite/runtime versions,
+process/permission gaps and independent review. Local Linux success is not native
+Windows/macOS evidence. Windows symlink tests need privilege; ACL protection remains
+caller-owned, and same-user TOCTOU is not eliminated. Prior 422 Rust/152 Node results are
+historical, not P1-A evidence or a test-count target. Never weaken CI/lints/platform
+checks to force acceptance. New direct SQLite dependency is permitted; unrelated
+upgrades are not. Compile/run all required old and new gates.
 
-C1 deletion remains complete. Preserve cooperative cancellation, correlation,
-full-batch authority/argument checks, result caching and ordering, validated
-recovery/provenance, execution-versus-delivery semantics, managed/external auth
-ownership and both transport paths. Production-provider reorganization is deferred.
+The owner authorized the P1-A commits and pushes recorded in the verification report.
+Do not merge, release, deploy, publish or start P1-B/V1 automatically. The final report
+distinguishes local tests, exact-head hosted CI, and live provider claims. The planning contract/schema are not implemented acceptance evidence.
 
-The final product is a one-owner multi-device service. Browser disconnect does
-not cancel service-owned work. Application sessions persist; service restart stops
-tasks without automatic replay/resumption. P1 storage design precedes V1 service
-acceptance, but neither begins here. Hosted skills/uploads are excluded. No database,
-permission manager, replay engine or generic tool is implied by this repair.
+## Completed work and enduring direction
 
-Pi authoring traffic is distinct from Wi verification. Report source inspection,
-executed tests, CI and live behavior separately. Preserve the repository's current
-organization and historical evidence. Future work needs an explicit requirement.
+Gateway/authentication, M3's retained controller, C1 deletion, S1, S2 and R1/NB-02 are
+complete within their recorded scopes. Do not execute their old prompts. Their frozen
+NOT RUN headings and historical budgets are evidence of prior phases, not current
+assignments. R1 merge is dd720c0; the current docs index links closure and prior reports.
+Unrelated audit observations such as older Node classification are not P1-A repairs.
+
+Wi is a Rust harness with a model gateway, not a CLI-only proxy. The final service
+serves one owner across devices; the browser only observes/commands. Disconnect is
+not cancellation. Sessions persist; restart stops old tasks without automatically
+resubmitting model work or rerunning tools. SQLite WAL recovery/catalog repair/in-flight
+DB commit cleanup are not agent task resumption. Human-readable database files and
+network database servers are not requirements. Actual provider-history restoration,
+service authentication, browser protocol, GUI and real coding tools remain later work.

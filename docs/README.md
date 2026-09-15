@@ -14,9 +14,31 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
-New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted after
-local gates, complete-diff review, and exact-head cross-platform CI. P1-B runtime
-persistence and V1 service remain deferred.
+New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
+at `34b4cfd`. P1-B1 is the next implementation plan, not implemented behavior.
+P1-B2 history restoration and V1 service remain later separately scoped work.
+
+## Next implementation: P1-B1 actual runtime capture
+
+Contract **p1b1.0**, baseline `34b4cfd0d3ecf286869a239997267dbd75c28c0b`.
+All 30 P1B1-00..P1B1-29 rows are initially NOT RUN. This connects actual execution
+to P1-A through a shared awaitable observation/result path and a narrow lifecycle
+hold. It does not claim restored-conversation model context or a running service.
+
+- [P1-B1 contract](slices/p1b1/CONTRACT.md): Fixed API, shared-loop integration,
+  acceptance/effect/commit ordering, failure/close behavior and explicit B1/B2 split.
+- [P1-B1 matrix](slices/p1b1/MATRIX.md): Thirty real producer-to-consumer cases,
+  loopback/process tests, gates, performance evidence and report requirements.
+- [P1-B1 source validation](slices/p1b1/VALIDATION.md): Existing interfaces versus
+  authorized changes, source pins, decision ledger and static-review limits.
+- [P1-B1 implementor prompt](slices/p1b1/IMPLEMENTOR_PROMPT.md): Fresh local agent
+  assignment; no replanning, live traffic, Git publication or deferred features.
+
+B1 adds actual incremental recording for a supplied prepared input. B2 remains
+required for a NEW explicit task using stored role/call/result/native context and
+compatible provider/account binding. No automatic task resumption is authorized.
+Ordinary CLI persistence is not changed by this planning PR or claimed delivered
+by B1. The future service owns execution independently of readers/browser clients.
 
 ## Current acceptance: P1-A storage only
 
@@ -31,6 +53,12 @@ lease release when another process held a duplicate descriptor; explicit healthy
 unlock and its regression fixed that race. Exact-head Ubuntu/macOS/Windows push and
 PR workflows passed at `0839af9`. The frozen plan's NOT RUN headings remain historical,
 not current evidence.
+
+PR #5 subsequently merged at `34b4cfd`. Planner correction `95353ef` changed only
+P1A-04's stale platform limitation; its push run 34935741002 and PR run 34935743731
+passed all six Cargo steps on all three operating systems before the expected-head
+merge. [Merge closure](https://github.com/zer09/wi/pull/5#issuecomment-5675695793)
+records the source review, exact CI and retained limits without rewriting old results.
 
 - [P1-A contract](slices/p1a/CONTRACT.md): Exact storage-only scope, API, ownership,
   creation, acknowledgments, catalog refresh/repair and restart semantics.

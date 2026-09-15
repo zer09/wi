@@ -18,6 +18,17 @@ impl Fixture {
         Self { temp, root }
     }
 
+    #[cfg(unix)]
+    pub fn short_unix() -> Self {
+        // Unix socket paths are much shorter than normal filesystem paths on macOS.
+        let temp = tempfile::Builder::new()
+            .prefix("wi-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let root = temp.path().join("r");
+        Self { temp, root }
+    }
+
     pub fn catalog(&self) -> PathBuf {
         self.root.join("catalog.sqlite3")
     }

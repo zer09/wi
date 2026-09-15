@@ -339,7 +339,7 @@ async fn storage_special_files_and_hardlinks_are_rejected_without_opening_them()
         "catalog.sqlite3-shm",
         "catalog.sqlite3-journal",
     ] {
-        let fixture = Fixture::new();
+        let fixture = Fixture::short_unix();
         fixtures::directory(&fixture.root);
         let path = fixture.root.join(name);
         let socket = UnixListener::bind(&path).unwrap();

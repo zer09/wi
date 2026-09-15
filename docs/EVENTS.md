@@ -21,6 +21,42 @@ Wi for managed credentials or Codex/Pi for external credentials, followed by a n
 provider session. The [exact message](WI_AUTH.md#expiry-guidance-r1) changes no
 freshness, renewal or upstream-outcome behavior.
 
+## Stored application events v1 (P1-A, storage only)
+
+P1-A local acceptance and final complete-diff review passed; hosted exact-head CI
+remains pending. See [P1-A verification](slices/p1a/VERIFICATION.md). The shared
+`wi::storage` library records supplied validated DTOs, not ordinary `wi run` output.
+Its storage envelope version 1 contains application-session identity, a store-owned
+sequence, event UUID, Unix-millisecond timestamp, event type/version and typed payload.
+Nested runtime/provider envelopes remain schema 2/1 with their original correlations.
+Provider-session IDs and source sequences are not durable application replay cursors.
+
+Stored types are `session.created`, `session.renamed`, `run.accepted`,
+`runtime.observed`, `tool.result.recorded`, `run.result.recorded` and `run.interrupted`.
+Accepted input preserves original user text, the prepared request, registry definitions
+and initial context provenance. Parsed native JSON values and embedded strings survive;
+original transport whitespace/property order is not promised. Tool finish observations
+contain no output. Exact output and explicit `is_error` are recorded separately,
+consistently in either finish/result order. Missing output remains missing.
+
+Atomic session mutations append immutable events and update projections/head/receipts.
+An identical operation retry returns the original receipt without another event or
+execution. Completed recording requires every started tool result. `RunResult` retains
+execution outcome separately from `events_complete`/`sink_error`; it can supplement an
+identical terminal observation without another terminal transition. Interrupted runs
+cannot be revived by ordinary appends. Cancellation/failure does not prove upstream stop.
+
+History pages capture a fixed committed head and return owned `(after, through]`
+records without retaining a cursor transaction. Catalog summaries report observed head
+and recorded state, not liveness. Canonical writes require explicit `refresh_catalog()`
+for publication. Lost-catalog reconstruction uses explicit `repair_catalog()`; selected
+session opens lazily add one prior-instance `run.interrupted` with `process_restart`.
+Neither recovery nor receipt retry resubmits providers or reruns tools.
+
+Ordinary run capture, awaited runtime delivery and provider-history restoration remain
+NOT IMPLEMENTED (P1-B). Service/browser/V1 remain deferred. Stored content is private
+application data; redacted Debug/static storage errors are not an encryption boundary.
+
 ## Plain presentation and legacy preflight (R1)
 
 Plain answer bodies from legacy `generate`/`tool-demo` and `wi run` preserve LF,
@@ -95,7 +131,7 @@ monotonically increasing, not a durable replay cursor.
 
 A failed delivery can leave a sequence gap followed by an explicit failure;
 consumers must not interpret a gap as successful completion. There is no replay
-API or durable event log in this milestone.
+API or automatically persisted provider event log. P1-A records only explicitly supplied DTOs.
 
 ## Implemented provider events
 
@@ -260,7 +296,7 @@ emitted by the separate tool registry, not by the provider. Legacy `tool-demo`
 writes raw `ToolExecutionEvent` NDJSON objects distinguished by `type` to stdout only
 with `--json`. Without `--json`, tool execution events are Debug diagnostics on stderr.
 `wi run` nests these same objects inside `tool_event` with run/turn/session/request
-correlation. Neither form is durable.
+correlation. Neither emitted form is automatically durable.
 `load_skill` uses these existing events, not a new skill lifecycle or provider event.
 
 | Loader condition | Existing observation |
@@ -358,15 +394,15 @@ tool's ordinary error/result, not a run-deadline outcome; the controller install
 no tool timers or generic timeout API.
 Dropping the run future requests session closure when a handle exists, but cannot
 return a result or promise terminal delivery. Process loss has the same delivery
-limit. There is no durable replay, event store, internal unbounded queue or detached
-tool task.
+limit. The controller has no durable replay, event store, internal unbounded queue
+or detached tool task; P1-A is a separate recording library.
 
 The future one-owner, multiple-device service must keep work independent of browser
 disconnection and persist application sessions. A client subscription must not
 own this fallible run observer directly. Restart stops active tasks without
-automatically resuming or restarting them. Storage and service design remain
-deferred; S1/S2 implement neither persistence nor a server/UI. Current sequences
-and provider-session IDs are not a durable-session design.
+automatically resuming or restarting them. P1-B runtime integration/provider-history
+restoration and V1 service/browser behavior remain unimplemented. P1-A application
+sequences and IDs are separate from these unchanged runtime/provider fields.
 
 ## Not emitted yet
 

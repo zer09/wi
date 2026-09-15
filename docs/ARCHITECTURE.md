@@ -6,6 +6,10 @@ complete-diff review; `accepted=true`. The follow-up closes NB-02 for legacy
 RequestFailed diagnostics. Exact-head cross-platform CI is NOT RUN.
 S1/S2 ownership and public schemas remain unchanged.
 
+P1-A adds storage-only `wi::storage`; local acceptance and final complete-diff
+review passed under p1a.0. Hosted exact-head CI remains pending. See
+[P1-A verification](slices/p1a/VERIFICATION.md). Ordinary run persistence is not implemented.
+
 ## One crate, explicit module boundaries
 
 | Module | Responsibility |
@@ -27,6 +31,7 @@ S1/S2 ownership and public schemas remain unchanged.
 | `tools.rs` | Shared two-phase registry, fresh result scopes and deterministic addition executor |
 | `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
+| `storage/*` | Explicit-root SQLite session ownership, receipts, typed records, projections, cursor reads, catalog refresh/repair and lazy interruption |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
 | `main.rs` | Program entry point and Tokio runtime startup |
 | `cli/mod.rs` | Private CLI arguments, shared helpers, routing, legacy text/NDJSON, generate and fixed tool-demo callers |
@@ -444,23 +449,71 @@ loss cannot promise a result, final event, rollback or upstream cancellation.
 `cli/run_cli.rs` validates inputs and prepares context before constructing the existing
 provider. It renders events and signals cancellation without a second loop.
 
+## Application-session storage ownership (P1-A)
+
+`SessionStore::open` takes an absolute root and an OS-backed exclusive `storage.lock`
+lease. Canonicalized root aliases share ownership. The catalog is `catalog.sqlite3`;
+each generated application session owns
+`sessions/<first-two-hex-digits>/<session-uuid>/session.sqlite3`. SQLx 0.9.0 uses only
+`runtime-tokio` and `sqlite-bundled`. Writable connections verify WAL, FULL, foreign
+keys, trusted_schema=OFF and zero busy timeout; private-cache behavior is tested.
+SQLx connections and SQL remain private. No idle session pool is retained.
+
+Each admitted disk operation owns a private Tokio task, lifecycle guard and explicit
+connection cleanup. Per-session locks serialize mutation; independent sessions can
+progress separately. Maintenance excludes normal operations during repair. A dropped
+caller waiter does not cancel an admitted transaction. `close()` rejects admission,
+drains guards and releases the lease. Uncertain retirement closes admission and retains
+the lease until process exit. This is database cleanup, not task resumption.
+
+Session mutations use `BEGIN IMMEDIATE`, receipt-first request identity, whole-batch
+validation, contiguous store-owned sequences, projection/head updates and one receipt
+before COMMIT. Create instead reserves in the catalog, initializes the canonical
+session and completes registration; it does not claim a two-database atomic commit.
+Immutable original creation provenance permits repair after rename and catalog loss.
+Identical retries return receipts; conflicts do not mutate. Unknown commit outcomes
+require receipt lookup. Post-commit cleanup warnings do not invalidate committed data.
+
+Canonical mutations finish independently of summary publication. Explicit
+`refresh_catalog()` rereads canonical state and updates only an eligible existing row
+monotonically by observed head. Listing opens only the catalog and uses live session-ID
+keyset pages. History uses short `(after, through]` queries at a fixed committed head;
+returned owned pages hold no transaction. No history-lifetime/session-count cap exists.
+
+A missing catalog with surviving generated paths requires explicit `repair_catalog()`.
+Repair streams canonical candidates, validates history/projections and original creation
+identity, preserves bad files and records availability. It clears durable intent only
+after a complete scan. Catalog-only failed reservations cannot all be reconstructed
+after catalog loss. Ordinary reads do not silently recreate missing ready databases.
+Selected `open_session()` calls interrupt only prior-instance accepted/running records,
+once, with `process_restart`. Partial output/results remain; nothing executes or retries.
+
+Storage accepts validated caller DTOs and copies PreparedRun getters plus matching
+registry definitions. It never constructs providers, reads credentials, rediscovers
+skills or executes tools. New Unix directories/files use 0700/0600. Static link/reparse
+substitutions and special files fail closed; same-user TOCTOU remains a trust limit.
+Windows protected-root ACLs remain caller-owned, not Unix-mode protection. Windows
+symlink tests require privilege; native Windows/macOS and hosted exact-head CI are pending.
+See [P1-A verification](slices/p1a/VERIFICATION.md) for exact process/fault evidence.
+
 ## Future service ownership (requirements only)
 
-S1/S2 do not implement a service or persistence. The future service serves one
+P1-A does not integrate ordinary `wi run` persistence or implement a service. The future service serves one
 owner across multiple devices. A browser disconnect must not cancel admitted
 service-owned work. A client subscription must not own the controller's observer
 or provider receiver directly, because sink/receiver failure currently stops work.
 Application sessions must persist in storage. Service restart stops active tasks
 without automatic restart, resume, provider submission or tool replay. Continuing
-requires an explicit user action. Storage design is deferred and must precede
-service acceptance; no backend, store interface or recovery worker is selected.
+requires an explicit user action. P1-B still needs the awaited runtime capture seam
+and valid provider-history restoration for explicit new submissions. P1-A storage
+recovery is not agent execution or service-wide adoption of sessions.
 The current `ProviderSession` is an in-memory transport handle, not that persistent
 application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 
 ## Intentionally deferred
 
 - Approvals, sandboxing and noncooperative/external-effect cancellation guarantees.
-- Persistent application sessions/history and durable operation state, branching, queues.
+- Ordinary run persistence, provider-history restoration/runtime capture (P1-B), branching and queues.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
 - Tool discovery, supporting skill-file reads, scripts and other resource execution.

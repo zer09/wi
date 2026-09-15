@@ -7,6 +7,13 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
+**P1-A status: storage implemented; local acceptance PASS under contract p1a.0.**
+The shared `wi::storage` library records supplied validated data in per-session
+SQLite databases and a session catalog. Ordinary `wi run` persistence and P1-B
+provider-history restoration remain **NOT IMPLEMENTED**. Final complete-diff review
+passed; hosted exact-head Ubuntu/macOS/Windows CI remains **PENDING**. See the
+[P1-A verification report](docs/slices/p1a/VERIFICATION.md) for evidence and limits.
+
 **S2 status: implemented and offline accepted under contract s2.1.**
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
 passing, 374 local Rust tests and 152 Node self-tests. Submitted-head CI for
@@ -61,7 +68,8 @@ CLI / library caller
 
 The deterministic `add_numbers` executor is a separate module. The provider
 never executes files, commands, model-generated JavaScript, or unknown tools.
-There is no web server, GUI, database, persistent agent service, or sandbox here.
+There is no web server, GUI, persistent agent service, or sandbox here.
+The separate storage library does not persist ordinary CLI runs.
 The cancellation-aware `wi::run::run` controller supports ordinary tool/result cycles.
 
 ## What is implemented in source
@@ -97,7 +105,9 @@ upload integration, API-key billing fallback, or hosted execution.
 
 ## Build and test first
 
-Use a current stable Rust installation with `cargo`, Rustfmt, and Clippy.
+Use Rust 1.94 or newer with `cargo`, Rustfmt, and Clippy.
+Storage pins SQLx 0.9.0 with only `runtime-tokio` and `sqlite-bundled`; the local
+linked SQLite is 3.51.3, also the required compatibility floor.
 
 ```bash
 cargo fmt --all -- --check
@@ -352,15 +362,45 @@ checks do **not** prove live model selection or adherence; that remains NOT RUN.
 See [S1](docs/WI_LOCAL_SKILLS_S1.md) for metadata parsing and filesystem limits,
 and [S2](docs/slices/s2/CONTRACT.md) for main-file loading semantics.
 
-## Future service and storage (not implemented)
+## Application-session storage (P1-A, storage only)
 
-The service is for one owner using multiple devices. Browser disconnect must not
-cancel service-owned work. Application sessions must persist in storage. Service
-restart stops active tasks; it must not automatically restart or resume them.
-Continuing requires a new explicit user action. Storage design precedes service
-acceptance and remains deferred. S1/S2 add no server, storage interface, database,
-recovery worker, or UI. `ProviderSession` is an in-memory transport handle, not a
-persistent application session. See [product direction](docs/WI_PRODUCT_DIRECTION.md).
+`wi::storage::SessionStore` accepts an explicit absolute data root. It owns one
+OS-backed exclusive lease, `catalog.sqlite3`, and canonical session databases at
+`sessions/<first-two-hex-digits>/<session-uuid>/session.sqlite3`. SQLite uses WAL/FULL,
+foreign keys, an untrusted schema, private caches and zero busy timeout. Connections
+open per operation and close before operation ownership ends; idle handles retain
+no SQLite worker. Unix files/directories are private. Windows ACL protection is
+caller-owned; native Windows/macOS behavior remains unverified locally.
+
+Create and rename return durable operation receipts. Validated input snapshots,
+typed runtime records, exact tool results and terminal results update immutable
+history and minimal projections transactionally. Same-operation retries reconcile
+receipts without repeating tools or provider work. Application IDs and sequences
+remain separate from provider-session IDs and run-local sequences. History pages
+use a fixed committed head; catalog pages are live ID-keyset views.
+
+Session writes do not refresh the catalog automatically. Call `refresh_catalog()`
+explicitly after a canonical commit. Missing catalogs with surviving sessions gate
+normal use until explicit `repair_catalog()`; corrupt/future files are preserved.
+`open_session()` lazily marks older-instance accepted/running records interrupted
+without resubmission or tool replay. Dropped waiters do not cancel admitted database
+transactions; `close()` rejects new work and drains admitted operations.
+
+`cargo run --example storage_offline` demonstrates these APIs with synthetic context,
+supplied DTO traces and real local registry results. It makes no provider requests.
+The [verification report](docs/slices/p1a/VERIFICATION.md) distinguishes process/fault
+simulation from physical power-loss guarantees and records filesystem trust limits.
+
+## Future runtime integration and service (not implemented)
+
+Ordinary `wi run` still has no storage capture. P1-B must add the awaited runtime
+seam, caller-selected run identity and explicit new submissions using valid stored
+provider history. Reading stored events is not provider-history restoration.
+V1 remains a one-owner, multi-device service: browser disconnect must not cancel
+service-owned work; restart must not automatically resume tasks. Service authentication,
+browser protocol and GUI remain unimplemented. `ProviderSession` is an in-memory
+transport handle, not a persistent application session. See
+[product direction](docs/WI_PRODUCT_DIRECTION.md).
 
 ## Experimental Wi browser login
 

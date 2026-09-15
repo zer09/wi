@@ -1,8 +1,13 @@
-# Wi: P1-A implementation handoff
+# Wi: P1-A local acceptance and hosted-CI handoff
 
-Current assignment: **P1-A durable application-session storage, contract p1a.0**.
+P1-A durable application-session storage, contract **p1a.0**, is implemented on
+this branch. Local acceptance gates and final complete-diff review passed. The owner
+authorized committing and pushing the current P1-A diff. Hosted exact-head
+Ubuntu/macOS/Windows CI remains **PENDING**.
 Runtime baseline: `dd720c0e66eceaaea831ad03e489656f77fc1cec` (R1/NB-02 merged).
-This branch begins as documentation only: implementation and all 32 rows are NOT RUN.
+Planning HEAD `21b1feacd2a278d74452fefd970a016170a83917` does not contain the implementation.
+See docs/slices/p1a/VERIFICATION.md and verification.json for all 32 dispositions.
+Frozen planning NOT RUN headings are not current acceptance evidence.
 
 Read in order:
 1. docs/slices/p1a/CONTRACT.md
@@ -12,18 +17,20 @@ Read in order:
 5. docs/slices/p1a/IMPLEMENTOR_PROMPT.md
 6. Current source paths in VALIDATION.md and completed R1/S2 verification records.
 
-Implement the fixed contract, then verify and obtain independent complete-diff review.
-Do not delegate another architecture-planning exercise or stop after planning. Report
+Preserve the reviewed implementation. Do not begin P1-B or another
+architecture-planning exercise. Report
 a genuine source/contract conflict before changing scope. Preserve local user work:
 no reset, clean, forced checkout, unsolicited stash or overwrite.
 
 ## Scope
 
-Add one shared wi::storage library: SQLite through the specified minimal SQLx 0.9.0
-features, one canonical database per application session and a session catalog,
+The shared wi::storage library uses SQLite through minimal SQLx 0.9.0 features,
+one canonical database per application session and a session catalog, with
 create/rename/receipts, typed history and minimal projections, explicit catalog refresh
 and repair, short cursor queries, safe DB ownership, lazy interruption of prior-instance
-recorded work, and offline/process evidence.
+recorded work, and offline/process evidence. Canonical writes require explicit catalog
+refresh; lost-catalog repair is explicit. Receipt retries do not repeat effects.
+Handles retain no idle connection; close drains admitted operations before lease release.
 
 P1-A does not integrate ordinary wi run with storage. It records supplied validated
 DTOs; P1-B will separately add the awaited runtime seam and explicit new submissions
@@ -49,15 +56,17 @@ credential/private-skill access, auth/profile/login/refresh commands, provider r
 or live probes. Normal locked build/dependency fetching is permitted development
 traffic. Keep the ledger unchanged: **31/50 used, 19 remaining**.
 
-Complete P1A-00..P1A-31. Write docs/slices/p1a/VERIFICATION.md and verification.json
-with actual evidence, failures/fixes, commands/counts, SQLite/runtime versions,
-process/permission gaps and independent review. Prior 422 Rust/152 Node results are
+Keep docs/slices/p1a/VERIFICATION.md and verification.json aligned with actual
+P1A-00..P1A-31 evidence, failures/fixes, commands/counts, SQLite/runtime versions,
+process/permission gaps and independent review. Local Linux success is not native
+Windows/macOS evidence. Windows symlink tests need privilege; ACL protection remains
+caller-owned, and same-user TOCTOU is not eliminated. Prior 422 Rust/152 Node results are
 historical, not P1-A evidence or a test-count target. Never weaken CI/lints/platform
 checks to force acceptance. New direct SQLite dependency is permitted; unrelated
 upgrades are not. Compile/run all required old and new gates.
 
-Leave source UNCOMMITTED unless the owner separately authorizes Git writes. Do not
-push, merge, release, deploy, publish or start P1-B/V1 automatically. A final report
+The owner authorized committing and pushing the current P1-A diff. Do not merge,
+release, deploy, publish or start P1-B/V1 automatically. A final report
 must distinguish local tests from later exact-head hosted CI and from live provider
 claims. The planning contract/schema are not implemented acceptance evidence.
 

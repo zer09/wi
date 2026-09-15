@@ -14,16 +14,19 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
-New slice documents use `docs/slices/<slice>/`. P1-A is now a fixed planning handoff,
-not implemented storage. P1-B runtime persistence and V1 service remain deferred.
+New slice documents use `docs/slices/<slice>/`. P1-A storage is implemented with
+local acceptance PASS. P1-B runtime persistence and V1 service remain deferred.
 
-## Current planning handoff: P1-A
+## Current local acceptance: P1-A storage only
 
-Contract **p1a.0**, runtime baseline `dd720c0` (R1/NB-02 merged). This documentation
-selects SQLite with the minimal SQLx 0.9.0 SQLite/Tokio features, per-session canonical
-databases and a session catalog. It does not install the driver or change runtime.
-All 32 acceptance rows are **NOT RUN**. Human-readable files, a network DB server,
-run limits and automatic task resumption are excluded.
+Contract **p1a.0**, runtime baseline `dd720c0` (R1/NB-02 merged). The shared
+`wi::storage` library uses minimal SQLx 0.9.0 SQLite/Tokio features, per-session
+canonical SQLite databases and a session catalog. It provides receipts, typed
+history/projections, short cursor reads, explicit catalog refresh/repair and lazy
+prior-instance interruption without execution. Ordinary `wi run` remains unchanged.
+P1A-00..P1A-30 have local PASS evidence; P1A-31 records passing local gates and final
+complete-diff review with hosted exact-head Ubuntu/macOS/Windows CI **PENDING**.
+The frozen plan's NOT RUN headings remain historical, not current evidence.
 
 - [P1-A contract](slices/p1a/CONTRACT.md): Exact storage-only scope, API, ownership,
   creation, acknowledgments, catalog refresh/repair and restart semantics.
@@ -36,9 +39,15 @@ run limits and automatic task resumption are excluded.
 - [P1-A implementor prompt](slices/p1a/IMPLEMENTOR_PROMPT.md): Fresh local agent
   assignment; implementation/offline tests only, no independent replanning or Git/live work.
 
-The implementor will create `docs/slices/p1a/VERIFICATION.md` and `verification.json`
-after observed work. Ordinary `wi run` persistence, valid provider-history restoration,
-service and GUI are not delivered by this planning PR or by P1-A's storage library.
+- [P1-A verification report](slices/p1a/VERIFICATION.md): All 32 row dispositions,
+  actual local commands/counts, process/fault evidence, performance and review history.
+- [P1-A machine report](slices/p1a/verification.json): Matching structured evidence,
+  dirty-worktree inventory, pending review/CI, platform limits and unchanged ledger.
+
+Ordinary `wi run` persistence, awaited runtime capture and valid provider-history
+restoration remain NOT IMPLEMENTED (P1-B). Service authentication, browser protocol
+and GUI remain NOT IMPLEMENTED (V1). Native Windows/macOS behavior is unverified;
+Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain explicit limits.
 
 ## Historical-citation errata (2026-09-12 UTC)
 
@@ -143,6 +152,12 @@ Live model selection/adherence is NOT RUN.
   follow-up body and final fixture text. Uses temporary synthetic roots without
   ambient context/auth configuration, credentials or provider networking.
   Run with `cargo run --example skill_loading_offline`; this is not live model evidence.
+
+- [storage_offline.rs](../examples/storage_offline.rs): Synthetic context capture,
+  supplied run DTOs, real registry output, create/rename/receipts, explicit refresh,
+  listing/history and close/reopen. Three finite latency samples include connection
+  costs; no provider requests, runtime integration or power-loss claim.
+  Run with `cargo run --example storage_offline`.
 
 ## Completed contracts and matrices
 

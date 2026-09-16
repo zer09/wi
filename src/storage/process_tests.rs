@@ -28,6 +28,7 @@ struct Fixture {
 #[derive(Serialize, Deserialize)]
 enum Mode {
     Hold,
+    Retire(Retirement),
     OpenError(String),
     Create {
         input: CreateSession,
@@ -48,6 +49,15 @@ enum Mode {
         terminal: ApplicationSessionId,
         terminal_history: Value,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+enum Retirement {
+    Quarantine,
+    OperationDrop,
+    ExecutionDrop,
+    ExecutionAbort,
+    ExecutionPanic,
 }
 
 fn private_dir(path: &Path) {
@@ -229,6 +239,71 @@ fn storage_child() {
                 line.clear();
                 input.read_line(&mut line).unwrap();
             }
+            Mode::Retire(retirement) => {
+                let created = store.create_session(create_input()).await.unwrap();
+                let handle = store
+                    .open_session(created.session_id().clone())
+                    .await
+                    .unwrap();
+                let hold = handle.execution_hold().unwrap();
+                let signal = hold.closing_token();
+                let mut notified = Box::pin(signal.cancelled());
+                assert!(futures_util::poll!(&mut notified).is_pending());
+                match retirement {
+                    Retirement::Quarantine => {
+                        store.inner.lifecycle.quarantine();
+                        assert!(signal.is_cancelled());
+                        assert_eq!(store.inner.lifecycle.gauge().0, 1);
+                        hold.finish();
+                    }
+                    Retirement::OperationDrop => {
+                        drop(store.inner.lifecycle.admit().unwrap());
+                        assert!(signal.is_cancelled());
+                        assert_eq!(store.inner.lifecycle.gauge().0, 1);
+                        hold.finish();
+                    }
+                    Retirement::ExecutionDrop => drop(hold),
+                    Retirement::ExecutionAbort => {
+                        let (ready, wait) = tokio::sync::oneshot::channel();
+                        let task = tokio::spawn(async move {
+                            let _hold = hold;
+                            ready.send(()).unwrap();
+                            std::future::pending::<()>().await;
+                        });
+                        wait.await.unwrap();
+                        task.abort();
+                        assert!(task.await.unwrap_err().is_cancelled());
+                    }
+                    Retirement::ExecutionPanic => {
+                        let task = tokio::spawn(async move {
+                            let _hold = hold;
+                            panic!("unfinished execution hold");
+                        });
+                        assert!(task.await.unwrap_err().is_panic());
+                    }
+                }
+                assert!(futures_util::poll!(&mut notified).is_ready());
+                assert_eq!(
+                    handle.execution_hold().err().unwrap().code(),
+                    "storage.closed"
+                );
+                assert_eq!(
+                    handle.manifest().await.unwrap_err().code(),
+                    "storage.closed"
+                );
+                assert_eq!(store.close().await.unwrap_err().code(), "storage.io");
+                let (admitted, opened, closed, closing) = store.inner.lifecycle.gauge();
+                assert_eq!(admitted, 0);
+                assert_eq!(opened, closed);
+                assert!(closing);
+                drop(handle);
+                drop(store);
+                // The parent checks ownership after every ordinary owner has gone away.
+                println!("READY");
+                line.clear();
+                input.read_line(&mut line).unwrap();
+                return;
+            }
             Mode::Create { input, stage } => {
                 let point = match stage {
                     0 => Point::Reserved,
@@ -362,6 +437,40 @@ async fn raw(path: &Path) -> sqlx::SqliteConnection {
 }
 fn create_input() -> CreateSession {
     CreateSession::new(OperationId::new(), "title-canary".into(), None).unwrap()
+}
+
+#[tokio::test]
+async fn p1b1_execution_unfinished_retirement_signals_and_retains_lease_until_exit() {
+    for retirement in [
+        Retirement::Quarantine,
+        Retirement::OperationDrop,
+        Retirement::ExecutionDrop,
+        Retirement::ExecutionAbort,
+        Retirement::ExecutionPanic,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root-canary");
+        let mut owner = Process::start(
+            temp.path(),
+            &Fixture {
+                root: root.clone(),
+                mode: Mode::Retire(retirement),
+            },
+        );
+        owner.ready();
+        Process::start(
+            temp.path(),
+            &Fixture {
+                root: root.clone(),
+                mode: Mode::OpenError("storage.busy".into()),
+            },
+        )
+        .finish(Some(0));
+        owner.release();
+        owner.finish(Some(0));
+        let reopened = SessionStore::open(root).await.unwrap();
+        reopened.close().await.unwrap();
+    }
 }
 
 #[tokio::test]

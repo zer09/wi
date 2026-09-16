@@ -9,7 +9,9 @@ S1/S2 ownership and public schemas remain unchanged.
 P1-A adds storage-only `wi::storage`; local acceptance, final complete-diff review,
 and exact-head Ubuntu/macOS/Windows CI passed under p1a.0 after both post-submission
 macOS findings were remediated. See [P1-A verification](slices/p1a/VERIFICATION.md).
-Ordinary run persistence is not implemented.
+B1 public execution-to-storage composition is implemented locally; its final acceptance,
+closure review, verification reports and submitted CI remain pending. Ordinary CLI
+persistence and B2 restored conversation/provider-account history are not implemented.
 
 ## One crate, explicit module boundaries
 
@@ -33,6 +35,7 @@ Ordinary run persistence is not implemented.
 | `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
 | `storage/*` | Explicit-root SQLite session ownership, receipts, typed records, projections, cursor reads, catalog refresh/repair and lazy interruption |
+| `execution/*` | Public supplied-input composition, receipt-first acceptance, awaited actual records and storage ownership during execution |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
 | `main.rs` | Program entry point and Tokio runtime startup |
 | `cli/mod.rs` | Private CLI arguments, shared helpers, routing, legacy text/NDJSON, generate and fixed tool-demo callers |
@@ -498,24 +501,70 @@ symlink tests require privilege. Exact-head hosted Windows/macOS jobs passed aft
 lease-release remediation.
 See [P1-A verification](slices/p1a/VERIFICATION.md) for exact process/fault evidence.
 
+## Supplied-input execution recording (P1-B1)
+
+`wi::execution::run_persisted` records only the explicitly supplied prepared input
+incrementally. The caller captures `RecordedRunInput` from actual context preparation
+and the matching registry, then supplies an operation ID and actual runtime RunId.
+Receipt-first duplicate handling never launches old work. For a new operation, shared
+local admission precedes acceptance; acceptance commits before provider work.
+
+One shared run loop serves both the legacy synchronous callback and B1's awaited
+observer. B1 awaits each actual runtime record. The registry serializes actual output,
+applies the existing error/size handling and inserts its per-run cache before B1 records
+the exact bytes and actual `is_error`. That commit precedes tool finish and provider
+continuation. No SQL repository executes a provider/tool. No background write queue,
+second controller, public middleware framework or schema/version change is introduced.
+
+Execution and recording outcomes remain separate. `Executed` contains the returned
+`RunResult` and acceptance/final receipts, even for a recorded failed/cancelled run.
+The first recording failure stops further work and retains its operation identity,
+known commit and any actual returned result. No write retry, fabricated result or
+second terminal writer hides uncertainty. Catalog refresh remains a separate explicit
+operation; catalog state is recorded state, not live execution ownership.
+
+A narrow private execution hold keeps storage ownership across provider/tool waits
+without retaining a database connection or session/maintenance lock. The caller owns
+and awaits the Send future; B1 creates no detached execution manager. Closing storage
+signals local cancellation, rejects new recording and drains admitted SQL/execution
+holds before healthy unlock. Terminal persistence during close is not guaranteed.
+Direct abort/drop/panic can quarantine the root until process exit; it is not a browser
+disconnect. Controlled shutdown cancels/awaits execution before closing storage.
+
+`cargo run --offline --locked --example persisted_run_offline` runs the public path
+with synthetic context, a finite in-process provider and real AddNumbers/SQLite.
+Add `--release` for a separate local sample. Provider barriers expose committed partial
+text and exact tool results through independent SQLite reads before scripted continuation
+admission. Turn-2 `generate` waits before counting or signaling that request.
+Close/reopen preserves input, history and results after context/registry/provider owners
+are removed, without new work.
+The [measurement notes](../README.md#incremental-supplied-input-capture-p1-b1) distinguish
+finite latency samples, test-only exact transaction/connection counts and actual
+post-close database/WAL sizes. No benchmark, SLA or transparent arbitrary-disk-latency
+claim follows; provider queue/consumer/terminal safeguards are unchanged.
+
+B1 does not restore prior conversation or provider/account-bound native history (B2).
+Ordinary CLI persistence, service/browser/GUI (V1), and task resumption/retry remain
+unimplemented.
+
 ## Future service ownership (requirements only)
 
-P1-A does not integrate ordinary `wi run` persistence or implement a service. The future service serves one
+Neither P1-A nor B1 integrates ordinary `wi run` persistence or implements a service. The future service serves one
 owner across multiple devices. A browser disconnect must not cancel admitted
 service-owned work. A client subscription must not own the controller's observer
 or provider receiver directly, because sink/receiver failure currently stops work.
 Application sessions must persist in storage. Service restart stops active tasks
 without automatic restart, resume, provider submission or tool replay. Continuing
-requires an explicit user action. P1-B still needs the awaited runtime capture seam
-and valid provider-history restoration for explicit new submissions. P1-A storage
-recovery is not agent execution or service-wide adoption of sessions.
+requires an explicit user action. B1 supplies actual capture of a supplied input;
+B2 still needs valid restored conversation/provider-account history for explicit new
+submissions. P1-A storage recovery is not agent execution or service-wide adoption of sessions.
 The current `ProviderSession` is an in-memory transport handle, not that persistent
 application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 
 ## Intentionally deferred
 
 - Approvals, sandboxing and noncooperative/external-effect cancellation guarantees.
-- Ordinary run persistence, provider-history restoration/runtime capture (P1-B), branching and queues.
+- Ordinary CLI persistence, restored conversation/provider-account history (B2), task resumption/retry, branching and queues.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
 - Tool discovery, supporting skill-file reads, scripts and other resource execution.

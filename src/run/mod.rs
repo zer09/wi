@@ -1,12 +1,15 @@
-//! One provider-neutral run with synchronous fallible observation.
+//! One provider-neutral run with synchronous public and awaitable private observation.
 mod collect;
 pub mod events;
+mod observer;
 pub use events::{RunEvent, RunEventEnvelope, RunSinkError, TurnOutcome};
+pub(crate) use observer::RunObserver;
+use observer::SyncObserver;
 
 use crate::{
     Gateway, GatewayError, InputItem, ItemKind, ModelResponse, ProviderEvent, ProviderSession,
-    ResponseOutcome, SessionControl, SessionOptions, Transport, UpstreamOutcome,
-    tools::{ToolExecutionEvent, ToolRegistry},
+    ResponseOutcome, SessionControl, SessionOptions, ToolDefinition, Transport, UpstreamOutcome,
+    tools::{ToolExecutionEvent, ToolObserver, ToolRegistry},
     validate_input,
 };
 use futures_util::StreamExt;
@@ -104,8 +107,8 @@ impl Drop for CloseGuard {
     }
 }
 
-struct State<F> {
-    emit: F,
+struct State<'a, O> {
+    observer: &'a mut O,
     sequence: u64,
     run_id: String,
     session_id: Option<String>,
@@ -115,8 +118,8 @@ struct State<F> {
     summary: RunSummary,
     last_response: Option<ModelResponse>,
 }
-impl<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>> State<F> {
-    fn send(&mut self, event: RunEvent) -> Result<(), RunOutcome> {
+impl<O: RunObserver> State<'_, O> {
+    async fn send(&mut self, event: RunEvent) -> Result<(), RunOutcome> {
         if self.sink_error.is_some() {
             return Err(failed("event_sink"));
         }
@@ -131,7 +134,7 @@ impl<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>> State<F> {
             request_id: self.request_id.clone(),
             event,
         };
-        if let Err(error) = (self.emit)(&envelope) {
+        if let Err(error) = self.observer.event(&envelope).await {
             self.sink_error = Some(error);
             return Err(failed("event_sink"));
         }
@@ -141,7 +144,7 @@ impl<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>> State<F> {
 
 pub async fn run<F>(
     gateway: &Gateway,
-    mut request: RunRequest,
+    request: RunRequest,
     tools: &ToolRegistry,
     cancel: CancellationToken,
     emit: F,
@@ -149,13 +152,58 @@ pub async fn run<F>(
 where
     F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>,
 {
+    let admitted = admit(gateway, request, tools, &cancel)?;
+    Ok(run_admitted(
+        gateway,
+        admitted,
+        Uuid::new_v4(),
+        cancel,
+        &mut SyncObserver(emit),
+    )
+    .await)
+}
+
+pub(crate) struct AdmittedRun {
+    provider_id: String,
+    options: SessionOptions,
+    input: Vec<InputItem>,
+    scope: ToolRegistry,
+}
+
+pub(crate) fn admit(
+    gateway: &Gateway,
+    request: RunRequest,
+    tools: &ToolRegistry,
+    cancel: &CancellationToken,
+) -> crate::Result<AdmittedRun> {
+    admit_with_snapshot(gateway, request, tools, cancel, None)
+}
+
+pub(crate) fn admit_with_snapshot(
+    gateway: &Gateway,
+    mut request: RunRequest,
+    tools: &ToolRegistry,
+    cancel: &CancellationToken,
+    recorded_definitions: Option<&[ToolDefinition]>,
+) -> crate::Result<AdmittedRun> {
     if !request.options.tools.is_empty() {
         return Err(GatewayError::InvalidRequest("caller tools must be empty"));
     }
     let input = vec![InputItem::user(request.prompt)];
     validate_input(&input)?;
-    let mut scope = tools.fresh_scope();
+    let scope = tools.fresh_scope();
     request.options.tools = scope.definitions();
+    if let Some(recorded) = recorded_definitions {
+        // Compare the same vector that validation and provider opening will use.
+        let actual = serde_json::to_value(&request.options.tools)
+            .map_err(|_| GatewayError::Serialization)?;
+        let recorded = serde_json::to_value(recorded).map_err(|_| GatewayError::Serialization)?;
+        if actual != recorded {
+            return Err(GatewayError::InvalidRequest(
+                "recorded tool definitions do not match registry",
+            ));
+        }
+    }
     request.options.validate()?;
     let capabilities = gateway.capabilities(&request.provider_id)?;
     let transport = match request.options.transport {
@@ -176,10 +224,31 @@ where
         return Err(GatewayError::InvalidRequest("run pre-cancelled"));
     }
 
+    Ok(AdmittedRun {
+        provider_id: request.provider_id,
+        options: request.options,
+        input,
+        scope,
+    })
+}
+
+pub(crate) async fn run_admitted<O: RunObserver>(
+    gateway: &Gateway,
+    admitted: AdmittedRun,
+    run_id: Uuid,
+    cancel: CancellationToken,
+    observer: &mut O,
+) -> RunResult {
+    let AdmittedRun {
+        provider_id,
+        options,
+        input,
+        mut scope,
+    } = admitted;
     let mut state = State {
-        emit,
+        observer,
         sequence: 0,
-        run_id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
         session_id: None,
         turn_id: None,
         request_id: None,
@@ -189,18 +258,15 @@ where
     };
     let mut guard = CloseGuard(None);
     let execution = async {
-        state.send(RunEvent::RunStarted)?;
+        state.send(RunEvent::RunStarted).await?;
         checkpoint(&cancel)?;
-        let mut session = cancellable(
-            &cancel,
-            gateway.open_session(&request.provider_id, request.options),
-        )
-        .await?
-        .map_err(|_| failed("session_open"))?;
+        let mut session = cancellable(&cancel, gateway.open_session(&provider_id, options))
+            .await?
+            .map_err(|_| failed("session_open"))?;
         guard.0 = Some(session.control.clone());
         state.session_id = Some(session.id.clone());
         let context = TurnContext {
-            provider: &request.provider_id,
+            provider: &provider_id,
             cancel: &cancel,
         };
         drive(&mut state, &mut session, input, &mut scope, &context).await
@@ -218,8 +284,9 @@ where
             outcome: outcome.clone(),
             summary: state.summary.clone(),
         })
+        .await
         .is_ok();
-    Ok(RunResult {
+    RunResult {
         run_id: state.run_id,
         session_id: state.session_id,
         outcome,
@@ -227,7 +294,7 @@ where
         last_response: state.last_response,
         events_complete,
         sink_error: state.sink_error,
-    })
+    }
 }
 
 struct TurnContext<'a> {
@@ -235,8 +302,8 @@ struct TurnContext<'a> {
     cancel: &'a CancellationToken,
 }
 
-async fn drive<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
-    state: &mut State<F>,
+async fn drive<O: RunObserver>(
+    state: &mut State<'_, O>,
     session: &mut ProviderSession,
     mut input: Vec<InputItem>,
     scope: &mut ToolRegistry,
@@ -252,9 +319,11 @@ async fn drive<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
         state.summary.last_upstream_outcome = Some(UpstreamOutcome::NotSubmitted);
         let mut collector = collect::Collector::default();
         let turn = async {
-            state.send(RunEvent::TurnStarted {
-                number: state.summary.turns_started,
-            })?;
+            state
+                .send(RunEvent::TurnStarted {
+                    number: state.summary.turns_started,
+                })
+                .await?;
             checkpoint(cancel)?;
             // Count only when generate is actually polled, not when its future is built.
             let receipt = cancellable(cancel, async {
@@ -282,12 +351,14 @@ async fn drive<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
         };
         if state.sink_error.is_none() {
             increment(&mut state.summary.turns_finished)?;
-            state.send(RunEvent::TurnFinished {
-                number: state.summary.turns_started,
-                response_id: collector.response_id,
-                outcome,
-                upstream_outcome: state.summary.last_upstream_outcome,
-            })?;
+            state
+                .send(RunEvent::TurnFinished {
+                    number: state.summary.turns_started,
+                    response_id: collector.response_id,
+                    outcome,
+                    upstream_outcome: state.summary.last_upstream_outcome,
+                })
+                .await?;
         }
         match turn? {
             Some(results) => input = results,
@@ -296,8 +367,8 @@ async fn drive<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
     }
 }
 
-async fn collect_response<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
-    state: &mut State<F>,
+async fn collect_response<O: RunObserver>(
+    state: &mut State<'_, O>,
     session: &mut ProviderSession,
     collector: &mut collect::Collector,
     sequence: &mut Option<u64>,
@@ -329,17 +400,19 @@ async fn collect_response<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError
             }
             _ => None,
         };
-        state.send(RunEvent::ProviderEvent {
-            event: Box::new(event),
-        })?;
+        state
+            .send(RunEvent::ProviderEvent {
+                event: Box::new(event),
+            })
+            .await?;
         if let Some(result) = terminal {
             return result;
         }
     }
 }
 
-async fn prepare_tools<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
-    state: &mut State<F>,
+async fn prepare_tools<O: RunObserver>(
+    state: &mut State<'_, O>,
     scope: &mut ToolRegistry,
     context: &TurnContext<'_>,
 ) -> Result<Option<Vec<InputItem>>, RunOutcome> {
@@ -373,21 +446,10 @@ async fn prepare_tools<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
     checkpoint(context.cancel)?;
     let mut results = Vec::new();
     while let Some(result) = batch
-        .execute_next(
+        .execute_next_observed(
             || checkpoint(context.cancel),
             stopped(context.cancel),
-            |event| {
-                match &event {
-                    ToolExecutionEvent::ToolExecutionStarted { .. } => {
-                        increment(&mut state.summary.new_tool_dispatches)?
-                    }
-                    ToolExecutionEvent::ToolResultReused { .. } => {
-                        increment(&mut state.summary.reused_results)?
-                    }
-                    ToolExecutionEvent::ToolExecutionFinished { .. } => {}
-                }
-                state.send(RunEvent::ToolEvent { event })
-            },
+            state,
         )
         .await?
     {
@@ -399,6 +461,49 @@ async fn prepare_tools<F: FnMut(&RunEventEnvelope) -> Result<(), RunSinkError>>(
     validate_input(&results).map_err(|_| failed("tool_result_input"))?;
     Ok(Some(results))
 }
+
+impl<O: RunObserver> ToolObserver<RunOutcome> for State<'_, O> {
+    async fn event(&mut self, event: ToolExecutionEvent) -> Result<(), RunOutcome> {
+        match &event {
+            ToolExecutionEvent::ToolExecutionStarted { .. } => {
+                increment(&mut self.summary.new_tool_dispatches)?
+            }
+            ToolExecutionEvent::ToolResultReused { .. } => {
+                increment(&mut self.summary.reused_results)?
+            }
+            ToolExecutionEvent::ToolExecutionFinished { .. } => {}
+        }
+        self.send(RunEvent::ToolEvent { event }).await
+    }
+
+    async fn result(
+        &mut self,
+        call_id: &str,
+        output: &str,
+        is_error: bool,
+    ) -> Result<(), RunOutcome> {
+        if self.sink_error.is_some() {
+            return Err(failed("event_sink"));
+        }
+        if let Err(error) = self
+            .observer
+            .tool_result(
+                self.request_id.as_deref().unwrap(),
+                call_id,
+                output,
+                is_error,
+            )
+            .await
+        {
+            self.sink_error = Some(error);
+            return Err(failed("event_sink"));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod observation_tests;
 
 #[cfg(test)]
 mod tests {
@@ -416,14 +521,15 @@ mod tests {
         assert_eq!(counter, u64::MAX);
     }
 
-    #[test]
-    fn event_sequence_overflow_fails_delivery_without_wrapping() {
+    #[tokio::test]
+    async fn event_sequence_overflow_fails_delivery_without_wrapping() {
         let mut events = Vec::new();
+        let mut observer = SyncObserver(|event: &RunEventEnvelope| {
+            events.push(event.clone());
+            Ok(())
+        });
         let mut state = State {
-            emit: |event: &RunEventEnvelope| {
-                events.push(event.clone());
-                Ok(())
-            },
+            observer: &mut observer,
             sequence: u64::MAX - 1,
             run_id: "synthetic".into(),
             session_id: None,
@@ -433,12 +539,14 @@ mod tests {
             summary: RunSummary::default(),
             last_response: None,
         };
-        state.send(RunEvent::RunStarted).unwrap();
+        state.send(RunEvent::RunStarted).await.unwrap();
         assert_eq!(
-            state.send(RunEvent::RunFinished {
-                outcome: RunOutcome::Completed,
-                summary: RunSummary::default(),
-            }),
+            state
+                .send(RunEvent::RunFinished {
+                    outcome: RunOutcome::Completed,
+                    summary: RunSummary::default(),
+                })
+                .await,
             Err(failed("counter_overflow"))
         );
         assert_eq!(state.sequence, u64::MAX);

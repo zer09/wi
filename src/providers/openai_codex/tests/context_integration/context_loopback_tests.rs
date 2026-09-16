@@ -6,6 +6,9 @@ use std::fs;
 mod harness;
 use harness::*;
 
+#[path = "persisted_skill_loading_tests.rs"]
+mod persisted_skill_loading_tests;
+
 #[tokio::test]
 async fn context_prepare_websocket_exact_initial_context_then_same_session_parent_delta() {
     for recovered in [false, true] {

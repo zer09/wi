@@ -9,12 +9,16 @@ mod database;
 mod dto;
 mod error;
 #[cfg(test)]
+mod execution_tests;
+#[cfg(test)]
 mod fault_tests;
 mod filesystem;
 mod history;
 mod ids;
 mod interruption;
 mod lifecycle;
+#[cfg(test)]
+mod measurement_tests;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
@@ -30,7 +34,7 @@ mod schema_tests;
 mod session;
 mod session_schema;
 #[cfg(test)]
-mod test_hooks;
+pub(crate) mod test_hooks;
 
 pub use catalog_repair::RepairReport;
 pub use catalog_sync::RefreshResult;
@@ -58,11 +62,14 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 
+pub(crate) use lifecycle::ExecutionHold;
 use lifecycle::Lifecycle;
 
 pub struct SessionStore {
     inner: Arc<StoreInner>,
 }
+
+type AcceptanceLocks = HashMap<(ApplicationSessionId, OperationId), Weak<AsyncMutex<()>>>;
 
 struct StoreInner {
     root: PathBuf,
@@ -71,6 +78,7 @@ struct StoreInner {
     catalog_lock: AsyncMutex<()>,
     maintenance: RwLock<()>,
     session_locks: Mutex<HashMap<ApplicationSessionId, Weak<AsyncMutex<()>>>>,
+    acceptance_locks: Mutex<AcceptanceLocks>,
     #[cfg(test)]
     hooks: Arc<test_hooks::Hooks>,
 }
@@ -149,6 +157,7 @@ impl SessionStore {
                     catalog_lock: AsyncMutex::new(()),
                     maintenance: RwLock::new(()),
                     session_locks: Mutex::new(HashMap::new()),
+                    acceptance_locks: Mutex::new(HashMap::new()),
                     #[cfg(test)]
                     hooks: Arc::default(),
                 }),

@@ -35,9 +35,20 @@ pub(super) fn setup(
     address: std::net::SocketAddr,
     transport: Transport,
 ) -> (Gateway, Arc<AuthRecords>, Arc<AtomicUsize>) {
+    setup_with_consumer_timeout(address, transport, None)
+}
+
+pub(super) fn setup_with_consumer_timeout(
+    address: std::net::SocketAddr,
+    transport: Transport,
+    consumer_timeout: Option<Duration>,
+) -> (Gateway, Arc<AuthRecords>, Arc<AtomicUsize>) {
     let auth = Arc::new(AuthRecords::default());
     let opens = Arc::new(AtomicUsize::new(0));
     let mut adapter = OpenAiCodexProvider::loopback(auth.clone(), transport, address);
+    if let Some(consumer_timeout) = consumer_timeout {
+        adapter.timeouts.consumer = consumer_timeout;
+    }
     // A fallback regression must stay on loopback, never reach a production endpoint.
     adapter.websocket_endpoint = format!("ws://{address}/codex/responses");
     adapter.sse_endpoint = format!("http://{address}/codex/responses");

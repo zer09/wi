@@ -120,6 +120,13 @@ pub(super) const SKILL_BODY: &str = "  Report the fixture answer: 42.\r\nKeep th
 pub(super) fn prepared_skill_loading_request(
     transport: Transport,
 ) -> (tempfile::TempDir, RunRequest, ToolRegistry) {
+    let (temp, prepared, tools) = prepared_skill_loading(transport);
+    (temp, prepared.into_request(), tools)
+}
+
+pub(super) fn prepared_skill_loading(
+    transport: Transport,
+) -> (tempfile::TempDir, crate::context::PreparedRun, ToolRegistry) {
     let temp = tempfile::tempdir().unwrap();
     let roots = ContextRoots {
         workspace: temp.path().join("workspace"),
@@ -180,7 +187,7 @@ pub(super) fn prepared_skill_loading_request(
             .instructions
             .contains("call load_skill")
     );
-    (temp, prepared.into_request(), tools)
+    (temp, prepared, tools)
 }
 
 pub(super) fn skill_output() -> Vec<Value> {

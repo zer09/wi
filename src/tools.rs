@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
-    future::{Future, pending},
+    future::{Future, pending, ready},
     sync::Arc,
 };
 
@@ -169,6 +169,40 @@ impl ToolRegistry {
     }
 }
 
+pub(crate) trait ToolObserver<E> {
+    fn event(
+        &mut self,
+        event: ToolExecutionEvent,
+    ) -> impl Future<Output = std::result::Result<(), E>>;
+    fn result(
+        &mut self,
+        call_id: &str,
+        output: &str,
+        is_error: bool,
+    ) -> impl Future<Output = std::result::Result<(), E>>;
+}
+
+struct SyncObserver<F>(F);
+impl<E, F: FnMut(ToolExecutionEvent) -> std::result::Result<(), E>> ToolObserver<E>
+    for SyncObserver<F>
+{
+    fn event(
+        &mut self,
+        event: ToolExecutionEvent,
+    ) -> impl Future<Output = std::result::Result<(), E>> {
+        ready((self.0)(event))
+    }
+
+    fn result(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: bool,
+    ) -> impl Future<Output = std::result::Result<(), E>> {
+        ready(Ok(()))
+    }
+}
+
 pub(crate) struct PreparedBatch<'a> {
     registry: &'a mut ToolRegistry,
     calls: std::vec::IntoIter<(FunctionCall, Value, Arc<dyn Tool>)>,
@@ -182,7 +216,17 @@ impl PreparedBatch<'_> {
         &mut self,
         mut checkpoint: impl FnMut() -> std::result::Result<(), E>,
         stop: impl Future<Output = E>,
-        mut emit: impl FnMut(ToolExecutionEvent) -> std::result::Result<(), E>,
+        emit: impl FnMut(ToolExecutionEvent) -> std::result::Result<(), E>,
+    ) -> std::result::Result<Option<InputItem>, E> {
+        self.execute_next_observed(&mut checkpoint, stop, &mut SyncObserver(emit))
+            .await
+    }
+
+    pub(crate) async fn execute_next_observed<E: From<GatewayError>>(
+        &mut self,
+        mut checkpoint: impl FnMut() -> std::result::Result<(), E>,
+        stop: impl Future<Output = E>,
+        observer: &mut impl ToolObserver<E>,
     ) -> std::result::Result<Option<InputItem>, E> {
         let Some((call, arguments, tool)) = self.calls.next() else {
             return Ok(None);
@@ -190,19 +234,23 @@ impl PreparedBatch<'_> {
         let result = async {
             checkpoint()?;
             if let Some(saved) = self.registry.results.get(&call.call_id) {
-                emit(ToolExecutionEvent::ToolResultReused {
-                    call_id: call.call_id.clone(),
-                    tool_name: call.name.clone(),
-                })?;
+                observer
+                    .event(ToolExecutionEvent::ToolResultReused {
+                        call_id: call.call_id.clone(),
+                        tool_name: call.name.clone(),
+                    })
+                    .await?;
                 return Ok(Some(InputItem::ToolResult {
                     call_id: call.call_id,
                     output: saved.output.clone(),
                 }));
             }
-            emit(ToolExecutionEvent::ToolExecutionStarted {
-                call_id: call.call_id.clone(),
-                tool_name: call.name.clone(),
-            })?;
+            observer
+                .event(ToolExecutionEvent::ToolExecutionStarted {
+                    call_id: call.call_id.clone(),
+                    tool_name: call.name.clone(),
+                })
+                .await?;
             checkpoint()?;
             let executed = tokio::select! {
                 biased;
@@ -229,11 +277,15 @@ impl PreparedBatch<'_> {
                     output: output.clone(),
                 },
             );
-            emit(ToolExecutionEvent::ToolExecutionFinished {
-                call_id: call.call_id.clone(),
-                tool_name: call.name,
-                is_error,
-            })?;
+            // The effect and cache are real even if observation fails or cancellation arrives.
+            observer.result(&call.call_id, &output, is_error).await?;
+            observer
+                .event(ToolExecutionEvent::ToolExecutionFinished {
+                    call_id: call.call_id.clone(),
+                    tool_name: call.name,
+                    is_error,
+                })
+                .await?;
             Ok(Some(InputItem::ToolResult {
                 call_id: call.call_id,
                 output,

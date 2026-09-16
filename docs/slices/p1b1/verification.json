@@ -1,13 +1,19 @@
 {
   "schema_version": 1,
   "contract": "p1b1.0",
-  "status": "LOCAL_PASS_CI_PENDING",
-  "accepted": false,
+  "status": "ACCEPTED",
+  "accepted": true,
   "local_acceptance": "PASS",
   "baseline": "34b4cfd0d3ecf286869a239997267dbd75c28c0b",
   "planning_head": "7087f50f79b5e655fa6b0acbb4e2d4ce077f642d",
-  "tested_revision": null,
-  "tested_worktree": "Uncommitted worktree at planning HEAD 7087f50 with 20 modified tracked files, 27 untracked files, and 0 staged files before these two reports. Exact submitted-head CI is not available because commit and push were not authorized.",
+  "observed_head": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
+  "tested_revision": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
+  "tested_worktree": "Commit b1e46f3 contains the accepted P1-B1 implementation and the locally reviewed verification reports. Its exact push and pull-request workflows passed all six Cargo gates on Ubuntu, macOS and Windows. This later evidence-only report update does not change production or test behavior.",
+  "implementation_commit": {
+    "revision": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
+    "message": "Implement persisted runtime capture",
+    "authorized_and_pushed": true
+  },
   "environment": {
     "platform": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64 GNU/Linux",
     "effective_uid": 1000,
@@ -26,7 +32,8 @@
     "scope_limit": "Local Linux/WSL execution only. Synthetic scripted providers and 127.0.0.1 loopbacks only. No real profile, credential, private skill or live provider request was used."
   },
   "worktree": {
-    "head": "7087f50f79b5e655fa6b0acbb4e2d4ce077f642d",
+    "initial_head": "7087f50f79b5e655fa6b0acbb4e2d4ce077f642d",
+    "accepted_head": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
     "baseline_is_ancestor": true,
     "modified_tracked_before_reports": 20,
     "untracked_files_before_reports": 27,
@@ -115,9 +122,9 @@
     {"id":"P1B1-24","status":"PASS","observer":"local S2/WebSocket/SQLite test","tests":["p1b1_24_persisted_skill_load_commits_exact_bytes_then_reuses_after_deletion","p1b1_24_persisted_skill_rejects_changed_frontmatter_with_committed_gateway_error","p1b1_24_persisted_skill_rejects_unqualified_id_before_any_batch_execution"],"commands":["F03","F07"],"source":["src/providers/openai_codex/tests/context_integration/persisted_skill_loading_tests.rs:423-666"],"assertions":"Global/project metadata is advertised without bodies. Exact selected main-file bytes or gateway_error commit before continuation; deletion reuse does not reread; invalid authority fails whole-batch preflight; resources/scripts stay inert.","blockers":[]},
     {"id":"P1B1-25","status":"PASS","observer":"local concurrent tests","tests":["p1b1_25_same_store_sessions_isolate_history_and_progress_during_provider_wait","p1b1_25_dropped_admitted_reader_and_rename_do_not_cancel_owned_execution"],"commands":["F03","F07"],"source":["src/execution/tests/independent.rs:416-692"],"assertions":"Dropped history waiters do not own or cancel backend execution. A second reader recovers Running history. Rename remains valid and two sessions isolate all identities, histories and results. No browser callback is in persistence.","blockers":[]},
     {"id":"P1B1-26","status":"PASS","observer":"local tests and source","tests":["failure_diagnostics_hide_input_output_native_paths_and_receipt_identities","returned_receipts_stay_at_two_and_intermediate_single_record_receipts_remain_queryable"],"commands":["F03","F07"],"source":["src/execution/types.rs:72-211","src/execution/tests/faults.rs:504-658"],"assertions":"Debug/Display expose only static stage/category. Sensitive canaries are absent. Public errors retain existing maps; only acceptance/final receipts or current failed operation are held while explicit APIs expose stored output/result.","blockers":[]},
-    {"id":"P1B1-27","status":"PASS","observer":"local full regressions and source","tests":["non_send_legacy_callback_and_admitted_engine_share_event_trace","result_observer_failure_keeps_cache_without_finish_or_remaining_call"],"commands":["F01-F12","F16-F18"],"source":["src/run/mod.rs","src/tools.rs","src/cli/run_cli.rs","Cargo.toml","Cargo.lock"],"assertions":"Legacy run/CLI/registry/context/auth/provider/storage assertions pass. RunRequest, storage schema v1, runtime/provider schemas 2/1, error maps, input limits, dependencies and ordinary CLI nonpersistence remain unchanged. No history seed, V1 service, scheduler or new provider exists.","blockers":[],"limits":["Native macOS and Windows execution is pending separately authorized submitted-head CI."]},
+    {"id":"P1B1-27","status":"PASS","observer":"local full regressions, source inspection and exact-head push/PR CI","tests":["non_send_legacy_callback_and_admitted_engine_share_event_trace","result_observer_failure_keeps_cache_without_finish_or_remaining_call"],"commands":["F01-F12","F16-F18","CI-B1E-PUSH","CI-B1E-PR"],"source":["src/run/mod.rs","src/tools.rs","src/cli/run_cli.rs","Cargo.toml","Cargo.lock"],"assertions":"Legacy run/CLI/registry/context/auth/provider/storage assertions pass. RunRequest, storage schema v1, runtime/provider schemas 2/1, error maps, input limits, dependencies and ordinary CLI nonpersistence remain unchanged. No history seed, V1 service, scheduler or new provider exists. Exact commit b1e46f3 passed all six Cargo gates in push and PR workflows on Ubuntu, macOS and Windows.","blockers":[],"limits":[]},
     {"id":"P1B1-28","status":"PASS","observer":"local examples, test counters and docs","tests":["p1b1_28_exact_example_recording_window_counts"],"commands":["F09-F15"],"source":["examples/persisted_run_offline.rs:282-677","src/storage/measurement_tests.rs:10-38","README.md","docs/README.md","docs/ARCHITECTURE.md","docs/EVENTS.md"],"assertions":"Public composition/controller/tools/SQLite example proves partial and pre-continuation reads, final result and no-work reopen. Existing four examples pass. Dev/release finite timings, exact transaction/connection counters and stored sizes are recorded without SLA claims. Docs distinguish B1, B2 and V1.","blockers":[]},
-    {"id":"P1B1-29","status":"PARTIAL","observer":"local gates and fresh three-review complete-diff gate","tests":[],"commands":["F01-F18"],"source":["docs/slices/p1b1/VERIFICATION.md","docs/slices/p1b1/verification.json"],"assertions":"Required local command set passes and every row maps to evidence. Three fresh independent reviewers inspected the complete tracked/untracked diff and reports; all returned PASS with no blocking findings. Exact submitted-head Ubuntu/macOS/Windows CI remains separately gated by owner-authorized commit and push.","blockers":["Exact submitted-head push/PR CI not run because commit and push were not authorized."]}
+    {"id":"P1B1-29","status":"PASS","observer":"local gates, fresh three-review complete-diff gate and exact-head push/PR CI","tests":[],"commands":["F01-F18","CI-B1E-PUSH","CI-B1E-PR"],"source":["docs/slices/p1b1/VERIFICATION.md","docs/slices/p1b1/verification.json"],"assertions":"Required local command set passes and every row maps to evidence. Three fresh independent reviewers inspected the complete tracked/untracked diff and reports; all returned PASS with no blocking findings. Exact commit b1e46f3 then passed all six Cargo gates on Ubuntu, macOS and Windows in both push and pull-request workflows.","blockers":[]}
   ],
   "prior_failures_and_fixes": [
     {"stage":"core composition review","failure":"Review confirmed registry definitions were read twice, concurrent absent lookups could expose loser preflight failure, and final committed cleanup warning returned failure.","fix":"Use one definition snapshot, weak-keyed acceptance coordination with recheck, and return Executed for committed final cleanup. Full tests and repeat reviews passed."},
@@ -138,9 +145,29 @@
     {"scope":"example/docs/measurements after ordering remediation","reviewers":["review-a","review-b","review-c"],"status":"PASS"},
     {"scope":"final complete diff including reports","reviewers":["review-a","review-b","review-c"],"status":"PASS","notes":"All three fresh reviewers found no blocking defects. Review-a and review-b verified the complete 49-path pre-report implementation inventory plus reports. Review-c independently reran cargo fmt --check, cargo test --all-targets with 601 passed and 2 ignored, git diff --check, JSON row validation and untracked whitespace spot checks. Informational observations did not require implementation changes."}
   ],
-  "submitted_ci": [],
+  "submitted_ci": [
+    {
+      "id": "CI-B1E-PUSH",
+      "event": "push",
+      "run_id": 35079562027,
+      "head_sha": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
+      "url": "https://github.com/zer09/wi/actions/runs/35079562027",
+      "status": "PASS",
+      "jobs": {"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},
+      "steps": ["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]
+    },
+    {
+      "id": "CI-B1E-PR",
+      "event": "pull_request",
+      "run_id": 35079566112,
+      "head_sha": "b1e46f3eb33a66c2682b3038066a9d20dadf17da",
+      "url": "https://github.com/zer09/wi/actions/runs/35079566112",
+      "status": "PASS",
+      "jobs": {"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},
+      "steps": ["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]
+    }
+  ],
   "limitations": [
-    "Exact submitted-head push and PR CI on Ubuntu, macOS and Windows is NOT RUN because commit and push require separate owner authorization.",
     "B1 executes only an explicitly supplied PreparedRun. It does not restore retained provider/account conversation history; B2 remains required.",
     "Ordinary wi run persistence, service-owned active-run management, browser transport, authentication for that service and GUI/V1 are not implemented.",
     "No retry, failover, resumption, background write queue, scheduler, alternate database, new provider or new dependency was added.",
@@ -156,8 +183,8 @@
   "provider_generations": 0,
   "ledger": {"used":31,"cap":50,"remaining":19,"changed":false},
   "authorization": {
-    "commit": false,
-    "push": false,
+    "commit": true,
+    "push": true,
     "merge": false,
     "release": false,
     "deployment": false

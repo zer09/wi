@@ -1,13 +1,13 @@
 # Wi P1-B1 verification report
 
-Contract **p1b1.0**. Status: **LOCAL PASS, SUBMITTED CI PENDING**.
-Final acceptance remains **accepted=false** until a separately authorized commit and
-exact-head push/PR CI pass on Ubuntu, macOS and Windows.
+Contract **p1b1.0**. Status: **ACCEPTED**.
+The accepted implementation commit is
+`b1e46f3eb33a66c2682b3038066a9d20dadf17da`. Its exact-head push and pull-request
+workflows passed all six Cargo gates on Ubuntu, macOS and Windows.
 
-**P1B1-00 through P1B1-28 pass local verification. P1B1-29 is partial:** its local
-command set and fresh complete-diff review pass, but the later submitted-head CI gate
-is not run. The planning statuses in [MATRIX.md](MATRIX.md) remain unchanged as
-required.
+**P1B1-00 through P1B1-29 pass.** Local gates, independent complete-diff review and
+submitted-head CI are complete. The planning statuses in [MATRIX.md](MATRIX.md) remain
+unchanged as required.
 
 P1-B1 now records actual execution for an explicitly supplied prepared input through
 `wi::execution::run_persisted`. It does not restore prior conversation context.
@@ -20,11 +20,12 @@ active-run management, browser transport and GUI/V1 remain unimplemented.
 |---|---|
 | Accepted baseline | `34b4cfd0d3ecf286869a239997267dbd75c28c0b`, P1-A merge |
 | Planning HEAD | `7087f50f79b5e655fa6b0acbb4e2d4ce077f642d`; baseline is an ancestor |
-| Tested revision | None. The implementation is intentionally uncommitted. |
+| Accepted/tested revision | `b1e46f3eb33a66c2682b3038066a9d20dadf17da`, `Implement persisted runtime capture` |
 | Pre-report worktree | 20 modified tracked files, 27 untracked files, 0 staged files, 47 changed files |
+| Accepted tree | Commit `b1e46f3` contains the locally reviewed implementation and reports; this update records its CI evidence only |
 | Cargo dependency state | `Cargo.toml` and `Cargo.lock` unchanged |
 | Report additions | `docs/slices/p1b1/VERIFICATION.md` and `docs/slices/p1b1/verification.json` |
-| Authorization | No stage, commit, push, merge, release or deployment authorization |
+| Authorization | Owner authorized implementation/evidence commits and pushes. Merge, release and deployment remain unauthorized. |
 
 **D** means an executed local command. **S** means current source, diff, inventory or
 configuration inspection. **P** means retained parent/delegate evidence from completed
@@ -225,11 +226,24 @@ example mains do not increase the 601 unique parent-harness passes.
 | F17 | `git diff --no-index --check -- /dev/null <each untracked file>` | PASS for all 27 pre-report files |
 | F18 | focused consistency loopback stress test | PASS; 1 passed, 340 filtered |
 
+## Submitted-head CI
+
+Commit `b1e46f3eb33a66c2682b3038066a9d20dadf17da` passed both required workflows.
+Each platform passed format, all-target check/test, Clippy with warnings denied,
+all-target build and doctests.
+
+| ID | Event and run | Ubuntu | macOS | Windows | Result |
+|---|---|---|---|---|---|
+| CI-B1E-PUSH | push [35079562027](https://github.com/zer09/wi/actions/runs/35079562027) | PASS | PASS | PASS | PASS |
+| CI-B1E-PR | pull request [35079566112](https://github.com/zer09/wi/actions/runs/35079566112) | PASS | PASS | PASS | PASS |
+
+GitHub emitted informational Node.js 20 deprecation annotations for `actions/checkout@v4`
+because the runners forced Node.js 24. No Cargo gate failed.
+
 ## Matrix dispositions
 
-Every ID appears exactly once below and in the machine report. Local PASS is bounded by
-the limits section. P1B1-29 remains partial because submitted-head CI requires separate
-owner authorization.
+Every ID appears exactly once below and in the machine report. All 30 rows pass within
+the stated limits.
 
 | ID | Status | Executed evidence and concrete oracle |
 |---|---|---|
@@ -260,9 +274,9 @@ owner authorization.
 | P1B1-24 | PASS | Three persisted S2 tests: metadata without bodies, exact selected CRLF/Unicode bytes before continuation, deletion reuse, committed error and full-batch invalid-authority rejection; resources/scripts inert. |
 | P1B1-25 | PASS | Two independent-observation tests: dropped admitted history reader does not cancel retained execution, second reader recovers Running history, rename works and two sessions isolate data. |
 | P1B1-26 | PASS | Diagnostic/privacy and receipt-bound tests: static stage/category output, no sensitive canaries, unchanged error maps and bounded retained receipt/operation state with explicit stored access. |
-| P1B1-27 | PASS | F01-F12 and source inspection preserve legacy run/CLI/context/auth/provider/storage behavior, RunRequest, schema 1/2/1, input limits, dependencies and ordinary CLI nonpersistence. Native submitted-head macOS/Windows execution remains pending. |
+| P1B1-27 | PASS | F01-F12 and source inspection preserve legacy run/CLI/context/auth/provider/storage behavior, RunRequest, schema 1/2/1, input limits, dependencies and ordinary CLI nonpersistence. CI-B1E-PUSH and CI-B1E-PR passed all six gates on Ubuntu, macOS and Windows. |
 | P1B1-28 | PASS | F09-F15 and docs: public offline example proves partial and pre-continuation reads, terminal storage and no-work reopen; existing examples pass; dev/release timings, exact counts and sizes recorded. |
-| P1B1-29 | PARTIAL | F01-F18 pass, each prior increment completed independent review, and three fresh reviewers passed the complete tracked/untracked diff and reports with no blocking findings. Exact submitted-head Ubuntu/macOS/Windows CI is NOT RUN without commit/push authorization. |
+| P1B1-29 | PASS | F01-F18 pass, each prior increment completed independent review, three fresh reviewers passed the complete diff and reports with no blocking findings, and exact commit `b1e46f3` passed push/PR CI on Ubuntu, macOS and Windows. |
 
 ## Process, fault and pressure evidence
 
@@ -373,10 +387,9 @@ edge and equivalent example command flags. No implementation change was required
 
 ## Limits and deferred work
 
-- Exact submitted-head push and PR CI on Ubuntu, macOS and Windows is **NOT RUN**.
-  Commit and push require separate owner authorization.
-- Local platform execution is Linux/WSL. Whole-repository platform-excluded counts were
-  not inferred.
+- Exact implementation-head push and PR CI passed on Ubuntu, macOS and Windows for
+  `b1e46f3`. Local extended examples, Node self-tests and measurements ran on Linux/WSL.
+  Whole-repository platform-excluded counts were not inferred.
 - B1 executes only the explicitly supplied `PreparedRun`. It does not read retained
   conversation history into the provider request. B2 remains required.
 - Ordinary `wi run` remains nonpersistent. The application session interface, service
@@ -387,5 +400,6 @@ edge and equivalent example command flags. No implementation change was required
   arbitrarily slow disk support or exactly-once external effects across separate runs.
 - The ledger remains **31/50 used, 19 remaining**. Balance is not authorization.
 
-No local verification result authorizes staging, commit, push, merge, release,
+The owner authorized and completed the implementation and evidence commit/push gate.
+Merge remains reserved for the planner/designer. No result authorizes release,
 deployment or B2/V1 work.

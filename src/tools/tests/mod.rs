@@ -5,6 +5,7 @@ use std::sync::Mutex;
 mod authority_validation;
 mod cancellation;
 mod execution_results;
+mod observation;
 mod result_reuse;
 mod workloads;
 

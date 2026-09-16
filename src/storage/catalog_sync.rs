@@ -54,6 +54,8 @@ pub(super) async fn refresh(
         let (mut connection, _) = session::connection(inner, id, false).await?;
         let result = async {
             let mut transaction = connection.begin().await.map_err(database::error)?;
+            #[cfg(test)]
+            test_hooks::read_transaction();
             let result = observe(&mut transaction, id).await;
             transaction.rollback().await.map_err(database::error)?;
             result

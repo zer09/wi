@@ -6,6 +6,9 @@ use crate::{
 };
 use tokio::sync::oneshot;
 
+#[path = "../run_continuation/persisted_loopback_tests.rs"]
+mod persisted_loopback;
+
 struct IdentityLoopback {
     gateway: Gateway,
     auth: Arc<AuthRecords>,
@@ -17,6 +20,19 @@ struct IdentityLoopback {
 
 impl IdentityLoopback {
     async fn new(transport: Transport, mime: Option<&'static str>, turns: Vec<Vec<Value>>) -> Self {
+        Self::with_request_observer(transport, mime, turns, |_, _| std::future::ready(())).await
+    }
+
+    async fn with_request_observer<F, Fut>(
+        transport: Transport,
+        mime: Option<&'static str>,
+        turns: Vec<Vec<Value>>,
+        mut observe: F,
+    ) -> Self
+    where
+        F: FnMut(usize, Value) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send,
+    {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (stop, stopped) = oneshot::channel();
@@ -25,7 +41,9 @@ impl IdentityLoopback {
             if transport == Transport::WebSocket {
                 let mut socket = accept_ws(&listener).await;
                 for events in turns {
-                    requests.push(incoming(&mut socket).await);
+                    let request = incoming(&mut socket).await;
+                    observe(requests.len(), request.clone()).await;
+                    requests.push(request);
                     for event in events {
                         send(&mut socket, event).await;
                     }
@@ -41,6 +59,7 @@ impl IdentityLoopback {
                         assert_eq!(previous, &session);
                     }
                     session_id = Some(session);
+                    observe(requests.len(), request.clone()).await;
                     requests.push(request);
                     reply(&mut tcp, "200 OK", mime, &frames(events)).await;
                 }

@@ -4,6 +4,7 @@ use std::{
 };
 
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use super::{StorageError, StorageErrorKind};
 
@@ -21,6 +22,21 @@ struct State {
 pub(super) struct Lifecycle {
     state: Mutex<State>,
     changed: Notify,
+    closing: CancellationToken,
+}
+
+// Reuse SQL drain accounting without retaining a connection or a storage lock.
+pub(crate) struct ExecutionHold(pub(super) OperationGuard);
+
+impl ExecutionHold {
+    pub(crate) fn closing_token(&self) -> CancellationToken {
+        // Cancelling an observer's token must not close storage admission.
+        self.0.lifecycle.closing.child_token()
+    }
+
+    pub(crate) fn finish(self) {
+        self.0.finish();
+    }
 }
 
 pub(super) struct OperationGuard {
@@ -48,6 +64,7 @@ impl Lifecycle {
                 closed: 0,
             }),
             changed: Notify::new(),
+            closing: CancellationToken::new(),
         })
     }
 
@@ -95,6 +112,7 @@ impl Lifecycle {
         let mut state = self.state();
         state.closing = true;
         state.unhealthy = true;
+        self.closing.cancel();
     }
 
     pub(super) async fn close(&self) -> Result<(), StorageError> {
@@ -105,6 +123,7 @@ impl Lifecycle {
             {
                 let mut state = self.state();
                 state.closing = true;
+                self.closing.cancel();
                 if state.admitted == 0 {
                     if state.unhealthy {
                         return Err(StorageError::new(StorageErrorKind::Io));
@@ -133,10 +152,11 @@ fn release_lease(state: &mut State) -> Result<(), StorageError> {
 impl Drop for OperationGuard {
     fn drop(&mut self) {
         let mut state = self.lifecycle.state();
-        // A panic or runtime shutdown can skip explicit connection close.
+        // An unfinished guard cannot prove that SQL or owned execution has stopped.
         if !self.finished {
             state.closing = true;
             state.unhealthy = true;
+            self.lifecycle.closing.cancel();
         }
         state.admitted -= 1;
         if state.admitted == 0 {
@@ -155,8 +175,8 @@ impl Drop for Lifecycle {
             .get_mut()
             .unwrap_or_else(|error| error.into_inner());
         if state.unhealthy {
-            // If worker retirement is uncertain, keep the OS lease until process exit.
-            // Releasing it here could let another owner race unfinished SQLite work.
+            // If retirement is uncertain, keep the OS lease until process exit.
+            // Releasing it here could let another owner race unfinished work.
             if let Some(lease) = state.lease.take() {
                 std::mem::forget(lease);
             }

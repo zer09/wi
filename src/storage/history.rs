@@ -348,6 +348,8 @@ pub(super) async fn page(
     limit: i64,
 ) -> Result<HistoryPage> {
     let mut transaction = connection.begin().await.map_err(database::error)?;
+    #[cfg(test)]
+    super::test_hooks::read_transaction();
     let result = async {
         let head: i64 = sqlx::query("SELECT head_sequence FROM manifest WHERE singleton=1")
             .fetch_one(&mut *transaction)

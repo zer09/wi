@@ -197,7 +197,13 @@ async fn consistency_public_session_rejects_before_publication_execution_or_next
                     }
                 }
             });
-            let provider = OpenAiCodexProvider::loopback(Arc::new(FakeAuth), transport, address);
+            let mut provider =
+                OpenAiCodexProvider::loopback(Arc::new(FakeAuth), transport, address);
+            if name == "event bound" {
+                // The 4,097-event stress case can exceed the short loopback deadline
+                // when the complete test suite runs in parallel.
+                provider.timeouts.total = Duration::from_secs(30);
+            }
             let mut options = SessionOptions::new("synthetic");
             options.transport = transport;
             let mut registry = ToolRegistry::new();

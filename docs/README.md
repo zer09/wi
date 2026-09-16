@@ -15,15 +15,19 @@ within their stated scope and evidence limits. Tested revisions, worktree states
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
-at `34b4cfd`. P1-B1 is the next implementation plan, not implemented behavior.
+at `34b4cfd`. P1-B1 public composition is implemented locally; final acceptance,
+complete-diff closure review, final verification reports and submitted CI remain pending.
 P1-B2 history restoration and V1 service remain later separately scoped work.
 
-## Next implementation: P1-B1 actual runtime capture
+## Current implementation: P1-B1 actual runtime capture
 
 Contract **p1b1.0**, baseline `34b4cfd0d3ecf286869a239997267dbd75c28c0b`.
-All 30 P1B1-00..P1B1-29 rows are initially NOT RUN. This connects actual execution
-to P1-A through a shared awaitable observation/result path and a narrow lifecycle
-hold. It does not claim restored-conversation model context or a running service.
+The matrix preserves all 30 original NOT RUN statuses as planning text, not current
+test evidence. `wi::execution::run_persisted` records only the explicitly supplied
+prepared input incrementally. It commits acceptance before provider work, awaits actual
+runtime/tool-result records, preserves separate execution versus recording outcomes,
+and holds storage ownership during execution. It uses the shared controller, not a
+second loop. This does not claim restored-conversation model context or a running service.
 
 - [P1-B1 contract](slices/p1b1/CONTRACT.md): Fixed API, shared-loop integration,
   acceptance/effect/commit ordering, failure/close behavior and explicit B1/B2 split.
@@ -34,11 +38,20 @@ hold. It does not claim restored-conversation model context or a running service
 - [P1-B1 implementor prompt](slices/p1b1/IMPLEMENTOR_PROMPT.md): Fresh local agent
   assignment; no replanning, live traffic, Git publication or deferred features.
 
-B1 adds actual incremental recording for a supplied prepared input. B2 remains
-required for a NEW explicit task using stored role/call/result/native context and
-compatible provider/account binding. No automatic task resumption is authorized.
-Ordinary CLI persistence is not changed by this planning PR or claimed delivered
-by B1. The future service owns execution independently of readers/browser clients.
+The [public offline example](../examples/persisted_run_offline.rs) uses real context
+preparation, a finite in-process provider, AddNumbers and SQLite under a synthetic root.
+It independently reads committed partial text and exact tool bytes before scripted
+provider continuation admission, then proves exact reopen without provider/tool work.
+Run `cargo run --offline --locked --example
+persisted_run_offline`, or add `--release`. The [top-level measurement notes](../README.md#incremental-supplied-input-capture-p1-b1)
+define finite latency samples, the counted operation window and post-close size limits.
+Catalog refresh is explicit. The caller retains and awaits the execution future.
+
+B2 remains required for a NEW explicit task using retained role/call/result/native
+history with compatible provider/account binding. Ordinary CLI persistence, restored
+prior conversation/provider-account history (B2), service/browser/GUI (V1), and task
+resumption/retry remain unimplemented. The future service owns execution independently
+of readers/browser clients.
 
 ## Current acceptance: P1-A storage only
 
@@ -76,11 +89,11 @@ records the source review, exact CI and retained limits without rewriting old re
 - [P1-A machine report](slices/p1a/verification.json): Matching structured evidence,
   dirty-worktree history, review and submitted-CI results, platform limits and unchanged ledger.
 
-Ordinary `wi run` persistence, awaited runtime capture and valid provider-history
-restoration remain NOT IMPLEMENTED (P1-B). Service authentication, browser protocol
-and GUI remain NOT IMPLEMENTED (V1). Exact-head hosted native Windows/macOS gates
-passed. Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain
-explicit limits.
+P1-A acceptance did not include runtime capture. The local B1 composition above now
+supplies that boundary, not ordinary `wi run` persistence or B2 history restoration.
+Service authentication, browser protocol and GUI remain NOT IMPLEMENTED (V1).
+The cited exact-head native Windows/macOS gates passed for P1-A, not for local B1 work.
+Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain explicit limits.
 
 ## Historical-citation errata (2026-09-12 UTC)
 

@@ -54,9 +54,35 @@ for publication. Lost-catalog reconstruction uses explicit `repair_catalog()`; s
 session opens lazily add one prior-instance `run.interrupted` with `process_restart`.
 Neither recovery nor receipt retry resubmits providers or reruns tools.
 
-Ordinary run capture, awaited runtime delivery and provider-history restoration remain
-NOT IMPLEMENTED (P1-B). Service/browser/V1 remain deferred. Stored content is private
-application data; redacted Debug/static storage errors are not an encryption boundary.
+### Actual incremental capture (P1-B1)
+
+The public `wi::execution::run_persisted` composition records only the explicitly
+supplied prepared input incrementally. It commits acceptance before provider work,
+then awaits each actual runtime observation. For a newly executed tool, the order is:
+committed provider terminal, whole-batch validation, committed tool intent, actual
+execution/serialization/cache insertion, committed exact output and `is_error`, tool
+finish, then provider continuation. Intent alone is not proof of execution. A reused
+result does not create another tool-result record. Run schema 2, provider schema 1
+and storage schema 1 remain unchanged; application and source sequences remain distinct.
+
+The actual returned `RunResult` receives a separate final record. Execution and recording
+outcomes remain separate: successfully storing a failed/cancelled run returns `Executed`,
+whereas failed recording can carry an observed completed execution and an uncertain
+operation ID. Only committed history is visible to readers. A dropped history reader
+does not cancel the caller-owned execution task. B1 holds storage ownership during
+execution; closing storage signals local cancellation and drains the hold, but can
+reject new recording before a terminal record commits. Direct owning-future abort/drop
+can quarantine ownership until process exit, not fabricate completion.
+
+`cargo run --offline --locked --example persisted_run_offline` demonstrates committed
+partial reads, exact tool-result ordering, explicit catalog refresh and exact close/reopen
+without new provider/tool work. Add `--release` for separate finite local samples.
+See [measurement scope and limits](../README.md#incremental-supplied-input-capture-p1-b1).
+B1 is implemented locally; final acceptance, closure review, verification reports and
+submitted CI remain pending. Ordinary CLI persistence, restored prior conversation/
+provider-account history (B2), service/browser/GUI (V1), and task resumption/retry remain
+unimplemented. Stored content is private application data; redacted Debug/static storage
+errors are not an encryption boundary.
 
 ## Plain presentation and legacy preflight (R1)
 
@@ -132,7 +158,9 @@ monotonically increasing, not a durable replay cursor.
 
 A failed delivery can leave a sequence gap followed by an explicit failure;
 consumers must not interpret a gap as successful completion. There is no replay
-API or automatically persisted provider event log. P1-A records only explicitly supplied DTOs.
+API or automatic persistence in `ProviderSession`. P1-A records supplied DTOs; B1's
+explicit public composition awaits storage of the actual wrapped provider observations.
+Neither path restores provider-native conversation history for a new task.
 
 ## Implemented provider events
 
@@ -396,14 +424,16 @@ no tool timers or generic timeout API.
 Dropping the run future requests session closure when a handle exists, but cannot
 return a result or promise terminal delivery. Process loss has the same delivery
 limit. The controller has no durable replay, event store, internal unbounded queue
-or detached tool task; P1-A is a separate recording library.
+or detached tool task. B1 composes this same controller with P1-A storage; the legacy
+`run()` callback path does not automatically persist observations.
 
 The future one-owner, multiple-device service must keep work independent of browser
 disconnection and persist application sessions. A client subscription must not
 own this fallible run observer directly. Restart stops active tasks without
-automatically resuming or restarting them. P1-B runtime integration/provider-history
-restoration and V1 service/browser behavior remain unimplemented. P1-A application
-sequences and IDs are separate from these unchanged runtime/provider fields.
+automatically resuming or restarting them. B1 supplies the explicit incremental recording
+path, not restored conversation/provider-account history (B2), ordinary CLI persistence,
+resumption/retry or V1 service/browser/GUI behavior. Those remain unimplemented.
+P1-A application sequences and IDs stay separate from unchanged runtime/provider fields.
 
 ## Not emitted yet
 

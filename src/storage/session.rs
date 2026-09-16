@@ -21,9 +21,38 @@ impl fmt::Debug for SessionHandle {
     }
 }
 
+pub(crate) struct RunAcceptance {
+    handle: SessionHandle,
+    operation_id: OperationId,
+    guard: OwnedMutexGuard<()>,
+}
+
+impl RunAcceptance {
+    pub(crate) async fn accept_run(
+        self,
+        run_id: RunId,
+        input: RecordedRunInput,
+    ) -> Result<CommitResult> {
+        self.handle
+            .record(
+                self.operation_id,
+                run_id,
+                run_store::Mutation::Accept {
+                    input: Box::new(input),
+                },
+                Some(self.guard),
+            )
+            .await
+    }
+}
+
 impl SessionHandle {
     pub fn session_id(&self) -> &ApplicationSessionId {
         &self.id
+    }
+
+    pub(crate) fn execution_hold(&self) -> Result<ExecutionHold> {
+        self.inner.lifecycle.admit().map(ExecutionHold)
     }
 
     pub async fn manifest(&self) -> Result<SessionManifest> {
@@ -88,20 +117,42 @@ impl SessionHandle {
             .await
     }
 
+    pub(crate) async fn run_acceptance(&self, operation_id: OperationId) -> RunAcceptance {
+        let lock = {
+            let mut locks = self
+                .inner
+                .acceptance_locks
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            // Old operation IDs must not retain coordination entries indefinitely.
+            locks.retain(|_, lock| lock.strong_count() != 0);
+            let key = (self.id.clone(), operation_id.clone());
+            match locks.get(&key).and_then(Weak::upgrade) {
+                Some(lock) => lock,
+                None => {
+                    let lock = Arc::new(AsyncMutex::new(()));
+                    locks.insert(key, Arc::downgrade(&lock));
+                    lock
+                }
+            }
+        };
+        RunAcceptance {
+            handle: self.clone(),
+            operation_id,
+            guard: lock.lock_owned().await,
+        }
+    }
+
     pub async fn accept_run(
         &self,
         operation_id: OperationId,
         run_id: RunId,
         input: RecordedRunInput,
     ) -> Result<CommitResult> {
-        self.record(
-            operation_id,
-            run_id,
-            run_store::Mutation::Accept {
-                input: Box::new(input),
-            },
-        )
-        .await
+        self.run_acceptance(operation_id)
+            .await
+            .accept_run(run_id, input)
+            .await
     }
 
     pub async fn append_run_records(
@@ -114,6 +165,7 @@ impl SessionHandle {
             operation_id,
             run_id,
             run_store::Mutation::Append { records },
+            None,
         )
         .await
     }
@@ -123,11 +175,16 @@ impl SessionHandle {
         operation: OperationId,
         run_id: RunId,
         mutation: run_store::Mutation,
+        acceptance: Option<OwnedMutexGuard<()>>,
     ) -> Result<CommitResult> {
         let id = self.id.clone();
         self.inner
             .clone()
             .operation(true, move |inner| async move {
+                #[cfg(test)]
+                test_hooks::select_record(&operation, &mutation);
+                // A dropped SQL waiter must not release the acceptance lock before commit.
+                let _acceptance = acceptance;
                 let _lock = inner.session_lock(&id).await;
                 let (mut connection, provenance) = connection(&inner, &id, true)
                     .await
@@ -143,12 +200,15 @@ impl SessionHandle {
                     None,
                 )
                 .await;
+                #[cfg(test)]
+                let fail_cleanup = matches!(&mutation, run_store::Mutation::Append { records } if matches!(records.as_slice(), [AppendRunRecord::Result(_)]))
+                    && test_hooks::hit(test_hooks::Point::FinalResultCleanup).await.is_err();
                 let ((receipt, duplicate), warning) = database::finish_write(
                     connection,
                     &inner.lifecycle,
                     result,
                     #[cfg(test)]
-                    false,
+                    fail_cleanup,
                 )
                 .await?;
                 Ok(CommitResult::new(receipt, duplicate, warning))
@@ -199,6 +259,13 @@ impl SessionHandle {
             .await
     }
 
+    // A verified acceptance must have a run projection, including on duplicate submission.
+    pub(crate) async fn accepted_run_record(&self, run_id: RunId) -> Result<RecordedRun> {
+        self.run_record(run_id)
+            .await?
+            .ok_or_else(|| StorageError::new(StorageErrorKind::Integrity))
+    }
+
     pub async fn tool_result(
         &self,
         run_id: RunId,
@@ -216,9 +283,15 @@ impl SessionHandle {
             .await
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_hooks(&self) -> Arc<test_hooks::Hooks> {
+        self.inner.hooks.clone()
+    }
+
     pub async fn lookup_receipt(&self, operation_id: OperationId) -> Result<Option<CommitReceipt>> {
         let id = self.id.clone();
-        self.inner
+        let result = self
+            .inner
             .clone()
             .operation(false, move |inner| async move {
                 let _lock = inner.session_lock(&id).await;
@@ -228,7 +301,13 @@ impl SessionHandle {
                     .map(|command| command.map(|command| command.receipt));
                 database::finish_read(connection, &inner.lifecycle, result).await
             })
-            .await
+            .await;
+        #[cfg(test)]
+        self.inner
+            .hooks
+            .scope(test_hooks::hit(test_hooks::Point::ReceiptLookupComplete))
+            .await?;
+        result
     }
 }
 

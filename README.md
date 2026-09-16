@@ -15,6 +15,15 @@ complete-diff review, and exact-head Ubuntu/macOS/Windows CI passed after both
 post-submission macOS findings were remediated. See the
 [P1-A verification report](docs/slices/p1a/VERIFICATION.md) for evidence and limits.
 
+**P1-B1 status: public composition implemented locally; final acceptance pending.**
+`wi::execution::run_persisted` records only the explicitly supplied prepared input
+incrementally. It commits acceptance before provider work, awaits actual runtime and
+tool-result records, preserves separate execution versus recording outcomes, and
+holds storage ownership during execution. Ordinary CLI persistence, restored prior
+conversation/provider-account history (B2), service/browser/GUI (V1), and task
+resumption/retry remain unimplemented. No B1 final verification report or submitted
+CI is claimed. See [the offline example and limitations](#incremental-supplied-input-capture-p1-b1).
+
 **S2 status: implemented and offline accepted under contract s2.1.**
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
 passing, 374 local Rust tests and 152 Node self-tests. Submitted-head CI for
@@ -91,6 +100,8 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
 - Completed, incomplete, failed, cancelled, and uncertain transport outcomes.
 - A local function executor with argument validation and in-memory result reuse.
   `add_numbers` adds integers; `load_skill` reads main instructions from the bound catalog.
+- Explicit public B1 execution-to-storage composition over the same run controller,
+  with committed incremental observations and exact serialized tool results.
 - No automatic retry, reconnect, transport fallback, or API-key billing fallback.
 
 **Native steering, async tool calling, programmatic tool execution, and tool search
@@ -392,15 +403,74 @@ supplied DTO traces and real local registry results. It makes no provider reques
 The [verification report](docs/slices/p1a/VERIFICATION.md) distinguishes process/fault
 simulation from physical power-loss guarantees and records filesystem trust limits.
 
-## Future runtime integration and service (not implemented)
+## Incremental supplied-input capture (P1-B1)
 
-Ordinary `wi run` still has no storage capture. P1-B must add the awaited runtime
-seam, caller-selected run identity and explicit new submissions using valid stored
-provider history. Reading stored events is not provider-history restoration.
-V1 remains a one-owner, multi-device service: browser disconnect must not cancel
-service-owned work; restart must not automatically resume tasks. Service authentication,
-browser protocol and GUI remain unimplemented. `ProviderSession` is an in-memory
-transport handle, not a persistent application session. See
+`wi::execution::run_persisted` composes the existing controller, registry and storage.
+The caller supplies a `PersistentRunRequest` with an operation ID, actual run ID and
+`RecordedRunInput::capture` snapshot from context preparation. B1 records only that
+explicitly supplied prepared input incrementally; it does not restore previous context.
+Acceptance commits before provider work. Each actual runtime observation and exact
+serialized tool result is awaited before continuation. Catalog publication still needs
+an explicit `refresh_catalog()` call.
+
+`Executed` returns the actual `RunResult` and acceptance/final recording receipts.
+A recorded failed or cancelled execution is still `Executed`; execution and recording
+outcomes are separate. `Duplicate` returns existing evidence without launching work.
+A recording failure exposes its stage, attempted operation ID, known receipt and any
+observed result. An unknown write outcome is not proof of rollback or permission to retry.
+
+The caller owns and awaits the future, including when spawned as a Tokio task. B1
+holds storage ownership during execution without retaining SQL connections or locks
+across provider/tool waits. Store close signals local cancellation and drains ownership;
+new writes reject during close, so terminal recording is not guaranteed. Direct task
+abort/drop can quarantine the root until process exit. For controlled shutdown, cancel
+and await execution while storage remains open, then close storage.
+
+Run the public-API example with cached dependencies:
+
+```bash
+cargo run --offline --locked --example persisted_run_offline
+cargo run --offline --locked --release --example persisted_run_offline
+```
+
+The example uses synthetic temporary context, real AddNumbers execution, a finite
+in-process provider and real SQLite. Provider barriers permit committed partial-text
+and exact tool-result reads while the owned execution task remains pending. The tool
+history/projection reads complete before the scripted provider admits continuation:
+turn-2 `generate` waits before validating input, counting admission or signaling its stream.
+It refreshes the catalog, closes storage, deletes its synthetic context, drops execution owners, and
+reopens exact saved history/input/results with zero new provider or tool work.
+It uses no credentials, ambient profile/private skills, or network.
+
+Printed `Instant` values are finite local samples, not benchmarks, an SLA or a fastest
+claim. Delta acknowledgment samples include scheduling and connection open, validation,
+commit and close; terminal/tool-cycle stages include intervening work. The tool-cycle
+sample includes the pre-admission history/projection reads. Barrier reads are also
+included in execution end-to-end time. Stored database/WAL sizes describe files
+observed after close under unchanged checkpoint behavior, not transient WAL volume.
+
+`storage::measurement_tests::p1b1_28_exact_example_recording_window_counts` runs the
+same example trace with cfg(test)-only counters. Its window starts after setup and ends
+after explicit refresh/list: 15 recording write transactions (acceptance, 12 runtime
+observations, one tool result, one final result), one catalog write, six explicit read
+transactions, and 76 operation-scoped connection opens/closes. The window includes two
+internal receipt lookups and every proof read. There are 13 session reads, one refresh
+and one catalog listing; each recording call uses three opens/closes, each session read
+two, refresh four and listing one. Five history snapshots plus refresh account for the
+six explicit read transactions. Schema/lookup SELECTs outside these snapshots use
+implicit SQLite statement transactions, not extra explicit BEGINs. Setup, close/reopen
+and implicit statement transaction counts are excluded. These are test-observed trace
+counts, not production telemetry or performance tuning.
+
+## Restored history and service (not implemented)
+
+Ordinary `wi run` remains nonpersistent. B2 still must restore prior conversation and
+provider/account-bound native history for a new explicit submission, including after
+reopen. Reading saved events is not provider-history restoration. Resumption/retry
+remain unimplemented. V1 remains a one-owner, multi-device service: browser disconnect
+must not cancel service-owned work; restart must not automatically resume tasks.
+Service authentication, browser protocol and GUI remain unimplemented. `ProviderSession`
+is an in-memory transport handle, not a persistent application session. See
 [product direction](docs/WI_PRODUCT_DIRECTION.md).
 
 ## Experimental Wi browser login

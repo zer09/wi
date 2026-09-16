@@ -1,101 +1,80 @@
-# Wi: P1-B1 implementation assignment
+# Wi: P1-B1 accepted implementation
 
-Current task: **P1-B1, contract p1b1.0**, actual runtime-to-storage capture.
-Accepted baseline: `34b4cfd0d3ecf286869a239997267dbd75c28c0b` (P1-A merged in PR #5).
-Planning documents are not implementation evidence; all 30 new rows start NOT RUN.
+P1-B1, contract **p1b1.0**, is implemented. The accepted runtime source is
+`b1e46f3eb33a66c2682b3038066a9d20dadf17da`; evidence-only head
+`ba83a5f7f7216b0a2f296553ab7e80d7334556a4` passed push workflow 35081585604
+and pull-request workflow 35081591576 on Ubuntu, macOS and Windows.
+This status correction is documentation only. A later documentation head still
+requires its own exact-head checks before merge. PR #6 is the merge-state record.
 
-Read in order:
-1. docs/slices/p1b1/CONTRACT.md
-2. docs/slices/p1b1/MATRIX.md
-3. docs/slices/p1b1/VALIDATION.md
-4. docs/slices/p1b1/IMPLEMENTOR_PROMPT.md
-5. docs/slices/p1a/SCHEMA.md and its VERIFICATION.md/verification.json
-6. The current source paths in VALIDATION.md and applicable existing regressions.
+No new implementation assignment is created by this file. Preserve completed work.
+Read the actual current user instruction before making further changes. The original
+P1-B1 contract, matrix, validation notes and implementor prompt are frozen phase
+records; their PLAN ONLY/NOT RUN headings and old imperatives are not instructions
+to repeat completed work. Actual acceptance is recorded in:
 
-The design and matrix are fixed. Execute the scoped implementation and offline
-verification; do not return another architecture plan or repeat P1-A. A source-linked
-contract contradiction must be reported before changing behavior or widening scope.
-Preserve user work, including untracked changes. No reset, clean, forced checkout,
-unsolicited stash or historical report rewrite.
+- docs/slices/p1b1/VERIFICATION.md
+- docs/slices/p1b1/verification.json
 
-## Current implementation and this increment
+The reports attribute 601 Rust passes, two subprocess helpers ignored as standalone
+tests, 152 Node self-tests, five offline examples and independent review to local
+execution. Hosted CI runs the six Cargo gates, not Node or example mains. Those
+counts are not targets for future work. Preserve the earlier failures and repairs.
+The planner inspected source and CI, not a fresh local Rust/Node test run.
 
-P1-A is implemented and merged. Its accepted source is 0839af9; the owner evidence head
-was 7e487e4. Planner correction 95353ef changed one stale platform limitation. Push run
-34935741002 and PR run 34935743731 passed all six Cargo gates on Ubuntu/macOS/Windows
-at that correction head; merge34b4cfd has the same file tree. Local 536 Rust passes,
-one ignored child helper, 152 Node tests and four examples are attributed prior evidence,
-not B1 test targets. The source reviewer did not rerun them or certify a defect-free repo.
+## Implemented boundary
 
-B1 adds a small wi::execution composition over the existing run engine and storage.
-It commits the accepted supplied input/real run UUID before provider work, awaits actual
-runtime observations, captures actual serialized tool results before continuation and
-records the returned RunResult. Duplicate old operations never launch work. Use ONE
-shared loop and keep the public legacy run/Tool/registry interfaces compatible.
+`wi::execution::run_persisted` captures an explicitly supplied prepared input using
+one shared run engine, actual supplied run identity, receipt-first acceptance,
+awaited runtime observations, exact serialized tool-result recording and final
+RunResult persistence. Duplicate accepted operations never launch work.
 
-A narrow crate-private execution hold/closing notification extends the existing storage
-lifecycle so explicit close cannot release the root during active execution. No provider
-or tool is executed inside storage. Do not hold SQLite/session/maintenance locks across
-model/tool waits. Do not add a second task manager or background write queue.
+The private execution hold retains store ownership across active execution without
+holding SQLite/session/maintenance locks across model/tool waits. Store close signals
+local cancellation and drains ownership. Dropping the owning execution future is not
+a browser disconnect; unfinished ownership follows the documented quarantine policy.
+A successful database commit is not proof of successful model execution or guaranteed
+upstream termination. Final execution and recording/delivery outcomes remain separate.
 
-B1 executes only the explicitly supplied prepared input. It does not restore prior
-conversation context. B2 remains required for new explicit submissions against retained
-history and provider/account-bound native replay. Normal CLI persistence, service client
-auth, browser transport, active-run ownership manager and GUI remain later work. This
-split is an implementation-scope boundary, not a cancellation of those requirements.
+P1-A is merged at `34b4cfd0d3ecf286869a239997267dbd75c28c0b`. Its per-session
+SQLite/canonical-history/catalog design, schema version 1, explicit catalog refresh
+and repair, private-root lease and no-auto-resume behavior remain in force.
 
-## Preserve these semantics
+## Required later work, not an automatic assignment
 
-- RunRequest fields and existing run/provider schemas 2/1 remain unchanged.
-- Application-session IDs/sequences are distinct from provider sessions/source sequences.
-- ToolFailed remains gateway_error; AuthExpired and Protocol mappings remain unchanged.
-- Full batch validation precedes tool intent/execution. No partial call can execute.
-- Actual result serialization/error flag/output-size handling is shared; no inferred
-  is_error, fabricated tool output, cache rollback after execution or duplicate effect.
-- Cancellation is cooperative; a completed actual result differs from pending work.
-- SQL queue acceptance is not commit. Ambiguous writes retain their operation identity.
-- Final execution outcome and final persistence/delivery outcome remain distinct.
-- P1-A schema and explicit catalog refresh/repair remain; no new schema/version planned.
-- Preserve S1/S2 catalog/loader/source checks and R1/NB-02 rendering/validation fixes.
-- Preserve auth ownership, account/session binding, provider uncertainty and transports.
+B2 must add explicit new submissions using stored conversation history and validated
+provider/account-compatible native replay. B1 does not restore old conversation
+context. Ordinary `wi run` remains the existing nonpersistent diagnostic path.
+Service-owned active-run management, service authentication, browser transport and
+GUI are V1 or separately approved work. Do not implement them incidentally.
 
-No RunLimits, optional replacement budgets, task deadlines, history/session quotas,
-auto-deletion, task resumption, retry/failover, hosted skills/API billing, new provider,
-permissions, shell/resource executors, approvals, steering, compaction, search, alternate
-DB, new dependencies, unused framework or production-provider reorganization.
+## Compatibility and enduring requirements
 
-## Verification and authorization
+- Keep public legacy run/Tool/registry behavior and runtime/provider schemas 2/1.
+- Keep application-session identity separate from provider-session identity.
+- ToolFailed remains gateway_error; do not infer is_error from error-shaped JSON.
+- Full-batch authority validation precedes tool intent and execution.
+- Preserve exact actual tool output, cache/reuse scope, uncertainty and receipt identities.
+- Preserve S1/S2 context/skill checks, R1/NB-02 fixes and accepted authentication.
+- No RunLimits, replacement budgets, execution quotas, task deadlines, history/session
+  lifetime caps, auto-deletion, automatic task restart or external-effect replay.
+- No hosted skills/API-key billing fallback, new providers/tools, permission framework,
+  alternate database, task scheduler or unrelated reorganization without a new contract.
 
-Use synthetic temporary roots/skills/credentials and loopback/scripted providers only.
-No real profile/credential/private-skill reads, auth commands or live provider requests.
-Ledger remains **31/50 used, 19 remaining**; balance is not authorization.
+Wi is a Rust service-oriented harness with a provider gateway, not a CLI-only proxy.
+The final service owns work for one owner across devices. Browser disconnect does not
+cancel tasks. Application sessions persist; restart stops tasks without automatically
+requesting a model, running a tool or draining a work queue. Storage/WAL recovery is
+not execution resumption. Embedded storage only; database-file readability is irrelevant.
 
-Run old gates plus new real SQL/controller/registry/process/loopback tests and the new
-persisted_run_offline example. Record actual performance costs without a fastest/SLA
-claim. Legacy callbacks need not be Send, while the new composition future must be Send.
-A slow-storage test must not weaken provider queue/consumer/terminal safeguards.
+## Verification and authority
 
-Create docs/slices/p1b1/VERIFICATION.md and verification.json after actual work. Map every
-P1B1-00..P1B1-29 row to executed or honestly unrun evidence. Keep first failures, ignored
-helpers, platform exclusions and observer attribution. Obtain fresh independent complete-
-diff review and remediate actual in-scope findings. Source counts are not test executions;
-zero doctests is not additional coverage.
+Use synthetic temporary roots, skills, credentials and scripted/loopback providers.
+No real credential/private-skill reads, authentication commands or live provider calls
+without separate owner permission. Ledger remains **31/50 used, 19 remaining**;
+remaining balance is not authorization. Normal build traffic is not model usage.
 
-Local source changes/offline verification are the current assignment. No implementation
-commit/push/merge, release, deployment or B2/V1 work without separate owner approval.
-Exact-head push/PR Ubuntu/macOS/Windows CI is a later merge gate after authorized push.
-
-## Enduring product requirements
-
-Wi is a Rust harness with a provider gateway, not a CLI-only proxy. The final service
-owns work for one owner across devices. Browser disconnect is not cancellation; clients
-observe committed history and send explicit commands. Sessions persist. Restart stops
-old tasks without automatically requesting a model, executing a tool or draining a task
-queue. Database WAL recovery/creation reconciliation does not authorize agent execution.
-Only embedded storage is allowed; human-readable database files are not a requirement.
-
-Historical gateway/auth/M3/C1/S1/S2/R1/P1-A prompts are phase records, not fresh orders.
-September13 checkpoint resources predate P1-A; current accepted source and new owner
-instructions take precedence. Frozen NOT RUN headings preserve original planning status;
-subsequent reports/CI establish scoped completion. Remaining unrelated audit notes are
-not incidental cleanup assignments.
+Preserve user changes and historical evidence. Do not reset, clean, force-checkout,
+stash unsolicited work, disable CI jobs or relax warning-denied checks. A new head
+requires exact-head CI before an authorized merge. Commits, pushes, merges, release,
+deployment and subsequent milestones require the applicable current owner instruction.

@@ -110,7 +110,7 @@ async fn independent_populated_session_v1_reopens_renames_and_retries_original_r
 async fn session_foreign_future_and_missing_schema_are_preserved() {
     for (change, code) in [
         ("PRAGMA application_id=17", "storage.integrity"),
-        ("PRAGMA user_version=2", "storage.unsupported_version"),
+        ("PRAGMA user_version=3", "storage.unsupported_version"),
         ("PRAGMA user_version=0", "storage.unsupported_version"),
         ("DROP TABLE tool_results", "storage.integrity"),
         (

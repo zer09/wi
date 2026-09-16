@@ -18,6 +18,7 @@ tokio::task_local! {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Record {
     Acceptance,
+    ProviderBinding,
     RunStarted,
     PartialText,
     ResponseFinished,
@@ -30,8 +31,9 @@ pub(crate) enum Record {
 pub(super) fn select_record(operation: &OperationId, mutation: &Mutation) {
     RECORDING.with(|recording| recording.set(true));
     let record = match mutation {
-        Mutation::Accept { .. } => Some(Record::Acceptance),
+        Mutation::Accept { .. } | Mutation::AcceptHistory { .. } => Some(Record::Acceptance),
         Mutation::Append { records } => match records.as_slice() {
+            [AppendRunRecord::ProviderBinding(_)] => Some(Record::ProviderBinding),
             [AppendRunRecord::ToolResult { .. }] => Some(Record::ToolResult),
             [AppendRunRecord::Result(_)] => Some(Record::FinalResult),
             [AppendRunRecord::Runtime(event)] => match &event.event {
@@ -69,6 +71,11 @@ pub(super) fn select_record(operation: &OperationId, mutation: &Mutation) {
 pub(crate) enum Point {
     Reserved,
     Initializing,
+    MigrationCreated,
+    MigrationCopied,
+    MigrationRebuilt,
+    MigrationPrecommit,
+    MigrationCommitted,
     Materialized,
     CatalogAccepted,
     BeforeCommit,
@@ -80,6 +87,8 @@ pub(crate) enum Point {
     Open,
     ReceiptLookupComplete,
     FinalResultCleanup,
+    HistorySelection,
+    ReplayHeadCaptured,
 }
 
 pub(crate) enum Action {
@@ -152,7 +161,7 @@ pub(super) fn read_transaction() {
     let _ = ACTIVE.try_with(|hooks| hooks.1.lock().unwrap().read_transactions += 1);
 }
 
-pub(super) async fn hit(point: Point) -> Result<(), StorageError> {
+pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
     if point == Point::AfterCommit {
         let recording = RECORDING.try_with(Cell::get).unwrap_or(false);
         let _ = ACTIVE.try_with(|hooks| {

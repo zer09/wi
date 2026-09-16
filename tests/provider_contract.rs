@@ -153,6 +153,35 @@ fn hosted_skills_required_feature_is_unknown_before_provider_construction() {
     }
 }
 
+#[tokio::test]
+async fn p1b2_01_replay_defaults_are_unsupported_without_opening() {
+    let replay = ConversationReplay::new("echo".into(), "test".into(), None, vec![]).unwrap();
+    let options = SessionOptions::new("test");
+    let input = [InputItem::user("new")];
+    assert!(matches!(
+        EchoProvider.validate_replay(&options, &replay, &input),
+        Err(GatewayError::UnsupportedFeature("history_replay"))
+    ));
+    let mut gateway = Gateway::new();
+    gateway.register(Arc::new(EchoProvider)).unwrap();
+    assert!(matches!(
+        gateway.validate_replay("echo", &options, &replay, &input),
+        Err(GatewayError::UnsupportedFeature("history_replay"))
+    ));
+    assert!(matches!(
+        gateway.validate_replay("absent", &options, &replay, &input),
+        Err(GatewayError::UnknownProvider)
+    ));
+    let (tx, mut rx) = mpsc::channel(2);
+    let control = EchoControl { tx };
+    assert!(control.replay_identity().is_none());
+    assert!(matches!(
+        control.install_replay(replay).await,
+        Err(GatewayError::UnsupportedFeature("history_replay"))
+    ));
+    assert!(rx.try_recv().is_err());
+}
+
 #[test]
 fn input_and_session_limits_are_checked() {
     assert!(SessionOptions::new("").validate().is_err());

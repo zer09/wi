@@ -10,7 +10,7 @@ use crate::{
     validate_input,
 };
 
-use super::{RunId, StorageError, StorageErrorKind};
+use super::{RecordedProviderBinding, RunId, StorageError, StorageErrorKind};
 
 type Result<T> = std::result::Result<T, StorageError>;
 
@@ -152,6 +152,7 @@ impl RecordedRunInput {
     rename_all = "snake_case"
 )]
 pub enum AppendRunRecord {
+    ProviderBinding(RecordedProviderBinding),
     Runtime(RunEventEnvelope),
     ToolResult {
         request_id: Option<String>,
@@ -170,6 +171,7 @@ pub enum AppendRunRecord {
     deny_unknown_fields
 )]
 enum AppendFields {
+    ProviderBinding(RecordedProviderBinding),
     Runtime(RunEventEnvelope),
     ToolResult {
         request_id: Option<String>,
@@ -185,6 +187,7 @@ impl TryFrom<AppendFields> for AppendRunRecord {
 
     fn try_from(value: AppendFields) -> Result<Self> {
         let record = match value {
+            AppendFields::ProviderBinding(binding) => Self::ProviderBinding(binding),
             AppendFields::Runtime(event) => Self::Runtime(event),
             AppendFields::ToolResult {
                 request_id,
@@ -209,7 +212,7 @@ impl AppendRunRecord {
         match self {
             Self::Runtime(event) => validate_runtime(event),
             Self::Result(result) => result.run_id.parse::<RunId>().map(|_| ()),
-            Self::ToolResult { .. } => Ok(()),
+            Self::ToolResult { .. } | Self::ProviderBinding(_) => Ok(()),
         }
     }
 }

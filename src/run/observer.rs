@@ -1,7 +1,17 @@
 use super::{RunEventEnvelope, RunSinkError};
+use crate::ReplayIdentity;
 use std::future::{Future, ready};
 
 pub(crate) trait RunObserver {
+    fn provider_opened(
+        &mut self,
+        _session_id: &str,
+        _requested_model: &str,
+        _identity: &ReplayIdentity,
+    ) -> impl Future<Output = Result<(), RunSinkError>> + Send {
+        ready(Ok(()))
+    }
+
     fn event(
         &mut self,
         event: &RunEventEnvelope,

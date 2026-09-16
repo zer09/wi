@@ -1,5 +1,6 @@
 use crate::{
-    GatewayError, Provider, ProviderCapabilities, ProviderSession, Result, SessionOptions,
+    ConversationReplay, GatewayError, InputItem, Provider, ProviderCapabilities, ProviderSession,
+    Result, SessionOptions,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -24,6 +25,18 @@ impl Gateway {
             .get(id)
             .ok_or(GatewayError::UnknownProvider)?
             .capabilities())
+    }
+    pub fn validate_replay(
+        &self,
+        id: &str,
+        options: &SessionOptions,
+        replay: &ConversationReplay,
+        new_input: &[InputItem],
+    ) -> Result<()> {
+        self.providers
+            .get(id)
+            .ok_or(GatewayError::UnknownProvider)?
+            .validate_replay(options, replay, new_input)
     }
     pub async fn open_session(&self, id: &str, options: SessionOptions) -> Result<ProviderSession> {
         options.validate()?;

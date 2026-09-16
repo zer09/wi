@@ -21,25 +21,27 @@ pub(super) fn private_dir(path: &Path) {
 }
 
 // Follow storage::process_tests: explicit stdin, cleared environment, drained pipes and reaping.
-pub(super) struct Process {
+pub(in crate::execution::tests) struct Process {
     child: Child,
     ready: mpsc::Receiver<()>,
     stdout: Option<thread::JoinHandle<String>>,
     stderr: Option<thread::JoinHandle<String>>,
 }
 impl Process {
-    pub fn start(sandbox: &Path, fixture: &Fixture) -> Self {
+    pub(super) fn start(sandbox: &Path, fixture: &Fixture) -> Self {
+        Self::start_test(
+            sandbox,
+            fixture,
+            "execution::tests::process::execution_child",
+        )
+    }
+    pub fn start_test(sandbox: &Path, fixture: &impl serde::Serialize, helper: &str) -> Self {
         for name in ["home", "xdg", "codex", "tmp"] {
             private_dir(&sandbox.join(name));
         }
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
-            .args([
-                "--exact",
-                "execution::tests::process::execution_child",
-                "--ignored",
-                "--nocapture",
-            ])
+            .args(["--exact", helper, "--ignored", "--nocapture"])
             .current_dir(sandbox)
             .env_clear()
             .env("HOME", sandbox.join("home"))
@@ -135,7 +137,7 @@ impl Drop for Process {
     }
 }
 
-pub(super) fn release_from_parent(input: &mut impl BufRead) {
+pub(in crate::execution::tests) fn release_from_parent(input: &mut impl BufRead) {
     println!("READY");
     std::io::stdout().flush().unwrap();
     let mut line = String::new();

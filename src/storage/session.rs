@@ -28,6 +28,42 @@ pub(crate) struct RunAcceptance {
 }
 
 impl RunAcceptance {
+    pub(crate) async fn repeat_history_run(
+        self,
+        run_id: RunId,
+        input: RecordedRunInput,
+        receipt: &CommitReceipt,
+    ) -> Result<CommitResult> {
+        let conflict = || StorageError::new(StorageErrorKind::CommandConflict).not_committed();
+        let original_run = receipt.run_id().ok_or_else(conflict)?;
+        let selection = self
+            .handle
+            .history_selection(original_run.clone())
+            .await?
+            .ok_or_else(conflict)?;
+        // Use the original selection; storage still checks method, run and input identity.
+        self.accept_history_run(run_id, input, selection).await
+    }
+
+    pub(crate) async fn accept_history_run(
+        self,
+        run_id: RunId,
+        input: RecordedRunInput,
+        selection: StoredHistorySelection,
+    ) -> Result<CommitResult> {
+        self.handle
+            .record(
+                self.operation_id,
+                run_id,
+                run_store::Mutation::AcceptHistory {
+                    input: Box::new(input),
+                    selection,
+                },
+                Some(self.guard),
+            )
+            .await
+    }
+
     pub(crate) async fn accept_run(
         self,
         run_id: RunId,
@@ -155,6 +191,45 @@ impl SessionHandle {
             .await
     }
 
+    pub async fn accept_history_run(
+        &self,
+        operation_id: OperationId,
+        run_id: RunId,
+        input: RecordedRunInput,
+        selection: StoredHistorySelection,
+    ) -> Result<CommitResult> {
+        self.run_acceptance(operation_id)
+            .await
+            .accept_history_run(run_id, input, selection)
+            .await
+    }
+
+    pub async fn history_selection(&self, run_id: RunId) -> Result<Option<StoredHistorySelection>> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                let _lock = inner.session_lock(&id).await;
+                let (mut connection, _) = connection(&inner, &id, false).await?;
+                let result = run_store::history_selection(&mut connection, &id, &run_id).await;
+                database::finish_read(connection, &inner.lifecycle, result).await
+            })
+            .await
+    }
+
+    pub async fn provider_binding(&self, run_id: RunId) -> Result<Option<RecordedProviderBinding>> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                let _lock = inner.session_lock(&id).await;
+                let (mut connection, _) = connection(&inner, &id, false).await?;
+                let result = run_store::provider_binding(&mut connection, &id, &run_id).await;
+                database::finish_read(connection, &inner.lifecycle, result).await
+            })
+            .await
+    }
+
     pub async fn append_run_records(
         &self,
         operation_id: OperationId,
@@ -212,6 +287,25 @@ impl SessionHandle {
                 )
                 .await?;
                 Ok(CommitResult::new(receipt, duplicate, warning))
+            })
+            .await
+    }
+
+    // Own the connection and its retirement exactly like other storage reads. No
+    // projection lookup can provide evidence newer than the captured prefix.
+    pub(crate) async fn history_prefix_digest(
+        &self,
+        through: u64,
+        checkpoints: Vec<(u64, String)>,
+    ) -> Result<String> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                let _lock = inner.session_lock(&id).await;
+                let (mut connection, _) = connection(&inner, &id, false).await?;
+                let result = history_prefix::digest(&mut connection, through, &checkpoints).await;
+                database::finish_read(connection, &inner.lifecycle, result).await
             })
             .await
     }
@@ -320,7 +414,22 @@ pub(super) async fn open(
         creation::create(&inner, entry.reservation.provenance.request()?).await?;
     }
     let _lock = inner.session_lock(&id).await;
-    let (mut connection, provenance) = connection(&inner, &id, true).await?;
+    let (mut inspected, provenance) = connection(&inner, &id, false).await?;
+    let result = async {
+        let version = session_schema::version(&mut inspected).await?;
+        if version == 1 {
+            let summary = catalog_sync::observe(&mut inspected, &id).await?;
+            catalog_repair::validate_history(&mut inspected, &summary).await?;
+        }
+        Ok(version)
+    }
+    .await;
+    let version = database::finish_read(inspected, &inner.lifecycle, result).await?;
+    if version == 1 {
+        migration::migrate(&inner, &provenance).await?;
+    }
+    let path = filesystem::session_path(&inner.root, &id, false)?;
+    let mut connection = database::open(&path, false, &inner.lifecycle).await?;
     let result = interruption::reconcile(&mut connection, &provenance, &inner.instance_id).await;
     database::finish_read(connection, &inner.lifecycle, result).await?;
     Ok(SessionHandle { inner, id })
@@ -348,17 +457,19 @@ pub(super) async fn connection(
     let provenance = entry.reservation.provenance;
     let path = filesystem::session_path(&inner.root, id, false)?;
     let mut connection = database::open(&path, true, &inner.lifecycle).await?;
-    let result = session_schema::validate(&mut connection, id, Some(&provenance))
-        .await
-        .and_then(|manifest| {
-            let observed = entry.summary.observed_manifest();
-            if observed.head_sequence() > manifest.head_sequence()
-                || (observed.head_sequence() == manifest.head_sequence() && *observed != manifest)
-            {
-                return Err(integrity());
-            }
-            Ok(())
-        });
+    let result = async {
+        let manifest = session_schema::validate(&mut connection, id, Some(&provenance)).await?;
+        let version = session_schema::version(&mut connection).await?;
+        let observed = entry.summary.observed_manifest();
+        if entry.summary.schema_version() > version
+            || observed.head_sequence() > manifest.head_sequence()
+            || (observed.head_sequence() == manifest.head_sequence() && *observed != manifest)
+        {
+            return Err(integrity());
+        }
+        Ok(())
+    }
+    .await;
     if !writable && result.is_ok() {
         return Ok((connection, provenance));
     }

@@ -42,7 +42,7 @@ pub(super) async fn create(inner: &StoreInner, input: CreateSession) -> Result<C
         CreationState::Failed(error) => return Err(error),
         CreationState::Creating => {}
     }
-    let (manifest, warning) = match materialize(inner, &provenance).await {
+    let ((manifest, version), warning) = match materialize(inner, &provenance).await {
         Ok(result) => result,
         Err(error) => {
             if matches!(
@@ -63,7 +63,7 @@ pub(super) async fn create(inner: &StoreInner, input: CreateSession) -> Result<C
     };
     #[cfg(test)]
     test_hooks::hit(test_hooks::Point::Materialized).await?;
-    let catalog_warning = catalog_ops::complete(inner, &provenance, &manifest)
+    let catalog_warning = catalog_ops::complete(inner, &provenance, &manifest, version)
         .await
         .map_err(incomplete)?;
     #[cfg(test)]
@@ -78,7 +78,7 @@ pub(super) async fn create(inner: &StoreInner, input: CreateSession) -> Result<C
 pub(super) async fn materialize(
     inner: &StoreInner,
     provenance: &CreationProvenance,
-) -> Result<(SessionManifest, Option<CleanupWarning>)> {
+) -> Result<((SessionManifest, u64), Option<CleanupWarning>)> {
     let path = filesystem::session_path(&inner.root, &provenance.session_id, true)?;
     if filesystem::check_database(&path)?.is_none() {
         drop(filesystem::open_file(&path, true)?);
@@ -88,9 +88,11 @@ pub(super) async fn materialize(
             if session_schema::empty(&mut connection).await? {
                 return Ok(None);
             }
-            session_schema::validate(&mut connection, &provenance.session_id, Some(provenance))
-                .await
-                .map(Some)
+            let manifest =
+                session_schema::validate(&mut connection, &provenance.session_id, Some(provenance))
+                    .await?;
+            let version = session_schema::version(&mut connection).await?;
+            Ok(Some((manifest, version)))
         }
         .await;
         let result = database::finish_read(connection, &inner.lifecycle, result).await?;
@@ -105,7 +107,8 @@ pub(super) async fn materialize(
         #[cfg(test)]
         false,
     )
-    .await;
+    .await
+    .map(|manifest| (manifest, 2));
     database::finish_write(
         connection,
         &inner.lifecycle,

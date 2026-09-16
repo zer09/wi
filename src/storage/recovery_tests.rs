@@ -390,8 +390,11 @@ async fn storage_recovery_refresh_is_monotonic_and_never_creates_or_promotes_row
     let current = store.list_sessions(None, 2).await.unwrap();
     let guard = store.inner.lifecycle.admit().unwrap();
     assert_eq!(
-        catalog_sync::publish(&store.inner, &old).await.unwrap(),
-        RefreshResult::Unchanged
+        catalog_sync::publish(&store.inner, &old)
+            .await
+            .unwrap_err()
+            .code(),
+        "storage.integrity"
     );
     guard.finish();
     assert_eq!(store.list_sessions(None, 2).await.unwrap(), current);

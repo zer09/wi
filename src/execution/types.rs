@@ -31,7 +31,9 @@ pub enum PersistentRunResult {
 pub enum PersistentRunStage {
     Lookup,
     Preflight,
+    History,
     Acceptance,
+    ProviderBinding,
     RuntimeEvent,
     ToolResult,
     FinalResult,
@@ -42,7 +44,9 @@ impl PersistentRunStage {
         match self {
             Self::Lookup => "lookup",
             Self::Preflight => "preflight",
+            Self::History => "history",
             Self::Acceptance => "acceptance",
+            Self::ProviderBinding => "provider_binding",
             Self::RuntimeEvent => "runtime_event",
             Self::ToolResult => "tool_result",
             Self::FinalResult => "final_result",
@@ -114,6 +118,10 @@ impl PersistentRunFailure {
             None,
             PersistentRunCause::Gateway(error),
         )
+    }
+
+    pub(super) fn history(cause: PersistentRunCause) -> Self {
+        Self::new(PersistentRunStage::History, None, cause)
     }
 
     fn new(

@@ -7,8 +7,9 @@ pub(crate) use observer::RunObserver;
 use observer::SyncObserver;
 
 use crate::{
-    Gateway, GatewayError, InputItem, ItemKind, ModelResponse, ProviderEvent, ProviderSession,
-    ResponseOutcome, SessionControl, SessionOptions, ToolDefinition, Transport, UpstreamOutcome,
+    ConversationReplay, Gateway, GatewayError, InputItem, ItemKind, ModelResponse, ProviderEvent,
+    ProviderSession, ResponseOutcome, SessionControl, SessionOptions, ToolDefinition, Transport,
+    UpstreamOutcome,
     tools::{ToolExecutionEvent, ToolObserver, ToolRegistry},
     validate_input,
 };
@@ -168,6 +169,20 @@ pub(crate) struct AdmittedRun {
     options: SessionOptions,
     input: Vec<InputItem>,
     scope: ToolRegistry,
+    replay: Option<ConversationReplay>,
+}
+
+impl AdmittedRun {
+    pub(crate) fn with_replay(
+        mut self,
+        gateway: &Gateway,
+        replay: ConversationReplay,
+    ) -> crate::Result<Self> {
+        // Validate the exact snapshot and new input that provider opening and drive will use.
+        gateway.validate_replay(&self.provider_id, &self.options, &replay, &self.input)?;
+        self.replay = Some(replay);
+        Ok(self)
+    }
 }
 
 pub(crate) fn admit(
@@ -229,6 +244,7 @@ pub(crate) fn admit_with_snapshot(
         options: request.options,
         input,
         scope,
+        replay: None,
     })
 }
 
@@ -244,6 +260,7 @@ pub(crate) async fn run_admitted<O: RunObserver>(
         options,
         input,
         mut scope,
+        replay,
     } = admitted;
     let mut state = State {
         observer,
@@ -260,11 +277,34 @@ pub(crate) async fn run_admitted<O: RunObserver>(
     let execution = async {
         state.send(RunEvent::RunStarted).await?;
         checkpoint(&cancel)?;
+        let requested_model = options.model.clone();
         let mut session = cancellable(&cancel, gateway.open_session(&provider_id, options))
             .await?
             .map_err(|_| failed("session_open"))?;
         guard.0 = Some(session.control.clone());
         state.session_id = Some(session.id.clone());
+        if let Some(replay) = replay {
+            let identity = session
+                .control
+                .replay_identity()
+                .ok_or_else(|| failed("history_identity"))?;
+            if let Err(error) = state
+                .observer
+                .provider_opened(&session.id, &requested_model, &identity)
+                .await
+            {
+                state.sink_error = Some(error);
+                return Err(failed("event_sink"));
+            }
+            // Save the actual binding even when this account cannot receive the old history.
+            if !replay.runs().is_empty() && replay.expected_identity() != Some(&identity) {
+                return Err(failed("history_identity"));
+            }
+            checkpoint(&cancel)?;
+            cancellable(&cancel, session.control.install_replay(replay))
+                .await?
+                .map_err(|_| failed("history_restore"))?;
+        }
         let context = TurnContext {
             provider: &provider_id,
             cancel: &cancel,

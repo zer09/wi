@@ -132,8 +132,13 @@ fn parts(v: &Value, kinds: &[(&str, &str)]) -> Option<()> {
     }
     Some(())
 }
-fn complete(item: &Value) -> Option<()> {
+pub(super) fn complete(item: &Value) -> Option<()> {
     bounded(&item["id"])?;
+    ordinary_item(item)
+}
+
+// Native terminal items can omit an ID; recovered done items must have one.
+pub(super) fn ordinary_item(item: &Value) -> Option<()> {
     if let Some(status) = item.get("status")
         && status.as_str() != Some("completed")
     {

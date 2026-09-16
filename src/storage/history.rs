@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Connection, Row, SqliteConnection, sqlite::SqliteRow};
 
 use super::{
-    ApplicationSessionId, RecordedRunInput, RunId, StorageError, StoredEventId, database,
+    ApplicationSessionId, RecordedProviderBinding, RecordedRunInput, RunId, StorageError,
+    StoredEventId, StoredHistorySelection, database,
     dto::{self, CreatedPayload, RenamedPayload},
     records,
     session_schema::integrity,
@@ -29,6 +30,21 @@ impl AcceptedPayload {
     }
     pub fn owner_instance_id(&self) -> &StoredEventId {
         &self.owner_instance_id
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistorySelectedPayload {
+    pub(super) run_id: RunId,
+    pub(super) selection: StoredHistorySelection,
+}
+impl HistorySelectedPayload {
+    pub fn run_id(&self) -> &RunId {
+        &self.run_id
+    }
+    pub fn selection(&self) -> &StoredHistorySelection {
+        &self.selection
     }
 }
 
@@ -85,6 +101,10 @@ pub enum StoredEventPayload {
     SessionRenamed { title: String },
     #[serde(rename = "run.accepted")]
     RunAccepted(AcceptedPayload),
+    #[serde(rename = "run.history.selected")]
+    RunHistorySelected(HistorySelectedPayload),
+    #[serde(rename = "run.provider.bound")]
+    RunProviderBound(RecordedProviderBinding),
     #[serde(rename = "runtime.observed")]
     RuntimeObserved(RunEventEnvelope),
     #[serde(rename = "tool.result.recorded")]
@@ -138,6 +158,8 @@ impl StoredEvent {
             StoredEventPayload::SessionCreated(_) => "session.created",
             StoredEventPayload::SessionRenamed { .. } => "session.renamed",
             StoredEventPayload::RunAccepted(_) => "run.accepted",
+            StoredEventPayload::RunHistorySelected(_) => "run.history.selected",
+            StoredEventPayload::RunProviderBound(_) => "run.provider.bound",
             StoredEventPayload::RuntimeObserved(_) => "runtime.observed",
             StoredEventPayload::ToolResultRecorded(_) => "tool.result.recorded",
             StoredEventPayload::RunResultRecorded(_) => "run.result.recorded",
@@ -240,6 +262,22 @@ impl TryFrom<StoredEventFields> for StoredEvent {
                     return Err(integrity());
                 }
                 StoredEventPayload::RunAccepted(payload)
+            }
+            "run.history.selected" => {
+                let payload: HistorySelectedPayload = dto::decode(&json)?;
+                if run_id.as_ref() != Some(&payload.run_id)
+                    || payload.selection.through_sequence().checked_add(2) != Some(sequence)
+                {
+                    return Err(integrity());
+                }
+                StoredEventPayload::RunHistorySelected(payload)
+            }
+            "run.provider.bound" => {
+                let payload: RecordedProviderBinding = dto::decode(&json)?;
+                if run_id.as_ref() != Some(payload.run_id()) {
+                    return Err(integrity());
+                }
+                StoredEventPayload::RunProviderBound(payload)
             }
             "runtime.observed" => {
                 let event: RunEventEnvelope = dto::decode(&json)?;
@@ -419,6 +457,7 @@ macro_rules! redacted {
 }
 redacted!(
     AcceptedPayload,
+    HistorySelectedPayload,
     ToolResultPayload,
     InterruptedPayload,
     StoredEventPayload,

@@ -275,11 +275,17 @@ async fn p1b2_19_21_missing_final_result_and_restart_are_not_no_submission_proof
         plan.stop = stop;
         plan.final_result = false;
         let (run, _) = rig.record(plan).await;
-        assert_incomplete(
-            prepare_session_replay(&rig.session, ID, MODEL)
-                .await
-                .unwrap_err(),
-        );
+        if stop == Stop::Never {
+            let prepared = rig.prepare().await;
+            assert_eq!(prepared.included_run_count(), 1);
+            assert!(prepared.excluded_runs().is_empty());
+        } else {
+            assert_incomplete(
+                prepare_session_replay(&rig.session, ID, MODEL)
+                    .await
+                    .unwrap_err(),
+            );
+        }
         let id = rig.session.session_id().clone();
         let prefix = history(&rig.session).await;
         let before = rig.counters.work();
@@ -310,8 +316,21 @@ async fn p1b2_19_21_missing_final_result_and_restart_are_not_no_submission_proof
                 value(prepared.replay().runs()[0].exchanges()[0].response()),
                 value(&original)
             );
+        } else if stop == Stop::Never {
+            assert_eq!(
+                recorded.state(),
+                crate::storage::RecordedRunState::Completed
+            );
+            assert_eq!(reopened_history.len(), prefix.len());
+            let prepared = prepare_session_replay(&session, ID, MODEL).await.unwrap();
+            assert_eq!(prepared.included_run_count(), 1);
+            assert!(prepared.excluded_runs().is_empty());
+            assert_eq!(
+                value(prepared.replay().runs()[0].exchanges()[0].response()),
+                value(&original)
+            );
         } else {
-            // An ordinary terminal still needs its actual RunResult, even after reopen.
+            // An empty terminal still needs its actual zero-attempt RunResult.
             assert_ne!(
                 recorded.state(),
                 crate::storage::RecordedRunState::Interrupted
@@ -325,6 +344,41 @@ async fn p1b2_19_21_missing_final_result_and_restart_are_not_no_submission_proof
         assert_eq!(value(&reopened_history), value(&history(&session).await));
         assert_eq!(rig.counters.work(), before);
         reopened.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn p1b2_19_closed_cancelled_terminal_replays_without_final_result() {
+    for stop in [Stop::Finish, Stop::SecondTurn] {
+        let rig = Rig::new().await;
+        let mut plan = Plan::new(
+            rig.input("closed cancelled task"),
+            vec![response("closed", vec![call("x", json!({"a":17,"b":25}))])],
+        );
+        plan.stop = stop;
+        plan.final_result = false;
+        let (run, result) = rig.record(plan).await;
+        assert_eq!(result.outcome, RunOutcome::CancelledLocally);
+        assert!(result.events_complete);
+        let prepared = rig.prepare().await;
+        assert_eq!(prepared.included_run_count(), 1);
+        assert_eq!(prepared.included_exchange_count(), 1);
+        assert!(prepared.excluded_runs().is_empty());
+        assert_eq!(prepared.replay().runs()[0].source_run_id(), run.as_str());
+        assert_eq!(
+            value(&prepared.replay().runs()[0].exchanges()[0].tool_results()),
+            json!([{"kind":"tool_result", "call_id":"x", "output":"{\"sum\":42}"}])
+        );
+        assert!(
+            rig.session
+                .run_record(run)
+                .await
+                .unwrap()
+                .unwrap()
+                .result()
+                .is_none()
+        );
+        rig.store.close().await.unwrap();
     }
 }
 

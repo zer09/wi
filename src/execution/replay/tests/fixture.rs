@@ -61,6 +61,7 @@ pub enum Stop {
     Intent,
     Result,
     Finish,
+    ToolsPrepared,
     Partial,
     SecondTurn,
     OpenFail,
@@ -360,6 +361,10 @@ impl RunObserver for Recorder<'_> {
                 )
             ),
             RunEvent::TurnStarted { number: 2 } => self.stop == Stop::SecondTurn,
+            RunEvent::TurnFinished {
+                outcome: run::TurnOutcome::ToolsPrepared,
+                ..
+            } => self.stop == Stop::ToolsPrepared,
             _ => false,
         };
         if stop {

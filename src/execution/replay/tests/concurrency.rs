@@ -48,11 +48,10 @@ async fn p1b2_07_08_paged_fixed_head_ignores_concurrent_rename_and_uses_checkpoi
 #[tokio::test]
 async fn p1b2_08_20_result_committed_above_h_cannot_complete_captured_history() {
     let rig = Rig::new().await;
-    let mut plan = Plan::new(
-        rig.input("closed result"),
-        vec![response("call", vec![call("x", json!({"a":1,"b":2}))])],
-    );
-    plan.stop = Stop::Finish;
+    // Unlike a complete exchange, an empty run needs its actual final result
+    // before the captured prefix can prove that no request was attempted.
+    let mut plan = Plan::new(rig.input("not submitted"), vec![]);
+    plan.stop = Stop::OpenFail;
     plan.final_result = false;
     let (run, actual) = rig.record(plan).await;
     let hooks = Arc::new(Hooks::default());
@@ -68,14 +67,16 @@ async fn p1b2_08_20_result_committed_above_h_cannot_complete_captured_history() 
     rig.session
         .append_run_records(
             OperationId::new(),
-            run,
+            run.clone(),
             vec![AppendRunRecord::Result(actual)],
         )
         .await
         .unwrap();
     pause.release.notify_one();
     assert_incomplete(reader.await.unwrap().unwrap_err());
-    assert_eq!(rig.prepare().await.included_exchange_count(), 1);
+    let prepared = rig.prepare().await;
+    assert_eq!(prepared.included_exchange_count(), 0);
+    assert_eq!(prepared.excluded_runs()[0].run_id(), run);
     rig.store.close().await.unwrap();
 }
 

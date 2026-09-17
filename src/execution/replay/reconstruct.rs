@@ -26,6 +26,7 @@ pub(super) struct ActiveRun {
     provider_sequence: Option<u64>,
     turns_started: u64,
     turns_finished: u64,
+    last_turn: Option<(TurnOutcome, Option<UpstreamOutcome>)>,
     next_turn_allowed: bool,
     request_ids: HashSet<String>,
     turn_ids: HashSet<String>,
@@ -75,6 +76,7 @@ impl ActiveRun {
             provider_sequence: None,
             turns_started: 0,
             turns_finished: 0,
+            last_turn: None,
             next_turn_allowed: true,
             request_ids: HashSet::new(),
             turn_ids: HashSet::new(),
@@ -233,9 +235,12 @@ impl ActiveRun {
                             {
                                 return Err(incomplete());
                             }
-                        } else if !matches!(outcome, TurnOutcome::Stopped { .. }) {
+                        } else if !matches!(outcome, TurnOutcome::Stopped { .. })
+                            || *upstream_outcome != Some(UpstreamOutcome::NotSubmitted)
+                        {
                             return Err(incomplete());
                         }
+                        self.last_turn = Some((outcome.clone(), *upstream_outcome));
                         self.next_turn_allowed = matches!(outcome, TurnOutcome::ToolsPrepared)
                             && turn.unfinished_result.is_none();
                         self.finish_turn()?;
@@ -314,6 +319,8 @@ impl ActiveRun {
             terminal: self.terminal,
             turns_started: self.turns_started,
             turns_finished: self.turns_finished,
+            last_turn: self.last_turn,
+            new_tool_dispatches: self.saved.len() as u64,
             last_request: self.last_request,
             interrupted,
             result_seen: false,
@@ -431,6 +438,8 @@ pub(super) struct ClosedRun {
     terminal: Option<(RunOutcome, RunSummary)>,
     turns_started: u64,
     turns_finished: u64,
+    last_turn: Option<(TurnOutcome, Option<UpstreamOutcome>)>,
+    new_tool_dispatches: u64,
     last_request: Option<String>,
     interrupted: bool,
     result_seen: bool,
@@ -483,12 +492,48 @@ impl ClosedRun {
         Ok(())
     }
     pub fn require_result(&self) -> Result<()> {
-        // Restart proves storage termination, not non-submission. Without a result,
-        // every started turn needs a closed exchange, including any trailing turn.
+        if let Some((outcome, summary)) = &self.terminal {
+            // A final-result write can fail after RunFinished commits. Check that
+            // terminal against the actual exchanges, not just a matching RunResult.
+            let prepared: u64 = self
+                .exchanges
+                .iter()
+                .map(|exchange| exchange.tool_results().len() as u64)
+                .sum();
+            let outcome_matches = match self.last_turn.as_ref().map(|(outcome, _)| outcome) {
+                Some(TurnOutcome::ModelCompleted) => matches!(outcome, RunOutcome::Completed),
+                Some(TurnOutcome::Stopped { reason }) => {
+                    !matches!(reason, RunOutcome::Completed) && outcome == reason
+                }
+                Some(TurnOutcome::ToolsPrepared) => {
+                    // Only the next loop's cancellation check or counter increment can stop here.
+                    matches!(outcome, RunOutcome::CancelledLocally)
+                        || matches!(outcome, RunOutcome::Failed { code } if code == "counter_overflow")
+                }
+                None => !matches!(outcome, RunOutcome::Completed),
+            };
+            if !outcome_matches
+                || summary.turns_started != self.turns_started
+                || summary.turns_finished != self.turns_finished
+                || self.turns_finished != self.turns_started
+                || summary.model_requests_attempted != self.exchanges.len() as u64
+                || summary.model_requests_admitted != self.exchanges.len() as u64
+                || summary.new_tool_dispatches != self.new_tool_dispatches
+                || summary.tool_results_prepared != prepared
+                || summary.reused_results != prepared - self.new_tool_dispatches
+                || summary.last_request_id != self.last_request
+                || summary.last_upstream_outcome
+                    != self.last_turn.as_ref().and_then(|(_, upstream)| *upstream)
+            {
+                return Err(incomplete());
+            }
+        }
+        // Empty history needs actual zero-attempt evidence. With no normal terminal,
+        // restart still requires a closed exchange for every started turn.
         if !self.result_seen
-            && (!self.interrupted
-                || self.exchanges.is_empty()
-                || self.turns_started != self.exchanges.len() as u64)
+            && (self.exchanges.is_empty()
+                || (self.terminal.is_none()
+                    && (!self.interrupted || self.turns_started != self.exchanges.len() as u64)))
         {
             return Err(incomplete());
         }

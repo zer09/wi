@@ -8,6 +8,165 @@ fn pause_record(task: &Task, record: Record) -> Arc<Pause> {
     pause
 }
 
+async fn final_result_failure_replays(responses: Vec<ModelResponse>, tool_calls: usize) {
+    let fixture = Fixture::new().await;
+    let task = fixture.task(
+        "final result fault",
+        Plan {
+            responses: responses.clone(),
+            ..Plan::default()
+        },
+    );
+    task.session.test_hooks().arm_record(
+        Record::FinalResult,
+        Point::BeforeCommit,
+        Action::Fail(StorageErrorKind::Io),
+    );
+    let failure = watchdog(task.start(CancellationToken::new()))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(failure.stage(), PersistentRunStage::FinalResult);
+    assert!(matches!(failure.cause(), PersistentRunCause::Storage(error)
+        if error.certainty() == CommitCertainty::NotCommitted));
+    assert!(failure.acceptance().is_some());
+    assert!(
+        task.session
+            .lookup_receipt(failure.operation_id().unwrap().clone())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let result = failure.observed_result().unwrap();
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert!(result.events_complete);
+    assert!(result.sink_error.is_none());
+    assert_eq!(
+        result.summary.model_requests_attempted,
+        responses.len() as u64
+    );
+    assert_eq!(
+        result.summary.model_requests_admitted,
+        responses.len() as u64
+    );
+    assert_eq!(result.summary.new_tool_dispatches, tool_calls as u64);
+    assert_eq!(count(&fixture.counts.effects), tool_calls);
+    assert_eq!(count(&task.observed.records.opens), 1);
+    assert_eq!(count(&task.observed.records.closes), 1);
+    let saved = task
+        .session
+        .run_record(task.run_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.state(), RecordedRunState::Completed);
+    assert!(saved.result().is_none());
+    let before = history(&task.session).await;
+    assert!(
+        matches!(before.last().unwrap().payload(), StoredEventPayload::RuntimeObserved(event)
+        if matches!(&event.event, RunEvent::RunFinished { outcome: RunOutcome::Completed, summary }
+            if value(summary) == value(&result.summary)))
+    );
+
+    let prepared = prepare_session_replay(&task.session, ID, "synthetic")
+        .await
+        .unwrap();
+    assert_eq!(prepared.included_run_count(), 1);
+    assert_eq!(prepared.included_exchange_count(), responses.len());
+    assert!(prepared.excluded_runs().is_empty());
+    let replay = prepared.replay();
+    let old = &replay.runs()[0];
+    assert_eq!(old.source_run_id(), task.run_id.as_str());
+    assert_eq!(old.prepared_prompt(), task.input.prepared_request().prompt);
+    for (exchange, response) in old.exchanges().iter().zip(&responses) {
+        assert_eq!(value(exchange.response()), value(response));
+        let mut expected = Vec::new();
+        for call in response
+            .output
+            .iter()
+            .filter_map(|item| item.function_call.as_ref())
+        {
+            let saved = task
+                .session
+                .tool_result(task.run_id.clone(), call.call_id.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                saved.request_id(),
+                Some(format!("{}-q1", task.run_id).as_str())
+            );
+            assert_eq!(saved.output(), Some("{\"sum\":42}"));
+            assert_eq!(saved.is_error(), Some(false));
+            expected.push(InputItem::ToolResult {
+                call_id: call.call_id.clone(),
+                output: saved.output().unwrap().into(),
+            });
+        }
+        assert_eq!(value(&exchange.tool_results()), value(&expected));
+    }
+    assert_eq!(value(&before), value(&history(&task.session).await));
+    fixture.store.close().await.unwrap();
+
+    let reopened = SessionStore::open(fixture.temp.path().join("root"))
+        .await
+        .unwrap();
+    let session = reopened
+        .open_session(task.session.session_id().clone())
+        .await
+        .unwrap();
+    assert_eq!(value(&before), value(&history(&session).await));
+    let prepared_after = prepare_session_replay(&session, ID, "synthetic")
+        .await
+        .unwrap();
+    assert_eq!(prepared_after.selection(), prepared.selection());
+    assert_eq!(value(&prepared_after.replay()), value(&replay));
+    assert_eq!(
+        value(&saved),
+        value(
+            &session
+                .run_record(task.run_id.clone())
+                .await
+                .unwrap()
+                .unwrap()
+        )
+    );
+    assert_eq!(count(&fixture.counts.effects), tool_calls);
+    assert_eq!(
+        task.observed.records.inputs.lock().unwrap().len(),
+        responses.len()
+    );
+
+    let (tools, counts) = replay_tools(&session);
+    let next = Task::new(&session, tools, "explicit next task", Plan::default());
+    assert_eq!(next.execute().await.2.outcome, RunOutcome::Completed);
+    assert_eq!(
+        value(&next.observed.installed.lock().unwrap()[0]),
+        value(&replay)
+    );
+    assert_eq!(count(&counts.validations), 0);
+    assert_eq!(count(&counts.effects), 0);
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn p1b2_25_no_call_terminal_replays_after_final_result_persistence_failure() {
+    final_result_failure_replays(vec![response("final", vec![], "done")], 0).await;
+}
+
+#[tokio::test]
+async fn p1b2_25_tool_terminal_and_reuse_replay_after_final_result_persistence_failure() {
+    final_result_failure_replays(
+        vec![
+            response("first", vec![call("same-call", 17, 25)], ""),
+            response("reused", vec![call("same-call", 17, 25)], ""),
+            response("final", vec![], "42"),
+        ],
+        1,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn p1b2_09_25_binding_commit_is_awaited_before_install_and_generate() {
     let fixture = Fixture::new().await;

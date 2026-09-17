@@ -1,4 +1,5 @@
 use super::*;
+use crate::run::RunOutcome;
 use sqlx::{Connection, SqliteConnection, sqlite::SqliteConnectOptions};
 
 async fn mutate(rig: &Rig, sequence: u64, payload: Value) {
@@ -224,6 +225,211 @@ async fn p1b2_20_authoritative_response_must_be_unique_and_agree_with_actual_res
         );
         rig.store.close().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn p1b2_20_terminal_summary_matches_canonical_exchanges_with_or_without_final_result() {
+    use crate::run::RunEvent;
+
+    for final_result in [false, true] {
+        for field in [
+            "turns_started",
+            "turns_finished",
+            "model_requests_attempted",
+            "model_requests_admitted",
+            "new_tool_dispatches",
+            "tool_results_prepared",
+            "reused_results",
+            "last_request_id",
+            "last_upstream_outcome",
+            "outcome",
+        ] {
+            let rig = Rig::new().await;
+            let mut plan = Plan::new(
+                rig.input("terminal summary"),
+                vec![
+                    response("first", vec![call("x", json!({"a":17,"b":25}))]),
+                    response("reused", vec![call("x", json!({"a":17,"b":25}))]),
+                    response("done", vec![]),
+                ],
+            );
+            plan.final_result = final_result;
+            rig.record(plan).await;
+            assert_eq!(rig.prepare().await.included_exchange_count(), 3);
+            let records = history(&rig.session).await;
+            let terminal = records
+                .iter()
+                .find(|record| {
+                    matches!(
+                        record.payload(),
+                        StoredEventPayload::RuntimeObserved(crate::run::RunEventEnvelope {
+                            event: RunEvent::RunFinished { .. },
+                            ..
+                        })
+                    )
+                })
+                .unwrap();
+            let mut payload = value(terminal)["payload"].clone();
+            match field {
+                "outcome" => payload[field] = json!({"type":"failed", "code":"event_sink"}),
+                "last_request_id" => payload["summary"][field] = json!("wrong request"),
+                "last_upstream_outcome" => payload["summary"][field] = json!("not_submitted"),
+                _ => {
+                    payload["summary"][field] =
+                        json!(payload["summary"][field].as_u64().unwrap() + 1)
+                }
+            }
+            mutate(&rig, terminal.sequence(), payload.clone()).await;
+            if final_result {
+                // Matching corruption in both terminal records must not hide the bad summary.
+                let result = records.last().unwrap();
+                assert!(matches!(
+                    result.payload(),
+                    StoredEventPayload::RunResultRecorded(_)
+                ));
+                let mut result_payload = value(result)["payload"].clone();
+                result_payload["summary"] = payload["summary"].clone();
+                result_payload["outcome"] = payload["outcome"].clone();
+                mutate(&rig, result.sequence(), result_payload).await;
+            }
+            assert_incomplete(
+                prepare_session_replay(&rig.session, ID, MODEL)
+                    .await
+                    .unwrap_err(),
+            );
+            rig.store.close().await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn p1b2_20_terminal_outcome_must_agree_with_stopped_turn_without_final_result() {
+    let rig = Rig::new().await;
+    let mut plan = Plan::new(
+        rig.input("cancelled terminal"),
+        vec![response("closed", vec![call("x", json!({"a":17,"b":25}))])],
+    );
+    plan.stop = Stop::Finish;
+    plan.final_result = false;
+    rig.record(plan).await;
+    assert_eq!(rig.prepare().await.included_exchange_count(), 1);
+    let records = history(&rig.session).await;
+    let terminal = records.last().unwrap();
+    for outcome in [
+        json!({"type":"completed"}),
+        json!({"type":"failed", "code":"event_sink"}),
+    ] {
+        let mut payload = value(terminal)["payload"].clone();
+        payload["outcome"] = outcome;
+        mutate(&rig, terminal.sequence(), payload).await;
+        assert_incomplete(
+            prepare_session_replay(&rig.session, ID, MODEL)
+                .await
+                .unwrap_err(),
+        );
+    }
+    rig.store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn p1b2_20_tools_prepared_terminal_rejects_unrelated_outcomes_without_final_result() {
+    use crate::run::{RunEvent, TurnOutcome};
+
+    let rig = Rig::new().await;
+    let original = response("closed", vec![call("x", json!({"a":17,"b":25}))]);
+    let mut plan = Plan::new(rig.input("tools prepared terminal"), vec![original.clone()]);
+    plan.stop = Stop::ToolsPrepared;
+    plan.final_result = false;
+    let (run, result) = rig.record(plan).await;
+    assert_eq!(result.outcome, RunOutcome::CancelledLocally);
+    assert!(result.events_complete);
+    assert!(result.sink_error.is_none());
+    assert_eq!(result.summary.turns_started, 1);
+    assert_eq!(result.summary.turns_finished, 1);
+    assert!(
+        rig.session
+            .run_record(run.clone())
+            .await
+            .unwrap()
+            .unwrap()
+            .result()
+            .is_none()
+    );
+    let records = history(&rig.session).await;
+    assert!(
+        matches!(records[records.len() - 2].payload(), StoredEventPayload::RuntimeObserved(event)
+        if matches!(event.event, RunEvent::TurnFinished { number: 1, outcome: TurnOutcome::ToolsPrepared, .. }))
+    );
+    let terminal = records.last().unwrap();
+    assert!(
+        matches!(terminal.payload(), StoredEventPayload::RuntimeObserved(event)
+        if matches!(&event.event, RunEvent::RunFinished { outcome: RunOutcome::CancelledLocally, summary }
+            if value(summary) == value(&result.summary)))
+    );
+    let prepared = rig.prepare().await;
+    assert_eq!(prepared.included_run_count(), 1);
+    assert_eq!(prepared.included_exchange_count(), 1);
+    assert!(prepared.excluded_runs().is_empty());
+    let replay = prepared.replay();
+    assert_eq!(replay.runs()[0].source_run_id(), run.as_str());
+    assert_eq!(
+        value(replay.runs()[0].exchanges()[0].response()),
+        value(&original)
+    );
+    assert_eq!(
+        value(&replay.runs()[0].exchanges()[0].tool_results()),
+        json!([{"kind":"tool_result", "call_id":"x", "output":"{\"sum\":42}"}])
+    );
+    assert_eq!(value(&records), value(&history(&rig.session).await));
+
+    for outcome in [
+        json!({"type":"failed", "code":"event_sink"}),
+        json!({"type":"failed", "code":"history_restore"}),
+        json!({"type":"failed", "code":"model_failed"}),
+        json!({"type":"failed", "code":"counter_overflow_extra"}),
+        json!({"type":"completed"}),
+    ] {
+        let mut payload = value(terminal)["payload"].clone();
+        payload["outcome"] = outcome;
+        mutate(&rig, terminal.sequence(), payload).await;
+        let before = history(&rig.session).await;
+        let work = rig.counters.work();
+        assert_incomplete(
+            prepare_session_replay(&rig.session, ID, MODEL)
+                .await
+                .unwrap_err(),
+        );
+        assert_eq!(value(&before), value(&history(&rig.session).await));
+        assert_eq!(rig.counters.work(), work);
+    }
+    rig.store.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn p1b2_20_tools_prepared_terminal_counter_overflow_allowlist_without_final_result() {
+    let rig = Rig::new().await;
+    let mut plan = Plan::new(
+        rig.input("tools prepared failure code"),
+        vec![response("closed", vec![call("x", json!({"a":17,"b":25}))])],
+    );
+    plan.stop = Stop::ToolsPrepared;
+    plan.final_result = false;
+    let (_, result) = rig.record(plan).await;
+    assert_eq!(result.outcome, RunOutcome::CancelledLocally);
+    assert!(result.events_complete);
+    let records = history(&rig.session).await;
+    let terminal = records.last().unwrap();
+    let mut payload = value(terminal)["payload"].clone();
+    // This mutation checks the allowed failure code, not an actual producer overflow.
+    payload["outcome"] = json!({"type":"failed", "code":"counter_overflow"});
+    mutate(&rig, terminal.sequence(), payload).await;
+    let before = history(&rig.session).await;
+    let prepared = rig.prepare().await;
+    assert_eq!(prepared.included_run_count(), 1);
+    assert_eq!(prepared.included_exchange_count(), 1);
+    assert!(prepared.excluded_runs().is_empty());
+    assert_eq!(value(&before), value(&history(&rig.session).await));
+    rig.store.close().await.unwrap();
 }
 
 #[test]

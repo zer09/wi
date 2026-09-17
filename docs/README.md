@@ -16,9 +16,35 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
 at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
-P1-B2 history restoration is implemented in source revision `80f3872`. Evidence head
-`cc9a6a2` passed push and PR workflows on Ubuntu, macOS and Windows. PR #7 remains
-unmerged. V1 service remains separately scoped and unimplemented.
+P1-B2 plus B2-E01 joined acceptance is accepted and merged in PR #7 at `50f4dff`.
+Its reviewed head `e25279a` passed push35227116004 attempt3 and PR35227120456 attempt1
+on Ubuntu/macOS/Windows. Earlier watchdog failures remain in the evidence; a passing
+rerun is not proof they were fixed. [Merge closure](https://github.com/zer09/wi/pull/7#issuecomment-5716447572)
+records the exact review, attempts and scope. V1-A below is new planning, not implementation.
+
+## Active plan: V1-A service-owned execution
+
+Contract **v1a.0**, baseline `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
+All30 V1A-00..29 rows are NOT RUN. This first service slice adds a shared in-process
+RunHost: tracked execution outlives caller/ticket loss, actual committed acceptance is
+observable before completion, cancellation is explicit, and owner shutdown drains runs
+before closing storage. It reuses B2 rather than adding another model/tool loop.
+
+- [V1-A contract](slices/v1a/CONTRACT.md): Ownership, dispatch/receipt/completion,
+  notifier integration, duplicate/cancellation/failure/shutdown boundaries and exclusions.
+- [V1-A API](slices/v1a/API.md): Additive trusted Rust interfaces and exact state meanings;
+  no database or network schema change.
+- [V1-A matrix](slices/v1a/MATRIX.md): Thirty concrete acceptance rows, joined public host
+  WS/SSE cases, real SQLite, process tests, gates and required report structure.
+- [V1-A validation](slices/v1a/VALIDATION.md): Actual baseline interfaces, new decisions,
+  dependency semantics, source-review and previous CI evidence limits.
+- [V1-A implementor prompt](slices/v1a/IMPLEMENTOR_PROMPT.md): Fresh local implementation
+  assignment; no Git/live/network-service permission beyond its stated scope.
+
+V1-B will separately provide network commands, client authentication, browser-safe
+protocol and reconnect/subscription behavior. GUI follows that API. Neither V1-A nor
+V1-B is currently implemented. Existing session/history read APIs remain canonical;
+ordinary CLI persistence and new coding tools are not incidental additions to this plan.
 
 ## Current implementation: P1-B2 stored conversation submissions
 
@@ -38,7 +64,8 @@ terminal history can contribute without a final-result append when `RunFinished`
 canonical exchanges agree. Empty-run exclusion needs the actual zero-attempt result.
 Complete process-interrupted exchanges may inform a new task; incomplete, uncertain,
 active or unbound history is rejected without repair, truncation or automatic resumption.
-A fresh WebSocket sends full native history without an old parent ID. SSE retains native
+A fresh WebSocket sends the selected conversation's history without an old parent ID;
+that history is empty for the first task in a new application session. SSE retains native
 history. The actual opened account must match before installation or generation.
 
 - [P1-B2 contract](slices/p1b2/CONTRACT.md), [schema](slices/p1b2/SCHEMA.md) and
@@ -47,7 +74,8 @@ history. The actual opened account must match before installation or generation.
   [implementor prompt](slices/p1b2/IMPLEMENTOR_PROMPT.md): Historical planning handoff.
 - [P1-B2 verification](slices/p1b2/VERIFICATION.md) and
   [machine report](slices/p1b2/verification.json): Local and exact-head hosted evidence
-  for the source and evidence revisions; live opaque portability remains unsupported.
+  for the source and evidence revisions, including B2-E01 joined closure; live opaque
+  portability is not established.
 - [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
   stored skill content and an explicit new task after reopen; no credentials or network.
 
@@ -160,7 +188,6 @@ The committed reports describe the pre-push stage. Subsequent submitted-head CI 
 merge closure are recorded in [PR #4](https://github.com/zer09/wi/pull/4): final head
 `a4ee1db`, merge `dd720c0`. R1 adds no feature or runtime budget and does not reopen
 S2 or managed authentication. These earlier results are not P1-A execution evidence.
-
 - [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
   allowed edits, implementation sequence and authorization.
 - [R1 matrix](slices/r1/MATRIX.md): R1-00..R1-19, all initially NOT RUN;

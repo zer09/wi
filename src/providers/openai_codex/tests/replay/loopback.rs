@@ -5,6 +5,8 @@ use crate::{
 use futures_util::FutureExt;
 #[path = "boundary.rs"]
 mod boundary;
+#[path = "joined.rs"]
+mod joined;
 
 use std::sync::{
     Mutex,
@@ -137,15 +139,16 @@ fn events(id: &str, output: Vec<Value>, recovered: bool) -> Vec<Value> {
     events
 }
 async fn send_events_http(stream: &mut TcpStream, events: Vec<Value>, mime: bool) {
+    send_events_http_mime(stream, events, mime.then_some("text/event-stream")).await;
+}
+async fn send_events_http_mime(stream: &mut TcpStream, events: Vec<Value>, mime: Option<&str>) {
     let body = events
         .iter()
         .map(|event| format!("data: {event}\r\n\r\n"))
         .collect::<String>();
-    let content_type = if mime {
-        "Content-Type: text/event-stream\r\n"
-    } else {
-        ""
-    };
+    let content_type = mime
+        .map(|mime| format!("Content-Type: {mime}\r\n"))
+        .unwrap_or_default();
     let headers = format!(
         "HTTP/1.1 200 OK\r\n{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()

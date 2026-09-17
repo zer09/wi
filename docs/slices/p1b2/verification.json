@@ -2,6 +2,7 @@
   "contract": "p1b2.0",
   "status": "PASS",
   "accepted": true,
+  "status_scope": "Historical pre-repair acceptance and observations are retained. The 2026-09-17 acceptance_repair object records completed local acceptance-evidence closure on the uncommitted owner-review tree. Current exact-head hosted CI remains NOT_RUN; closure is subject to separately authorized commit/push and then exact-head cross-platform CI.",
   "baseline": "6fe0a538edf6bae39c9f933db8394b7d8483e2be",
   "planning_revision": "58fdb17d2eb621f65fb862d1ad313d57f07e0d18",
   "source_revision": "80f387294c92ff0287e614a7f9c658901979352f",
@@ -48,7 +49,7 @@
     {"id":"P1B2-13","status":"PASS","observer":"actual reuse and fresh-scope tests","assertions":["within-run reuse does not repeat effect/result","same call ID in B executes in fresh scope","missing/wrong-origin/result conflicts reject","call IDs are not globally rewritten"],"tests":["src/execution/replay/tests/fidelity.rs::p1b2_10_12_13_actual_multicall_reuse_and_run_scoped_results","src/execution/replay/tests/integrity.rs::p1b2_13_reuse_needs_its_actual_event_and_identical_original_arguments","examples/conversation_offline.rs"],"commands":["cargo test --all-targets","cargo run --example conversation_offline"],"source":["src/execution/replay/reconstruct.rs","src/tools.rs"],"blockers":[]},
     {"id":"P1B2-14","status":"PASS","observer":"native/effective fidelity tests and example","assertions":["native terminal and recovered output-item evidence replay effective items","recovered stored native output stays empty","opaque encrypted/refusal/reasoning/Unicode/CRLF/part structure survive","no UI text flattening or delta duplication"],"tests":["src/execution/replay/tests/fidelity.rs::p1b2_14_native_recovery_refusal_reasoning_empty_and_alias_fidelity","src/providers/openai_codex/tests/replay/validation.rs::native_and_recovered_compile_exact_items_results_and_original_terminal","examples/conversation_offline.rs"],"commands":["cargo test --all-targets","cargo run --example conversation_offline"],"source":["src/providers/openai_codex/replay.rs","src/providers/openai_codex/finalized.rs"],"blockers":[]},
     {"id":"P1B2-15","status":"PASS","observer":"both loopback transports with counted credentials","assertions":["identity derives from account ID loaded by Wire::open","credential source loads once for opening","rotated token keeps identity and account Y differs","diagnostics redact account/token/digest/prompt"],"tests":["src/providers/openai_codex/tests/replay/loopback.rs::opened_identity_uses_one_load_is_token_independent_and_account_exact_for_both_transports"],"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/wire.rs","src/providers/openai_codex/replay.rs"],"blockers":[]},
-    {"id":"P1B2-16","status":"PASS","observer":"public binding guard and direct install tests","assertions":["actual mismatched binding commits before failure","zero generate/tool/history send on mismatch","no account fallback occurs","matching identity succeeds and direct mismatch rejects"],"tests":["src/execution/tests/in_session.rs::p1b2_16_21_actual_mismatched_binding_commits_before_refusal_and_later_match_works","src/providers/openai_codex/tests/replay/install.rs::direct_mismatched_identity_rejects_without_network_or_semantic_events_on_both_transports"],"commands":["cargo test --all-targets"],"source":["src/run/mod.rs","src/providers/openai_codex/session.rs"],"blockers":[]},
+    {"id":"P1B2-16","status":"PASS","observer":"public binding guard and direct install tests","assertions":["actual mismatched binding commits before failure","zero generate/tool/history send on mismatch","no account fallback occurs","matching identity succeeds and direct mismatch rejects"],"tests":["src/execution/tests/in_session.rs::p1b2_16_21_actual_mismatched_binding_commits_before_refusal_and_later_match_works","src/providers/openai_codex/tests/replay/install.rs::direct_mismatched_identity_rejects_without_network_or_semantic_events_on_both_transports","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_04_public_session_websocket_records_actual_mismatch_and_later_matching_task","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_04_public_session_sse_records_actual_mismatch_and_later_matching_task"],"acceptance_repair":{"date":"2026-09-17","ids":["B2MR-04"],"status":"PASS"},"commands":["cargo test --all-targets"],"source":["src/run/mod.rs","src/providers/openai_codex/session.rs"],"blockers":[]},
     {"id":"P1B2-17","status":"PASS","observer":"pure preflight and execution-failure tests","assertions":["provider/model/format boundaries reject before acceptance/open","response model aliases are preserved","missing identity records history_identity with zero generation","unsupported provider keeps default error"],"tests":["src/execution/replay/tests/policy.rs::p1b2_17_provider_model_format_and_principal_boundaries","src/execution/tests/in_session.rs::p1b2_17_21_missing_identity_is_recorded_then_excluded_without_install","src/execution/tests/in_session/admission.rs::p1b2_17_25_pure_replay_rejection_and_selection_rollback_do_no_provider_work"],"commands":["cargo test --all-targets"],"source":["src/gateway.rs","src/run/mod.rs"],"blockers":[]},
     {"id":"P1B2-18","status":"PASS","observer":"actor lifecycle races on real controls","assertions":["install is fresh-only, atomic and once-only","busy/used/closed/repeated races reject","install has no semantic event or request","cancellation/drop closes ownership without retry and idle behavior remains"],"tests":["src/providers/openai_codex/tests/replay/install.rs::install_is_atomic_once_only_and_serializes_with_generate_without_events","src/providers/openai_codex/tests/replay/install.rs::generate_wins_reservation_and_install_rejects_busy_then_used","src/providers/openai_codex/tests/replay/install.rs::cancelled_install_and_lost_ack_close_ownership_without_request_or_retry","src/execution/tests/in_session/startup.rs::p1b2_18_23_26_install_cancellation_and_store_close_guard_session_without_retry"],"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/session.rs"],"blockers":[]},
     {"id":"P1B2-19","status":"PASS","observer":"real child-process interruption fixtures","assertions":["complete response plus complete result batch replays after process exit","final no-call response replays without runtime terminal","old run remains interrupted","no old request is automatically resumed"],"tests":["src/execution/replay/tests/interrupted.rs::p1b2_19_process_exit_after_complete_trailing_batch_preserves_exact_replay","src/execution/replay/tests/interrupted.rs::p1b2_19_process_exit_after_result_commit_needs_no_finish_notification","src/execution/replay/tests/interrupted.rs::p1b2_19_process_exit_after_final_no_call_response_preserves_exact_replay"],"commands":["cargo test --all-targets"],"source":["src/execution/replay/reconstruct.rs","src/storage/interruption.rs"],"blockers":[]},
@@ -57,17 +58,17 @@
     {"id":"P1B2-22","status":"PASS","observer":"legacy fixture and duplicate tests","assertions":["legacy B1/v1/v2 history remains readable and repairable","missing selection/binding rejects before provider access","migration does not backfill provenance","empty session remains usable"],"tests":["src/execution/replay/tests/policy.rs::p1b2_22_legacy_actual_b1_history_remains_readable_but_unbound","src/execution/tests/in_session/admission.rs::p1b2_22_23_b1_receipt_conflicts_and_legacy_history_fails_before_current_checks"],"commands":["cargo test --all-targets"],"source":["src/execution/replay/reconstruct.rs","src/storage/migration.rs"],"blockers":[]},
     {"id":"P1B2-23","status":"PASS","observer":"receipt-first and absent-lookup races","assertions":["existing receipt ignores cancel/provider/registry/history changes","two absent lookups produce one executor","direct selected acceptance shares coordination","conflicts produce zero additional work"],"tests":["src/execution/tests/in_session/admission.rs::p1b2_23_receipt_first_completed_reopened_and_unstarted_duplicates_conflicts","src/execution/tests/in_session/admission.rs::p1b2_23_both_absent_lookups_recheck_and_execute_only_once","src/execution/tests/in_session/admission.rs::p1b2_23_direct_selected_acceptance_wins_lookup_race_without_execution"],"commands":["cargo test --all-targets"],"source":["src/execution/mod.rs","src/storage/session.rs"],"blockers":[]},
     {"id":"P1B2-24","status":"PASS","observer":"provider boundary tests","assertions":["history can exceed new-input 128-item/1MiB limit while fitting 2048/8MiB context","new input is validated separately","combined overflow rejects before acceptance/send","serialized escape overhead is counted with no truncation"],"tests":["src/providers/openai_codex/tests/replay/boundary.rs::native_history_over_128_items_and_one_mib_is_sent_and_old_response_ids_are_not_imported","src/providers/openai_codex/tests/replay/validation.rs::history_and_current_input_use_separate_item_and_serialized_byte_limits","src/providers/openai_codex/tests/replay/boundary.rs::install_and_actual_generate_recheck_capacity_without_sending_or_replacing_context"],"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/replay.rs","src/providers/openai_codex/state.rs"],"blockers":[]},
-    {"id":"P1B2-25","status":"PASS","observer":"SQL barriers, faults and cancellation","assertions":["selection/binding/B1 commits are awaited","IDs, certainty, acceptance and observed outcomes survive failures","binding failure prevents install/generate","policy mismatch is a recorded execution failure","sticky first failure and final-result behavior remain"],"tests":["src/storage/b2_tests/repair.rs::p1b2_25_second_row_sql_failure_and_binding_commit_certainty","src/execution/tests/in_session/startup.rs::p1b2_25_binding_failures_keep_first_stage_certainty_acceptance_and_observed_result","src/execution/tests/in_session/startup.rs::p1b2_25_cancellation_during_accepted_startup_awaits_sql_and_records_terminal"],"commands":["cargo test --all-targets"],"source":["src/execution/observer.rs","src/execution/types.rs"],"blockers":[]},
+    {"id":"P1B2-25","status":"PASS","observer":"SQL barriers, faults and cancellation","assertions":["selection/binding/B1 commits are awaited","IDs, certainty, acceptance and observed outcomes survive failures","binding failure prevents install/generate","policy mismatch is a recorded execution failure","sticky first failure and final-result behavior remain"],"tests":["src/storage/b2_tests/repair.rs::p1b2_25_second_row_sql_failure_and_binding_commit_certainty","src/execution/tests/in_session/startup.rs::p1b2_25_binding_failures_keep_first_stage_certainty_acceptance_and_observed_result","src/execution/tests/in_session/startup.rs::p1b2_25_cancellation_during_accepted_startup_awaits_sql_and_records_terminal","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_03_public_session_websocket_awaits_acceptance_binding_and_result_commits","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_03_public_session_sse_awaits_acceptance_binding_and_result_commits"],"acceptance_repair":{"date":"2026-09-17","ids":["B2MR-03"],"status":"PASS"},"commands":["cargo test --all-targets"],"source":["src/execution/observer.rs","src/execution/types.rs"],"blockers":[]},
     {"id":"P1B2-26","status":"PASS","observer":"ownership, close and subprocess tests","assertions":["execution hold drains owned startup/install/tool waits","store close cancels and awaits guarded ownership","future drop/process exit quarantines and never resumes old receipt","read/migrate/repair/prepare perform no auth/effects"],"tests":["src/execution/tests/in_session/startup.rs::p1b2_18_23_26_install_cancellation_and_store_close_guard_session_without_retry","src/execution/tests/process.rs","src/execution/replay/tests/interrupted.rs"],"commands":["cargo test --all-targets"],"source":["src/execution/mod.rs","src/storage/lifecycle.rs"],"blockers":[]},
-    {"id":"P1B2-27","status":"PASS","observer":"real loopback WebSocket wire assertions","assertions":["fresh socket first request contains full native history plus new prompt","first request has no old previous_response_id","later continuation sends only new result with new response parent","native and recovered variants pass without fallback"],"tests":["src/providers/openai_codex/tests/replay/loopback.rs::websocket_restores_actual_native_and_recovered_history_on_a_fresh_connection"],"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/state.rs","src/providers/openai_codex/wire.rs"],"blockers":[]},
-    {"id":"P1B2-28","status":"PASS","observer":"real loopback SSE wire assertions","assertions":["labelled and missing-MIME paths send full ordered native/effective history","no parent ID or fallback is used","opaque values and actual results remain exact","changed account is rejected before submission"],"tests":["src/providers/openai_codex/tests/replay/loopback.rs::labelled_sse_restores_actual_native_and_recovered_history_on_every_request","src/providers/openai_codex/tests/replay/loopback.rs::missing_mime_sse_restores_actual_native_and_recovered_history_on_every_request","src/providers/openai_codex/tests/replay/boundary.rs::installed_sse_identity_stays_immutable_and_changed_account_is_not_submitted"],"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/state.rs","src/providers/openai_codex/wire.rs"],"blockers":[]},
+    {"id":"P1B2-27","status":"PASS","observer":"real loopback WebSocket wire assertions","assertions":["fresh socket first request contains full native history plus new prompt","first request has no old previous_response_id","later continuation sends only new result with new response parent","native and recovered variants pass without fallback"],"tests":["src/providers/openai_codex/tests/replay/loopback.rs::websocket_restores_actual_native_and_recovered_history_on_a_fresh_connection","src/providers/openai_codex/tests/replay/joined.rs::b2mr_01_public_session_websocket_native_and_recovered_history"],"acceptance_repair":{"date":"2026-09-17","ids":["B2MR-01"],"status":"PASS"},"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/state.rs","src/providers/openai_codex/wire.rs"],"blockers":[]},
+    {"id":"P1B2-28","status":"PASS","observer":"real loopback SSE wire assertions","assertions":["labelled and missing-MIME paths send full ordered native/effective history","no parent ID or fallback is used","opaque values and actual results remain exact","changed account is rejected before submission"],"tests":["src/providers/openai_codex/tests/replay/loopback.rs::labelled_sse_restores_actual_native_and_recovered_history_on_every_request","src/providers/openai_codex/tests/replay/loopback.rs::missing_mime_sse_restores_actual_native_and_recovered_history_on_every_request","src/providers/openai_codex/tests/replay/boundary.rs::installed_sse_identity_stays_immutable_and_changed_account_is_not_submitted","src/providers/openai_codex/tests/replay/joined.rs::b2mr_02_public_session_labelled_sse_native_and_recovered_history","src/providers/openai_codex/tests/replay/joined.rs::b2mr_02_public_session_missing_mime_sse_native_and_recovered_history","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error","src/providers/openai_codex/tests/replay/joined_gates.rs::b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error"],"acceptance_repair":{"date":"2026-09-17","ids":["B2MR-02","B2MR-05"],"status":"PASS"},"commands":["cargo test --all-targets"],"source":["src/providers/openai_codex/state.rs","src/providers/openai_codex/wire.rs"],"blockers":[]},
     {"id":"P1B2-29","status":"PASS","observer":"deleted source tests and public example","assertions":["A loads a real project skill","source is deleted/changed before B","B replays exact stored body/result with no reread","historical scripts/resources remain inert","current catalog remains independent"],"tests":["src/execution/replay/tests/fidelity.rs::p1b2_29_deleted_s1_s2_sources_replay_only_stored_prepared_prompt_and_results","examples/conversation_offline.rs"],"commands":["cargo test --all-targets","cargo run --example conversation_offline"],"source":["examples/conversation_offline.rs","src/execution/replay.rs"],"blockers":[]},
     {"id":"P1B2-30","status":"PASS","observer":"explicit streamed repair tests","assertions":["repair validates v1/v2 metadata, prefix and unique bindings","only corrupted session becomes unavailable","repair never executes or invents binding","same-head schema refresh requires matching canonical summary","catalog regression rejects"],"tests":["src/storage/b2_tests/repair.rs::p1b2_30_repair_metadata_corruption_isolated_from_ready_legacy_sessions","src/storage/b2_tests/repair.rs::p1b2_30_same_head_schema_upgrade_requires_identical_summary_and_good_availability","src/storage/b2_tests/remediation.rs::p1b2_remediation_streamed_repair_rejects_unbound_activity","src/storage/b2_tests/remediation.rs::p1b2_remediation_catalog_regressed_head_is_integrity_without_update"],"commands":["cargo test --all-targets"],"source":["src/storage/catalog_repair.rs","src/storage/catalog_sync.rs","src/storage/run_store/repair.rs"],"blockers":[]},
     {"id":"P1B2-31","status":"PASS","observer":"concurrency/isolation tests and public example","assertions":["session histories and call caches do not leak","same call ID in a new run executes fresh","dropped reader does not cancel producer","rename during fixed-head read stays ordered","provider/tool waits hold no database lock"],"tests":["src/execution/replay/tests/concurrency.rs::p1b2_31_session_isolation_and_dropped_preparation_do_not_cancel_producer","examples/conversation_offline.rs","src/storage/execution_tests.rs::p1b1_execution_hold_uses_no_database_session_or_maintenance_lock"],"commands":["cargo test --all-targets","cargo run --example conversation_offline"],"source":["src/execution/replay.rs","src/storage/session.rs"],"blockers":[]},
     {"id":"P1B2-32","status":"PASS","observer":"complete local regression gates","assertions":["P1-A/B1/C1/S1/S2/R1/auth/provider assertions remain green","CLI behavior and dependencies are unchanged","no new loop/retry/limit/quota/server exists"],"tests":["all Rust targets","152 Node self-tests","six offline examples"],"commands":["cargo test --all-targets","uv run scripts/verify.py","node scripts/cli_retest.mjs --self-test"],"source":["Cargo.toml","Cargo.lock"],"blockers":[]},
     {"id":"P1B2-33","status":"PASS","observer":"public dev and release example runs","assertions":["A uses real S2 result and AddNumbers","store closes/reopens and read causes zero work","explicit B needs A and executes a new tool","exact provider input is asserted","finite timing/size samples are labelled non-SLA","five older examples pass"],"tests":["examples/conversation_offline.rs"],"commands":["cargo run --example run_offline","cargo run --example skills_offline","cargo run --example skill_loading_offline","cargo run --example storage_offline","cargo run --example persisted_run_offline","cargo run --example conversation_offline","cargo run --release --example conversation_offline"],"source":["examples/conversation_offline.rs"],"blockers":[]},
-    {"id":"P1B2-34","status":"PASS","observer":"current human and machine reports","assertions":["all 36 rows are represented","first failures and fixes are recorded","schema, migration, identity, replay and unsupported limits are explicit","old frozen reports remain unchanged","ledger is unchanged"],"tests":[],"commands":["git diff --check"],"source":["docs/slices/p1b2/VERIFICATION.md","docs/slices/p1b2/verification.json"],"blockers":[]},
-    {"id":"P1B2-35","status":"PASS","observer":"increment reviews, complete local gates and exact-head hosted CI","assertions":["each implementation increment received three independent reviews","all required local commands pass","complete-diff review is run after reports are authored","push and PR workflows pass all six Cargo gates on Ubuntu, macOS and Windows","no CI/lint/security assertion was weakened"],"tests":["all local tests and examples","push workflow 35167416739","PR workflow 35167422773"],"commands":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc","git diff --check"],"source":["source revision 80f387294c92ff0287e614a7f9c658901979352f","hosted evidence revision cc9a6a269b737a7d5b093791f9a297e07d585ec8"],"blockers":[]}
+    {"id":"P1B2-34","status":"PASS","acceptance_repair":{"date":"2026-09-17","ids":["B2MR-06"],"status":"PASS","scope":"initial repair evidence in both reports; historical observations retained"},"observer":"current human and machine reports","assertions":["all 36 rows are represented","first failures and fixes are recorded","schema, migration, identity, replay and unsupported limits are explicit","old frozen reports remain unchanged","ledger is unchanged"],"tests":[],"commands":["git diff --check"],"source":["docs/slices/p1b2/VERIFICATION.md","docs/slices/p1b2/verification.json"],"blockers":[]},
+    {"id":"P1B2-35","status":"PASS","acceptance_repair":{"date":"2026-09-17","ids":["B2MR-07"],"status":"PASS","complete_accumulated_diff_review":"PASS","reviewers":3,"blocking_findings":[],"closure_scope":"local acceptance-evidence on the uncommitted owner-review tree only","current_exact_head_hosted_ci":"NOT_RUN","historical_pass_retained":true},"observer":"increment reviews, complete local gates and exact-head hosted CI","assertions":["each implementation increment received three independent reviews","all required local commands pass","complete-diff review is run after reports are authored","push and PR workflows pass all six Cargo gates on Ubuntu, macOS and Windows","no CI/lint/security assertion was weakened"],"tests":["all local tests and examples","push workflow 35167416739","PR workflow 35167422773"],"commands":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc","git diff --check"],"source":["source revision 80f387294c92ff0287e614a7f9c658901979352f","hosted evidence revision cc9a6a269b737a7d5b093791f9a297e07d585ec8"],"blockers":[]}
   ],
   "commands": [
     {"command":"cargo fmt --all -- --check","status":"PASS"},
@@ -163,5 +164,185 @@
   "real_credential_reads": 0,
   "provider_generations": 0,
   "synthetic_provider_generations_only": true,
-  "ledger": {"used":31,"cap":50,"remaining":19,"changed":false}
+  "ledger": {"used":31,"cap":50,"remaining":19,"changed":false},
+  "acceptance_repair": {
+    "date": "2026-09-17",
+    "contract": "p1b2.0",
+    "pull_request": 7,
+    "finding": "B2-E01",
+    "increment": 3,
+    "scope": "B2MR-06 evidence report with final B2MR-07 local acceptance-evidence closure on the uncommitted owner-review tree, subject to separately authorized commit/push and then exact-head cross-platform CI.",
+    "status": "PASS",
+    "accepted": true,
+    "b2_e01_fully_closed": true,
+    "closure_scope": "Local acceptance-evidence only; b2_e01_fully_closed does not claim hosted CI acceptance or PR closure.",
+    "finding_classification": "missing_acceptance_evidence_not_reproduced_product_malfunction",
+    "finding_evidence": {
+      "prior_adapter_tests": "Direct in-memory replay construction and installation did not exercise persisted public-session reconstruction.",
+      "prior_public_tests": "Public run_in_session tests used a scripted provider, not the real OpenAI-Codex adapter.",
+      "gap": "The combination did not prove the joined persisted real-adapter path.",
+      "source": ["src/providers/openai_codex/tests/replay/loopback.rs:230-383", "src/execution/tests/in_session/fixture.rs:144-155"],
+      "lower_component_tests_preserved": true,
+      "joined_tests_exposed_production_defect": false,
+      "production_fix_made": false
+    },
+    "attribution": {
+      "P": "Parent-supplied verified execution, first failures, reviews and measurements; not independently rerun by this documentation increment.",
+      "S": "This increment inspected the current joined tests, wiring and prior component paths.",
+      "D": "This increment directly checked Git state, ancestry, report validity and whitespace."
+    },
+    "baseline": "6fe0a538edf6bae39c9f933db8394b7d8483e2be",
+    "reviewed_head": "06dae19bd885c60bd341a092a23fcd850d00fb85",
+    "source_revision": "80f387294c92ff0287e614a7f9c658901979352f",
+    "tested_tree": "Uncommitted repair based on reviewed_head, before these report edits; not clean HEAD and not a new source commit.",
+    "worktree": {
+      "path": "/home/gc/projects/wi",
+      "initial_repair_state": "clean at exactly reviewed_head (P)",
+      "head_matches_reviewed": true,
+      "baseline_ancestry": "PASS (D)",
+      "reviewed_head_ancestry": "PASS (D)",
+      "before_report_edits": {"tracked_modified":1,"untracked":2,"staged":0},
+      "after_report_edits": {"tracked_modified":3,"untracked":2,"staged":0},
+      "preserved_tracked_test": "src/providers/openai_codex/tests/replay/loopback.rs",
+      "preserved_untracked_tests": ["src/providers/openai_codex/tests/replay/joined.rs", "src/providers/openai_codex/tests/replay/joined_gates.rs"],
+      "preserved_test_sha256": {
+        "src/providers/openai_codex/tests/replay/loopback.rs": "5b6f9eba30824961c19b617896a5e7330bd5e8e0900af6834519357c57c04af6",
+        "src/providers/openai_codex/tests/replay/joined.rs": "c5c0c17a1678f9e8bd57e711932e03fac8e960e4f7f5b460107b048070c22e4e",
+        "src/providers/openai_codex/tests/replay/joined_gates.rs": "4c6e06d6097ae07bfb9f8318eeff2878106f5446165a2424744833d9d7607982"
+      },
+      "changed_by_this_increment": ["docs/slices/p1b2/VERIFICATION.md", "docs/slices/p1b2/verification.json"],
+      "dependency_files_changed": false,
+      "production_source_changed": false,
+      "index_changed": false,
+      "committed": false,
+      "pushed": false
+    },
+    "environment": {
+      "platform": "Linux x86_64",
+      "kernel": "6.18.33.2-microsoft-standard-WSL2",
+      "rustc": "1.98.1",
+      "cargo": "1.98.1",
+      "uv": "0.12.10",
+      "node": "v24.18.0",
+      "bundled_sqlite": "3.51.3",
+      "attribution": "P"
+    },
+    "dispositions": [
+      {"id":"B2MR-00","status":"PASS","evidence":"Initial clean reviewed HEAD, baseline/reviewed ancestry and current scoped uncommitted repair inventory.","tests":[]},
+      {"id":"B2MR-01","status":"PASS","matrix_rows":["P1B2-27"],"tests":["b2mr_01_public_session_websocket_native_and_recovered_history"],"source":["src/providers/openai_codex/tests/replay/joined.rs:761-765"]},
+      {"id":"B2MR-02","status":"PASS","matrix_rows":["P1B2-28"],"tests":["b2mr_02_public_session_labelled_sse_native_and_recovered_history","b2mr_02_public_session_missing_mime_sse_native_and_recovered_history"],"source":["src/providers/openai_codex/tests/replay/joined.rs:768-779"]},
+      {"id":"B2MR-03","status":"PASS","matrix_rows":["P1B2-25"],"tests":["b2mr_03_public_session_websocket_awaits_acceptance_binding_and_result_commits","b2mr_03_public_session_sse_awaits_acceptance_binding_and_result_commits"],"source":["src/providers/openai_codex/tests/replay/joined_gates.rs:242-249"]},
+      {"id":"B2MR-04","status":"PASS","matrix_rows":["P1B2-16"],"tests":["b2mr_04_public_session_websocket_records_actual_mismatch_and_later_matching_task","b2mr_04_public_session_sse_records_actual_mismatch_and_later_matching_task"],"source":["src/providers/openai_codex/tests/replay/joined_gates.rs:555-561"]},
+      {"id":"B2MR-05","status":"PASS","matrix_rows":["P1B2-28"],"tests":["b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty","b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error","b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error"],"source":["src/providers/openai_codex/tests/replay/joined_gates.rs:695-731"]},
+      {"id":"B2MR-06","status":"PASS","matrix_rows":["P1B2-34"],"evidence":"Initial dated evidence repair appended to both reports; all 36 historical rows, old component symbols, revisions, first failures and CI observations retained.","tests":[]},
+      {"id":"B2MR-07","status":"PASS","matrix_rows":["P1B2-35"],"evidence":"Local full gates and three fresh complete accumulated-diff reviews including both reports and both untracked test files pass with no blocking findings. Local acceptance-evidence closure on the uncommitted owner-review tree only; current exact-head hosted CI remains NOT_RUN.","tests":[]}
+    ],
+    "joined_evidence": [
+      {"scope":"wiring","source":["src/providers/openai_codex/tests/replay/loopback.rs:8-9","src/providers/openai_codex/tests/replay/joined.rs:18-19"],"assertions":["joined.rs is wired from loopback.rs; joined_gates.rs is its gates module","all prior lower component tests remain"]},
+      {"scope":"public persisted producer and replay","source":["src/providers/openai_codex/tests/replay/joined.rs:521-556","src/providers/openai_codex/tests/replay/joined.rs:567-757"],"assertions":["public run_in_session produces both A and B through real temporary SQLite and the real OpenAI-Codex loopback adapter","counted add_numbers(17,25)=42, then B add_numbers(42,8)=50","native-terminal and validated recovered effective output preserve exact native/opaque content","actual selections, bindings, tool results and final results are observed","no manual construction or installation supplies B replay under test; expected wire arrays are assertions only","close/reopen/read/prepare causes no new provider/tool work","new conversation has empty replay and conversation isolation holds","A canonical prefix stays unchanged"]},
+      {"scope":"wire payloads","source":["src/providers/openai_codex/tests/replay/joined.rs:761-779"],"assertions":["WebSocket B opens a fresh connection and first sends full native history without an old parent ID","B WebSocket continuation sends only the new result with B new response parent","labelled and missing-MIME SSE send full ordered native/effective history on every request"]},
+      {"scope":"durable gates","source":["src/providers/openai_codex/tests/replay/joined_gates.rs:136-238"],"assertions":["both transports pause real acceptance, provider-binding and tool-result commits","no provider open before acceptance","no model payload before binding","no continuation before durable result and awaited commit completion"]},
+      {"scope":"actual account mismatch","source":["src/providers/openai_codex/tests/replay/joined_gates.rs:373-551"],"assertions":["both transports persist actual Y binding before recorded history_identity failure","zero model attempts, admissions, tools or model requests on mismatch","no fallback or account search","later explicit X task succeeds with B excluded as DefinitelyUnsubmitted and retained in history"]},
+      {"scope":"stored-history SSE failure controls","source":["src/providers/openai_codex/tests/replay/joined_gates.rs:564-731"],"assertions":["wrong explicit MIME yields unexpected_content_type","labelled SSE empty identity yields protocol_error","missing-MIME malformed admission yields unexpected_content_type","all preserve UpstreamOutcome::Unknown","no false success, tool effect, continuation, fallback or mutation of A"]}
+    ],
+    "commands_attribution": "P; executed on the uncommitted repair tree before these report edits, not rerun by this documentation increment",
+    "commands": [
+      {"command":null,"check":"Cargo test filter b2mr_","status":"PASS","passed":10,"failed":0,"exact_invocation_flags_supplied":false},
+      {"command":null,"check":"Full replay loopback module","status":"PASS","passed":18,"exact_invocation_flags_supplied":false},
+      {"command":"cargo fmt --all -- --check","status":"PASS"},
+      {"command":"cargo check --all-targets","status":"PASS"},
+      {"command":"cargo test --all-targets","status":"PASS","passed":702,"ignored_helpers":5,"failed":0,"ignored_scope":"closed child helpers invoked by parent tests, not skipped acceptance cases"},
+      {"command":"cargo clippy --all-targets -- -D warnings","status":"PASS"},
+      {"command":"cargo build --all-targets","status":"PASS"},
+      {"command":"cargo test --doc","status":"PASS","passed":0},
+      {"command":"uv run scripts/verify.py","status":"PASS","source_files":230,"rust_test_definitions":692,"fixture_events":25,"internal_gates":"PASS"},
+      {"command":"node scripts/cli_retest.mjs --self-test","status":"PASS","tests":152,"live_started":false},
+      {"command":"cargo run --example run_offline","status":"PASS"},
+      {"command":"cargo run --example skills_offline","status":"PASS"},
+      {"command":"cargo run --example skill_loading_offline","status":"PASS"},
+      {"command":"cargo run --example storage_offline","status":"PASS"},
+      {"command":"cargo run --example persisted_run_offline","status":"PASS"},
+      {"command":"cargo run --example conversation_offline","status":"PASS"},
+      {"command":"cargo run --release --example conversation_offline","status":"PASS"},
+      {"command":"git diff --check","status":"PASS"},
+      {"command":null,"check":"All-untracked whitespace scan","status":"PASS"}
+    ],
+    "first_failures_and_fixes": [
+      {"increment":1,"first_failure":"First cargo fmt --all -- --check failed only on formatting in new test code.","fix":"cargo fmt corrected the formatting; the subsequent check passed.","attribution":"P","production_change":false},
+      {"increment":2,"first_failure":"First compilation failed because test-only request reuse moved a value.","fix":"Clone the request before reuse; compilation then passed.","attribution":"P","production_change":false}
+    ],
+    "reviews": [
+      {"scope":"repair increment 1 B2MR-01/02","status":"PASS","reviewers":3,"blocking_findings":[],"attribution":"P"},
+      {"scope":"repair increment 2 B2MR-03/04/05","status":"PASS","reviewers":3,"blocking_findings":[],"attribution":"P"},
+      {
+        "date": "2026-09-17",
+        "scope": "fresh complete accumulated diff including updated reports and all untracked files",
+        "status": "PASS",
+        "completed": true,
+        "reviewers": 3,
+        "blocking_findings": [],
+        "attribution": "P; supplied verified reviews, not reviewers started or test suites rerun by this closure increment",
+        "reviewed_tree": "Uncommitted owner-review tree based on 06dae19bd885c60bd341a092a23fcd850d00fb85, including both untracked test files and dated report additions.",
+        "confirmed": [
+          "No production, Cargo, public API or schema changes; public run_in_session with real SQLite, real OpenAI loopback and actual tools.",
+          "Canonical storage-fed B replay; WS/SSE native/recovered output, MIME controls, close/reopen and isolation.",
+          "Actual acceptance/binding/result gates; both-transport mismatch binding/no-send/later X exclusion; failure classifications and uncertainty.",
+          "All 36 historical rows, prior evidence and first failures preserved; current hosted CI NOT_RUN; ledger unchanged."
+        ],
+        "independent_checks": [
+          {"reviewers":["review-a","review-b"],"status":"PASS","commands":["cargo fmt --all -- --check","git diff --check"],"checks":["JSON validation","All-untracked whitespace scan","Mechanical report checks"]},
+          {"reviewers":["review-c"],"status":"PASS","commands":["cargo fmt --all -- --check","git diff --check"],"focused_runs":[{"command":"cargo test --lib b2mr_","status":"PASS","passed":10},{"command":"cargo test --lib replay_loopback_tests","status":"PASS","passed":18}],"checks":["JSON validation","All-untracked whitespace scan","SHA linkage and ancestry/index checks"]}
+        ],
+        "informational_notes": [
+          "Review-c noted that the reports had not yet recorded this completed review; this closure update records completion.",
+          "Review-c confirmed that the historical top-level PASS is explicitly scoped separately from the repair."
+        ]
+      }
+    ],
+    "review_checks": "Parent-supplied increment reviewers inspected untracked files and ran focused/module/fmt/clippy/diff checks; one also ran full all-target gates. The dated three-reviewer batch separately passed the complete accumulated diff including the updated reports. Its independent checks are recorded without replacing the earlier observations.",
+    "current_exact_head_hosted_ci": {
+      "status": "NOT_RUN",
+      "repair_commit": null,
+      "submitted_runs": [],
+      "reason": "Repair is uncommitted; no current commit or push is authorized.",
+      "historical_reviewed_head": "06dae19bd885c60bd341a092a23fcd850d00fb85",
+      "historical_reviewed_head_jobs_scope": "Pre-repair evidence only; parent did not supply job IDs for this increment.",
+      "original_submitted_ci_retained": true,
+      "original_submitted_ci_head": "cc9a6a269b737a7d5b093791f9a297e07d585ec8",
+      "original_submitted_ci_run_ids": [35167416739, 35167422773]
+    },
+    "performance_observations": [
+      {"mode":"dev","a_install_ms":0.039,"a_end_to_end_ms":1931.835,"history_read_after_a_ms":50.145,"replay_prepare_after_a_ms":86.864,"b_install_ms":1.135,"b_end_to_end_ms":1496.015,"history_read_after_b_ms":62.612,"replay_prepare_after_b_ms":113.810,"example_end_to_end_ms":5368.014,"attribution":"P"},
+      {"mode":"release","a_install_ms":0.010,"a_end_to_end_ms":989.066,"history_read_after_a_ms":16.450,"replay_prepare_after_a_ms":39.258,"b_install_ms":0.116,"b_end_to_end_ms":533.670,"history_read_after_b_ms":28.497,"replay_prepare_after_b_ms":45.850,"example_end_to_end_ms":2413.889,"attribution":"P"},
+      {"modes":["dev","release"],"history_records":48,"replay_runs":2,"replay_exchanges":5,"replay_json_bytes":5399,"catalog_bytes":36864,"session_bytes":131072,"catalog_wal_bytes":0,"session_wal_bytes":0,"claim":"finite local samples, not an SLA, performance regression verdict or fastest claim","attribution":"P"}
+    ],
+    "report_validation": {
+      "attribution": "D",
+      "status": "PASS",
+      "untracked_paths_scanned": 2,
+      "result": "All required document checks passed; all 36 historical rows and 10 joined mappings validated; reviewed test bytes, index and Cargo files unchanged.",
+      "commands": ["uv run python -m json.tool docs/slices/p1b2/verification.json /dev/null", "cargo fmt --all -- --check", "git diff --check"],
+      "additional_checks": ["JSON format round-trip, all 36 matrix IDs and original historical fields/tests preserved", "Markdown historical observations and all 36 rows preserved", "All-untracked whitespace scan", "Reviewed test SHA-256 values, index and allowed-path scope unchanged"]
+    },
+    "limitations": [
+      "B2-E01 is accepted and closed locally for acceptance evidence on the uncommitted owner-review tree, subject to separately authorized commit/push and then exact-head cross-platform CI.",
+      "Current exact-head hosted CI is NOT_RUN; historical jobs do not cover this uncommitted repair.",
+      "Local results are Linux only; no new native macOS or Windows execution is claimed.",
+      "Full gates, focused runs, reviews, first failures and measurements are parent-supplied verified evidence, not independent executions by this increment.",
+      "Exact invocation flags for the two original parent-supplied focused runs and earlier 06dae19 job IDs were not supplied; none are invented. Review-c supplied its separate focused command invocations.",
+      "Source definitions, filtered reruns, examples and child helpers are not additional unique tests; zero doctests adds no coverage.",
+      "Process/reopen observations do not prove physical power-loss durability.",
+      "Live opaque portability and model adherence remain NOT_RUN; legacy unbound history, incomplete or uncertain tails and cross-model conversion remain unsupported.",
+      "No production change, dependency, retry/failover, normal CLI persistence, service or later increment was added."
+    ],
+    "deferred_scope": ["separately authorized commit/push", "then exact-head push/PR CI on Ubuntu, macOS and Windows; historical jobs do not cover the current repair"],
+    "live_started": false,
+    "real_credential_reads": 0,
+    "provider_generations": 0,
+    "provider_generation_count_scope": "live provider generations only; synthetic scripted/loopback work is excluded",
+    "synthetic_provider_generations_only": true,
+    "ledger": {"used":31,"cap":50,"remaining":19,"changed":false},
+    "authority": {"stage":false,"commit":false,"push":false,"merge":false,"release":false,"deploy":false,"hosted_write":false,"live_test":false},
+    "left_unstaged_and_uncommitted": true
+  }
 }

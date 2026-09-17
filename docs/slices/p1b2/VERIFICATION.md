@@ -4,6 +4,12 @@ Contract: **p1b2.0**
 Result: **PASS**
 Accepted: **Yes under p1b2.0. PR #7 remains open; merge, release and deployment were not authorized.**
 
+**2026-09-17 acceptance-repair status:** The result above and sections 1-13 retain
+historical evidence. Section 14 records B2-E01 under unchanged p1b2.0: B2MR-00..07
+**PASS** for local acceptance-evidence closure on the uncommitted owner-review tree.
+Current exact-head hosted CI remains **NOT_RUN**. Closure is subject to separately
+authorized commit/push and then exact-head cross-platform CI.
+
 ## 1. Revision and worktree
 
 - Accepted baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
@@ -111,7 +117,7 @@ For SSE, every request contains the full ordered effective/native history. Label
 | P1B2-13 | PASS | Reuse evidence, conflict rejection and fresh call scope |
 | P1B2-14 | PASS | Native/recovered/refusal/reasoning/opaque fidelity tests |
 | P1B2-15 | PASS | Counted credential loads and both loopback transports |
-| P1B2-16 | PASS | Actual mismatched binding before zero-attempt failure |
+| P1B2-16 | PASS | Actual mismatched binding before zero-attempt failure; 2026-09-17 joined evidence: `b2mr_04_public_session_websocket_records_actual_mismatch_and_later_matching_task` and `b2mr_04_public_session_sse_records_actual_mismatch_and_later_matching_task` (`src/providers/openai_codex/tests/replay/joined_gates.rs:555-561`) |
 | P1B2-17 | PASS | Provider/model/format/missing-identity boundaries |
 | P1B2-18 | PASS | Install atomicity and install/generate/cancel/drop races |
 | P1B2-19 | PASS | Complete interrupted batch and final-response child processes |
@@ -120,17 +126,17 @@ For SSE, every request contains the full ordered effective/native history. Label
 | P1B2-22 | PASS | Legacy unbound readable-but-not-replayable fixture |
 | P1B2-23 | PASS | Receipt-first and two-absent-lookup races |
 | P1B2-24 | PASS | Separate new-input and combined-context capacity tests |
-| P1B2-25 | PASS | Selection/binding SQL faults, cancellation and certainty tests |
+| P1B2-25 | PASS | Selection/binding SQL faults, cancellation and certainty tests; 2026-09-17 joined evidence: `b2mr_03_public_session_websocket_awaits_acceptance_binding_and_result_commits` and `b2mr_03_public_session_sse_awaits_acceptance_binding_and_result_commits` (`src/providers/openai_codex/tests/replay/joined_gates.rs:242-249`) |
 | P1B2-26 | PASS | Hold/close/drop/process ownership tests |
-| P1B2-27 | PASS | Exact WebSocket loopback request bodies |
-| P1B2-28 | PASS | Exact labelled/missing-MIME SSE request bodies |
+| P1B2-27 | PASS | Exact WebSocket loopback request bodies; 2026-09-17 joined evidence: `b2mr_01_public_session_websocket_native_and_recovered_history` (`src/providers/openai_codex/tests/replay/joined.rs:761-765`) |
+| P1B2-28 | PASS | Exact labelled/missing-MIME SSE request bodies; 2026-09-17 joined evidence: `b2mr_02_public_session_labelled_sse_native_and_recovered_history` and `b2mr_02_public_session_missing_mime_sse_native_and_recovered_history` (`src/providers/openai_codex/tests/replay/joined.rs:768-779`); `b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty`, `b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error` and `b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error` (`src/providers/openai_codex/tests/replay/joined_gates.rs:695-731`) |
 | P1B2-29 | PASS | Deleted S1/S2 source and inert canary tests/example |
 | P1B2-30 | PASS | Version-aware streamed repair and catalog regression tests |
 | P1B2-31 | PASS | Session/cache/reader/rename/lock isolation tests |
 | P1B2-32 | PASS | Complete local regression gates and unchanged dependencies |
 | P1B2-33 | PASS | Six dev examples and release `conversation_offline` |
-| P1B2-34 | PASS | This report and `verification.json` |
-| P1B2-35 | PASS | Complete local gates, independent reviews, and exact-head push/PR CI on Ubuntu, macOS and Windows |
+| P1B2-34 | PASS | This report and `verification.json`; 2026-09-17 initial B2MR-06 evidence repair is appended in section 14 and `acceptance_repair` |
+| P1B2-35 | PASS | Complete local gates, independent reviews, and exact-head push/PR CI on Ubuntu, macOS and Windows (historical); 2026-09-17 repair: local gates and three fresh complete accumulated-diff reviews PASS; local acceptance-evidence closed on the uncommitted owner-review tree (section 14.8); current exact-head hosted CI NOT_RUN |
 
 Detailed row assertions, test names, source paths and blockers are in `verification.json`.
 
@@ -235,3 +241,241 @@ The first final evidence review found stale current-document revision pointers. 
 - No normal CLI session persistence, task manager, browser service, server, GUI, hosted skills, billing path, retry/failover, compaction or import/export was added.
 - The no-live ledger remains **31/50 used, 19 remaining**.
 - Source revision `80f3872` and hosted evidence revision `cc9a6a2` are pushed. PR #7 remains open; merge, release and deployment require separate authorization.
+
+## 14. Acceptance repair, 2026-09-17: PR #7 B2-E01
+
+### 14.1 Scope, revision and attribution
+
+This section retains the initial B2MR-06 evidence repair under unchanged **p1b2.0**.
+Section 14.8 records final local acceptance-evidence closure of B2-E01, not hosted CI
+acceptance. The prior adapter tests directly constructed and installed
+in-memory replay (`src/providers/openai_codex/tests/replay/loopback.rs:230-383`).
+The prior public tests used a scripted provider
+(`src/execution/tests/in_session/fixture.rs:144-155`). Their combination did not
+prove the joined persisted real-adapter path. This was missing acceptance evidence,
+not a reproduced product malfunction. All lower component tests and their prior
+observations remain valid within that narrower scope and remain in the matrix.
+
+**P** means parent-supplied verified execution/review evidence, not a new run by this
+documentation increment. **S** means this increment's source inspection. **D** means
+this increment's direct Git or report checks. The full gates, focused tests,
+first failures, reviews and measurements below are P; the joined source path is S.
+
+- Accepted baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
+- Starting/reviewed HEAD: `06dae19bd885c60bd341a092a23fcd850d00fb85`.
+- Source revision remains `80f387294c92ff0287e614a7f9c658901979352f`.
+- Initial repair worktree was clean at the reviewed HEAD (P). This increment confirmed
+  that HEAD still matches and both baseline/reviewed-HEAD ancestry checks pass (D).
+- Before report edits: one tracked test file modified, two untracked test files,
+  zero staged files (D). The prior reviewed test changes are preserved.
+- After report edits: three tracked files modified and the same two untracked files;
+  the only files changed by this increment are these two reports.
+- The full local gate run covers the uncommitted repair tree based on `06dae19b`,
+  before these report edits. It is not a test run on clean HEAD or a new source commit.
+- `Cargo.toml` and `Cargo.lock` remain unchanged. No production source changed.
+  No stage, commit, push, merge, release, deployment or hosted write is authorized here.
+
+Test paths are `src/providers/openai_codex/tests/replay/joined.rs` and
+`src/providers/openai_codex/tests/replay/joined_gates.rs`. Wiring is through
+`src/providers/openai_codex/tests/replay/loopback.rs:8-9`, then
+`src/providers/openai_codex/tests/replay/joined.rs:18-19`.
+
+### 14.2 Joined executable evidence
+
+| ID | Exact test symbol | Source |
+|---|---|---|
+| B2MR-01 | `b2mr_01_public_session_websocket_native_and_recovered_history` | `src/providers/openai_codex/tests/replay/joined.rs:761` |
+| B2MR-02 | `b2mr_02_public_session_labelled_sse_native_and_recovered_history` | `src/providers/openai_codex/tests/replay/joined.rs:768` |
+| B2MR-02 | `b2mr_02_public_session_missing_mime_sse_native_and_recovered_history` | `src/providers/openai_codex/tests/replay/joined.rs:775` |
+| B2MR-03 | `b2mr_03_public_session_websocket_awaits_acceptance_binding_and_result_commits` | `src/providers/openai_codex/tests/replay/joined_gates.rs:242` |
+| B2MR-03 | `b2mr_03_public_session_sse_awaits_acceptance_binding_and_result_commits` | `src/providers/openai_codex/tests/replay/joined_gates.rs:247` |
+| B2MR-04 | `b2mr_04_public_session_websocket_records_actual_mismatch_and_later_matching_task` | `src/providers/openai_codex/tests/replay/joined_gates.rs:555` |
+| B2MR-04 | `b2mr_04_public_session_sse_records_actual_mismatch_and_later_matching_task` | `src/providers/openai_codex/tests/replay/joined_gates.rs:560` |
+| B2MR-05 | `b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty` | `src/providers/openai_codex/tests/replay/joined_gates.rs:695` |
+| B2MR-05 | `b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error` | `src/providers/openai_codex/tests/replay/joined_gates.rs:706` |
+| B2MR-05 | `b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error` | `src/providers/openai_codex/tests/replay/joined_gates.rs:726` |
+
+The joined happy paths use public `run_in_session` for A and B, real temporary SQLite
+and the real OpenAI-Codex loopback adapter. Counted `add_numbers(17,25)` produces 42;
+B adds 8 and produces 50. Native-terminal and validated recovered output both pass.
+Only current input enters the public submission; no test-side B replay construction
+or manual installation supplies the replay under test
+(`src/providers/openai_codex/tests/replay/joined.rs:521-556`). Expected wire arrays
+are assertions, not injected history.
+
+The observations include exact native/opaque output, actual selections and bindings,
+actual results/finals, close/reopen/read/prepare with zero new work, an empty new
+conversation and conversation isolation. WebSocket B opens a fresh connection:
+its first request sends full history with no old parent; its continuation sends only
+the new result with B's new parent. Labelled and missing-MIME SSE send full history
+on every request. A's canonical prefix stays unchanged.
+
+Commit barriers pause real acceptance, provider-binding and tool-result commits on
+both transports. They prove no provider open before acceptance, no model payload
+before binding, and no continuation before the durable result and awaited commit
+completion (`src/providers/openai_codex/tests/replay/joined_gates.rs:136-238`).
+
+Account mismatch on both transports persists the actual Y binding, then records
+`history_identity` with zero attempts, admissions and tools. No model request or
+fallback occurs. A later explicit X task succeeds and excludes B as
+`DefinitelyUnsubmitted`, while retaining B's records
+(`src/providers/openai_codex/tests/replay/joined_gates.rs:373-551`).
+
+Failure controls run after stored A. Wrong explicit MIME yields
+`unexpected_content_type`; labelled SSE with empty identity yields `protocol_error`;
+missing-MIME malformed admission yields `unexpected_content_type`. All retain
+`UpstreamOutcome::Unknown`, with no false success, tool effect, continuation, fallback
+or mutation of A (`src/providers/openai_codex/tests/replay/joined_gates.rs:564-731`).
+
+### 14.3 Dated dispositions and original matrix linkage
+
+| ID | Disposition | Evidence / remaining boundary |
+|---|---|---|
+| B2MR-00 | PASS | Reviewed HEAD, initial clean tree, ancestry and scoped uncommitted repair inventory |
+| B2MR-01 | PASS | Joined persisted WebSocket native/recovered path; P1B2-27 |
+| B2MR-02 | PASS | Joined persisted labelled/missing-MIME SSE native/recovered paths; P1B2-28 |
+| B2MR-03 | PASS | Real acceptance/binding/result commit gates on both transports; P1B2-25 |
+| B2MR-04 | PASS | Actual mismatch and later matching task on both transports; P1B2-16 |
+| B2MR-05 | PASS | Stored-history SSE failure codes and uncertainty controls; P1B2-28 |
+| B2MR-06 | PASS | Initial dated repair evidence in both reports; P1B2-34 |
+| B2MR-07 | PASS | Local gates and three fresh complete accumulated-diff reviews pass; local acceptance-evidence closure only (section 14.8); current exact-head hosted CI is NOT_RUN; P1B2-35 |
+
+The original 36 IDs and historical PASS observations remain. Dated mappings for
+P1B2-16/25/27/28 add joined test symbols without replacing the component symbols.
+P1B2-34 gains this evidence repair. P1B2-35 gains dated local closure evidence;
+its historical PASS and exact-head hosted CI observations remain unchanged.
+The current repair has local review acceptance, not current hosted CI acceptance.
+
+### 14.4 Local execution supplied by the parent
+
+Environment: Linux `6.18.33.2-microsoft-standard-WSL2` x86_64, rustc `1.98.1`, cargo
+`1.98.1`, uv `0.12.10`, Node `v24.18.0`, bundled SQLite `3.51.3`.
+
+| Command / check (P) | Result |
+|---|---|
+| Cargo test filter `b2mr_` | PASS: 10 passed, 0 failed |
+| Full replay loopback module | PASS: 18 passed |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo check --all-targets` | PASS |
+| `cargo test --all-targets` | PASS: 702 passed, 5 ignored closed child helpers, 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo build --all-targets` | PASS |
+| `cargo test --doc` | PASS: 0 doctests |
+| `uv run scripts/verify.py` | PASS: 230 source files, 692 Rust test definitions, 25 fixture events; internal gates passed |
+| `node scripts/cli_retest.mjs --self-test` | PASS: 152; `live_started=false` |
+| `cargo run --example run_offline` | PASS |
+| `cargo run --example skills_offline` | PASS |
+| `cargo run --example skill_loading_offline` | PASS |
+| `cargo run --example storage_offline` | PASS |
+| `cargo run --example persisted_run_offline` | PASS |
+| `cargo run --example conversation_offline` | PASS |
+| `cargo run --release --example conversation_offline` | PASS |
+| `git diff --check` | PASS |
+| All-untracked whitespace scan | PASS |
+
+The parent supplied filters/counts, not the exact invocation flags for the two
+focused runs. This increment does not invent those flags or rerun the full gates.
+Source definitions, filtered reruns, examples and child helpers are not additional
+unique tests. Zero doctests contributes no extra coverage.
+
+### 14.5 First failures, reviews and hosted status
+
+1. Repair increment 1's first `cargo fmt --all -- --check` failed only on formatting
+   in new test code. `cargo fmt` corrected it; the subsequent check passed (P).
+2. Repair increment 2's first compilation failed because test-only request reuse
+   moved a value. Cloning the request fixed compilation (P).
+
+No joined test exposed a production defect. No production fix was made. These
+observations append to, rather than replace, the first failures in section 11.
+
+Three independent reviewers passed increment 1 (B2MR-01/02) with no blocking findings.
+Three passed increment 2 (B2MR-03/04/05) with no blocking findings. Reviewers inspected
+untracked files and ran focused/module/fmt/clippy/diff checks; one also ran the full
+all-target gates (P). These remain increment reviews. Three fresh reviewers have
+since passed the complete accumulated diff, including these updated reports and
+both untracked test files, with no blocking findings (P; section 14.8).
+
+Current exact-head hosted CI is **NOT RUN** because the repair is uncommitted and no
+commit/push is authorized. Earlier jobs at reviewed HEAD `06dae19b` are pre-repair
+evidence only; their job IDs were not supplied in this increment. The exact
+`cc9a6a2` push/PR jobs and cross-platform outcomes in section 9 remain historical
+and unchanged. No old job is evidence for the uncommitted joined tests or reports.
+B2-E01 local acceptance evidence is closed as recorded in section 14.8; current
+exact-head hosted acceptance is not claimed.
+
+### 14.6 Finite conversation example samples (P)
+
+| Observation | Dev | Release |
+|---|---:|---:|
+| A replay install | 0.039 ms | 0.010 ms |
+| A end-to-end | 1931.835 ms | 989.066 ms |
+| History read after A | 50.145 ms | 16.450 ms |
+| Replay prepare after A | 86.864 ms | 39.258 ms |
+| B replay install | 1.135 ms | 0.116 ms |
+| B end-to-end | 1496.015 ms | 533.670 ms |
+| History read after B | 62.612 ms | 28.497 ms |
+| Replay prepare after B | 113.810 ms | 45.850 ms |
+| Example end-to-end | 5368.014 ms | 2413.889 ms |
+
+Both modes recorded 48 rows, 2 runs, 5 exchanges and 5,399 replay bytes. Closed
+catalog/session sizes were 36,864/131,072 bytes, with zero WAL bytes. These are finite
+local samples, not an SLA, performance regression verdict or fastest claim.
+
+### 14.7 Report checks, limits and authority
+
+Increment-3 report checks (D): **PASS**.
+
+| Check | Result |
+|---|---|
+| `uv run python -m json.tool docs/slices/p1b2/verification.json /dev/null` | PASS: parse/format validation |
+| Read-only Node JSON round-trip and historical-evidence checks | PASS: all 36 rows, original fields, component tests, first failures, revisions and hosted evidence preserved; all 10 joined test symbols mapped |
+| `cargo fmt --all -- --check` | PASS |
+| `git diff --check` | PASS |
+| Node whitespace scan of all `git ls-files --others --exclude-standard -z` paths | PASS: 2 files; no trailing whitespace, space-before-tab or blank-EOF errors |
+| Reviewed test SHA-256, Git index and changed-path checks | PASS: test bytes unchanged, index empty, only the two authorized reports changed by this increment; Cargo files unchanged |
+
+Linux local results do not establish current repair coverage on native macOS or
+Windows. Process/reopen evidence is not physical power-loss proof. Live opaque
+portability and model adherence remain NOT RUN. Legacy unbound history,
+incomplete/uncertain tails and cross-model conversion remain unsupported.
+
+Real credential reads = **0**; live/provider generations = **0**, excluding synthetic
+scripted/loopback work. No real profiles/private skills or authentication commands
+were used. The ledger remains **31/50 used, 19 remaining**, unchanged. This evidence
+repair adds no runtime behavior, dependency, retry/failover or later increment.
+Separately authorized commit/push and then exact-head cross-platform CI remain deferred.
+All changes remain unstaged and uncommitted for owner review.
+
+### 14.8 Complete-diff review and local closure, 2026-09-17
+
+Three fresh independent reviewers inspected the complete accumulated uncommitted
+diff based on `06dae19bd885c60bd341a092a23fcd850d00fb85`, including both untracked
+test files and the dated report additions. All returned **PASS** with no blocking
+findings (P). This closure increment records their supplied results; it did not
+start reviewers or rerun their test suites.
+
+All three confirmed the joined public/SQLite/OpenAI/tool path and canonical
+storage-fed replay described in section 14.2. Their review covered WS/SSE native
+and recovered output, MIME controls, close/reopen, isolation, real durable gates,
+both-transport mismatch binding/no-send/later X exclusion, failure classifications
+and uncertainty. They confirmed no production, Cargo, public API or schema change;
+all 36 historical rows, prior evidence, first failures and the ledger remain preserved.
+
+| Reviewer (P) | Independent checks | Result |
+|---|---|---|
+| review-a | `cargo fmt --all -- --check`; JSON validation; `git diff --check`; all-untracked whitespace scan; mechanical report checks | PASS; no blocking findings |
+| review-b | `cargo fmt --all -- --check`; JSON validation; `git diff --check`; all-untracked whitespace scan; mechanical report checks | PASS; no blocking findings |
+| review-c | `cargo test --lib b2mr_`: 10 passed; `cargo test --lib replay_loopback_tests`: 18 passed; `cargo fmt --all -- --check`; JSON validation; `git diff --check`; all-untracked whitespace scan; SHA linkage and ancestry/index checks | PASS; no blocking findings |
+
+Review-c noted only that the reports had not yet recorded this completed review
+and that the historical top-level PASS was explicitly scoped separately from the
+repair. This update records completion. The focused command flags above belong
+to review-c's independent reruns, not the original parent runs in section 14.4.
+
+**B2MR-07: PASS. B2-E01: accepted and closed locally for acceptance evidence.**
+Closure applies only to the uncommitted owner-review tree. It is subject to separately
+authorized commit/push and then exact-head push/PR CI on Ubuntu, macOS and Windows.
+Current exact-head hosted CI remains **NOT_RUN** because commit/push was not authorized.
+No historical hosted result is relabeled. No native macOS/Windows execution is claimed
+for this repair. Real credential reads and live provider generations remain **0**;
+the ledger remains **31/50 used, 19 remaining**. No production change or V1 work was added.

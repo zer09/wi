@@ -5,11 +5,12 @@ Result: **PASS**
 Accepted: **Yes under p1b2.0. PR #7 remains open; merge, release and deployment were not authorized.**
 
 **2026-09-17 remediation status:** The result above and sections 1-14 retain
-historical evidence, including B2-E01 local acceptance-evidence closure. Section 15
-records mixed hosted results at `80290a8636ef27d3b3cd920ac12f601fb2d7b6ca` and the
-verification-confirmed test watchdog correction. The uncommitted remediation passes
-its required local checks. Its exact-head hosted CI remains **NOT_RUN**; no all-green
-exact-head hosted closure is claimed.
+historical evidence, including B2-E01 local acceptance-evidence closure. Sections
+15.1-15.4 record the mixed hosted results at
+`80290a8636ef27d3b3cd920ac12f601fb2d7b6ca` and the then-uncommitted test watchdog
+correction. Section 15.5 is current: exact remediation revision
+`c0534f4b6637fc90e739afac6ae4ddeee69adbaa` passed both push and pull-request CI on
+Ubuntu, macOS and Windows. B2-E01 now has all-green exact-head hosted closure.
 
 ## 1. Revision and worktree
 
@@ -137,7 +138,7 @@ For SSE, every request contains the full ordered effective/native history. Label
 | P1B2-32 | PASS | Complete local regression gates and unchanged dependencies |
 | P1B2-33 | PASS | Six dev examples and release `conversation_offline` |
 | P1B2-34 | PASS | This report and `verification.json`; 2026-09-17 initial B2MR-06 evidence repair is appended in section 14 and `acceptance_repair` |
-| P1B2-35 | PASS | Complete local gates, independent reviews, and exact-head push/PR CI on Ubuntu, macOS and Windows (historical); 2026-09-17 repair: local gates and three fresh complete accumulated-diff reviews PASS; local acceptance-evidence closed on the uncommitted owner-review tree (section 14.8); current exact-head hosted CI NOT_RUN |
+| P1B2-35 | PASS | Complete local gates and independent reviews; 2026-09-17 B2-E01 repair: local closure passed three complete-diff reviews, and exact remediation revision `c0534f4` passed push/PR CI on Ubuntu, macOS and Windows (section 15.5) |
 
 Detailed row assertions, test names, source paths and blockers are in `verification.json`.
 
@@ -563,3 +564,29 @@ No production behavior changed. No stage, commit, push, hosted write, PR transit
 merge, deployment, auth command or live provider traffic occurred. Real credential
 reads and live provider generations remain **0**. The ledger remains
 **31/50 used, 19 remaining**, unchanged.
+
+### 15.5 Remediation exact-head hosted closure, 2026-09-17
+
+The test-only watchdog remediation was committed and pushed at exact revision
+`c0534f4b6637fc90e739afac6ae4ddeee69adbaa`. Both Rust source validation workflows
+completed successfully at that revision:
+
+| Event | Workflow run | Ubuntu | macOS | Windows |
+|---|---:|---|---|---|
+| Push | [35221955828](https://github.com/zer09/wi/actions/runs/35221955828) | PASS | PASS | PASS |
+| Pull request | [35221961938](https://github.com/zer09/wi/actions/runs/35221961938) | PASS | PASS | PASS |
+
+Every platform passed `cargo fmt --all -- --check`, `cargo check --all-targets`,
+`cargo test --all-targets`, `cargo clippy --all-targets -- -D warnings`,
+`cargo build --all-targets` and `cargo test --doc`. The passing Windows jobs were
+push job `105204026240` and pull-request job `105204046388`. This exact-head result
+closes the portability gate left open in section 15.4 and confirms that the
+60-second test-local watchdog is sufficient on hosted Windows without changing any
+semantic assertion or production deadline.
+
+**B2-E01 is closed with local review and exact-head hosted evidence.** No production
+code, dependency, API, schema, budget, retry/failover behavior or live provider path
+changed. No live smoke test was required or run. Real credential reads and live
+provider generations remain **0**. The ledger remains **31/50 used, 19 remaining**.
+PR #7 remains open and unmerged; merge, release and deployment still require separate
+authorization.

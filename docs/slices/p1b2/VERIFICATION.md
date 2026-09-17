@@ -4,11 +4,12 @@ Contract: **p1b2.0**
 Result: **PASS**
 Accepted: **Yes under p1b2.0. PR #7 remains open; merge, release and deployment were not authorized.**
 
-**2026-09-17 acceptance-repair status:** The result above and sections 1-13 retain
-historical evidence. Section 14 records B2-E01 under unchanged p1b2.0: B2MR-00..07
-**PASS** for local acceptance-evidence closure on the uncommitted owner-review tree.
-Current exact-head hosted CI remains **NOT_RUN**. Closure is subject to separately
-authorized commit/push and then exact-head cross-platform CI.
+**2026-09-17 remediation status:** The result above and sections 1-14 retain
+historical evidence, including B2-E01 local acceptance-evidence closure. Section 15
+records mixed hosted results at `80290a8636ef27d3b3cd920ac12f601fb2d7b6ca` and the
+verification-confirmed test watchdog correction. The uncommitted remediation passes
+its required local checks. Its exact-head hosted CI remains **NOT_RUN**; no all-green
+exact-head hosted closure is claimed.
 
 ## 1. Revision and worktree
 
@@ -479,3 +480,86 @@ Current exact-head hosted CI remains **NOT_RUN** because commit/push was not aut
 No historical hosted result is relabeled. No native macOS/Windows execution is claimed
 for this repair. Real credential reads and live provider generations remain **0**;
 the ledger remains **31/50 used, 19 remaining**. No production change or V1 work was added.
+
+## 15. Test timeout portability remediation, 2026-09-17
+
+### 15.1 Exact-head hosted observation (P)
+
+The parent supplied verified hosted observations at exact committed SHA
+`80290a8636ef27d3b3cd920ac12f601fb2d7b6ca`. These observations follow the local
+closure in section 14; its then-current uncommitted/NOT_RUN statements remain
+historical. This remediation did not query, rerun or write hosted CI.
+
+| Event | Workflow run | Ubuntu | macOS | Windows |
+|---|---:|---|---|---|
+| Push | [35217888199](https://github.com/zer09/wi/actions/runs/35217888199) | PASS | PASS | FAIL |
+| Pull request | [35217892116](https://github.com/zer09/wi/actions/runs/35217892116) | PASS | PASS | PASS |
+
+Push Windows job [105190612330](https://github.com/zer09/wi/actions/runs/35217888199/job/105190612330)
+failed `cargo test --all-targets`: two B2MR-05 cases reached the 20-second test-local
+outer watchdog and panicked at `src/providers/openai_codex/tests/replay/joined_gates.rs:286`.
+The Windows test summary was **389 passed, 2 failed, 5 ignored**. Later Clippy, build
+and doctest gates were skipped. The PR workflow at the same SHA passed all six Cargo
+gates on Ubuntu, macOS and Windows; its Windows test summary was
+**391 passed, 0 failed, 5 ignored**. These summaries are not additional unique tests.
+
+Verification classified the first exact-head push failure as a **test timeout
+portability defect, not a production defect**. The existing failing B2MR-05 cases
+supply the regression evidence; no new semantic test or production fix is required.
+
+### 15.2 Minimal correction and revision linkage (D)
+
+The initial worktree was clean at the exact SHA above. The only code change is
+`failed_execution` at `src/providers/openai_codex/tests/replay/joined_gates.rs:272`:
+its outer `tokio::time::timeout` increases from **20 to 60 seconds**. Every semantic
+assertion remains unchanged. Production/session/provider/storage deadlines, error
+behavior, workflow concurrency and Cargo files remain unchanged.
+
+SHA-256 for `src/providers/openai_codex/tests/replay/joined_gates.rs`:
+
+- Committed 20-second version: `4c6e06d6097ae07bfb9f8318eeff2878106f5446165a2424744833d9d7607982`.
+- Current uncommitted 60-second version: `cbd8bd97c79c060c900c4e8c9c1d761cfbc744fb21900a426e501ecb024f7579`.
+
+The machine report retains the historical `preserved_test_sha256` values and records
+current linkage in `timeout_portability_remediation.test_file_sha256`. All 36 prior
+matrix rows and the prior local closure evidence remain unchanged. Only this test
+file and the two current evidence reports are modified; all three remain unstaged
+and uncommitted, with no untracked files.
+
+### 15.3 Required local checks (D)
+
+Checks ran once each on the uncommitted remediation based on the exact SHA above,
+in `/home/gc/projects/wi`, on Linux `6.18.33.2-microsoft-standard-WSL2` x86_64 with
+rustc/cargo `1.98.1`. Cargo commands used `env -i`, inherited trusted `PATH`,
+`CARGO_HOME` and `RUSTUP_HOME`, and `CARGO_NET_OFFLINE=true`. Synthetic `HOME`,
+`XDG_CONFIG_HOME`, `CODEX_HOME` and `TMPDIR` were under
+`/tmp/wi-b2e01-timeout.iZlelA`; no credential or endpoint variables were inherited.
+
+| Command / check | Result |
+|---|---|
+| `cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty -- --exact` | PASS: exactly 1 selected, 1 passed, 0 failed, 0 ignored; 2.37 s |
+| `cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error -- --exact` | PASS: exactly 1 selected, 1 passed, 0 failed, 0 ignored; 5.53 s |
+| `cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error -- --exact` | PASS: exactly 1 selected, 1 passed, 0 failed, 0 ignored; 4.99 s |
+| `cargo test --lib replay_loopback_tests` | PASS: 18 passed, 0 failed, 0 ignored; 12.99 s |
+| `cargo fmt --all -- --check` | PASS |
+| `uv run python -m json.tool docs/slices/p1b2/verification.json /dev/null` | PASS |
+| `git diff --check` | PASS |
+| Node whitespace scan using `git ls-files -z` and `git ls-files --others --exclude-standard -z` | PASS: tracked text files and all nonignored untracked files; no trailing whitespace, space-before-tab or blank-EOF errors; 0 untracked files |
+| Node historical-evidence, exact code-diff, SHA linkage and changed-path checks | PASS: all 36 rows and prior closure preserved; only the authorized three paths changed; index unchanged |
+
+Test-name discovery used `cargo test --lib b2mr_05 -- --list` and listed exactly three
+tests. Focused reruns and the module run are overlapping coverage, not new unique tests.
+The required checks had no local failures or retries. Full all-target gates were not
+rerun for this narrow remediation; their earlier local evidence remains in section 14.
+
+### 15.4 Remaining boundary
+
+New remediation exact-head hosted CI is **NOT_RUN** until separately authorized
+commit/push. The passing PR workflow does not erase the failed push workflow or
+cover the uncommitted watchdog change. No all-green exact-head hosted closure is
+claimed. Native Windows/macOS execution of this remediation remains unverified locally.
+
+No production behavior changed. No stage, commit, push, hosted write, PR transition,
+merge, deployment, auth command or live provider traffic occurred. Real credential
+reads and live provider generations remain **0**. The ledger remains
+**31/50 used, 19 remaining**, unchanged.

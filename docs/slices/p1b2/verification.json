@@ -2,7 +2,7 @@
   "contract": "p1b2.0",
   "status": "PASS",
   "accepted": true,
-  "status_scope": "Historical pre-repair acceptance and observations are retained. The 2026-09-17 acceptance_repair object records completed local acceptance-evidence closure on the uncommitted owner-review tree. Current exact-head hosted CI remains NOT_RUN; closure is subject to separately authorized commit/push and then exact-head cross-platform CI.",
+  "status_scope": "Historical acceptance and the acceptance_repair object, including local closure on its then-uncommitted tree, are retained unchanged. The 2026-09-17 timeout_portability_remediation object records mixed hosted results at 80290a8636ef27d3b3cd920ac12f601fb2d7b6ca and the uncommitted test watchdog correction. Required local remediation checks pass; new remediation exact-head hosted CI remains NOT_RUN. No all-green exact-head hosted closure is claimed.",
   "baseline": "6fe0a538edf6bae39c9f933db8394b7d8483e2be",
   "planning_revision": "58fdb17d2eb621f65fb862d1ad313d57f07e0d18",
   "source_revision": "80f387294c92ff0287e614a7f9c658901979352f",
@@ -344,5 +344,114 @@
     "ledger": {"used":31,"cap":50,"remaining":19,"changed":false},
     "authority": {"stage":false,"commit":false,"push":false,"merge":false,"release":false,"deploy":false,"hosted_write":false,"live_test":false},
     "left_unstaged_and_uncommitted": true
+  },
+  "timeout_portability_remediation": {
+    "date": "2026-09-17",
+    "contract": "p1b2.0",
+    "pull_request": 7,
+    "finding": "B2-E01",
+    "classification": "test_timeout_portability_defect_not_production_defect",
+    "attribution": {
+      "hosted_observations_and_classification": "Parent-supplied verified evidence; no hosted query, rerun or write by this remediation.",
+      "local_change_and_checks": "Direct execution on the uncommitted remediation tree."
+    },
+    "base_head": "80290a8636ef27d3b3cd920ac12f601fb2d7b6ca",
+    "initial_worktree": "clean",
+    "tested_tree": "Uncommitted watchdog change based on base_head in /home/gc/projects/wi; not a new committed or hosted-tested revision.",
+    "hosted_observations": [
+      {
+        "event": "push",
+        "run_id": 35217888199,
+        "url": "https://github.com/zer09/wi/actions/runs/35217888199",
+        "head_sha": "80290a8636ef27d3b3cd920ac12f601fb2d7b6ca",
+        "status": "FAIL",
+        "platforms": {"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"FAIL"},
+        "windows_job_id": 105190612330,
+        "windows_job_url": "https://github.com/zer09/wi/actions/runs/35217888199/job/105190612330",
+        "failed_gate": "cargo test --all-targets",
+        "windows_test_summary": {"passed":389,"failed":2,"ignored":5},
+        "first_failure": "Two B2MR-05 cases reached the 20-second test-local outer watchdog and panicked at src/providers/openai_codex/tests/replay/joined_gates.rs:286.",
+        "later_gates_skipped": ["cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc"]
+      },
+      {
+        "event": "pull_request",
+        "run_id": 35217892116,
+        "url": "https://github.com/zer09/wi/actions/runs/35217892116",
+        "head_sha": "80290a8636ef27d3b3cd920ac12f601fb2d7b6ca",
+        "status": "PASS",
+        "platforms": {"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"},
+        "all_six_cargo_gates_on_all_three_platforms": "PASS",
+        "windows_test_summary": {"passed":391,"failed":0,"ignored":5}
+      }
+    ],
+    "fix": {
+      "path": "src/providers/openai_codex/tests/replay/joined_gates.rs",
+      "symbol": "failed_execution",
+      "line": 272,
+      "test_local_outer_timeout_seconds": {"before":20,"after":60},
+      "verification_confirmed_minimal_fix": true,
+      "regression_evidence": "Existing B2MR-05 cases failed on exact-head Windows push CI before the fix; all three exact cases and the full replay loopback module pass locally after the fix.",
+      "semantic_assertions_changed": false,
+      "production_session_provider_storage_deadlines_changed": false,
+      "production_source_changed": false,
+      "workflow_concurrency_changed": false,
+      "error_behavior_changed": false,
+      "dependency_files_changed": false
+    },
+    "test_file_sha256": {
+      "path": "src/providers/openai_codex/tests/replay/joined_gates.rs",
+      "committed_before": "4c6e06d6097ae07bfb9f8318eeff2878106f5446165a2424744833d9d7607982",
+      "current_uncommitted": "cbd8bd97c79c060c900c4e8c9c1d761cfbc744fb21900a426e501ecb024f7579",
+      "historical_preserved_test_sha256_scope": "The acceptance_repair worktree hashes remain unchanged as prior local closure evidence; current linkage is recorded here."
+    },
+    "local_environment": {
+      "platform": "Linux x86_64",
+      "kernel": "6.18.33.2-microsoft-standard-WSL2",
+      "rustc": "1.98.1",
+      "cargo": "1.98.1",
+      "synthetic_root": "/tmp/wi-b2e01-timeout.iZlelA",
+      "cargo_environment": "env -i with trusted PATH, CARGO_HOME and RUSTUP_HOME; synthetic HOME, XDG_CONFIG_HOME, CODEX_HOME and TMPDIR; CARGO_NET_OFFLINE=true; no credential or endpoint variables inherited."
+    },
+    "local_status": "PASS",
+    "commands": [
+      {"command":"cargo test --lib b2mr_05 -- --list","status":"PASS","listed_tests":3,"test_execution":false},
+      {"command":"cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_sse_wrong_explicit_mime_preserves_uncertainty -- --exact","status":"PASS","selected":1,"passed":1,"failed":0,"ignored":0,"filtered_out":443,"elapsed_seconds":2.37,"attempts":1},
+      {"command":"cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_labelled_sse_empty_identity_is_protocol_error -- --exact","status":"PASS","selected":1,"passed":1,"failed":0,"ignored":0,"filtered_out":443,"elapsed_seconds":5.53,"attempts":1},
+      {"command":"cargo test --lib providers::openai_codex::tests::replay_loopback_tests::joined::gates::b2mr_05_public_session_missing_mime_sse_malformed_admission_is_content_type_error -- --exact","status":"PASS","selected":1,"passed":1,"failed":0,"ignored":0,"filtered_out":443,"elapsed_seconds":4.99,"attempts":1},
+      {"command":"cargo test --lib replay_loopback_tests","status":"PASS","passed":18,"failed":0,"ignored":0,"filtered_out":426,"elapsed_seconds":12.99,"attempts":1},
+      {"command":"cargo fmt --all -- --check","status":"PASS","attempts":1},
+      {"command":"uv run python -m json.tool docs/slices/p1b2/verification.json /dev/null","status":"PASS","attempts":1},
+      {"command":"git diff --check","status":"PASS","attempts":1},
+      {"check":"Node whitespace scan of git ls-files -z and git ls-files --others --exclude-standard -z","status":"PASS","scope":"all tracked text files and all nonignored untracked files","errors":0,"untracked_paths":0,"attempts":1},
+      {"check":"Node historical-evidence, exact code-diff, SHA linkage and changed-path checks","status":"PASS","historical_matrix_rows_unchanged":36,"prior_local_closure_unchanged":true,"index_unchanged":true,"attempts":1}
+    ],
+    "local_first_failures": [],
+    "current_exact_head_hosted_ci": {
+      "status": "NOT_RUN",
+      "remediation_commit": null,
+      "submitted_runs": [],
+      "reason": "The 60-second watchdog remediation is uncommitted and unpushed. Exact-head hosted CI requires separately authorized commit/push; the mixed base_head workflows do not cover this change.",
+      "all_green_exact_head_hosted_closure": false
+    },
+    "worktree": {
+      "path": "/home/gc/projects/wi",
+      "tracked_modified": 3,
+      "untracked": 0,
+      "staged": 0,
+      "changed_paths": ["src/providers/openai_codex/tests/replay/joined_gates.rs","docs/slices/p1b2/VERIFICATION.md","docs/slices/p1b2/verification.json"],
+      "left_unstaged_and_uncommitted": true
+    },
+    "limitations": [
+      "The passing PR workflow does not erase the failed push workflow or establish all-green exact-head hosted closure.",
+      "New remediation exact-head hosted CI remains NOT_RUN until separately authorized commit/push; local checks do not establish native Windows/macOS portability.",
+      "Focused tests and the module run overlap; reruns and hosted summaries are not additional unique tests.",
+      "Full all-target gates were not rerun for this narrow remediation; prior local closure evidence remains unchanged."
+    ],
+    "live_started": false,
+    "real_credential_reads": 0,
+    "provider_generations": 0,
+    "provider_generation_count_scope": "live provider generations only; synthetic scripted/loopback work is excluded",
+    "ledger": {"used":31,"cap":50,"remaining":19,"changed":false},
+    "authority": {"stage":false,"commit":false,"push":false,"merge":false,"release":false,"deploy":false,"hosted_write":false,"live_test":false}
   }
 }

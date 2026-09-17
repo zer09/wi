@@ -269,7 +269,7 @@ async fn failed_execution(
     code: &str,
 ) -> (RunResult, Vec<RunEventEnvelope>) {
     let execution = timeout(
-        Duration::from_secs(20),
+        Duration::from_secs(60),
         run_in_session(
             gateway,
             &task.session,

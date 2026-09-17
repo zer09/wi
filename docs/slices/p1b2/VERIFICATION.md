@@ -1,21 +1,22 @@
 # P1-B2 verification
 
 Contract: **p1b2.0**
-Result: **LOCAL PASS; HOSTED CI NOT RUN**
-Accepted: **No. The exact tested source revision is committed locally; remote push and hosted CI remain pending.**
+Result: **PASS**
+Accepted: **Yes under p1b2.0. PR #7 remains open; merge, release and deployment were not authorized.**
 
 ## 1. Revision and worktree
 
 - Accepted baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
 - Planning revision: `58fdb17d2eb621f65fb862d1ad313d57f07e0d18`.
-- Exact tested source revision: `80f387294c92ff0287e614a7f9c658901979352f`.
-- The baseline and planning revision are ancestors of the tested source revision.
-- The tested source revision was clean and committed before this documentation/evidence-only update.
+- Exact source revision: `80f387294c92ff0287e614a7f9c658901979352f`.
+- Exact hosted evidence revision: `cc9a6a269b737a7d5b093791f9a297e07d585ec8`.
+- The baseline and planning revision are ancestors of both revisions.
+- The hosted evidence revision differs from the source revision only in current documentation and evidence files.
 - Before the original reports were added, the worktree had 34 tracked modified files and 31 untracked files.
 - `Cargo.toml` and `Cargo.lock` are unchanged.
-- No reset, clean, force checkout, stash, push, merge, release or deployment occurred.
+- No reset, clean, force checkout, stash, merge, release or deployment occurred.
 
-The local result is not release acceptance because exact-head hosted CI on Ubuntu, macOS and Windows requires a separately authorized push.
+The authorized branch push occurred. PR #7 remains open and unmerged.
 
 ## 2. Implemented boundary
 
@@ -129,7 +130,7 @@ For SSE, every request contains the full ordered effective/native history. Label
 | P1B2-32 | PASS | Complete local regression gates and unchanged dependencies |
 | P1B2-33 | PASS | Six dev examples and release `conversation_offline` |
 | P1B2-34 | PASS | This report and `verification.json` |
-| P1B2-35 | LOCAL PASS; CI NOT RUN | Complete local gates and independent increment reviews; push/PR CI unauthorized |
+| P1B2-35 | PASS | Complete local gates, independent reviews, and exact-head push/PR CI on Ubuntu, macOS and Windows |
 
 Detailed row assertions, test names, source paths and blockers are in `verification.json`.
 
@@ -159,7 +160,22 @@ All commands ran on exact source revision `80f387294c92ff0287e614a7f9c6589019793
 
 The five ignored tests are closed child helpers invoked by parent process tests. They are not skipped acceptance cases.
 
-## 9. Public example observations
+## 9. Hosted CI
+
+Evidence head `cc9a6a269b737a7d5b093791f9a297e07d585ec8` passed both submitted workflows:
+
+| Event | Workflow run | Ubuntu | macOS | Windows |
+|---|---:|---|---|---|
+| Push | [35167416739](https://github.com/zer09/wi/actions/runs/35167416739) | PASS | PASS | PASS |
+| Pull request | [35167422773](https://github.com/zer09/wi/actions/runs/35167422773) | PASS | PASS | PASS |
+
+Each job passed `cargo fmt --all -- --check`, `cargo check --all-targets`,
+`cargo test --all-targets`, `cargo clippy --all-targets -- -D warnings`,
+`cargo build --all-targets`, and `cargo test --doc`. The PR was mergeable when observed.
+The runner warning that `actions/checkout@v4` targets Node.js 20 was non-blocking and
+GitHub forced the action to Node.js 24.
+
+## 10. Public example observations
 
 The final `conversation_offline` runs used synthetic roots, a synthetic identity, local SQLite, an in-process provider, real S2 loading and real `AddNumbers` effects.
 
@@ -177,7 +193,7 @@ The final `conversation_offline` runs used synthetic roots, a synthetic identity
 
 Both modes recorded 48 history rows, 2 runs, 5 exchanges and 5,399 replay JSON bytes. The closed catalog/session files were 36,864/131,072 bytes with zero-byte WAL files. These are finite local samples, not an SLA or fastest claim.
 
-## 10. First failures and fixes
+## 11. First failures and fixes
 
 1. Increment-1 review found selected runs could append activity before binding. Append and streamed repair now require canonical binding before selected-run activity while preserving valid atomic binding batches and zero-activity terminal failures.
 2. Increment-1 review found catalog heads ahead of canonical history returned `Unchanged`. Regressed catalog heads now fail `storage.integrity` without catalog mutation.
@@ -193,7 +209,7 @@ Both modes recorded 48 history rows, 2 runs, 5 exchanges and 5,399 replay JSON b
 
 The post-commit replay finding clarified the existing closed-exchanges-v1 contract; it did not widen the feature boundary.
 
-## 11. Independent reviews
+## 12. Independent reviews
 
 Each implementation increment received three fresh read-only reviews:
 
@@ -208,13 +224,14 @@ The first final complete-diff review inspected these reports and every untracked
 
 After the initial implementation commit, three post-commit reviewers identified the ordinary-terminal replay policy and stale current evidence/docs. Independent verification confirmed each discrepancy. The source/current-doc remediation review found one overbroad `ToolsPrepared` outcome branch; focused remediation narrowed it. The repeated three-review gate returned PASS with no blocking findings on exact source revision `80f387294c92ff0287e614a7f9c658901979352f`.
 
-## 12. Limits and authority
+The first final evidence review found stale current-document revision pointers. Independent verification confirmed the finding. After correction, the repeated three-review gate returned PASS with no blocking findings before evidence head `cc9a6a2` was committed and pushed.
 
-- Verification ran locally on Linux x86_64 only.
-- Hosted Ubuntu, macOS and Windows workflows were not authorized and were not run.
+## 13. Limits and authority
+
+- Local verification ran on Linux x86_64. Exact-head hosted Cargo gates passed on Ubuntu, macOS and Windows.
 - Process-exit and transaction-fault tests are not a physical power-loss test.
 - No real credentials, profile aliases, authentication commands, private skills or live provider requests were used.
 - Legacy unbound history, incomplete/uncertain tails, cross-model conversion and arbitrary imported transcripts remain unsupported for replay.
 - No normal CLI session persistence, task manager, browser service, server, GUI, hosted skills, billing path, retry/failover, compaction or import/export was added.
 - The no-live ledger remains **31/50 used, 19 remaining**.
-- The exact tested source revision is committed locally; remote push and exact-head hosted CI remain pending.
+- Source revision `80f3872` and hosted evidence revision `cc9a6a2` are pushed. PR #7 remains open; merge, release and deployment require separate authorization.

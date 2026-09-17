@@ -23,13 +23,13 @@ holds storage ownership during execution. Local validation and exact-head
 Ubuntu/macOS/Windows CI passed. See [B1 verification](docs/slices/p1b1/VERIFICATION.md)
 and [the offline example](#incremental-supplied-input-capture-p1-b1).
 
-**P1-B2 status: implemented in local committed source at `80f3872`; locally validated.**
+**P1-B2 status: implemented at `80f3872`; local and hosted validation passed.**
 `wi::execution::run_in_session` submits a new explicit task using stored, bound,
 closed conversation exchanges. `prepare_session_replay` prepares that history through
 storage-only reads. Session schema 2 adds lazy schema-1 migration and canonical history
-selection/provider binding. B2 push and exact-head hosted CI remain pending.
-[B2 verification](docs/slices/p1b2/VERIFICATION.md) identifies the exact tested source
-revision and does not claim hosted acceptance. Ordinary CLI persistence, V1
+selection/provider binding. Evidence head `cc9a6a2` passed push and PR workflows on
+Ubuntu, macOS and Windows. [B2 verification](docs/slices/p1b2/VERIFICATION.md)
+identifies the exact source and hosted evidence revisions. PR #7 remains unmerged. Ordinary CLI persistence, V1
 service/browser/GUI, and automatic task resumption/retry remain unimplemented.
 
 **S2 status: implemented and offline accepted under contract s2.1.**
@@ -511,7 +511,7 @@ SSE retains full native/effective history. Live opaque portability remains unver
 `cargo run --example conversation_offline` demonstrates actual tools and stored skill
 content, close/reopen, read-only preparation and a new explicit submission using synthetic
 roots and a scripted provider. See [B2 evidence](docs/slices/p1b2/VERIFICATION.md) for its
-local observations and limits. B2 push and hosted CI remain pending.
+local observations, hosted workflow evidence and remaining limits. PR #7 remains unmerged.
 
 ## Ordinary CLI and V1 service (not implemented)
 

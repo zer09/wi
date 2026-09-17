@@ -2,10 +2,10 @@
 
 Current contract: **p1b2.0**.
 Accepted P1-B1 baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
-P1-B2 is implemented in local committed source at `80f3872`, with local validation.
-B2 push and exact-head hosted CI remain pending. Frozen planning documents retain
-NOT RUN statuses; the local reports identify the exact tested source revision and do
-not claim hosted acceptance.
+P1-B2 source is committed at `80f3872`; evidence head `cc9a6a2` passed push and
+PR workflows on Ubuntu, macOS and Windows. PR #7 remains open and unmerged. Frozen
+planning documents retain NOT RUN statuses; current reports identify the source and
+hosted evidence revisions.
 
 Read in order:
 1. docs/slices/p1b2/CONTRACT.md
@@ -78,7 +78,7 @@ Use synthetic temporary roots, skills, credentials, scripted providers and loopb
 transports. No real profile/private-skill access, authentication commands or live
 provider requests. Ledger remains **31/50 used, 19 remaining**.
 
-The local 36-row implementation evidence is recorded in:
+The accepted 36-row local and hosted implementation evidence is recorded in:
 - docs/slices/p1b2/VERIFICATION.md
 - docs/slices/p1b2/verification.json
 
@@ -88,7 +88,8 @@ checks, platform limits and unsupported cases. Follow the current assignment's g
 and review scope rather than rerunning completed milestones automatically.
 
 Source counts, reruns, examples and child helpers are not additional unique tests.
-Do not weaken CI, lints or security assertions. A later authorized push requires its
-own exact-head workflow evidence. Leave remediation uncommitted for owner review.
-Commit, push, merge, release, deployment, live tests and later work require separate
-owner authorization. Old checkpoints and frozen prompts are historical references.
+Do not weaken CI, lints or security assertions. Push workflow 35167416739 and PR
+workflow 35167422773 passed all six Cargo gates on Ubuntu, macOS and Windows at
+`cc9a6a2`. Leave later remediation uncommitted for owner review. Commit, push, merge,
+release, deployment, live tests and later work require separate owner authorization.
+Old checkpoints and frozen prompts are historical references.

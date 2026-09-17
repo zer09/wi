@@ -1,12 +1,13 @@
 {
   "contract": "p1b2.0",
-  "status": "LOCAL_PASS_CI_NOT_RUN",
-  "accepted": false,
+  "status": "PASS",
+  "accepted": true,
   "baseline": "6fe0a538edf6bae39c9f933db8394b7d8483e2be",
   "planning_revision": "58fdb17d2eb621f65fb862d1ad313d57f07e0d18",
-  "tested_revision": "80f387294c92ff0287e614a7f9c658901979352f",
+  "source_revision": "80f387294c92ff0287e614a7f9c658901979352f",
+  "tested_revision": "cc9a6a269b737a7d5b093791f9a297e07d585ec8",
   "worktree": {
-    "state": "clean_committed_source_revision_with_documentation_evidence_descendant",
+    "state": "clean_committed_hosted_evidence_revision_with_documentation_closure_descendant",
     "initial_precommit_tracked_modified": 34,
     "initial_precommit_untracked": 31,
     "dependency_files_changed": false,
@@ -28,7 +29,7 @@
     "uv": "0.12.10",
     "node": "v24.18.0",
     "linked_sqlite_expected_by_contract": "3.51.3",
-    "hosted_platforms_run": []
+    "hosted_platforms_run": ["ubuntu-latest", "macos-latest", "windows-latest"]
   },
   "matrix": [
     {"id":"P1B2-00","status":"PASS","observer":"local source and Git inspection","assertions":["baseline and planning revision are ancestors of the exact tested source revision","tested source revision was clean and committed before the documentation/evidence-only update","Cargo.toml and Cargo.lock unchanged","no live ledger use"],"tests":[],"commands":["git status --short --branch","git merge-base --is-ancestor 6fe0a538edf6bae39c9f933db8394b7d8483e2be HEAD","git diff --exit-code -- Cargo.toml Cargo.lock"],"source":["AGENTS.md","docs/slices/p1b2/CONTRACT.md"],"blockers":[]},
@@ -66,7 +67,7 @@
     {"id":"P1B2-32","status":"PASS","observer":"complete local regression gates","assertions":["P1-A/B1/C1/S1/S2/R1/auth/provider assertions remain green","CLI behavior and dependencies are unchanged","no new loop/retry/limit/quota/server exists"],"tests":["all Rust targets","152 Node self-tests","six offline examples"],"commands":["cargo test --all-targets","uv run scripts/verify.py","node scripts/cli_retest.mjs --self-test"],"source":["Cargo.toml","Cargo.lock"],"blockers":[]},
     {"id":"P1B2-33","status":"PASS","observer":"public dev and release example runs","assertions":["A uses real S2 result and AddNumbers","store closes/reopens and read causes zero work","explicit B needs A and executes a new tool","exact provider input is asserted","finite timing/size samples are labelled non-SLA","five older examples pass"],"tests":["examples/conversation_offline.rs"],"commands":["cargo run --example run_offline","cargo run --example skills_offline","cargo run --example skill_loading_offline","cargo run --example storage_offline","cargo run --example persisted_run_offline","cargo run --example conversation_offline","cargo run --release --example conversation_offline"],"source":["examples/conversation_offline.rs"],"blockers":[]},
     {"id":"P1B2-34","status":"PASS","observer":"current human and machine reports","assertions":["all 36 rows are represented","first failures and fixes are recorded","schema, migration, identity, replay and unsupported limits are explicit","old frozen reports remain unchanged","ledger is unchanged"],"tests":[],"commands":["git diff --check"],"source":["docs/slices/p1b2/VERIFICATION.md","docs/slices/p1b2/verification.json"],"blockers":[]},
-    {"id":"P1B2-35","status":"LOCAL_PASS_CI_NOT_RUN","observer":"increment reviews and complete local gates","assertions":["each implementation increment received three independent reviews","all required local commands pass","complete-diff review is run after reports are authored","no CI/lint/security assertion was weakened"],"tests":["all local tests and examples"],"commands":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc","git diff --check"],"source":["complete worktree diff"],"blockers":["Exact-head push and PR CI on Ubuntu, macOS and Windows require separate owner authorization and were not run."]}
+    {"id":"P1B2-35","status":"PASS","observer":"increment reviews, complete local gates and exact-head hosted CI","assertions":["each implementation increment received three independent reviews","all required local commands pass","complete-diff review is run after reports are authored","push and PR workflows pass all six Cargo gates on Ubuntu, macOS and Windows","no CI/lint/security assertion was weakened"],"tests":["all local tests and examples","push workflow 35167416739","PR workflow 35167422773"],"commands":["cargo fmt --all -- --check","cargo check --all-targets","cargo test --all-targets","cargo clippy --all-targets -- -D warnings","cargo build --all-targets","cargo test --doc","git diff --check"],"source":["source revision 80f387294c92ff0287e614a7f9c658901979352f","hosted evidence revision cc9a6a269b737a7d5b093791f9a297e07d585ec8"],"blockers":[]}
   ],
   "commands": [
     {"command":"cargo fmt --all -- --check","status":"PASS"},
@@ -122,9 +123,14 @@
     {"scope":"repeated final complete accumulated diff after remediation","status":"PASS","reviewers":3,"findings":[]},
     {"scope":"post-commit contract and evidence validation","status":"BLOCKING_FINDINGS_REMEDIATED","reviewers":3,"findings":["ordinary terminal closed exchanges were rejected when final RunResult persistence failed","current milestone/schema documentation and report Git state were stale","two machine-report test symbols were stale"]},
     {"scope":"terminal replay and current-documentation remediation","status":"BLOCKING_FINDING_REMEDIATED","reviewers":3,"findings":["ToolsPrepared terminal validation accepted arbitrary non-completed outcomes"]},
-    {"scope":"repeated terminal replay and current-documentation remediation","status":"PASS","reviewers":3,"findings":[]}
+    {"scope":"repeated terminal replay and current-documentation remediation","status":"PASS","reviewers":3,"findings":[]},
+    {"scope":"first final documentation/evidence review","status":"BLOCKING_FINDING_REMEDIATED","reviewers":3,"findings":["five current documents pointed to the pre-remediation implementation commit"]},
+    {"scope":"repeated final documentation/evidence review","status":"PASS","reviewers":3,"findings":[]}
   ],
-  "submitted_ci": [],
+  "submitted_ci": [
+    {"event":"push","workflow":"Rust source validation","run_id":35167416739,"url":"https://github.com/zer09/wi/actions/runs/35167416739","head_sha":"cc9a6a269b737a7d5b093791f9a297e07d585ec8","status":"PASS","platforms":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"}},
+    {"event":"pull_request","workflow":"Rust source validation","run_id":35167422773,"url":"https://github.com/zer09/wi/actions/runs/35167422773","head_sha":"cc9a6a269b737a7d5b093791f9a297e07d585ec8","status":"PASS","platforms":{"ubuntu-latest":"PASS","macos-latest":"PASS","windows-latest":"PASS"}}
+  ],
   "performance_observations": [
     {"mode":"dev","a_install_ms":0.027,"b_install_ms":0.343,"history_read_after_a_ms":21.833,"replay_prepare_after_a_ms":52.205,"history_read_after_b_ms":26.458,"replay_prepare_after_b_ms":51.515,"a_end_to_end_ms":1100.251,"b_end_to_end_ms":757.753,"example_end_to_end_ms":2779.322},
     {"mode":"release","a_install_ms":0.010,"b_install_ms":0.163,"history_read_after_a_ms":11.320,"replay_prepare_after_a_ms":21.851,"history_read_after_b_ms":11.468,"replay_prepare_after_b_ms":21.672,"a_end_to_end_ms":567.685,"b_end_to_end_ms":411.364,"example_end_to_end_ms":1462.844},
@@ -144,12 +150,12 @@
     "Post-commit validation found stale current milestone/schema documentation, stale report Git state and two stale machine-report test symbols; current docs and both evidence reports now match the committed source revision."
   ],
   "limitations": [
-    "Local verification ran only on Linux x86_64. Hosted Ubuntu, macOS and Windows CI was not authorized or run.",
+    "Local verification ran on Linux x86_64; exact-head hosted Cargo gates passed on Ubuntu, macOS and Windows.",
     "No physical power-loss test was performed; process-exit and transaction fault injection cover bounded crash cases.",
     "No live provider request, real credential read, authentication command, private profile or private skill access occurred.",
     "Legacy unbound history, incomplete or uncertain tails, cross-model conversion and arbitrary imported transcripts remain unsupported for replay.",
     "No normal CLI session persistence, task manager, server, GUI, hosted skills, billing path, retry/failover, compaction or import/export was added.",
-    "The exact tested source revision is committed locally; remote push and exact-head hosted CI remain pending."
+    "Source revision 80f3872 and hosted evidence revision cc9a6a2 are pushed; PR #7 remains open and merge, release and deployment require separate authorization."
   ],
   "normal_cli_persistence_implemented": false,
   "service_implemented": false,

@@ -16,9 +16,9 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
 at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
-P1-B2 history restoration is implemented in local committed source at `80f3872`, with
-local validation. B2 push and exact-head hosted CI remain pending. V1 service remains
-separately scoped and unimplemented.
+P1-B2 history restoration is implemented in source revision `80f3872`. Evidence head
+`cc9a6a2` passed push and PR workflows on Ubuntu, macOS and Windows. PR #7 remains
+unmerged. V1 service remains separately scoped and unimplemented.
 
 ## Current implementation: P1-B2 stored conversation submissions
 
@@ -46,8 +46,8 @@ history. The actual opened account must match before installation or generation.
 - [P1-B2 validation](slices/p1b2/VALIDATION.md) and
   [implementor prompt](slices/p1b2/IMPLEMENTOR_PROMPT.md): Historical planning handoff.
 - [P1-B2 verification](slices/p1b2/VERIFICATION.md) and
-  [machine report](slices/p1b2/verification.json): Local implementation evidence for the
-  exact tested source revision, not exact-head hosted CI or live opaque portability.
+  [machine report](slices/p1b2/verification.json): Local and exact-head hosted evidence
+  for the source and evidence revisions; live opaque portability remains unsupported.
 - [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
   stored skill content and an explicit new task after reopen; no credentials or network.
 
@@ -128,9 +128,9 @@ records the source review, exact CI and retained limits without rewriting old re
   dirty-worktree history, review and submitted-CI results, platform limits and unchanged ledger.
 
 P1-A acceptance did not include runtime capture. Accepted B1 supplies that boundary;
-local B2 adds stored-history submissions. Ordinary `wi run` persistence, service
+accepted B2 adds stored-history submissions. Ordinary `wi run` persistence, service
 authentication, browser protocol and GUI remain NOT IMPLEMENTED (V1).
-P1-A and B1 have their own exact-head native Windows/macOS evidence; B2 hosted CI is pending.
+P1-A, B1 and B2 have exact-head Ubuntu, macOS and Windows evidence.
 Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain explicit limits.
 
 ## Historical-citation errata (2026-09-12 UTC)

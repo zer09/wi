@@ -33,10 +33,10 @@ sequence, event UUID, Unix-millisecond timestamp, event type/version and typed p
 Nested runtime/provider envelopes remain schema 2/1 with their original correlations.
 Provider-session IDs and source sequences are not durable application replay cursors.
 
-P1-B1 is accepted and merged in PR #6 at `6fe0a53`. P1-B2 is implemented in local
-committed source at `80f3872`, with local validation; B2 push and exact-head hosted CI
-remain pending. Its [verification report](slices/p1b2/VERIFICATION.md) identifies the
-exact tested source revision and does not claim hosted acceptance. B2 initializes session database schema 2 and lazily migrates valid
+P1-B1 is accepted and merged in PR #6 at `6fe0a53`. P1-B2 is implemented in source
+revision `80f3872`; evidence head `cc9a6a2` passed push and PR workflows on Ubuntu,
+macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md) identifies
+the exact source and hosted evidence revisions. PR #7 remains unmerged. B2 initializes session database schema 2 and lazily migrates valid
 schema-1 sessions on explicit open, preserving old event/receipt bytes and identities.
 Catalog schema remains 1; stored/runtime/provider envelopes remain 1/2/1. Legacy
 schema-1 history stays readable but lacks native replay provenance; migration does

@@ -2,10 +2,10 @@
 
 Current contract: **p1b2.0**.
 Accepted P1-B1 baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
-P1-B2 is implemented in local committed source at `652e078`, with local validation.
+P1-B2 is implemented in local committed source at `80f3872`, with local validation.
 B2 push and exact-head hosted CI remain pending. Frozen planning documents retain
-NOT RUN statuses; local reports describe their own pre-commit validation snapshot,
-not the current Git state or hosted acceptance.
+NOT RUN statuses; the local reports identify the exact tested source revision and do
+not claim hosted acceptance.
 
 Read in order:
 1. docs/slices/p1b2/CONTRACT.md

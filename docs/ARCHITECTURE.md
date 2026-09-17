@@ -11,9 +11,9 @@ and exact-head Ubuntu/macOS/Windows CI passed under p1a.0 after both post-submis
 macOS findings were remediated. See [P1-A verification](slices/p1a/VERIFICATION.md).
 P1-B1 execution-to-storage composition is accepted and merged in PR #6 at `6fe0a53`,
 with local validation and exact-head Ubuntu/macOS/Windows CI. P1-B2 restored history is
-implemented in local committed source at `652e078`, with local validation. B2 push and
+implemented in local committed source at `80f3872`, with local validation. B2 push and
 exact-head hosted CI remain pending. Its [local report](slices/p1b2/VERIFICATION.md)
-records the pre-commit implementation snapshot, not hosted acceptance. Ordinary CLI
+identifies the exact tested source revision and does not claim hosted acceptance. Ordinary CLI
 persistence and V1 service/browser/GUI remain unimplemented.
 
 ## One crate, explicit module boundaries

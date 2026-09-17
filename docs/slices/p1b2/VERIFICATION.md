@@ -2,17 +2,18 @@
 
 Contract: **p1b2.0**
 Result: **LOCAL PASS; HOSTED CI NOT RUN**
-Accepted: **No. Owner review, commit, push and hosted CI remain separately authorized actions.**
+Accepted: **No. The exact tested source revision is committed locally; remote push and hosted CI remain pending.**
 
 ## 1. Revision and worktree
 
 - Accepted baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
-- Planning and tested HEAD: `58fdb17d2eb621f65fb862d1ad313d57f07e0d18`.
-- The baseline is an ancestor of tested HEAD.
-- The tested implementation is unstaged and uncommitted.
-- Before these reports were added, the worktree had 34 tracked modified files and 31 untracked files.
+- Planning revision: `58fdb17d2eb621f65fb862d1ad313d57f07e0d18`.
+- Exact tested source revision: `80f387294c92ff0287e614a7f9c658901979352f`.
+- The baseline and planning revision are ancestors of the tested source revision.
+- The tested source revision was clean and committed before this documentation/evidence-only update.
+- Before the original reports were added, the worktree had 34 tracked modified files and 31 untracked files.
 - `Cargo.toml` and `Cargo.lock` are unchanged.
-- No reset, clean, force checkout, stash, commit, push, merge, release or deployment occurred.
+- No reset, clean, force checkout, stash, push, merge, release or deployment occurred.
 
 The local result is not release acceptance because exact-head hosted CI on Ubuntu, macOS and Windows requires a separately authorized push.
 
@@ -59,7 +60,7 @@ Schema migration does not create history selection, provider binding, run activi
 - Actual committed tool results and actual reuse evidence.
 - Original run, request and call identities.
 
-The builder rejects missing provenance, conflicting responses/results, uncertain submission, incomplete result batches, malformed executable output and unsupported executable kinds. A process-interrupted run may omit `RunResult` only when every started turn has a structurally complete closed exchange. A terminal zero-attempt run can be structurally excluded as `DefinitelyUnsubmitted`; missing final result alone is not proof of no submission.
+The builder rejects missing provenance, conflicting responses/results, uncertain submission, incomplete result batches, malformed executable output and unsupported executable kinds. A complete nonempty run may omit `RunResult` after process interruption or final-result persistence failure only when canonical exchanges are closed and the committed terminal outcome and summary are exact. A terminal zero-attempt run can be structurally excluded as `DefinitelyUnsubmitted` only with its actual `RunResult`; missing final result alone is not proof of no submission.
 
 Legacy unbound history remains readable and repairable. Migration and replay never assign it to the current account.
 
@@ -134,17 +135,17 @@ Detailed row assertions, test names, source paths and blockers are in `verificat
 
 ## 8. Commands
 
-All commands ran on the final source/test tree before these two reports were added.
+All commands ran on exact source revision `80f387294c92ff0287e614a7f9c658901979352f` before this documentation/evidence-only update.
 
 | Command | Result |
 |---|---|
 | `cargo fmt --all -- --check` | PASS |
 | `cargo check --all-targets` | PASS |
-| `cargo test --all-targets` | PASS: 685 passed, 5 ignored child helpers, 0 failed |
+| `cargo test --all-targets` | PASS: 692 passed, 5 ignored child helpers, 0 failed |
 | `cargo clippy --all-targets -- -D warnings` | PASS |
 | `cargo build --all-targets` | PASS |
 | `cargo test --doc` | PASS: 0 doctests |
-| `uv run scripts/verify.py` | PASS: 228 source files, 675 Rust test definitions, 25 fixture events; internal Cargo gates passed |
+| `uv run scripts/verify.py` | PASS: 228 source files, 682 Rust test definitions, 25 fixture events; internal Cargo gates passed |
 | `node scripts/cli_retest.mjs --self-test` | PASS: 152 tests; `live_started=false` |
 | `cargo run --example run_offline` | PASS |
 | `cargo run --example skills_offline` | PASS |
@@ -186,8 +187,11 @@ Both modes recorded 48 history rows, 2 runs, 5 exchanges and 5,399 replay JSON b
 6. The first P1B2-11 implementation delegate exhausted its run budget after writing partial test changes. Inspection, focused execution and three independent reviews confirmed the recovered changes.
 7. Final complete-diff review found normally terminal history could omit `ToolExecutionFinished` after a committed result. Reconstruction now permits that omission only when an open turn closes through `ProcessRestart`; normal terminal closure rejects it.
 8. Final complete-diff review found two Markdown hard-break lines with trailing spaces after the earlier whitespace scan. The spaces were removed, and the corrected all-untracked scan found zero matches.
+9. Post-commit validation found complete ordinary terminal exchanges were rejected when final `RunResult` persistence failed. Reconstruction now accepts nonempty committed `RunFinished` history only after exact terminal outcome and summary validation; empty exclusion still requires `RunResult`.
+10. Remediation review found the `ToolsPrepared` terminal check accepted arbitrary non-completed outcomes. It now accepts only producer-valid `CancelledLocally` or `counter_overflow` outcomes, with focused corruption tests.
+11. Post-commit validation found stale current milestone/schema documentation, stale report Git state and two stale machine-report test symbols. Current docs and both evidence reports now match the committed source revision.
 
-No contract/source conflict required widening behavior.
+The post-commit replay finding clarified the existing closed-exchanges-v1 contract; it did not widen the feature boundary.
 
 ## 11. Independent reviews
 
@@ -202,6 +206,8 @@ Each implementation increment received three fresh read-only reviews:
 
 The first final complete-diff review inspected these reports and every untracked file. It found two blocking issues: the missing-finish policy above and report trailing whitespace. Both findings were independently reproduced and remediated. The repeated complete-diff review inspected the remediated accumulated tree, including all 33 untracked files, and all three reviewers returned PASS with no blocking findings.
 
+After the initial implementation commit, three post-commit reviewers identified the ordinary-terminal replay policy and stale current evidence/docs. Independent verification confirmed each discrepancy. The source/current-doc remediation review found one overbroad `ToolsPrepared` outcome branch; focused remediation narrowed it. The repeated three-review gate returned PASS with no blocking findings on exact source revision `80f387294c92ff0287e614a7f9c658901979352f`.
+
 ## 12. Limits and authority
 
 - Verification ran locally on Linux x86_64 only.
@@ -211,4 +217,4 @@ The first final complete-diff review inspected these reports and every untracked
 - Legacy unbound history, incomplete/uncertain tails, cross-model conversion and arbitrary imported transcripts remain unsupported for replay.
 - No normal CLI session persistence, task manager, browser service, server, GUI, hosted skills, billing path, retry/failover, compaction or import/export was added.
 - The no-live ledger remains **31/50 used, 19 remaining**.
-- The implementation remains unstaged and uncommitted for owner review.
+- The exact tested source revision is committed locally; remote push and exact-head hosted CI remain pending.

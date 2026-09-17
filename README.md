@@ -23,13 +23,13 @@ holds storage ownership during execution. Local validation and exact-head
 Ubuntu/macOS/Windows CI passed. See [B1 verification](docs/slices/p1b1/VERIFICATION.md)
 and [the offline example](#incremental-supplied-input-capture-p1-b1).
 
-**P1-B2 status: implemented in local committed source at `652e078`; locally validated.**
+**P1-B2 status: implemented in local committed source at `80f3872`; locally validated.**
 `wi::execution::run_in_session` submits a new explicit task using stored, bound,
 closed conversation exchanges. `prepare_session_replay` prepares that history through
 storage-only reads. Session schema 2 adds lazy schema-1 migration and canonical history
 selection/provider binding. B2 push and exact-head hosted CI remain pending.
-[B2 verification](docs/slices/p1b2/VERIFICATION.md) records local validation at its
-pre-commit snapshot, not hosted acceptance. Ordinary CLI persistence, V1
+[B2 verification](docs/slices/p1b2/VERIFICATION.md) identifies the exact tested source
+revision and does not claim hosted acceptance. Ordinary CLI persistence, V1
 service/browser/GUI, and automatic task resumption/retry remain unimplemented.
 
 **S2 status: implemented and offline accepted under contract s2.1.**

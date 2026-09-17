@@ -16,7 +16,7 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
 at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
-P1-B2 history restoration is implemented in local committed source at `652e078`, with
+P1-B2 history restoration is implemented in local committed source at `80f3872`, with
 local validation. B2 push and exact-head hosted CI remain pending. V1 service remains
 separately scoped and unimplemented.
 
@@ -46,8 +46,8 @@ history. The actual opened account must match before installation or generation.
 - [P1-B2 validation](slices/p1b2/VALIDATION.md) and
   [implementor prompt](slices/p1b2/IMPLEMENTOR_PROMPT.md): Historical planning handoff.
 - [P1-B2 verification](slices/p1b2/VERIFICATION.md) and
-  [machine report](slices/p1b2/verification.json): Local implementation evidence at the
-  recorded pre-commit snapshot, not exact-head hosted CI or live opaque portability.
+  [machine report](slices/p1b2/verification.json): Local implementation evidence for the
+  exact tested source revision, not exact-head hosted CI or live opaque portability.
 - [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
   stored skill content and an explicit new task after reopen; no credentials or network.
 

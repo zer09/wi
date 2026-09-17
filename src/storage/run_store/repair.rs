@@ -22,6 +22,8 @@ pub(in crate::storage) async fn validate_run(
         result_sequence: None,
         result: None,
     };
+    let mut selection_seen = false;
+    let mut binding_seen = false;
     let mut correlation = Correlation::default();
     let mut after = 0_i64;
     while let Some(row) = sqlx::query(
@@ -44,7 +46,30 @@ pub(in crate::storage) async fn validate_run(
                     return Err(integrity());
                 }
             }
+            StoredEventPayload::RunHistorySelected(_) => {
+                if selection_seen || after as u64 != replay.accepted_sequence {
+                    return Err(integrity());
+                }
+                history_selection(connection, id, run_id)
+                    .await?
+                    .ok_or_else(integrity)?;
+                selection_seen = true;
+            }
+            StoredEventPayload::RunProviderBound(binding) => {
+                if !selection_seen || binding_seen || replay.state != RecordedRunState::Running {
+                    return Err(integrity());
+                }
+                provider_binding(connection, id, run_id)
+                    .await?
+                    .ok_or_else(integrity)?;
+                replay.provider_session_id = Some(binding.provider_session_id().to_owned());
+                correlation.session = replay.provider_session_id.clone();
+                binding_seen = true;
+            }
             StoredEventPayload::RuntimeObserved(event) => {
+                if selection_seen && !binding_seen {
+                    replay::validate_unbound_runtime(event).map_err(|_| integrity())?;
+                }
                 correlation
                     .observe(connection, &replay, event, sequence as i64)
                     .await
@@ -70,7 +95,7 @@ pub(in crate::storage) async fn validate_run(
                 replay.provider_session_id = event.session_id.clone();
             }
             StoredEventPayload::ToolResultRecorded(payload) => {
-                if replay.state != RecordedRunState::Running {
+                if replay.state != RecordedRunState::Running || (selection_seen && !binding_seen) {
                     return Err(integrity());
                 }
                 let saved = tool_result(connection, id, run_id, payload.call_id())
@@ -81,6 +106,9 @@ pub(in crate::storage) async fn validate_run(
                 }
             }
             StoredEventPayload::RunResultRecorded(result) => {
+                if selection_seen && !binding_seen {
+                    replay::validate_unbound_result(result).map_err(|_| integrity())?;
+                }
                 if replay.state == RecordedRunState::Interrupted || replay.result_sequence.is_some()
                 {
                     return Err(integrity());

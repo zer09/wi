@@ -1,6 +1,8 @@
 use super::{
     dto::{self, CreationProvenance},
-    history::{self, AcceptedPayload, StoredEventPayload, ToolResultPayload},
+    history::{
+        self, AcceptedPayload, HistorySelectedPayload, StoredEventPayload, ToolResultPayload,
+    },
     records::invalid,
     session_schema::integrity,
     *,
@@ -16,7 +18,9 @@ use std::fmt;
 type Result<T> = std::result::Result<T, StorageError>;
 
 mod repair;
+mod replay;
 pub(super) use repair::validate_run;
+pub(super) use replay::{history_selection, provider_binding};
 
 #[derive(Clone, Serialize)]
 pub struct RecordedRun {
@@ -525,6 +529,11 @@ async fn latest_runtime(
 pub(super) enum Mutation {
     #[serde(rename = "accept_run")]
     Accept { input: Box<RecordedRunInput> },
+    #[serde(rename = "accept_history_run")]
+    AcceptHistory {
+        input: Box<RecordedRunInput>,
+        selection: StoredHistorySelection,
+    },
     #[serde(rename = "append_run_records")]
     Append { records: Vec<AppendRunRecord> },
 }
@@ -532,6 +541,7 @@ impl Mutation {
     fn method(&self) -> &'static str {
         match self {
             Self::Accept { .. } => "accept_run",
+            Self::AcceptHistory { .. } => "accept_history_run",
             Self::Append { .. } => "append_run_records",
         }
     }
@@ -556,6 +566,25 @@ pub(super) fn sequence_range(head: u64, count: usize) -> Result<(i64, i64)> {
     Ok((first, last))
 }
 
+fn command_hash(
+    id: &ApplicationSessionId,
+    run_id: &RunId,
+    mutation: &Mutation,
+) -> Result<[u8; 32]> {
+    #[derive(Serialize)]
+    struct Request<'a> {
+        session_id: &'a ApplicationSessionId,
+        run_id: &'a RunId,
+        #[serde(flatten)]
+        mutation: &'a Mutation,
+    }
+    Ok(dto::hash(&dto::canonical_json(&Request {
+        session_id: id,
+        run_id,
+        mutation,
+    })?))
+}
+
 pub(super) async fn mutate(
     connection: &mut SqliteConnection,
     provenance: &CreationProvenance,
@@ -570,22 +599,26 @@ pub(super) async fn mutate(
         .await
         .map_err(|e| database::error(e).not_committed())?;
     let result = async {
-        #[derive(Serialize)]
-        struct Request<'a> { session_id: &'a ApplicationSessionId, run_id: &'a RunId, #[serde(flatten)] mutation: &'a Mutation }
         let id = &provenance.session_id;
-        let hash = dto::hash(&dto::canonical_json(&Request { session_id: id, run_id, mutation })?);
+        let hash = command_hash(id, run_id, mutation)?;
         // A retry returns its original range even after the run is terminal.
         if let Some(command) = session::command(&mut transaction, id, operation).await? {
             if command.method != mutation.method() || command.payload_hash != hash { return Err(StorageError::new(StorageErrorKind::CommandConflict)); }
             if command.receipt.run_id() != Some(run_id) { return Err(integrity()); }
+            if let Mutation::AcceptHistory { selection, .. } = mutation
+                && history_selection(&mut transaction, id, run_id).await?.as_ref() != Some(selection) { return Err(integrity()); }
             return Ok((command.receipt, true));
         }
         let manifest = session_schema::validate(&mut transaction, id, Some(provenance)).await?;
-        let count = match mutation { Mutation::Accept { .. } => 1, Mutation::Append { records } => records.len() };
+        if let Mutation::AcceptHistory { input, selection } = mutation {
+            if manifest.head_sequence() != selection.through_sequence() { return Err(StorageError::new(StorageErrorKind::StaleHistory)); }
+            if !selection.matches_input(input) { return Err(invalid()); }
+        }
+        let count = match mutation { Mutation::Accept { .. } => 1, Mutation::AcceptHistory { .. } => 2, Mutation::Append { records } => records.len() };
         let (first, last) = sequence_range(manifest.head_sequence(), count)?;
         let timestamp = dto::now_ms()?;
         match mutation {
-            Mutation::Accept { input } => {
+            Mutation::Accept { input } | Mutation::AcceptHistory { input, .. } => {
                 if sqlx::query("SELECT 1 FROM runs WHERE run_id=?").bind(run_id.as_str()).fetch_optional(&mut *transaction).await.map_err(database::error)?.is_some() { return Err(transition()); }
                 if sqlx::query("SELECT 1 FROM runs WHERE state IN ('accepted','running')").fetch_optional(&mut *transaction).await.map_err(database::error)?.is_some() { return Err(StorageError::new(StorageErrorKind::ActiveRunExists)); }
                 let payload = AcceptedPayload { run_id: run_id.clone(), input: input.as_ref().clone(), owner_instance_id: owner.clone() };
@@ -596,18 +629,38 @@ pub(super) async fn mutate(
                     .bind(run_id.as_str()).bind(first).bind(owner.as_str()).execute(&mut *transaction).await.map_err(database::error)?;
                 #[cfg(test)]
                 if matches!(fault, Some(RecordFault::AfterProjection)) { return Err(StorageError::new(StorageErrorKind::Io)); }
+                if let Mutation::AcceptHistory { selection, .. } = mutation {
+                    #[cfg(test)]
+                    test_hooks::hit(test_hooks::Point::HistorySelection).await?;
+                    let payload = HistorySelectedPayload { run_id: run_id.clone(), selection: selection.clone() };
+                    insert_event(&mut transaction, last, timestamp, run_id, "run.history.selected", &dto::canonical_json(&payload)?, None).await?;
+                }
             }
             Mutation::Append { records } => {
                 let mut run = run_record(&mut transaction, id, run_id).await?.ok_or_else(transition)?;
                 let mut correlation = Correlation::load(&mut transaction, id, &run).await?;
+                let mut unbound = history_selection(&mut transaction, id, run_id).await?.is_some()
+                    && provider_binding(&mut transaction, id, run_id).await?.is_none();
                 for (index, record) in records.iter().enumerate() {
                     record.validate()?;
+                    if unbound {
+                        match record {
+                            AppendRunRecord::Runtime(event) => replay::validate_unbound_runtime(event)?,
+                            AppendRunRecord::Result(result) => replay::validate_unbound_result(result)?,
+                            AppendRunRecord::ToolResult { .. } => return Err(transition()),
+                            AppendRunRecord::ProviderBinding(_) => {}
+                        }
+                    }
                     // Any later rejection rolls back this whole batch, including its projections.
                     let sequence = first + index as i64;
                     if let AppendRunRecord::Runtime(event) = record {
                         correlation.observe(&mut transaction, &run, event, sequence).await?;
                     }
                     append(&mut transaction, id, &mut run, sequence, timestamp, record, #[cfg(test)] fault).await?;
+                    if let AppendRunRecord::ProviderBinding(binding) = record {
+                        correlation.session = Some(binding.provider_session_id().to_owned());
+                        unbound = false;
+                    }
                 }
             }
         }
@@ -667,6 +720,13 @@ async fn append(
     #[cfg(test)] fault: Option<RecordFault>,
 ) -> Result<()> {
     let (kind, json, source) = match record {
+        AppendRunRecord::ProviderBinding(binding) => {
+            if run.state != RecordedRunState::Running {
+                return Err(transition());
+            }
+            replay::validate_binding(connection, id, run, binding, sequence as u64).await?;
+            ("run.provider.bound", dto::canonical_json(binding)?, None)
+        }
         AppendRunRecord::Runtime(event) => {
             ("runtime.observed", dto::canonical_json(event)?, Some(event))
         }
@@ -709,6 +769,9 @@ async fn append(
         return Err(StorageError::new(StorageErrorKind::Io));
     }
     match record {
+        AppendRunRecord::ProviderBinding(binding) => {
+            run.provider_session_id = Some(binding.provider_session_id().to_owned());
+        }
         AppendRunRecord::Runtime(event) => {
             match &event.event {
                 RunEvent::RunStarted => run.state = RecordedRunState::Running,

@@ -1,6 +1,11 @@
-//! Awaited capture of an explicitly supplied prepared run. This does not restore history.
+//! Awaited run capture and storage-only preparation of closed conversation history.
 mod observer;
+mod replay;
 mod types;
+
+pub use replay::{
+    ExcludedReplayRun, PreparedSessionReplay, ReplayExclusionDisposition, prepare_session_replay,
+};
 
 #[cfg(test)]
 mod tests;
@@ -20,12 +25,33 @@ use tokio_util::sync::CancellationToken;
 use types::check_commit;
 use uuid::Uuid;
 
+pub async fn run_in_session(
+    gateway: &Gateway,
+    session: &SessionHandle,
+    request: PersistentRunRequest,
+    tools: &ToolRegistry,
+    cancel: CancellationToken,
+) -> Result<PersistentRunResult, PersistentRunFailure> {
+    run_owned(gateway, session, request, tools, cancel, true).await
+}
+
 pub async fn run_persisted(
     gateway: &Gateway,
     session: &SessionHandle,
     request: PersistentRunRequest,
     tools: &ToolRegistry,
     cancel: CancellationToken,
+) -> Result<PersistentRunResult, PersistentRunFailure> {
+    run_owned(gateway, session, request, tools, cancel, false).await
+}
+
+async fn run_owned(
+    gateway: &Gateway,
+    session: &SessionHandle,
+    request: PersistentRunRequest,
+    tools: &ToolRegistry,
+    cancel: CancellationToken,
+    restore_history: bool,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
     let hold = session.execution_hold().map_err(|error| {
         PersistentRunFailure::storage(
@@ -41,6 +67,7 @@ pub async fn run_persisted(
         tools,
         cancel,
         hold.closing_token(),
+        restore_history,
     )
     .await;
     // Only a returned orchestration result proves local work has stopped. Drop/panic quarantines.
@@ -55,6 +82,7 @@ async fn run_held(
     tools: &ToolRegistry,
     cancel: CancellationToken,
     closing: CancellationToken,
+    restore_history: bool,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
     let PersistentRunRequest {
         operation_id,
@@ -83,16 +111,29 @@ async fn run_held(
     } else {
         receipt
     };
-    if receipt.is_some() {
+    if let Some(receipt) = receipt {
         // Storage verifies the original method and content before returning the old receipt.
+        let accepted = if restore_history {
+            acceptance_guard
+                .repeat_history_run(run_id.clone(), input, &receipt)
+                .await
+        } else {
+            acceptance_guard.accept_run(run_id.clone(), input).await
+        };
         let acceptance = check_commit(
             PersistentRunStage::Acceptance,
             operation_id.clone(),
-            acceptance_guard.accept_run(run_id.clone(), input).await,
+            accepted,
         )?;
         return duplicate(session, run_id, acceptance).await;
     }
 
+    let prepared = if restore_history {
+        let request = input.prepared_request();
+        Some(prepare_session_replay(session, &request.provider_id, &request.options.model).await?)
+    } else {
+        None
+    };
     let admitted = run::admit_with_snapshot(
         gateway,
         input.prepared_request().clone(),
@@ -101,12 +142,24 @@ async fn run_held(
         Some(input.tool_definitions()),
     )
     .map_err(PersistentRunFailure::preflight)?;
+    let (admitted, accepted) = if let Some(prepared) = prepared {
+        let admitted = admitted
+            .with_replay(gateway, prepared.replay())
+            .map_err(PersistentRunFailure::preflight)?;
+        let accepted = acceptance_guard
+            .accept_history_run(run_id.clone(), input, prepared.selection())
+            .await;
+        (admitted, accepted)
+    } else {
+        let accepted = acceptance_guard.accept_run(run_id.clone(), input).await;
+        (admitted, accepted)
+    };
     // RunId is validated by storage. Use its exact UUID, not a new runtime identity.
     let uuid = Uuid::parse_str(run_id.as_str()).expect("validated storage run ID");
     let acceptance = check_commit(
         PersistentRunStage::Acceptance,
         operation_id.clone(),
-        acceptance_guard.accept_run(run_id.clone(), input).await,
+        accepted,
     )?;
     if acceptance.duplicate() {
         return duplicate(session, run_id, acceptance).await;

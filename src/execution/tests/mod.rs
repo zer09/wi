@@ -28,6 +28,7 @@ use tokio::sync::{Notify, mpsc};
 mod admission;
 mod commit_boundaries;
 mod faults;
+mod in_session;
 mod independent;
 mod lifecycle;
 mod process;

@@ -19,14 +19,15 @@ mod oauth_offline;
 pub mod observation;
 pub mod profile_selection;
 mod refresh;
+mod replay;
 mod session;
 mod sse;
 mod state;
 mod wire;
 
 use crate::{
-    Capability, Feature, FeatureCapability, Provider, ProviderCapabilities, ProviderSession,
-    Result, SessionOptions, Transport,
+    Capability, ConversationReplay, Feature, FeatureCapability, InputItem, Provider,
+    ProviderCapabilities, ProviderSession, Result, SessionOptions, Transport,
 };
 use async_trait::async_trait;
 use auth::CredentialSource;
@@ -148,6 +149,17 @@ impl Provider for OpenAiCodexProvider {
     fn capabilities(&self) -> ProviderCapabilities {
         Self::capability_report()
     }
+    fn validate_replay(
+        &self,
+        options: &SessionOptions,
+        replay: &ConversationReplay,
+        new_input: &[InputItem],
+    ) -> Result<()> {
+        crate::validate_input(new_input)?;
+        state::Conversation::from_replay(options, replay)?.prepare(options, new_input)?;
+        Ok(())
+    }
+
     async fn open_session(&self, options: SessionOptions) -> Result<ProviderSession> {
         options.validate()?;
         self.capabilities().require(&options.required_features)?;

@@ -43,6 +43,10 @@ mod managed_loopback_tests;
 mod observation_tests;
 #[path = "recovery/recovery_loopback_tests.rs"]
 mod recovery_loopback_tests;
+#[path = "replay/install.rs"]
+mod replay_install_tests;
+#[path = "replay/loopback.rs"]
+mod replay_loopback_tests;
 #[path = "run_continuation/run_loopback_tests.rs"]
 mod run_loopback_tests;
 #[path = "wire_format/sse_prolog_loopback_tests.rs"]

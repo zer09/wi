@@ -1,8 +1,8 @@
 use super::{PROVIDER_ID, codec::ResponseDecoder, state::Conversation, wire::Wire};
 use crate::{
-    EventEnvelope, GatewayError, InputItem, ModelResponse, ProviderEvent, ProviderSession,
-    RequestReceipt, ResponseOutcome, Result, SessionControl, SessionOptions, UpstreamOutcome,
-    validate_input,
+    ConversationReplay, EventEnvelope, GatewayError, InputItem, ModelResponse, ProviderEvent,
+    ProviderSession, ReplayIdentity, RequestReceipt, ResponseOutcome, Result, SessionControl,
+    SessionOptions, UpstreamOutcome, validate_input,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -35,26 +35,28 @@ impl Default for Timeouts {
 struct Flags {
     busy: AtomicBool,
     closed: AtomicBool,
+    used: AtomicBool,
 }
 struct Generate {
     input: Vec<InputItem>,
     reply: oneshot::Sender<Result<RequestReceipt>>,
 }
+enum Command {
+    Generate(Generate),
+    Install {
+        replay: ConversationReplay,
+        reply: oneshot::Sender<Result<()>>,
+    },
+}
 struct Control {
-    tx: mpsc::Sender<Generate>,
+    tx: mpsc::Sender<Command>,
     flags: Arc<Flags>,
     cancel: CancellationToken,
+    identity: ReplayIdentity,
 }
-impl Drop for Control {
-    fn drop(&mut self) {
-        self.cancel.cancel();
-    }
-}
-#[async_trait]
-impl SessionControl for Control {
-    async fn generate(&self, input: Vec<InputItem>) -> Result<RequestReceipt> {
-        validate_input(&input)?;
-        if self.flags.closed.load(Ordering::SeqCst) {
+impl Control {
+    fn reserve(&self) -> Result<()> {
+        if self.flags.closed.load(Ordering::SeqCst) || self.cancel.is_cancelled() {
             return Err(GatewayError::SessionClosed);
         }
         if self
@@ -65,8 +67,54 @@ impl SessionControl for Control {
         {
             return Err(GatewayError::Busy);
         }
+        Ok(())
+    }
+}
+impl Drop for Control {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+#[async_trait]
+impl SessionControl for Control {
+    fn replay_identity(&self) -> Option<ReplayIdentity> {
+        Some(self.identity.clone())
+    }
+    async fn install_replay(&self, replay: ConversationReplay) -> Result<()> {
+        self.reserve()?;
+        if self.flags.used.load(Ordering::SeqCst) {
+            self.flags.busy.store(false, Ordering::SeqCst);
+            return Err(GatewayError::InvalidRequest(
+                "replay installation requires a fresh session",
+            ));
+        }
+        // Dropping an admitted install closes ownership, even if its ack was already sent.
+        let guard = self.cancel.clone().drop_guard();
         let (reply, receiver) = oneshot::channel();
-        if self.tx.send(Generate { input, reply }).await.is_err() {
+        if self
+            .tx
+            .send(Command::Install { replay, reply })
+            .await
+            .is_err()
+        {
+            self.close();
+            return Err(GatewayError::SessionClosed);
+        }
+        let result = receiver.await.map_err(|_| GatewayError::SessionClosed)?;
+        guard.disarm();
+        result
+    }
+    async fn generate(&self, input: Vec<InputItem>) -> Result<RequestReceipt> {
+        validate_input(&input)?;
+        self.reserve()?;
+        self.flags.used.store(true, Ordering::SeqCst);
+        let (reply, receiver) = oneshot::channel();
+        if self
+            .tx
+            .send(Command::Generate(Generate { input, reply }))
+            .await
+            .is_err()
+        {
             self.flags.busy.store(false, Ordering::SeqCst);
             return Err(GatewayError::SessionClosed);
         }
@@ -158,6 +206,7 @@ pub(super) fn spawn(
     let flags = Arc::new(Flags {
         busy: AtomicBool::new(false),
         closed: AtomicBool::new(false),
+        used: AtomicBool::new(false),
     });
     let cancel = CancellationToken::new();
     let final_slot = Arc::new(Mutex::new(None));
@@ -172,6 +221,7 @@ pub(super) fn spawn(
         tx,
         flags: flags.clone(),
         cancel: cancel.clone(),
+        identity: wire.replay_identity(),
     });
     tokio::spawn(worker(
         wire,
@@ -201,7 +251,7 @@ pub(super) fn spawn(
 async fn worker(
     mut wire: Wire,
     options: SessionOptions,
-    mut commands: mpsc::Receiver<Generate>,
+    mut commands: mpsc::Receiver<Command>,
     mut sink: EventSink,
     flags: Arc<Flags>,
     cancel: CancellationToken,
@@ -225,6 +275,31 @@ async fn worker(
                 flags.closed.store(true, Ordering::SeqCst);
                 sink.terminal(None, None, ProviderEvent::SessionClosed { reason: reason.into() });
                 break;
+            }
+        };
+        let command = match command {
+            Command::Generate(command) => command,
+            Command::Install { replay, reply } => {
+                let prepared = if replay
+                    .expected_identity()
+                    .is_some_and(|expected| *expected != wire.replay_identity())
+                {
+                    Err(GatewayError::InvalidRequest("replay identity mismatch"))
+                } else {
+                    Conversation::from_replay(&options, &replay)
+                };
+                if cancel.is_cancelled() || reply.is_closed() {
+                    break;
+                }
+                let result = prepared.map(|restored| {
+                    state = restored;
+                    flags.used.store(true, Ordering::SeqCst);
+                });
+                flags.busy.store(false, Ordering::SeqCst);
+                if reply.send(result).is_err() {
+                    break;
+                }
+                continue;
             }
         };
         let (mut body, full_input) = match state.prepare(&options, &command.input) {
@@ -307,7 +382,14 @@ async fn worker(
     flags.busy.store(false, Ordering::SeqCst);
     commands.close();
     while let Ok(command) = commands.try_recv() {
-        let _ = command.reply.send(Err(GatewayError::SessionClosed));
+        match command {
+            Command::Generate(command) => {
+                let _ = command.reply.send(Err(GatewayError::SessionClosed));
+            }
+            Command::Install { reply, .. } => {
+                let _ = reply.send(Err(GatewayError::SessionClosed));
+            }
+        }
     }
     wire.close().await;
     // Sink sender drops here; stream drains queued events and the final slot.

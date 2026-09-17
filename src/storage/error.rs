@@ -19,6 +19,7 @@ pub enum StorageErrorKind {
     CommandConflict,
     InvalidTransition,
     ActiveRunExists,
+    StaleHistory,
     CatalogRepairRequired,
     CreationIncomplete,
     Io,
@@ -68,6 +69,7 @@ impl StorageError {
             CreationIncomplete,
             Io,
             CommitUnknown,
+            StaleHistory,
         ]
         .into_iter()
         .map(Self::new)
@@ -94,6 +96,7 @@ impl StorageError {
             StorageErrorKind::CommandConflict => "storage.command_conflict",
             StorageErrorKind::InvalidTransition => "storage.invalid_transition",
             StorageErrorKind::ActiveRunExists => "storage.active_run_exists",
+            StorageErrorKind::StaleHistory => "storage.stale_history",
             StorageErrorKind::CatalogRepairRequired => "storage.catalog_repair_required",
             StorageErrorKind::CreationIncomplete => "storage.creation_incomplete",
             StorageErrorKind::Io => "storage.io",
@@ -141,6 +144,7 @@ mod tests {
             CreationIncomplete,
             Io,
             CommitUnknown,
+            StaleHistory,
         ];
         let codes = [
             "invalid_input",
@@ -157,6 +161,7 @@ mod tests {
             "creation_incomplete",
             "io",
             "commit_unknown",
+            "stale_history",
         ];
         for (kind, code) in kinds.into_iter().zip(codes) {
             let error = StorageError::new(kind);

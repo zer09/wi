@@ -35,9 +35,10 @@ pub(super) async fn observe(
         last_run_state = Some(run.state());
         last_run_id = Some(run_id);
     }
+    let schema_version = session_schema::version(connection).await?;
     Ok(SessionSummary {
         manifest,
-        schema_version: 1,
+        schema_version,
         availability: SessionAvailability::Ready,
         fault_code: None,
         last_run_id,
@@ -86,14 +87,23 @@ pub(super) async fn publish(
                 SessionAvailability::Missing => return Err(StorageError::new(StorageErrorKind::NotFound)),
                 SessionAvailability::Unavailable => return Err(StorageError::new(StorageErrorKind::Unavailable)),
             }
-            if current.observed_head_sequence() >= observed.observed_head_sequence() {
-                if current.observed_head_sequence() == observed.observed_head_sequence() && current != *observed {
-                    return Err(integrity());
-                }
-                return Ok(RefreshResult::Unchanged);
+            if observed.availability() != SessionAvailability::Ready
+                || observed.fault_code().is_some()
+                || !(1..=2).contains(&observed.schema_version())
+                || observed.schema_version() < current.schema_version() {
+                return Err(integrity());
+            }
+            if current.observed_head_sequence() > observed.observed_head_sequence() {
+                return Err(integrity());
+            }
+            if current.observed_head_sequence() == observed.observed_head_sequence() {
+                if current == *observed { return Ok(RefreshResult::Unchanged); }
+                let mut upgraded = current.clone();
+                upgraded.schema_version = 2;
+                if current.schema_version() != 1 || upgraded != *observed { return Err(integrity()); }
             }
             let manifest = observed.observed_manifest();
-            sqlx::query("UPDATE sessions SET title=?, workspace_json=?, created_at_ms=?, updated_at_ms=?, head_sequence=?, schema_version=?, last_run_id=?, last_run_state=? WHERE session_id=? AND availability='ready' AND head_sequence < ?")
+            sqlx::query("UPDATE sessions SET title=?, workspace_json=?, created_at_ms=?, updated_at_ms=?, head_sequence=?, schema_version=?, last_run_id=?, last_run_state=? WHERE session_id=? AND availability='ready' AND head_sequence <= ?")
                 .bind(manifest.title()).bind(manifest.workspace().map(|value| dto::canonical_json(&value)).transpose()?)
                 .bind(manifest.created_at_ms()).bind(manifest.updated_at_ms()).bind(manifest.head_sequence() as i64)
                 .bind(observed.schema_version() as i64).bind(observed.last_run_id().map(RunId::as_str))

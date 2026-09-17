@@ -9,6 +9,9 @@ use serde_json::Value;
 
 use crate::{GatewayError, Result};
 
+pub(crate) mod replay;
+pub use replay::{ConversationReplay, ReplayExchange, ReplayIdentity, ReplayRun};
+
 pub const MAX_INPUT_BYTES: usize = 1024 * 1024;
 pub const MAX_INPUT_ITEMS: usize = 128;
 pub const MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
@@ -392,6 +395,14 @@ pub struct ProviderSession {
 /// per session in this milestone. There is no implicit retry or reconnection.
 #[async_trait]
 pub trait SessionControl: Send + Sync {
+    /// Local immutable identity of this already-opened control.
+    fn replay_identity(&self) -> Option<ReplayIdentity> {
+        None
+    }
+    /// Install stored context locally, without submitting a provider request.
+    async fn install_replay(&self, _replay: ConversationReplay) -> Result<()> {
+        Err(GatewayError::UnsupportedFeature("history_replay"))
+    }
     async fn generate(&self, input: Vec<InputItem>) -> Result<RequestReceipt>;
     /// Local interruption closes the entire session. It is not an upstream
     /// cancellation guarantee. Open a new session explicitly afterward.
@@ -405,5 +416,14 @@ pub trait SessionControl: Send + Sync {
 pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
     fn capabilities(&self) -> ProviderCapabilities;
+    /// Pure validation of stored context plus current input. Never opens or authenticates.
+    fn validate_replay(
+        &self,
+        _options: &SessionOptions,
+        _replay: &ConversationReplay,
+        _new_input: &[InputItem],
+    ) -> Result<()> {
+        Err(GatewayError::UnsupportedFeature("history_replay"))
+    }
     async fn open_session(&self, options: SessionOptions) -> Result<ProviderSession>;
 }

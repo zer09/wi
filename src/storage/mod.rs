@@ -1,5 +1,7 @@
 //! Explicit-root application storage. Ordinary `wi run` does not use this module.
 
+#[cfg(test)]
+mod b2_tests;
 mod catalog;
 mod catalog_ops;
 mod catalog_repair;
@@ -14,11 +16,13 @@ mod execution_tests;
 mod fault_tests;
 mod filesystem;
 mod history;
+mod history_prefix;
 mod ids;
 mod interruption;
 mod lifecycle;
 #[cfg(test)]
 mod measurement_tests;
+mod migration;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
@@ -28,6 +32,7 @@ mod recording_tests;
 mod records;
 #[cfg(test)]
 mod recovery_tests;
+mod replay_metadata;
 mod run_store;
 #[cfg(test)]
 mod schema_tests;
@@ -45,11 +50,12 @@ pub use dto::{
 };
 pub use error::{CommitCertainty, StorageError, StorageErrorKind};
 pub use history::{
-    AcceptedPayload, HistoryPage, InterruptedPayload, InterruptionReason, StoredEvent,
-    StoredEventPayload, ToolResultPayload,
+    AcceptedPayload, HistoryPage, HistorySelectedPayload, InterruptedPayload, InterruptionReason,
+    StoredEvent, StoredEventPayload, ToolResultPayload,
 };
 pub use ids::{ApplicationSessionId, OperationId, RunId, StoredEventId};
 pub use records::{AppendRunRecord, RecordedRunInput};
+pub use replay_metadata::{RecordedProviderBinding, StoredHistorySelection};
 pub use run_store::{RecordedRun, RecordedToolResult};
 
 pub use session::SessionHandle;

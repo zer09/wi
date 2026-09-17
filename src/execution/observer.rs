@@ -1,7 +1,8 @@
 use super::{PersistentRunFailure, PersistentRunStage, check_commit};
 use crate::{
+    ReplayIdentity,
     run::{RunEventEnvelope, RunObserver, RunSinkError},
-    storage::{AppendRunRecord, OperationId, RunId, SessionHandle},
+    storage::{AppendRunRecord, OperationId, RecordedProviderBinding, RunId, SessionHandle},
 };
 
 pub(super) struct PersistentObserver<'a> {
@@ -41,6 +42,36 @@ impl<'a> PersistentObserver<'a> {
 }
 
 impl RunObserver for PersistentObserver<'_> {
+    async fn provider_opened(
+        &mut self,
+        session_id: &str,
+        requested_model: &str,
+        identity: &ReplayIdentity,
+    ) -> Result<(), RunSinkError> {
+        if self.failure.is_some() {
+            return Err(RunSinkError::Failed);
+        }
+        let binding = RecordedProviderBinding::new(
+            self.run_id.clone(),
+            session_id.into(),
+            requested_model.into(),
+            identity.clone(),
+        )
+        .map_err(|error| {
+            self.failure = Some(PersistentRunFailure::storage(
+                PersistentRunStage::ProviderBinding,
+                OperationId::new(),
+                error,
+            ));
+            RunSinkError::Failed
+        })?;
+        self.append(
+            PersistentRunStage::ProviderBinding,
+            AppendRunRecord::ProviderBinding(binding),
+        )
+        .await
+    }
+
     async fn event(&mut self, event: &RunEventEnvelope) -> Result<(), RunSinkError> {
         self.append(
             PersistentRunStage::RuntimeEvent,

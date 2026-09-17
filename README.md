@@ -9,20 +9,28 @@ See the [documentation index](docs/README.md) for current documentation and hist
 
 **P1-A status: accepted under contract p1a.0.**
 The shared `wi::storage` library records supplied validated data in per-session
-SQLite databases and a session catalog. Ordinary `wi run` persistence and P1-B
-provider-history restoration remain **NOT IMPLEMENTED**. Local acceptance, final
+SQLite databases and a session catalog. Ordinary `wi run` persistence remains
+**NOT IMPLEMENTED**. Local acceptance, final
 complete-diff review, and exact-head Ubuntu/macOS/Windows CI passed after both
 post-submission macOS findings were remediated. See the
 [P1-A verification report](docs/slices/p1a/VERIFICATION.md) for evidence and limits.
 
-**P1-B1 status: public composition implemented locally; final acceptance pending.**
+**P1-B1 status: accepted and merged in PR #6 at `6fe0a53`.**
 `wi::execution::run_persisted` records only the explicitly supplied prepared input
 incrementally. It commits acceptance before provider work, awaits actual runtime and
 tool-result records, preserves separate execution versus recording outcomes, and
-holds storage ownership during execution. Ordinary CLI persistence, restored prior
-conversation/provider-account history (B2), service/browser/GUI (V1), and task
-resumption/retry remain unimplemented. No B1 final verification report or submitted
-CI is claimed. See [the offline example and limitations](#incremental-supplied-input-capture-p1-b1).
+holds storage ownership during execution. Local validation and exact-head
+Ubuntu/macOS/Windows CI passed. See [B1 verification](docs/slices/p1b1/VERIFICATION.md)
+and [the offline example](#incremental-supplied-input-capture-p1-b1).
+
+**P1-B2 status: implemented at `80f3872`; local and hosted validation passed.**
+`wi::execution::run_in_session` submits a new explicit task using stored, bound,
+closed conversation exchanges. `prepare_session_replay` prepares that history through
+storage-only reads. Session schema 2 adds lazy schema-1 migration and canonical history
+selection/provider binding. Evidence head `cc9a6a2` passed push and PR workflows on
+Ubuntu, macOS and Windows. [B2 verification](docs/slices/p1b2/VERIFICATION.md)
+identifies the exact source and hosted evidence revisions. PR #7 remains unmerged. Ordinary CLI persistence, V1
+service/browser/GUI, and automatic task resumption/retry remain unimplemented.
 
 **S2 status: implemented and offline accepted under contract s2.1.**
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
@@ -102,6 +110,10 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
   `add_numbers` adds integers; `load_skill` reads main instructions from the bound catalog.
 - Explicit public B1 execution-to-storage composition over the same run controller,
   with committed incremental observations and exact serialized tool results.
+- B2 explicit stored-conversation submissions over that shared controller, with
+  fixed-head replay preparation, provider/account binding and native WS/SSE history.
+- Session schema 2 with lazy schema-1 migration; catalog schema 1 and unchanged
+  runtime/provider envelope schemas 2/1.
 - No automatic retry, reconnect, transport fallback, or API-key billing fallback.
 
 **Native steering, async tool calling, programmatic tool execution, and tool search
@@ -374,7 +386,7 @@ checks do **not** prove live model selection or adherence; that remains NOT RUN.
 See [S1](docs/WI_LOCAL_SKILLS_S1.md) for metadata parsing and filesystem limits,
 and [S2](docs/slices/s2/CONTRACT.md) for main-file loading semantics.
 
-## Application-session storage (P1-A, storage only)
+## Application-session storage (P1-A + P1-B2)
 
 `wi::storage::SessionStore` accepts an explicit absolute data root. It owns one
 OS-backed exclusive lease, `catalog.sqlite3`, and canonical session databases at
@@ -383,6 +395,15 @@ foreign keys, an untrusted schema, private caches and zero busy timeout. Connect
 open per operation and close before operation ownership ends; idle handles retain
 no SQLite worker. Unix files/directories are private. Windows ACL protection is
 caller-owned; native Windows/macOS behavior remains unverified locally.
+
+New sessions use database schema 2. Explicit `open_session()` lazily migrates valid
+schema-1 files transactionally, preserving original history bytes, identities and
+receipts. Catalog-only listing and repair do not migrate every session. Catalog schema
+stays 1; stored envelopes stay 1 and runtime/provider envelopes stay 2/1.
+`run.history.selected` records a fixed prefix and digest; `run.provider.bound` records
+the actual opened provider identity. Migration adds neither fact to legacy runs.
+Legacy schema-1 history stays readable after migration but is not natively replayable
+without the original selection/binding provenance.
 
 Create and rename return durable operation receipts. Validated input snapshots,
 typed runtime records, exact tool results and terminal results update immutable
@@ -462,15 +483,44 @@ implicit SQLite statement transactions, not extra explicit BEGINs. Setup, close/
 and implicit statement transaction counts are excluded. These are test-observed trace
 counts, not production telemetry or performance tuning.
 
-## Restored history and service (not implemented)
+## Stored conversation submissions (P1-B2)
 
-Ordinary `wi run` remains nonpersistent. B2 still must restore prior conversation and
-provider/account-bound native history for a new explicit submission, including after
-reopen. Reading saved events is not provider-history restoration. Resumption/retry
-remain unimplemented. V1 remains a one-owner, multi-device service: browser disconnect
-must not cancel service-owned work; restart must not automatically resume tasks.
-Service authentication, browser protocol and GUI remain unimplemented. `ProviderSession`
-is an in-memory transport handle, not a persistent application session. See
+`wi::execution::run_in_session` uses the same request types, controller and awaited
+recording as B1. A new explicit task can use stored context, including after reopen.
+`prepare_session_replay` reads one fixed canonical head without opening a provider,
+reading credentials or old skill files, or executing tools. It preserves prepared user
+prompts, authoritative native/effective responses, exact results and call reuse.
+It does not flatten a transcript or promote old instructions/tool definitions to authority.
+
+Only selected, bound, closed exchanges with complete actual results contribute.
+A committed normal `RunFinished` can establish terminal state without a final
+`RunResult` append when its outcome and summary agree with canonical exchanges.
+Empty-run exclusion still needs an actual zero-attempt/admission `RunResult`.
+Complete process-interrupted exchanges can inform a new task without resuming the old
+one. Active, incomplete, uncertain, partial and legacy unbound histories reject replay;
+they remain readable. No missing output, binding or abandoned continuation is invented.
+
+Acceptance atomically records the selected prefix; a changed head fails without retry.
+The opened control's identity must match the stored provider, requested model and account
+binding before history is installed or sent. OpenAI-Codex derives its private equality
+marker from the account ID already loaded for opening, not another credential read.
+There is no account search or failover. A fresh WebSocket sends full native history on
+its first request without an old parent response ID; later requests use its new parent.
+SSE retains full native/effective history. Live opaque portability remains unverified.
+
+`cargo run --example conversation_offline` demonstrates actual tools and stored skill
+content, close/reopen, read-only preparation and a new explicit submission using synthetic
+roots and a scripted provider. See [B2 evidence](docs/slices/p1b2/VERIFICATION.md) for its
+local observations, hosted workflow evidence and remaining limits. PR #7 remains unmerged.
+
+## Ordinary CLI and V1 service (not implemented)
+
+Ordinary `wi run` remains nonpersistent and has no session commands. B2 adds library
+composition, not a service or automatic task resumption/retry. V1 remains separately
+scoped: a one-owner, multi-device service must own work across browser disconnects and
+must not resume tasks automatically after restart. Service authentication, browser
+protocol and GUI remain unimplemented. `ProviderSession` is an in-memory transport
+handle, not a persistent application session. See
 [product direction](docs/WI_PRODUCT_DIRECTION.md).
 
 ## Experimental Wi browser login

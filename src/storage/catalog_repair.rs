@@ -194,7 +194,7 @@ async fn inspect(
     database::finish_read(connection, &inner.lifecycle, result).await
 }
 
-async fn validate_history(
+pub(super) async fn validate_history(
     connection: &mut SqliteConnection,
     summary: &SessionSummary,
 ) -> Result<()> {
@@ -217,6 +217,7 @@ async fn validate_history(
     }
     let mut head = 0;
     let mut title = None;
+    let mut checkpoints = Vec::new();
     let mut rows = sqlx::query("SELECT * FROM events ORDER BY sequence").fetch(&mut *connection);
     while let Some(row) = rows.try_next().await.map_err(database::error)? {
         let event = history::decode(&row, summary.session_id())?;
@@ -230,12 +231,35 @@ async fn validate_history(
             }
             StoredEventPayload::SessionCreated(_) => return Err(integrity()),
             StoredEventPayload::SessionRenamed { title: renamed } => title = Some(renamed.clone()),
+            StoredEventPayload::RunHistorySelected(payload) => {
+                if summary.schema_version() != 2 {
+                    return Err(integrity());
+                }
+                checkpoints.push((
+                    payload.selection().through_sequence(),
+                    payload.selection().history_digest().to_owned(),
+                ));
+            }
+            StoredEventPayload::RunProviderBound(_) if summary.schema_version() != 2 => {
+                return Err(integrity());
+            }
             _ => {}
         }
     }
     drop(rows);
     if head != summary.observed_head_sequence() || title.as_deref() != Some(summary.title()) {
         return Err(integrity());
+    }
+    history_prefix::digest(connection, head, &checkpoints).await?;
+    // A receipt must not survive removal or substitution of its selected-history fact.
+    let mut after_operation = String::new();
+    while let Some(row) = sqlx::query("SELECT operation_id FROM commands WHERE method='accept_history_run' AND operation_id>? ORDER BY operation_id LIMIT 1")
+        .bind(&after_operation).fetch_optional(&mut *connection).await.map_err(database::error)? {
+        after_operation = row.try_get(0).map_err(database::error)?;
+        let operation = after_operation.parse().map_err(|_| integrity())?;
+        let command = session::command(connection, summary.session_id(), &operation).await?.ok_or_else(integrity)?;
+        let run = command.receipt.run_id().ok_or_else(integrity)?;
+        run_store::history_selection(connection, summary.session_id(), run).await?.ok_or_else(integrity)?;
     }
     // Every run event needs a projection, anchored to its canonical acceptance.
     if sqlx::query("SELECT 1 FROM events e WHERE e.run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.run_id=e.run_id AND (e.event_type<>'run.accepted' OR r.accepted_sequence=e.sequence)) LIMIT 1")
@@ -288,10 +312,10 @@ async fn register(
                 }
             }
             let manifest = summary.observed_manifest();
-            sqlx::query("INSERT INTO sessions (session_id, relative_path, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, schema_version, availability, fault_code, last_run_id, last_run_state, seen_repair_id) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'ready', NULL, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET relative_path=excluded.relative_path, title=excluded.title, workspace_json=excluded.workspace_json, created_at_ms=excluded.created_at_ms, updated_at_ms=excluded.updated_at_ms, head_sequence=excluded.head_sequence, schema_version=1, availability='ready', fault_code=NULL, last_run_id=excluded.last_run_id, last_run_state=excluded.last_run_state, seen_repair_id=excluded.seen_repair_id")
+            sqlx::query("INSERT INTO sessions (session_id, relative_path, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, schema_version, availability, fault_code, last_run_id, last_run_state, seen_repair_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', NULL, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET relative_path=excluded.relative_path, title=excluded.title, workspace_json=excluded.workspace_json, created_at_ms=excluded.created_at_ms, updated_at_ms=excluded.updated_at_ms, head_sequence=excluded.head_sequence, schema_version=excluded.schema_version, availability='ready', fault_code=NULL, last_run_id=excluded.last_run_id, last_run_state=excluded.last_run_state, seen_repair_id=excluded.seen_repair_id")
                 .bind(manifest.session_id().as_str()).bind(filesystem::session_relative_path(manifest.session_id())).bind(manifest.title())
                 .bind(manifest.workspace().map(|value| dto::canonical_json(&value)).transpose()?)
-                .bind(manifest.created_at_ms()).bind(manifest.updated_at_ms()).bind(manifest.head_sequence() as i64)
+                .bind(manifest.created_at_ms()).bind(manifest.updated_at_ms()).bind(manifest.head_sequence() as i64).bind(summary.schema_version() as i64)
                 .bind(summary.last_run_id().map(RunId::as_str)).bind(summary.last_run_state().map(run_store::state_name)).bind(repair_id.as_str())
                 .execute(&mut *transaction).await.map_err(database::error)?;
             if let Some(first) = conflict {

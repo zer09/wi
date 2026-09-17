@@ -6,7 +6,21 @@ use super::{
 };
 
 type Result<T> = std::result::Result<T, StorageError>;
-const MIGRATIONS: &[&str] = &[include_str!("session_v1.sql")];
+pub(super) const V1: &str = include_str!("session_v1.sql");
+pub(super) const V2: &str = include_str!("session_v2.sql");
+
+pub(super) async fn version(connection: &mut SqliteConnection) -> Result<u64> {
+    let value: i64 = sqlx::query("PRAGMA user_version")
+        .fetch_one(connection)
+        .await
+        .map_err(database::error)?
+        .try_get(0)
+        .map_err(database::error)?;
+    match value {
+        1 | 2 => Ok(value as u64),
+        _ => Err(StorageError::new(StorageErrorKind::UnsupportedVersion)),
+    }
+}
 
 pub(super) fn integrity() -> StorageError {
     StorageError::new(StorageErrorKind::Integrity)
@@ -36,9 +50,7 @@ pub(super) async fn initialize(
         // Only the creating-reservation caller reaches this function. Recheck emptiness
         // under the write lock so an existing history can never be initialized over.
         if !empty(&mut transaction).await? { return Err(integrity()); }
-        for migration in MIGRATIONS {
-            sqlx::raw_sql(*migration).execute(&mut *transaction).await.map_err(database::error)?;
-        }
+        sqlx::raw_sql(V2).execute(&mut *transaction).await.map_err(database::error)?;
         #[cfg(test)]
         if fail_after_ddl { return Err(StorageError::new(StorageErrorKind::Io)); }
         #[cfg(test)]
@@ -46,7 +58,7 @@ pub(super) async fn initialize(
         let input = provenance.request()?;
         let payload = CreatedPayload { title: input.title().to_owned(), workspace: input.workspace().map(str::to_owned), creation_provenance: provenance.clone() };
         let workspace = input.workspace().map(|value| dto::canonical_json(&value)).transpose()?;
-        sqlx::query("INSERT INTO manifest (singleton, session_id, schema_version, format_version, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, creation_provenance_json) VALUES (1, ?, 1, 1, ?, ?, ?, ?, 1, ?)")
+        sqlx::query("INSERT INTO manifest (singleton, session_id, schema_version, format_version, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, creation_provenance_json) VALUES (1, ?, 2, 1, ?, ?, ?, ?, 1, ?)")
             .bind(provenance.session_id.as_str()).bind(input.title()).bind(workspace)
             .bind(provenance.created_at_ms).bind(provenance.created_at_ms).bind(dto::canonical_json(provenance)?)
             .execute(&mut *transaction).await.map_err(database::error)?;
@@ -69,19 +81,11 @@ pub(super) async fn validate(
         .map_err(database::error)?
         .try_get(0)
         .map_err(database::error)?;
-    let version: i64 = sqlx::query("PRAGMA user_version")
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(database::error)?
-        .try_get(0)
-        .map_err(database::error)?;
     if application != 1464423233 {
         return Err(integrity());
     }
-    if version != 1 {
-        return Err(StorageError::new(StorageErrorKind::UnsupportedVersion));
-    }
-    structure(connection).await?;
+    let version = version(connection).await? as i64;
+    structure(connection, version).await?;
     let rows = sqlx::query("SELECT * FROM manifest LIMIT 2")
         .fetch_all(&mut *connection)
         .await
@@ -224,7 +228,34 @@ pub(super) fn workspace(value: Option<String>) -> Result<Option<String>> {
     Ok(value)
 }
 
-async fn structure(connection: &mut SqliteConnection) -> Result<()> {
+async fn structure(connection: &mut SqliteConnection, version: i64) -> Result<()> {
+    if sqlx::query("SELECT 1 FROM sqlite_schema WHERE name='events_p1b2_new'")
+        .fetch_optional(&mut *connection)
+        .await
+        .map_err(database::error)?
+        .is_some()
+    {
+        return Err(integrity());
+    }
+    let schema = if version == 1 { V1 } else { V2 };
+    for table in ["manifest", "events", "commands", "runs", "tool_results"] {
+        let actual: String =
+            sqlx::query("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?")
+                .bind(table)
+                .fetch_one(&mut *connection)
+                .await
+                .map_err(|_| integrity())?
+                .try_get(0)
+                .map_err(database::error)?;
+        let expected = table_ddl(schema, table)?;
+        // SQLite quotes the target name after ALTER TABLE RENAME. Constraints and FK
+        // targets must otherwise remain exactly the released table definitions.
+        let actual_body = actual.split_once('(').ok_or_else(integrity)?.1;
+        let expected_body = expected.split_once('(').ok_or_else(integrity)?.1;
+        if normalized(actual_body) != normalized(expected_body) {
+            return Err(integrity());
+        }
+    }
     for (table, columns) in [
         (
             "manifest",
@@ -361,9 +392,27 @@ async fn structure(connection: &mut SqliteConnection) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn table_ddl<'a>(schema: &'a str, table: &str) -> Result<&'a str> {
+    let start = schema
+        .find(&format!("CREATE TABLE {table} ("))
+        .ok_or_else(integrity)?;
+    let tail = &schema[start..];
+    Ok(&tail[..tail.find(';').ok_or_else(integrity)?])
+}
+
 fn normalized(sql: &str) -> String {
-    sql.chars()
-        .filter(|value| !value.is_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
+    let mut result = String::new();
+    let mut literal = false;
+    for value in sql.chars() {
+        if value == '\'' {
+            literal = !literal;
+        }
+        // SQL keywords ignore case and spacing, but CHECK values and trigger messages do not.
+        if literal || value == '\'' {
+            result.push(value);
+        } else if !value.is_whitespace() {
+            result.extend(value.to_lowercase());
+        }
+    }
+    result
 }

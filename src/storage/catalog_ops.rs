@@ -164,7 +164,8 @@ pub(super) fn summary(row: &SqliteRow) -> Result<SessionSummary> {
         || version < 1
         || created < 0
         || updated < 0
-        || (availability == SessionAvailability::Ready && (head == 0 || version != 1))
+        || (availability == SessionAvailability::Ready
+            && (head == 0 || !(1..=2).contains(&version)))
     {
         return Err(integrity());
     }
@@ -368,6 +369,7 @@ pub(super) async fn complete(
     inner: &StoreInner,
     provenance: &CreationProvenance,
     manifest: &SessionManifest,
+    schema_version: u64,
 ) -> Result<Option<CleanupWarning>> {
     let _lock = inner.catalog_lock.lock().await;
     let mut connection = connect(inner, true).await?;
@@ -378,8 +380,8 @@ pub(super) async fn complete(
             if entry.reservation.provenance != *provenance { return Err(integrity()); }
             if entry.reservation.state == CreationState::Accepted { return Ok(()); }
             if entry.reservation.state != CreationState::Creating || entry.summary.availability != SessionAvailability::Creating { return Err(integrity()); }
-            sqlx::query("UPDATE sessions SET title=?, updated_at_ms=?, head_sequence=?, availability='ready', fault_code=NULL WHERE session_id=?")
-                .bind(manifest.title()).bind(manifest.updated_at_ms()).bind(manifest.head_sequence() as i64).bind(provenance.session_id.as_str())
+            sqlx::query("UPDATE sessions SET title=?, updated_at_ms=?, head_sequence=?, schema_version=?, availability='ready', fault_code=NULL WHERE session_id=?")
+                .bind(manifest.title()).bind(manifest.updated_at_ms()).bind(manifest.head_sequence() as i64).bind(schema_version as i64).bind(provenance.session_id.as_str())
                 .execute(&mut *transaction).await.map_err(database::error)?;
             sqlx::query("UPDATE creation_commands SET state='accepted', receipt_json=? WHERE command_id=?")
                 .bind(dto::canonical_json(&provenance.receipt)?).bind(provenance.operation_id.as_str())

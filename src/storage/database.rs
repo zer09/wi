@@ -188,7 +188,10 @@ pub(super) async fn finish_write<T>(
     })
 }
 
-async fn check_settings(connection: &mut SqliteConnection, writable: bool) -> Result<()> {
+pub(super) async fn check_settings(
+    connection: &mut SqliteConnection,
+    writable: bool,
+) -> Result<()> {
     let version: String = sqlx::query("SELECT sqlite_version() AS version")
         .fetch_one(&mut *connection)
         .await

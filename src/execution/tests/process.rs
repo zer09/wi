@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::{io::BufRead, path::PathBuf};
 
 mod child;
-mod harness;
+pub(super) mod harness;
 mod prefixes;
 mod reopen;
 mod snapshots;

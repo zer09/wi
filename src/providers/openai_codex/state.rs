@@ -17,6 +17,17 @@ pub(super) struct Conversation {
     settled_ids: HashSet<String>,
 }
 impl Conversation {
+    pub(super) fn from_replay(
+        options: &SessionOptions,
+        replay: &crate::ConversationReplay,
+    ) -> Result<Self> {
+        Ok(Self {
+            history: super::replay::compile(options, replay)?,
+            // A restored conversation has no parent on this new connection.
+            ..Self::default()
+        })
+    }
+
     pub fn prepare(
         &self,
         options: &SessionOptions,
@@ -41,17 +52,7 @@ impl Conversation {
                 "supply exactly the outstanding tool results before continuing",
             ));
         }
-        let delta: Vec<Value> = input
-            .iter()
-            .map(|i| match i {
-                InputItem::User { text } => {
-                    json!({"role":"user","content":[{"type":"input_text","text":text}]})
-                }
-                InputItem::ToolResult { call_id, output } => {
-                    json!({"type":"function_call_output","call_id":call_id,"output":output})
-                }
-            })
-            .collect();
+        let delta: Vec<Value> = input.iter().map(native_input).collect();
         let mut full_input = self.history.clone();
         full_input.extend(delta.clone());
         check_history(&full_input)?;
@@ -147,7 +148,18 @@ impl Conversation {
         Ok(())
     }
 }
-fn check_history(history: &[Value]) -> Result<()> {
+pub(super) fn native_input(input: &InputItem) -> Value {
+    match input {
+        InputItem::User { text } => {
+            json!({"role":"user","content":[{"type":"input_text","text":text}]})
+        }
+        InputItem::ToolResult { call_id, output } => {
+            json!({"type":"function_call_output","call_id":call_id,"output":output})
+        }
+    }
+}
+
+pub(super) fn check_history(history: &[Value]) -> Result<()> {
     if history.len() > 2048
         || serde_json::to_vec(history)
             .map_err(|_| GatewayError::Serialization)?

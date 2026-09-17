@@ -8,8 +8,9 @@ filters only stderr presentation and leaves event data unchanged.
 Exact-head cross-platform CI is NOT RUN.
 
 Managed authentication does not change the event JSON schema. The CLI reports
-only the validated selected profile alias on stderr. Provider account IDs and
-tokens never become selection evidence. Preparation failures before generation
+only the validated selected profile alias on stderr. Raw account IDs and tokens
+do not enter those public diagnostics; B2 records a separate private account digest.
+Preparation failures before generation
 dispatch remain `not_submitted`; OAuth exchange uncertainty is separate from
 generation submission uncertainty. Experimental login and real renewal are implemented;
 explicit renewal has live L1 evidence; automatic expiry and failure paths have
@@ -21,7 +22,7 @@ Wi for managed credentials or Codex/Pi for external credentials, followed by a n
 provider session. The [exact message](WI_AUTH.md#expiry-guidance-r1) changes no
 freshness, renewal or upstream-outcome behavior.
 
-## Stored application events v1 (P1-A, storage only)
+## Stored application envelope v1, session database schema 2
 
 P1-A local acceptance, final complete-diff review, and exact-head
 Ubuntu/macOS/Windows CI passed after both post-submission macOS findings were
@@ -32,8 +33,18 @@ sequence, event UUID, Unix-millisecond timestamp, event type/version and typed p
 Nested runtime/provider envelopes remain schema 2/1 with their original correlations.
 Provider-session IDs and source sequences are not durable application replay cursors.
 
+P1-B1 is accepted and merged in PR #6 at `6fe0a53`. P1-B2 is implemented in source
+revision `80f3872`; evidence head `cc9a6a2` passed push and PR workflows on Ubuntu,
+macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md) identifies
+the exact source and hosted evidence revisions. PR #7 remains unmerged. B2 initializes session database schema 2 and lazily migrates valid
+schema-1 sessions on explicit open, preserving old event/receipt bytes and identities.
+Catalog schema remains 1; stored/runtime/provider envelopes remain 1/2/1. Legacy
+schema-1 history stays readable but lacks native replay provenance; migration does
+not create missing selection or binding evidence.
+
 Stored types are `session.created`, `session.renamed`, `run.accepted`,
-`runtime.observed`, `tool.result.recorded`, `run.result.recorded` and `run.interrupted`.
+`runtime.observed`, `tool.result.recorded`, `run.result.recorded`, `run.interrupted`,
+`run.history.selected` and `run.provider.bound`.
 Accepted input preserves original user text, the prepared request, registry definitions
 and initial context provenance. Parsed native JSON values and embedded strings survive;
 original transport whitespace/property order is not promised. Tool finish observations
@@ -62,8 +73,9 @@ then awaits each actual runtime observation. For a newly executed tool, the orde
 committed provider terminal, whole-batch validation, committed tool intent, actual
 execution/serialization/cache insertion, committed exact output and `is_error`, tool
 finish, then provider continuation. Intent alone is not proof of execution. A reused
-result does not create another tool-result record. Run schema 2, provider schema 1
-and storage schema 1 remain unchanged; application and source sequences remain distinct.
+result does not create another tool-result record. B1 preserves runtime/provider
+schemas 2/1 and stored envelope schema 1. B2 changes the session database schema to 2;
+application and source sequences remain distinct.
 
 The actual returned `RunResult` receives a separate final record. Execution and recording
 outcomes remain separate: successfully storing a failed/cancelled run returns `Executed`,
@@ -78,11 +90,43 @@ can quarantine ownership until process exit, not fabricate completion.
 partial reads, exact tool-result ordering, explicit catalog refresh and exact close/reopen
 without new provider/tool work. Add `--release` for separate finite local samples.
 See [measurement scope and limits](../README.md#incremental-supplied-input-capture-p1-b1).
-B1 is implemented locally; final acceptance, closure review, verification reports and
-submitted CI remain pending. Ordinary CLI persistence, restored prior conversation/
-provider-account history (B2), service/browser/GUI (V1), and task resumption/retry remain
-unimplemented. Stored content is private application data; redacted Debug/static storage
-errors are not an encryption boundary.
+[B1 verification](slices/p1b1/VERIFICATION.md) records local acceptance, independent
+review and exact-head Ubuntu/macOS/Windows CI. B2 supplies restored history through a
+separate library entry point, not ordinary CLI persistence or V1 service/browser/GUI.
+Automatic task resumption/retry remains unimplemented. Stored content is private
+application data; redacted Debug/static storage errors are not an encryption boundary.
+
+### Canonical replay provenance (P1-B2)
+
+Both new facts use event version 1 and null runtime source IDs/sequences:
+
+| Stored type | Evidence |
+|---|---|
+| `run.history.selected` | Run ID and `StoredHistorySelection`: `closed-exchanges-v1` policy, fixed prefix head, canonical digest, provider/requested model and optional expected identity. It immediately follows `run.accepted` in the same transaction and receipt. |
+| `run.provider.bound` | Run ID, actual provider-session ID, requested model and `ReplayIdentity` from the opened control. It commits once after `RunStarted`, before turns, without advancing runtime sequence. |
+
+OpenAI-Codex derives the binding's private account digest from credentials already loaded
+for opening, never from a token hash, alias or extra credential read. Raw account IDs and
+tokens are not stored in these facts. The digest is an equality marker, not encryption
+or authenticated provenance. A mismatched actual binding remains recorded even though
+execution refuses to send history. It is not silently reassigned to a matching account.
+
+`prepare_session_replay` checks only committed records at the captured head. Nonempty
+selected/bound runs with complete authoritative exchanges/results can use a committed
+normal `RunFinished` without a final `RunResult` append. Its outcome and summary must
+agree with canonical turn/request/tool/result/reuse evidence and upstream state.
+Execution completion does not imply successful final-result persistence. Empty-run
+`DefinitelyUnsubmitted` exclusion still requires the actual zero-attempt/admission
+`RunResult`, no last response and no provider/tool/result activity.
+
+Authorized complete process-interrupted exchanges can inform a new explicit task,
+including complete trailing tool results. Active, incomplete, uncertain, partial and
+legacy unbound history cannot be repaired or skipped for replay. Normal missing-finish
+histories still reject. Native/effective response items and actual result strings retain
+their order and identities; stream deltas are evidence, not duplicate messages.
+`run_in_session` uses the same recording loop and a fresh control. Its first WebSocket
+request has full history and no old parent ID; later requests use the new connection's
+response ID. SSE retains full native history. No tool effect or old task resumes.
 
 ## Plain presentation and legacy preflight (R1)
 
@@ -157,10 +201,11 @@ closure. The local sequence is independent of provider sequence numbers and is
 monotonically increasing, not a durable replay cursor.
 
 A failed delivery can leave a sequence gap followed by an explicit failure;
-consumers must not interpret a gap as successful completion. There is no replay
-API or automatic persistence in `ProviderSession`. P1-A records supplied DTOs; B1's
-explicit public composition awaits storage of the actual wrapped provider observations.
-Neither path restores provider-native conversation history for a new task.
+consumers must not interpret a gap as successful completion. `ProviderSession` does
+not provide event-stream replay or automatic persistence. P1-A records supplied DTOs;
+B1 explicitly awaits storage of actual wrapped observations. B2 validates and installs
+closed native conversation history on a fresh `SessionControl` for a new explicit task.
+It does not replay the old event stream or change provider envelope schema 1.
 
 ## Implemented provider events
 
@@ -430,10 +475,11 @@ or detached tool task. B1 composes this same controller with P1-A storage; the l
 The future one-owner, multiple-device service must keep work independent of browser
 disconnection and persist application sessions. A client subscription must not
 own this fallible run observer directly. Restart stops active tasks without
-automatically resuming or restarting them. B1 supplies the explicit incremental recording
-path, not restored conversation/provider-account history (B2), ordinary CLI persistence,
-resumption/retry or V1 service/browser/GUI behavior. Those remain unimplemented.
-P1-A application sequences and IDs stay separate from unchanged runtime/provider fields.
+automatically resuming or restarting them. B1 supplies explicit incremental recording;
+B2 supplies stored conversation/provider-account history for new explicit tasks.
+Ordinary CLI persistence, automatic resumption/retry and V1 service/browser/GUI remain
+unimplemented. Application sequences and IDs stay separate from unchanged
+runtime/provider fields.
 
 ## Not emitted yet
 

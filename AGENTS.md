@@ -1,80 +1,100 @@
-# Wi: P1-B1 accepted implementation
+# Wi: P1-B2 source and verification boundary
 
-P1-B1, contract **p1b1.0**, is implemented. The accepted runtime source is
-`b1e46f3eb33a66c2682b3038066a9d20dadf17da`; evidence-only head
-`ba83a5f7f7216b0a2f296553ab7e80d7334556a4` passed push workflow 35081585604
-and pull-request workflow 35081591576 on Ubuntu, macOS and Windows.
-This status correction is documentation only. A later documentation head still
-requires its own exact-head checks before merge. PR #6 is the merge-state record.
+Current contract: **p1b2.0**.
+Accepted P1-B1 baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
+P1-B2 source is committed at `80f3872`; evidence head `cc9a6a2` passed push and
+PR workflows on Ubuntu, macOS and Windows. The B2-E01 joined acceptance repair and
+its test-timeout portability correction are committed through `c0534f4`; exact-head
+push workflow `35221955828` and PR workflow `35221961938` passed all six Cargo gates
+on Ubuntu, macOS and Windows. PR #7 remains open and unmerged. Frozen planning
+documents retain NOT RUN statuses; current reports identify the source, repair and
+hosted evidence revisions.
 
-No new implementation assignment is created by this file. Preserve completed work.
-Read the actual current user instruction before making further changes. The original
-P1-B1 contract, matrix, validation notes and implementor prompt are frozen phase
-records; their PLAN ONLY/NOT RUN headings and old imperatives are not instructions
-to repeat completed work. Actual acceptance is recorded in:
+Read in order:
+1. docs/slices/p1b2/CONTRACT.md
+2. docs/slices/p1b2/SCHEMA.md
+3. docs/slices/p1b2/MATRIX.md
+4. docs/slices/p1b2/VALIDATION.md
+5. docs/slices/p1b2/IMPLEMENTOR_PROMPT.md
+6. The mapped current source and prior P1-A/P1-B1 verification reports.
 
-- docs/slices/p1b1/VERIFICATION.md
-- docs/slices/p1b1/verification.json
+Follow the current scoped assignment. Preserve the implemented contract; do not
+execute completed milestone prompts or broaden remediation. Preserve user changes,
+including untracked and staged work. No reset, clean, force checkout, unsolicited
+stash, or historical report rewrite. Report a genuine source/contract conflict with
+its exact producer/consumer evidence before changing behavior or widening scope.
 
-The reports attribute 601 Rust passes, two subprocess helpers ignored as standalone
-tests, 152 Node self-tests, five offline examples and independent review to local
-execution. Hosted CI runs the six Cargo gates, not Node or example mains. Those
-counts are not targets for future work. Preserve the earlier failures and repairs.
-The planner inspected source and CI, not a fresh local Rust/Node test run.
+## Baseline
+
+P1-A is merged in PR #5 at `34b4cfd`. P1-B1 is merged in PR #6 at `6fe0a53`.
+Its source revision is `b1e46f3`, evidence revision `ba83a5f`, and documentation-only
+closure `2948b8c`. Push workflow 35088046786 and PR workflow 35088051822 passed all
+six Cargo gates on Ubuntu, macOS and Windows at the reviewed head. The merge tree
+matches that head. Local 601 Rust passes, two child helpers, 152 Node self-tests and
+five examples are attributed earlier observations, not B2 results or count targets.
+
+B1 already records actual supplied-input execution with the shared loop, awaited
+observations/results, receipt-first concurrency and storage lifecycle ownership.
+It does not restore prior history. B2 now supplies that capability through the same engine.
 
 ## Implemented boundary
 
-`wi::execution::run_persisted` captures an explicitly supplied prepared input using
-one shared run engine, actual supplied run identity, receipt-first acceptance,
-awaited runtime observations, exact serialized tool-result recording and final
-RunResult persistence. Duplicate accepted operations never launch work.
+`run_in_session` and shared read-only `prepare_session_replay` use canonical history
+at a fixed head, actual recorded results and native/effective response items. Keep
+one shared engine and B1 recording/failure semantics. No transcript flattening,
+historical skill rereads, repeated tool effects or speculative old-parent request.
 
-The private execution hold retains store ownership across active execution without
-holding SQLite/session/maintenance locks across model/tool waits. Store close signals
-local cancellation and drains ownership. Dropping the owning execution future is not
-a browser disconnect; unfinished ownership follows the documented quarantine policy.
-A successful database commit is not proof of successful model execution or guaranteed
-upstream termination. Final execution and recording/delivery outcomes remain separate.
+Session schema 2 has tested lazy schema-1 migration, canonical `run.history.selected`
+and `run.provider.bound` facts, and additive default-unsupported provider replay methods.
+Catalog schema remains 1; preserve old history and receipts. Stored envelopes remain 1;
+runtime/provider schemas remain 2/1. Keep public run/Tool interfaces and legacy CLI behavior.
+Legacy schema-1 history stays readable but lacks native replay provenance. Migration
+never supplies missing selection or account binding.
 
-P1-A is merged at `34b4cfd0d3ecf286869a239997267dbd75c28c0b`. Its per-session
-SQLite/canonical-history/catalog design, schema version 1, explicit catalog refresh
-and repair, private-root lease and no-auto-resume behavior remain in force.
+Only closed exchanges and complete actual results are replayable. Nonempty normal
+terminal runs can use committed `RunFinished` without a final `RunResult` when canonical
+exchanges validate its outcome and summary. Empty-run exclusion still requires an
+actual zero-attempt/admission result. Authorized complete ProcessRestart cases remain
+usable only for a new explicit task; missing evidence is not repaired. Incomplete,
+uncertain and legacy unbound history remains readable but is not silently repaired
+or assigned the current account. Identity comes from the credentials already used by
+the provider opening, not an extra read or alias guess. No account search/failover.
+The first new WebSocket request sends full native history without an old parent ID;
+subsequent requests use that connection's new response ID. SSE retains native history.
 
-## Required later work, not an automatic assignment
+## Compatibility and exclusions
 
-B2 must add explicit new submissions using stored conversation history and validated
-provider/account-compatible native replay. B1 does not restore old conversation
-context. Ordinary `wi run` remains the existing nonpersistent diagnostic path.
-Service-owned active-run management, service authentication, browser transport and
-GUI are V1 or separately approved work. Do not implement them incidentally.
+Preserve ToolFailed -> gateway_error, actual is_error, original result/request/call
+identities, whole-batch preflight, sticky recording failures, cleanup certainty,
+final execution versus delivery, S1/S2 source checks, R1/NB-02 and accepted auth.
 
-## Compatibility and enduring requirements
+No new dependency, storage engine, RunLimits or replacement budget, task quota or
+deadline, history/session lifetime ceiling, auto-deletion, automatic task restart,
+retry/failover, hosted skills or billing path, provider, tool, permission framework,
+compaction, import/export, normal CLI session commands, server, GUI or unrelated
+reorganization. V1 remains separate. The service will own work across browser
+connections; a reader disconnect is not an owning-future cancellation.
 
-- Keep public legacy run/Tool/registry behavior and runtime/provider schemas 2/1.
-- Keep application-session identity separate from provider-session identity.
-- ToolFailed remains gateway_error; do not infer is_error from error-shaped JSON.
-- Full-batch authority validation precedes tool intent and execution.
-- Preserve exact actual tool output, cache/reuse scope, uncertainty and receipt identities.
-- Preserve S1/S2 context/skill checks, R1/NB-02 fixes and accepted authentication.
-- No RunLimits, replacement budgets, execution quotas, task deadlines, history/session
-  lifetime caps, auto-deletion, automatic task restart or external-effect replay.
-- No hosted skills/API-key billing fallback, new providers/tools, permission framework,
-  alternate database, task scheduler or unrelated reorganization without a new contract.
+## Verification and authorization
 
-Wi is a Rust service-oriented harness with a provider gateway, not a CLI-only proxy.
-The final service owns work for one owner across devices. Browser disconnect does not
-cancel tasks. Application sessions persist; restart stops tasks without automatically
-requesting a model, running a tool or draining a work queue. Storage/WAL recovery is
-not execution resumption. Embedded storage only; database-file readability is irrelevant.
+Use synthetic temporary roots, skills, credentials, scripted providers and loopback
+transports. No real profile/private-skill access, authentication commands or live
+provider requests. Ledger remains **31/50 used, 19 remaining**.
 
-## Verification and authority
+The accepted 36-row local and hosted implementation evidence and the B2-E01 joined
+acceptance closure are recorded in:
+- docs/slices/p1b2/VERIFICATION.md
+- docs/slices/p1b2/verification.json
 
-Use synthetic temporary roots, skills, credentials and scripted/loopback providers.
-No real credential/private-skill reads, authentication commands or live provider calls
-without separate owner permission. Ledger remains **31/50 used, 19 remaining**;
-remaining balance is not authorization. Normal build traffic is not model usage.
+Do not rewrite frozen contracts or historical reports. Evidence updates require their
+own assignment and must identify exact source revisions/worktrees, first failures,
+checks, platform limits and unsupported cases. Follow the current assignment's gate
+and review scope rather than rerunning completed milestones automatically.
 
-Preserve user changes and historical evidence. Do not reset, clean, force-checkout,
-stash unsolicited work, disable CI jobs or relax warning-denied checks. A new head
-requires exact-head CI before an authorized merge. Commits, pushes, merges, release,
-deployment and subsequent milestones require the applicable current owner instruction.
+Source counts, reruns, examples and child helpers are not additional unique tests.
+Do not weaken CI, lints or security assertions. Original implementation-evidence
+push workflow 35167416739 and PR workflow 35167422773 passed all six Cargo gates on
+Ubuntu, macOS and Windows at `cc9a6a2`. B2-E01 remediation push workflow 35221955828
+and PR workflow 35221961938 passed the same gates at `c0534f4`. Further commit, push,
+merge, release, deployment, live tests and later work require separate owner
+authorization. Old checkpoints and frozen prompts are historical references.

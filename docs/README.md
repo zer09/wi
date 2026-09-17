@@ -15,11 +15,47 @@ within their stated scope and evidence limits. Tested revisions, worktree states
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
-at `34b4cfd`. P1-B1 public composition is implemented locally; final acceptance,
-complete-diff closure review, final verification reports and submitted CI remain pending.
-P1-B2 history restoration and V1 service remain later separately scoped work.
+at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
+P1-B2 history restoration is implemented in source revision `80f3872`. Evidence head
+`cc9a6a2` passed push and PR workflows on Ubuntu, macOS and Windows. PR #7 remains
+unmerged. V1 service remains separately scoped and unimplemented.
 
-## Current implementation: P1-B1 actual runtime capture
+## Current implementation: P1-B2 stored conversation submissions
+
+Contract **p1b2.0** adds `wi::execution::run_in_session` and storage-only
+`prepare_session_replay`. A new explicit task uses canonical history at a fixed head:
+stored prepared prompts, authoritative native/effective responses and exact correlated
+results. The shared controller retains B1 recording and ownership semantics.
+
+Session database schema 2 adds `run.history.selected` and `run.provider.bound`, with
+lazy transactional schema-1 migration on explicit open. Old history and receipts remain
+unchanged. Catalog schema stays 1; stored envelopes stay 1 and runtime/provider schemas
+stay 2/1. Legacy schema-1 history remains readable but lacks replay provenance; migration
+never assigns it to the current account.
+
+Replay needs selected, bound, closed exchanges and complete actual results. Normal
+terminal history can contribute without a final-result append when `RunFinished` and
+canonical exchanges agree. Empty-run exclusion needs the actual zero-attempt result.
+Complete process-interrupted exchanges may inform a new task; incomplete, uncertain,
+active or unbound history is rejected without repair, truncation or automatic resumption.
+A fresh WebSocket sends full native history without an old parent ID. SSE retains native
+history. The actual opened account must match before installation or generation.
+
+- [P1-B2 contract](slices/p1b2/CONTRACT.md), [schema](slices/p1b2/SCHEMA.md) and
+  [matrix](slices/p1b2/MATRIX.md): Frozen requirements and plan-time statuses.
+- [P1-B2 validation](slices/p1b2/VALIDATION.md) and
+  [implementor prompt](slices/p1b2/IMPLEMENTOR_PROMPT.md): Historical planning handoff.
+- [P1-B2 verification](slices/p1b2/VERIFICATION.md) and
+  [machine report](slices/p1b2/verification.json): Local and exact-head hosted evidence
+  for the source and evidence revisions; live opaque portability remains unsupported.
+- [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
+  stored skill content and an explicit new task after reopen; no credentials or network.
+
+Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. V1 service
+ownership, service authentication, browser protocol and GUI remain unimplemented.
+B2 does not add automatic task resumption, retries or a service task manager.
+
+## Accepted and merged: P1-B1 actual runtime capture
 
 Contract **p1b1.0**, baseline `34b4cfd0d3ecf286869a239997267dbd75c28c0b`.
 The matrix preserves all 30 original NOT RUN statuses as planning text, not current
@@ -35,8 +71,11 @@ second loop. This does not claim restored-conversation model context or a runnin
   loopback/process tests, gates, performance evidence and report requirements.
 - [P1-B1 source validation](slices/p1b1/VALIDATION.md): Existing interfaces versus
   authorized changes, source pins, decision ledger and static-review limits.
-- [P1-B1 implementor prompt](slices/p1b1/IMPLEMENTOR_PROMPT.md): Fresh local agent
-  assignment; no replanning, live traffic, Git publication or deferred features.
+- [P1-B1 implementor prompt](slices/p1b1/IMPLEMENTOR_PROMPT.md): Historical local
+  assignment, not authorization to execute completed work.
+- [P1-B1 verification](slices/p1b1/VERIFICATION.md) and
+  [machine report](slices/p1b1/verification.json): Local validation, independent review
+  and exact-head Ubuntu/macOS/Windows CI. PR #6 merged at `6fe0a53`.
 
 The [public offline example](../examples/persisted_run_offline.rs) uses real context
 preparation, a finite in-process provider, AddNumbers and SQLite under a synthetic root.
@@ -47,11 +86,10 @@ persisted_run_offline`, or add `--release`. The [top-level measurement notes](..
 define finite latency samples, the counted operation window and post-close size limits.
 Catalog refresh is explicit. The caller retains and awaits the execution future.
 
-B2 remains required for a NEW explicit task using retained role/call/result/native
-history with compatible provider/account binding. Ordinary CLI persistence, restored
-prior conversation/provider-account history (B2), service/browser/GUI (V1), and task
-resumption/retry remain unimplemented. The future service owns execution independently
-of readers/browser clients.
+B1 remains supplied-input capture, not restored-history execution. B2 now supplies
+new explicit tasks with compatible provider/account-bound native history. Neither path
+implements ordinary CLI persistence, V1 service/browser/GUI, or automatic task
+resumption/retry. The future service owns execution independently of readers.
 
 ## Current acceptance: P1-A storage only
 
@@ -89,10 +127,10 @@ records the source review, exact CI and retained limits without rewriting old re
 - [P1-A machine report](slices/p1a/verification.json): Matching structured evidence,
   dirty-worktree history, review and submitted-CI results, platform limits and unchanged ledger.
 
-P1-A acceptance did not include runtime capture. The local B1 composition above now
-supplies that boundary, not ordinary `wi run` persistence or B2 history restoration.
-Service authentication, browser protocol and GUI remain NOT IMPLEMENTED (V1).
-The cited exact-head native Windows/macOS gates passed for P1-A, not for local B1 work.
+P1-A acceptance did not include runtime capture. Accepted B1 supplies that boundary;
+accepted B2 adds stored-history submissions. Ordinary `wi run` persistence, service
+authentication, browser protocol and GUI remain NOT IMPLEMENTED (V1).
+P1-A, B1 and B2 have exact-head Ubuntu, macOS and Windows evidence.
 Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain explicit limits.
 
 ## Historical-citation errata (2026-09-12 UTC)
@@ -204,6 +242,10 @@ Live model selection/adherence is NOT RUN.
   listing/history and close/reopen. Three finite latency samples include connection
   costs; no provider requests, runtime integration or power-loss claim.
   Run with `cargo run --example storage_offline`.
+
+- [conversation_offline.rs](../examples/conversation_offline.rs): Two explicit tasks
+  through `run_in_session`, with native/effective history, real tool results and stored
+  skill bodies across close/reopen. Run with `cargo run --example conversation_offline`.
 
 ## Completed contracts and matrices
 

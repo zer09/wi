@@ -5,7 +5,7 @@ use super::{
     },
     sse::SseDecoder,
 };
-use crate::{GatewayError, Result, Transport, UpstreamOutcome};
+use crate::{GatewayError, ReplayIdentity, Result, Transport, UpstreamOutcome};
 use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::{
     Client,
@@ -250,6 +250,7 @@ pub(super) enum Wire {
     WebSocket {
         socket: Box<Socket>,
         auth: SubscriptionCredentials,
+        identity: ReplayIdentity,
         received: usize,
         observation: Option<Observation>,
     },
@@ -258,6 +259,7 @@ pub(super) enum Wire {
         endpoint: String,
         credentials: Arc<dyn CredentialSource>,
         account_id: String,
+        identity: ReplayIdentity,
         session_id: String,
         stream: Option<ByteStream>,
         decoder: SseDecoder,
@@ -282,6 +284,7 @@ impl Wire {
         let _ = rustls::crypto::ring::default_provider().install_default();
         credentials.prepare_submission().await?;
         let auth = credentials.load().await?;
+        let identity = super::replay::identity(&auth)?;
         let observation =
             observer.map(|(observer, case)| Observation::new(observer, case, transport));
         match transport {
@@ -318,6 +321,7 @@ impl Wire {
                 Ok(Self::WebSocket {
                     socket: Box::new(socket),
                     auth,
+                    identity,
                     received: 0,
                     observation,
                 })
@@ -339,6 +343,7 @@ impl Wire {
                     endpoint: endpoint.into(),
                     credentials,
                     account_id: auth.account_id().into(),
+                    identity,
                     session_id: session_id.into(),
                     stream: None,
                     decoder: SseDecoder::default(),
@@ -348,6 +353,12 @@ impl Wire {
                     observation,
                 })
             }
+        }
+    }
+
+    pub(super) fn replay_identity(&self) -> ReplayIdentity {
+        match self {
+            Self::WebSocket { identity, .. } | Self::Sse { identity, .. } => identity.clone(),
         }
     }
 
@@ -363,6 +374,7 @@ impl Wire {
                 auth,
                 received,
                 observation,
+                ..
             } => {
                 // A WS session is bound to its original account and handshake.
                 // Expiry requires an explicit new session; do not switch tokens
@@ -394,6 +406,7 @@ impl Wire {
                 eof,
                 received,
                 observation,
+                ..
             } => {
                 credentials.prepare_submission().await?;
                 let auth = credentials.load().await?;

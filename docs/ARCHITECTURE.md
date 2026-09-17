@@ -9,9 +9,12 @@ S1/S2 ownership and public schemas remain unchanged.
 P1-A adds storage-only `wi::storage`; local acceptance, final complete-diff review,
 and exact-head Ubuntu/macOS/Windows CI passed under p1a.0 after both post-submission
 macOS findings were remediated. See [P1-A verification](slices/p1a/VERIFICATION.md).
-B1 public execution-to-storage composition is implemented locally; its final acceptance,
-closure review, verification reports and submitted CI remain pending. Ordinary CLI
-persistence and B2 restored conversation/provider-account history are not implemented.
+P1-B1 execution-to-storage composition is accepted and merged in PR #6 at `6fe0a53`,
+with local validation and exact-head Ubuntu/macOS/Windows CI. P1-B2 restored history is
+implemented in source revision `80f3872`. Evidence head `cc9a6a2` passed push and PR
+workflows on Ubuntu, macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md)
+identifies the exact source and hosted evidence revisions. PR #7 remains unmerged. Ordinary CLI
+persistence and V1 service/browser/GUI remain unimplemented.
 
 ## One crate, explicit module boundaries
 
@@ -34,8 +37,8 @@ persistence and B2 restored conversation/provider-account history are not implem
 | `tools.rs` | Shared two-phase registry, fresh result scopes and deterministic addition executor |
 | `run/mod.rs` | Provider-neutral run controller and cooperative cancellation ownership |
 | `run/events.rs` | Outer run lifecycle and provider/tool wrappers, fallible observer contract |
-| `storage/*` | Explicit-root SQLite session ownership, receipts, typed records, projections, cursor reads, catalog refresh/repair and lazy interruption |
-| `execution/*` | Public supplied-input composition, receipt-first acceptance, awaited actual records and storage ownership during execution |
+| `storage/*` | Explicit-root SQLite session ownership, receipts, typed records, projections, cursor reads, catalog refresh/repair, lazy schema-1 migration and interruption |
+| `execution/*` | Supplied-input and stored-history composition, fixed-head replay preparation, receipt-first acceptance, awaited records and storage ownership during execution |
 | `run/collect.rs` | Generic receipt/envelope correlation and one-response collection |
 | `main.rs` | Program entry point and Tokio runtime startup |
 | `cli/mod.rs` | Private CLI arguments, shared helpers, routing, legacy text/NDJSON, generate and fixed tool-demo callers |
@@ -463,6 +466,14 @@ each generated application session owns
 keys, trusted_schema=OFF and zero busy timeout; private-cache behavior is tested.
 SQLx connections and SQL remain private. No idle session pool is retained.
 
+New session databases use schema 2; catalog schema stays 1. Explicit `open_session()`
+lazily migrates a valid schema-1 session in one transaction before prior-instance
+interruption. The migration rebuilds the closed event-type constraint while preserving
+all original rows, payload strings, receipts and identities. It does not add provenance
+or provider work. Listing does not migrate sessions; explicit repair can inspect either
+supported version. Legacy unbound history stays readable but cannot supply native replay.
+Stored envelopes stay schema 1; runtime/provider envelopes stay 2/1.
+
 Each admitted disk operation owns a private Tokio task, lifecycle guard and explicit
 connection cleanup. Per-session locks serialize mutation; independent sessions can
 progress separately. Maintenance excludes normal operations during repair. A dropped
@@ -543,28 +554,74 @@ finite latency samples, test-only exact transaction/connection counts and actual
 post-close database/WAL sizes. No benchmark, SLA or transparent arbitrary-disk-latency
 claim follows; provider queue/consumer/terminal safeguards are unchanged.
 
-B1 does not restore prior conversation or provider/account-bound native history (B2).
-Ordinary CLI persistence, service/browser/GUI (V1), and task resumption/retry remain
-unimplemented.
+B1 remains supplied-input recording. B2 adds explicit restored-history execution through
+the same engine. Ordinary CLI persistence, service/browser/GUI (V1), and automatic task
+resumption/retry remain unimplemented.
+
+## Stored conversation preparation and execution (P1-B2)
+
+`execution::prepare_session_replay` reads fixed-head canonical pages and checks recorded
+prefix digests in one raw-row hashing pass. It retains prepared user prompts, complete
+authoritative responses and exact correlated tool results, including actual reuse.
+It opens no provider, reads no credentials or historical skill files, and executes no tools.
+
+`closed-exchanges-v1` requires original selection/binding provenance and terminal recorded
+state. A nonempty run with committed `RunFinished` can contribute without a final
+`RunResult` append when its outcome and summary match reconstructed turns, requests and
+tool results. An empty run requires an actual zero-attempt/admission result for exclusion.
+Complete process-interrupted exchanges may contribute to a new task, including a complete
+trailing result batch. Active, incomplete, uncertain, partial or legacy unbound histories
+reject replay. Missing finishes remain invalid except at the authorized process-loss
+boundary. No transcript flattening, invented output, tail skipping or old-task restart occurs.
+
+`run_in_session` checks receipts before current dependencies or replay preparation.
+For a new operation, shared admission and pure provider validation check old history plus
+new input before acceptance. `accept_history_run` atomically appends `run.accepted` and
+`run.history.selected` at the selected head. A changed head returns `storage.stale_history`
+without rebuilding or retrying. Historical requested model/provider strings must match;
+observed response model aliases remain intact. Current instructions and tools stay current.
+
+After committed `RunStarted`, the shared loop opens one fresh provider control and records
+`run.provider.bound` with its actual identity. OpenAI-Codex derives a domain-separated
+SHA-256 equality marker from the account ID already loaded for opening. No extra credential
+read, alias guess or account search supplies identity. A mismatch prevents history
+installation and generation. Missing/mismatched identity or rejected installation is a
+recorded execution failure; an actual binding write failure remains a sticky storage failure.
+
+Additive `Provider::validate_replay`, `SessionControl::replay_identity` and
+`SessionControl::install_replay` defaults preserve existing provider implementations.
+Unsupported adapters reject replay. Installation is local and atomic on a fresh unused
+control. OpenAI-Codex validates native/effective fidelity, retains opaque data and actual
+results, and imports no old parent ID or pending tool effect. The first new WebSocket
+request sends full history plus the new input; later requests use that connection's new
+response ID and result delta. SSE sends full retained native/effective history each time.
+
+The [conversation example](../examples/conversation_offline.rs) exercises real tools and
+stored skill content across reopen with a scripted provider. Loopback tests cover native
+transports; they do not establish live opaque portability. B2 retains B1 owned-future,
+cleanup-certainty and execution-versus-recording semantics. Account markers and native
+content are private application data, not safe logs or encrypted identity proof.
 
 ## Future service ownership (requirements only)
 
-Neither P1-A nor B1 integrates ordinary `wi run` persistence or implements a service. The future service serves one
+P1-A, B1 and B2 do not integrate ordinary `wi run` persistence or implement a service.
+The future V1 service serves one
 owner across multiple devices. A browser disconnect must not cancel admitted
 service-owned work. A client subscription must not own the controller's observer
 or provider receiver directly, because sink/receiver failure currently stops work.
 Application sessions must persist in storage. Service restart stops active tasks
 without automatic restart, resume, provider submission or tool replay. Continuing
 requires an explicit user action. B1 supplies actual capture of a supplied input;
-B2 still needs valid restored conversation/provider-account history for explicit new
-submissions. P1-A storage recovery is not agent execution or service-wide adoption of sessions.
+B2 supplies valid restored conversation/provider-account history for explicit new
+submissions. Storage recovery is not agent execution or service-wide adoption of sessions.
 The current `ProviderSession` is an in-memory transport handle, not that persistent
 application session. See [product direction](WI_PRODUCT_DIRECTION.md).
 
 ## Intentionally deferred
 
 - Approvals, sandboxing and noncooperative/external-effect cancellation guarantees.
-- Ordinary CLI persistence, restored conversation/provider-account history (B2), task resumption/retry, branching and queues.
+- Ordinary CLI persistence, automatic task resumption/retry, branching and queues.
+- Replay of legacy unbound, incomplete or uncertain history; cross-model/account conversion.
 - Native steering acknowledgement/commit/pending-result protocol.
 - Provider-native async tool scheduler and programmatic tool continuation.
 - Tool discovery, supporting skill-file reads, scripts and other resource execution.

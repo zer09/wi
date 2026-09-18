@@ -14,8 +14,13 @@ with local validation and exact-head Ubuntu/macOS/Windows CI. P1-B2 restored his
 implemented in source revision `80f3872`. Evidence head `cc9a6a2` passed push and PR
 workflows on Ubuntu, macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md)
 identifies the exact source and hosted evidence revisions. PR #7 is merged at `50f4dff`.
-V1-A in-process ownership is locally complete; ordinary CLI persistence, V1-B networking,
-browser protocol and GUI remain unimplemented.
+V1-A in-process ownership is complete and accepted under contract **v1a.0** at implementation
+head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Hosted CI passed: exact-head push run
+**35320097103** and pull-request run **35320100396** passed all six Cargo steps on
+Ubuntu/macOS/Windows. See the [V1-A verification report](slices/v1a/VERIFICATION.md).
+These runs prove only that implementation revision. Current PR-head merge checks are
+external GitHub merge-readiness evidence, separate from this fixed implementation evidence.
+Ordinary CLI persistence, V1-B networking, browser protocol and GUI remain unimplemented.
 
 ## One crate, explicit module boundaries
 

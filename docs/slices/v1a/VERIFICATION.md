@@ -1,42 +1,52 @@
 # Wi V1-A verification
 
-Contract: **v1a.0**. Status: **LOCAL_COMPLETE_CI_NOT_RUN**. Accepted: **false**.
+Contract: **v1a.0**. Status: **ACCEPTED**. Accepted: **true**. Hosted CI: **PASS**.
 
-The implementation and required local verification are complete. Full hosted acceptance
-is not complete. V1A-29 has passing local reviews and gates, but exact-head push and
-pull-request CI are **NOT RUN** because push is explicitly unauthorized.
-`submitted_ci` is empty in [verification.json](verification.json).
+V1-A is complete and accepted at implementation head
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb` (`feat: add service-owned execution host`).
+Exact-head push **35320097103** and pull-request **35320100396** passed all six Cargo
+steps on Ubuntu/macOS/Windows. V1A-29 is PASS with no blockers. Both runs and all six
+jobs are recorded below and in [verification.json](verification.json).
 
-The verification increment created this report and `verification.json` after preserving
-the reviewed source, test and example changes. Three independent complete-diff reviews
-passed with both reports present at the historical pre-documentation-alignment snapshot.
-After the current-documentation edits and remediation, three fresh reviewers passed the
-complete current documentation diff and reproduced its identity. Nothing was staged,
-committed or pushed.
+Local G01-G17 and independent complete-diff reviews remain attributed to their
+historical pre-commit snapshots. Three reviews passed before documentation alignment;
+three later reviewers passed the aligned documentation after remediation. The authorized
+implementation commit and push followed those snapshots. During acceptance preparation,
+PR #8 was observed **open and draft, not merged**.
+
+This docs-only acceptance record documents fixed evidence for the implementation revision
+above, not CI for documentation-only descendants. Current PR-head merge checks are external
+GitHub merge-readiness evidence, separate from this fixed implementation evidence.
+This record asserts no current PR-head CI result. Acceptance-record preparation and
+remediation changed no source, tests or configuration and performed no staging, commit,
+push, PR transition or live request.
 
 ## 1. Revision, environment and preservation
 
 | Item | Actual observation |
 |---|---|
 | Accepted baseline | `50f4dffe5d912615014edc46cf1bf1e1b68e6857` |
-| Tested HEAD | `a013e77f4fafa7834b14b98b7a17ab9f89a4eb69` plus the uncommitted implementation below |
-| Ancestry | Baseline is HEAD's direct parent. HEAD contains only the V1-A planning documentation changes. |
-| Initial worktree | 12 modified tracked paths, 15 untracked paths, zero staged paths |
-| Final worktree | 19 modified tracked paths and 17 untracked files, including the two reports; zero staged paths |
-| Current tracked diff | 381 insertions, 171 deletions in 19 files; includes seven current-documentation alignment files and excludes untracked files |
-| Verification date | 2026-09-18, local clock UTC+08:00 |
+| Tested implementation revision | `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`; both exact-head hosted workflows passed |
+| Ancestry | Implementation parent is planning commit `a013e77f4fafa7834b14b98b7a17ab9f89a4eb69`; its parent is the accepted baseline |
+| Historical local-verification HEAD | `a013e77f4fafa7834b14b98b7a17ab9f89a4eb69` plus the then-uncommitted implementation |
+| Historical initial worktree | 12 modified tracked paths, 15 untracked paths, zero staged paths |
+| Historical final pre-commit worktree | 19 modified tracked paths and 17 untracked files, including the two reports; zero staged paths |
+| Historical tracked diff | 381 insertions, 171 deletions in 19 files; includes seven documentation-alignment files and excludes then-untracked files |
+| Acceptance-record starting tree | Clean at `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`; preparation and remediation edit only the eight allowed docs/reports listed in section 8 |
+| Local verification date | 2026-09-18, local clock UTC+08:00 |
 | OS | openSUSE 20260902.0.0, WSL2 x86_64 Linux, kernel `6.18.33.2-microsoft-standard-WSL2` |
 | Rust | `rustc 1.98.1 (48a229cea 2026-09-01)`, LLVM 22.1.8, `x86_64-unknown-linux-gnu` |
 | Cargo | `cargo 1.98.1 (797e8a9bc 2026-08-05)` |
 | Other tools | uv 0.12.10; Node v24.18.0; Git 2.55.0 |
 | Toolchain selection | Repository `rust-toolchain.toml`: stable, minimal, rustfmt and clippy |
 | Build context | Existing `target` caches; no `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET` or `RUSTFLAGS` override |
-| Dependencies and CI | `Cargo.toml`, `Cargo.lock`, toolchain and `.github` unchanged against HEAD |
+| Dependencies and CI | `Cargo.toml`, `Cargo.lock`, toolchain and `.github` unchanged by implementation and acceptance-record edits |
 | Storage versions | Session DB 2, catalog 1, stored envelope 1, runtime event 2, provider event 1 remain unchanged |
 
-### Reproducible worktree identity
+### Historical pre-commit review identity
 
-Protected **342** tracked/untracked nonignored files, excluding only these two reports:
+The post-documentation-alignment review snapshot protected **342** tracked/untracked
+nonignored files, excluding only these two reports:
 
 - SHA-256: `995851188f598a10ed8664a4733836162d5e1a006519f6606aeec057ee737394`
 - Index SHA-256: `8bd4c84e86a4c98a02c477f9b8578b8664387a75673c826e8bcc52730a861c85`
@@ -45,10 +55,14 @@ The file fingerprint hashes sorted unique UTF-8 paths from
 `git ls-files --cached --others --exclude-standard -z`. For each path, it hashes the
 path, NUL, exact file bytes, NUL. The index fingerprint hashes the exact output of
 `git ls-files --stage -z`. Excluding the reports avoids a self-referential hash.
-The consistency check below reproduces both fingerprints and the complete dirty list.
-This identifies the actual tested source, not a new commit.
+These fingerprints and the dirty-path lists describe the historical pre-commit snapshot,
+not the current committed tree or this docs-only acceptance-record increment. The earlier review hash
+`8631ae894d298200632e4c0326ebb61deaf37b2aa1a94b4920294382b041e338` remains in section 6.
+The consistency check validates snapshot metadata without requiring the old dirty state
+or computing a recursive report hash. Hosted evidence identifies the committed
+implementation by `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`.
 
-Preserved modified paths:
+Historical preserved modified source paths:
 
 - `src/execution/mod.rs`
 - `src/execution/replay.rs`
@@ -63,7 +77,7 @@ Preserved modified paths:
 - `src/storage/session.rs`
 - `src/storage/test_hooks.rs`
 
-Preserved untracked paths:
+Historical preserved untracked source/example paths:
 
 - `examples/host_offline.rs`
 - `src/execution/tests/in_session/notifier.rs`
@@ -95,11 +109,17 @@ busy_timeout=0 and shared_cache=false.
 
 ## 2. Evidence attribution and implemented boundary
 
-- **D**: this final increment's local commands and consistency checks.
-- **S**: current source, configuration, ancestry and worktree inspection.
+- **D**: the original local verification increment's commands and consistency checks
+  on the historical pre-commit worktree.
+- **S**: source, configuration, ancestry and worktree inspection at the recorded stages.
 - **P**: retained parent/delegate completion and review evidence, inspected locally.
   P is not relabeled as a new independent run.
 - **H**: frozen historical reports and V1-A VALIDATION, not current V1-A CI.
+- **C**: parent-supplied verified exact-head hosted run/job/step evidence and the historical
+  PR observation during acceptance preparation. This docs-only increment did not
+  independently fetch hosted evidence.
+- **A**: local documentation checks in this acceptance-record increment, not new Cargo,
+  hosted or live executions.
 
 The accepted foundation remains P1-A/B1/B2, C1/S1/S2 and R1/NB-02. See the unchanged
 [P1-A report](../p1a/VERIFICATION.md), [B1 report](../p1b1/VERIFICATION.md),
@@ -130,7 +150,8 @@ The fixture sharing and barriers in storage/execution are test-only.
 
 ## 3. Required command outcomes
 
-Every requested top-level command ran **once** and passed. Before G01-G06, six timing
+G01-G17 are retained pre-commit verification evidence, not reruns by this docs-only
+increment. Every requested top-level command ran **once** and passed. Before G01-G06, six timing
 wrapper launches failed because `/usr/bin/time` is absent. They started no Cargo command.
 After that diagnosed wrapper correction, G01-G06 each ran directly once.
 
@@ -158,8 +179,9 @@ hidden retries or additional distinct tests. No source correction occurred in th
 | G16 | `cargo run --release --example host_offline` | PASS, exit 0; same finite public-host assertions |
 | G17 | `git diff --check` | PASS, exit 0; before report creation, with unchanged tracked source afterward |
 
-Staged whitespace inspection was clean; the index is unchanged. The report consistency
-check separately inspects every final untracked file, including both reports.
+At that historical snapshot, staged whitespace inspection was clean and the index was
+unchanged. The original consistency check inspected all 17 then-untracked files,
+including both reports. Current acceptance-record checks are listed in section 8.
 
 ### Actual test counts
 
@@ -201,15 +223,16 @@ these final executions. These durations are not test deadlines or performance gu
 
 ## 4. All30 matrix
 
-`PASS_LOCAL` means the row has local/source evidence, not hosted or live acceptance.
-`LOCAL_PASS_CI_NOT_RUN` explicitly leaves the hosted part of V1A-29 incomplete.
+`PASS_LOCAL` means a completed row with local/source evidence, not a blocker or live
+proof. V1A-29 is `PASS`: local reviews/gates and both exact-head hosted workflows passed.
+All 30 rows are complete; hosted acceptance applies to the implementation head above.
 Commands refer to the exact invocations above. Tests below identify principal evidence;
 [verification.json](verification.json) retains the expanded named-test mapping.
 Source references use repository-relative paths and current line numbers.
 
 | ID | Status | Assertions | Tests | Commands | Source | Observer | Blockers |
 |---|---|---|---|---|---|---|---|
-| V1A-00 | PASS_LOCAL | Baseline ancestry, complete dirty list, toolchain/dependencies, frozen evidence and ledger preserved. | Inventory and fingerprint checks; no separate test | G01-G07, G17 | `AGENTS.md:1`; `Cargo.toml:1`; `VALIDATION.md:7-21` | D/S/H | None |
+| V1A-00 | PASS_LOCAL | Baseline ancestry, historical dirty lists/fingerprints, toolchain/dependencies, frozen evidence and ledger preserved. | Inventory and fingerprint checks; no separate test | G01-G07, G17 | `AGENTS.md:1`; `Cargo.toml:1`; `VALIDATION.md:7-21` | D/S/H | None |
 | V1A-01 | PASS_LOCAL | Additive API, weak clients, passive Send+Sync handles, no-work construction and unavailable-runtime error. | `public_types_and_static_errors`; `construction_outside_runtime_is_unavailable` | G02, G03, G07 | `src/service/mod.rs:29-109`; `src/service/tests/mod.rs:64-123` | D/S | None |
 | V1A-02 | PASS_LOCAL | Gate registration precedes spawn; registered gap drains; rejection destroys guards outside gate. | `registered_before_spawn_is_cancelled_and_drained_by_shutdown`; `concurrent_dispatch_and_shutdown_share_one_registration_gate` | G03, G07 | `src/service/mod.rs:137-248`; `src/service/tests/mod.rs:187-227`; `src/service/tests/admission.rs:94` | D/S | None |
 | V1A-03 | PASS_LOCAL | Real precommit receipt wait; exact unwarned receipt before completion, first replay empty. | `notifier_waits_for_unwarned_commit_and_precedes_completion`; `v1a_21_host_websocket_awaits_acceptance_binding_and_result_commits` | G03, G07 | `src/execution/mod.rs:164-228`; `src/execution/tests/in_session/notifier.rs:4-58`; `src/providers/openai_codex/tests/replay/joined_host.rs:251-340` | D/S | None |
@@ -237,8 +260,8 @@ Source references use repository-relative paths and current line numbers.
 | V1A-25 | PASS_LOCAL | Existing suites/direct APIs pass; no dependency/schema/event/error/provider/tool/auth/CI or excluded feature changes. | Complete all-target regression and Node self-test | G01-G14 | `src/execution/mod.rs:28-127`; `Cargo.toml:1`; `Cargo.lock:1`; `.github/workflows/ci.yml:1` | D/S | None |
 | V1A-26 | PASS_LOCAL | Public host example: early receipt, lost A observers, stored outputs, completion, shutdown, no-work reopen, explicit B/cancel; older examples pass. | `v1a_24_host_s2_saved_bytes_survive_mutated_and_deleted_sources`; seven offline mains | G03, G07, G09-G16 | `examples/host_offline.rs:467-810`; older example paths in command table | D/S | None |
 | V1A-27 | PASS_LOCAL | Prior/new dev/release finite samples and retirement/connection counts recorded; failures preserved; no SLA. | `finite_submissions_retire_entries_and_retained_tickets_release_resources`; offline measurements | G03, G07, G12-G16 | `examples/host_offline.rs:45-55,453-792`; `src/service/tests/storage.rs:294-359`; `VALIDATION.md:7-21` | D/S/P/H | None; historical Windows cause unresolved |
-| V1A-28 | PASS_LOCAL | Both reports, unique rows, source links, failures, reviews, fingerprint and ledger; redacted Debug/static errors; frozen docs preserved. | `public_types_and_static_errors`; report consistency check | G03, G07, G17 | `src/service/types.rs:14-70`; `src/service/tickets.rs:116-126`; `VERIFICATION.md:1`; `verification.json:1` | D/S/P | None |
-| V1A-29 | LOCAL_PASS_CI_NOT_RUN | Independent accumulated-diff reviews and all local gates passed; no current hosted acceptance claimed. | Prior complete-diff reviews; complete local matrix | G01-G17 | `MATRIX.md`; `.github/workflows/ci.yml:1`; review section below | D/S/P | Push unauthorized; exact-head three-OS push/PR CI NOT RUN |
+| V1A-28 | PASS_LOCAL | Both reports, unique rows, source links, failures, reviews, historical fingerprints, tested revision and ledger; redacted Debug/static errors; frozen docs preserved. | `public_types_and_static_errors`; report consistency check | G03, G07, G17 | `src/service/types.rs:14-70`; `src/service/tickets.rs:116-126`; `VERIFICATION.md:1`; `verification.json:1` | D/S/P | None |
+| V1A-29 | PASS | Independent complete-diff reviews and local gates passed; push 35320097103 and PR 35320100396 passed all six Cargo steps on Ubuntu/macOS/Windows at fad3855. Exact job evidence is in section 6. | Prior complete-diff reviews; complete local matrix; six hosted jobs | G01-G17; hosted G01-G06 per job | `MATRIX.md`; `.github/workflows/ci.yml:1`; section 6 | D/S/P/C | None |
 
 ## 5. Joined paths and ownership/fault observations
 
@@ -327,6 +350,12 @@ are not invented.
 | Historical B2 Windows | Push 35227116004 attempts 1/2 had existing public-session/final-result/child-exit watchdog expirations although joined tests passed. | Final same-SHA push attempt 3 and PR 35227120456 attempt 1 passed all three OS. Root cause/timing sensitivity is **not proven fixed**. Frozen reports remain unchanged. |
 | Final increment inventory | Broad parent-directory discovery timed out after 10 seconds. | Scoped repository discovery completed; only root AGENTS.md, no nested CONTEXT.md/CLAUDE.md. No file change. |
 | Final increment timing setup | Six `/usr/bin/time` wrapper launches failed, exit 127. No Cargo gate started. | Removed unavailable wrapper and ran G01-G06 directly once each. All passed; no source correction or further retry. |
+| Acceptance-record status scan | First literal-phrase assertion failed because `all six Cargo steps` spans a Markdown line break in CHANGELOG.md. | Normalized whitespace in the check; the second attempt passed all five current docs. No content correction was needed. |
+| Acceptance-record check extraction | The first launcher stopped at backticks inside a JavaScript regex, truncating the embedded check and causing a SyntaxError. | Matched the closing Markdown fence at line start; the second launcher executed the complete check successfully. No report assertion was weakened. |
+| Acceptance-record remediation inventory | Broad parent-directory instruction discovery timed out after 10 seconds. | Repository-scoped discovery completed; only root AGENTS.md and no nested CONTEXT.md/CLAUDE.md. Discovery changed no file. |
+| Acceptance-record finding 1 | Review and independent verification confirmed lifecycle-dependent provenance and PR/check assertions. The pre-fix documentation regression detected transient claims and missing eight-path scope metadata. | Replaced lifecycle state with fixed implementation provenance and phase-qualified PR observations. The embedded check requires tested-revision ancestry and checks every intervening commit plus staged/unstaged/untracked paths. Scope fixtures accept allowed descendant paths and reject source changes in either committed or worktree paths. No current PR-head CI result is asserted. |
+| Acceptance-record finding 2 | Review and independent verification confirmed ARCHITECTURE still said V1-A was only locally complete. The pre-fix documentation regression detected missing accepted implementation provenance. | Updated ARCHITECTURE to v1a.0 accepted at fad3855 with both exact-head hosted runs; V1-B/browser/GUI/ordinary CLI persistence remain unimplemented. Scope and normalized status checks now cover eight files/six current docs. Post-fix documentation regression and acceptance-record checks passed. |
+| Acceptance-record remediation check launcher | The first launcher used a shared VM context and redeclared `fs`, causing a SyntaxError before any embedded assertion ran. | Executed the unchanged embedded check in an isolated function scope; the second attempt passed. No assertion was weakened. |
 
 Review completion records (UTC, P):
 
@@ -350,15 +379,23 @@ Review completion records (UTC, P):
   `docs/README.md` and `docs/WI_PRODUCT_DIRECTION.md`. These reviewers did not cover
   those later edits or this documentation remediation. All30 status consistency and
   bounded local gates passed at that snapshot; no blocking or actionable finding
-  remained there. Hosted CI remains NOT RUN and acceptance remains false.
-- Current-documentation alignment and remediation: three fresh reviewers covered all
-  current modified and untracked files. They reproduced the current 342-file fingerprint
+  remained there. This snapshot predates the authorized implementation commit and
+  hosted workflows.
+- Historical pre-commit documentation alignment and remediation: three fresh reviewers
+  covered all then-modified and untracked files. They reproduced that 342-file fingerprint
   `995851188f598a10ed8664a4733836162d5e1a006519f6606aeec057ee737394`,
   the 19-file `+381/-171` tracked diff, all30 report consistency, links and whitespace.
   The initial review found two low-severity documentation gaps; independent verification
   confirmed both. Remediation corrected the product-direction roadmap and distinguished
-  the historical review hash from the current fingerprint. The repeated three-review
-  gate passed with no actionable findings.
+  the earlier review hash from the then-current fingerprint. The repeated three-review
+  gate passed with no actionable findings. Neither snapshot covers this acceptance-record
+  update.
+- Acceptance-record review, verification, remediation and repeated review: the initial
+  three-review gate reported two documentation findings. Independent verification confirmed
+  both. Remediation corrected durable provenance/scope checks and the architecture status.
+  Three fresh repeated reviewers then passed the complete eight-file diff with no actionable
+  findings. They reproduced all30, exact CI records, descendant scope enforcement, links,
+  whitespace and the fixed implementation/live-provider boundaries.
 
 Earlier targeted evidence remains P: eight joined host tests, ten existing `b2mr_*`
 tests, one S2 test with six cases, and the twelve-submission retirement test passed.
@@ -366,10 +403,35 @@ The two exact-model targeted tests were reruns after stronger assertions, not tw
 additional tests. These results are not added to this increment's 750-test count.
 
 D reproduced all required local gates and checked the reports before the historical
-complete-diff review. Section 1 records the sole current worktree fingerprint. The
-current-documentation review gate reproduced that fingerprint and passed after both
-confirmed documentation findings were remediated. There is still no hosted approval
-because push and hosted CI remain unauthorized.
+complete-diff review. Section 1 records the later pre-commit snapshot, not the current
+Git state. Its documentation review gate passed after both confirmed findings were
+remediated. Authorized hosted acceptance followed at the committed implementation head.
+
+### Exact-head hosted acceptance
+
+C evidence establishes both **Rust source validation** workflows at
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Both run conclusions and every listed job
+conclusion are **success**. Each job passed all six exact Cargo commands G01-G06 in
+section 3; [verification.json](verification.json) records each command and conclusion.
+
+| Event | Run | OS | Job | Cargo steps |
+|---|---|---|---|---|
+| push | [35320097103](https://github.com/zer09/wi/actions/runs/35320097103) | Ubuntu | [105520455006](https://github.com/zer09/wi/actions/runs/35320097103/job/105520455006) | G01-G06 PASS |
+| push | [35320097103](https://github.com/zer09/wi/actions/runs/35320097103) | macOS | [105520455249](https://github.com/zer09/wi/actions/runs/35320097103/job/105520455249) | G01-G06 PASS |
+| push | [35320097103](https://github.com/zer09/wi/actions/runs/35320097103) | Windows | [105520455296](https://github.com/zer09/wi/actions/runs/35320097103/job/105520455296) | G01-G06 PASS |
+| pull_request | [35320100396](https://github.com/zer09/wi/actions/runs/35320100396) | Ubuntu | [105520471681](https://github.com/zer09/wi/actions/runs/35320100396/job/105520471681) | G01-G06 PASS |
+| pull_request | [35320100396](https://github.com/zer09/wi/actions/runs/35320100396) | macOS | [105520471423](https://github.com/zer09/wi/actions/runs/35320100396/job/105520471423) | G01-G06 PASS |
+| pull_request | [35320100396](https://github.com/zer09/wi/actions/runs/35320100396) | Windows | [105520471721](https://github.com/zer09/wi/actions/runs/35320100396/job/105520471721) | G01-G06 PASS |
+
+During acceptance preparation, [PR #8](https://github.com/zer09/wi/pull/8) was observed
+OPEN and DRAFT, not merged, at `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`, with
+mergeable MERGEABLE and mergeStateStatus CLEAN. These are historical observations,
+not current PR assertions. The recorded runs prove only that implementation revision.
+Current PR-head merge checks are external GitHub merge-readiness evidence, separate from
+this fixed implementation evidence; this record asserts no current-head CI result.
+Cargo CI does not establish Node self-test, offline example-main or live/provider execution;
+their evidence remains separate.
+Earlier failures and unresolved historical Windows watchdog observations remain above.
 
 ## 7. Finite measurements
 
@@ -423,17 +485,31 @@ JSON bytes. None of these finite sizes are retention, history or task limits.
 
 ## 8. Report consistency and reproducibility
 
-JSON syntax and all30 uniqueness passed after the JSON write. Final consistency status:
-**PASS**. The embedded check passed for both reports, all 30 rows and all 17 untracked
-files. It reproduced the 342-file fingerprint and unchanged index. The read-only check
-below validates both reports, source/test references,
-commands/counts, local-versus-hosted status, privacy ledger, worktree identity and all
-untracked whitespace. Run it from the repository root with Node; no provider is involved.
+Acceptance-record consistency status: **PASS**. JSON parse/all30/hosted evidence checks,
+local links in all seven allowed Markdown files, stale transient-token scan across eight
+files, normalized current-status scan across six docs including ARCHITECTURE,
+`git diff --check` and the eight-file committed-plus-worktree scope check passed.
+The embedded check passed against the uncommitted remediation state. The pre-fix
+documentation regression failed on both confirmed findings; its post-fix run passed.
+Section 6 preserves earlier check failures, the findings and their corrections.
+Preparation and remediation left source/tests/configuration, frozen plans, historical
+reports and the index unchanged and created no untracked files.
+
+The original pre-commit consistency check reproduced the 342-file fingerprint and
+inspected all 17 then-untracked files. That result is historical. The read-only check
+below validates report structure/status, both exact-head workflows, all six jobs
+and 36 successful Cargo steps, source/test references, commands/counts, privacy ledger
+and historical snapshot metadata. It requires tested_revision to be an ancestor of HEAD.
+It checks all paths in every commit in tested_revision..HEAD and all staged, unstaged
+and untracked paths against the eight allowed docs/reports below. Read-only scope fixtures
+accept allowed descendant paths and reject source changes in committed or worktree paths;
+these fixtures do not create commits. The check permits a documentation-only descendant
+without requiring a fixed current PR head, dirty tree or recursive report hash.
+Run from the repository root with Node; no provider or hosted request is involved.
 
 ```javascript
 const fs = require('node:fs');
 const cp = require('node:child_process');
-const crypto = require('node:crypto');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const report = 'docs/slices/v1a/verification.json';
@@ -442,16 +518,57 @@ const j = JSON.parse(fs.readFileSync(report, 'utf8'));
 const md = fs.readFileSync(human, 'utf8');
 const git = (...args) => cp.execFileSync('git', args);
 const split = bytes => bytes.toString().split('\0').filter(Boolean);
-const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const revision = 'fad3855db70ff4151a5c27ec3f64d04fa9097cbb';
 assert.equal(j.contract, 'v1a.0');
-assert.equal(j.status, 'LOCAL_COMPLETE_CI_NOT_RUN');
-assert.equal(j.accepted, false);
+assert.equal(j.status, 'ACCEPTED');
+assert.equal(j.accepted, true);
 assert.equal(j.local_complete, true);
-assert.equal(j.hosted_ci_status, 'NOT_RUN');
+assert.equal(j.hosted_ci_status, 'PASS');
+assert.equal(j.tested_revision, revision);
 assert.equal(j.consistency_checks.status, 'PASS');
-assert.deepEqual(j.submitted_ci, []);
-assert(md.includes('Status: **LOCAL_COMPLETE_CI_NOT_RUN**'));
-assert(md.includes('Accepted: **false**'));
+assert.equal(j.acceptance_record_update.based_on_revision, revision);
+assert.equal(j.acceptance_record_update.kind, 'docs_only_acceptance_record');
+assert.equal(j.acceptance_record_update.preparation_git_transitions_performed, false);
+assert.equal(j.pull_request.number, 8);
+assert.equal(j.pull_request.observation_phase, 'acceptance_preparation');
+assert.equal(j.pull_request.observer, 'C');
+const allowedPaths = [
+  'AGENTS.md',
+  'CHANGELOG.md',
+  'README.md',
+  'docs/ARCHITECTURE.md',
+  'docs/README.md',
+  'docs/WI_PRODUCT_DIRECTION.md',
+  human,
+  report,
+];
+assert.deepEqual(j.acceptance_record_update.allowed_paths, allowedPaths);
+const assertScope = (committed, worktree) => {
+  for (const p of new Set([...committed, ...worktree])) {
+    assert(allowedPaths.includes(p), `out-of-scope path: ${p}`);
+  }
+};
+// Allowed docs stay valid after a commit; source changes in either place must fail.
+assert.doesNotThrow(() => assertScope(allowedPaths, []));
+assert.doesNotThrow(() => assertScope([], allowedPaths));
+assert.doesNotThrow(() => assertScope([allowedPaths[0]], [allowedPaths[1]]));
+assert.throws(() => assertScope(['src/lib.rs'], []), /out-of-scope path/);
+assert.throws(() => assertScope([], ['src/lib.rs']), /out-of-scope path/);
+git('merge-base', '--is-ancestor', revision, 'HEAD');
+const commits = git('rev-list', `${revision}..HEAD`).toString().trim().split('\n').filter(Boolean);
+// Inspect every commit so a later revert cannot hide an unauthorized source edit.
+const committedPaths = commits.flatMap(commit => split(git(
+  'diff-tree', '--root', '-m', '--no-commit-id', '--name-only', '--no-renames', '-r', '-z', commit,
+)));
+const worktreePaths = [
+  ...split(git('diff', '--name-only', '--no-renames', '-z')),
+  ...split(git('diff', '--cached', '--name-only', '--no-renames', '-z')),
+  ...split(git('ls-files', '--others', '--exclude-standard', '-z')),
+];
+assertScope(committedPaths, worktreePaths);
+assert(md.includes('Status: **ACCEPTED**'));
+assert(md.includes('Accepted: **true**'));
+assert(md.includes(revision));
 const ids = Array.from({length: 30}, (_, i) => `V1A-${String(i).padStart(2, '0')}`);
 assert.deepEqual(j.matrix.map(r => r.id), ids);
 assert.equal(new Set(j.matrix.map(r => r.id)).size, 30);
@@ -469,7 +586,36 @@ for (const c of j.commands) {
   assert.equal(c.top_level_invocations, 1);
   assert(md.includes('`' + c.command + '`'));
 }
-const excludes = new Set(j.worktree.report_paths_excluded_from_self_hash);
+const hostedCommands = j.commands.slice(0, 6).map(c => c.command);
+const workflow = fs.readFileSync('.github/workflows/ci.yml', 'utf8');
+assert.deepEqual([...workflow.matchAll(/^\s+- run: (.+)$/gm)].map(m => m[1]), hostedCommands);
+const expectedRuns = [
+  {run: 35320097103, event: 'push', jobs: [105520455006, 105520455249, 105520455296]},
+  {run: 35320100396, event: 'pull_request', jobs: [105520471681, 105520471423, 105520471721]},
+];
+assert.equal(j.submitted_ci.length, 2);
+for (let i = 0; i < expectedRuns.length; i++) {
+  const expected = expectedRuns[i];
+  const run = j.submitted_ci[i];
+  assert.equal(run.run, expected.run);
+  assert.equal(run.workflow, 'Rust source validation');
+  assert.equal(run.event, expected.event);
+  assert.equal(run.head_sha, revision);
+  assert.equal(run.conclusion, 'success');
+  assert.equal(run.observer, 'C');
+  assert.equal(run.url, `https://github.com/zer09/wi/actions/runs/${run.run}`);
+  assert(md.includes(run.url));
+  assert.deepEqual(run.jobs.map(job => job.id), expected.jobs);
+  assert.deepEqual(run.jobs.map(job => job.os), ['Ubuntu', 'macOS', 'Windows']);
+  assert.deepEqual(run.jobs.map(job => job.runner), ['ubuntu-latest', 'macos-latest', 'windows-latest']);
+  for (const job of run.jobs) {
+    assert.equal(job.conclusion, 'success');
+    assert.equal(job.url, `${run.url}/job/${job.id}`);
+    assert(md.includes(job.url));
+    assert.deepEqual(job.cargo_steps.map(step => step.command), hostedCommands);
+    assert(job.cargo_steps.every(step => step.conclusion === 'success'));
+  }
+}
 const all = [...new Set(split(git('ls-files', '--cached', '--others', '--exclude-standard', '-z')))].sort();
 const rust = all.filter(p => p.endsWith('.rs')).map(p => fs.readFileSync(p, 'utf8')).join('\n');
 for (let i = 0; i < j.matrix.length; i++) {
@@ -480,9 +626,9 @@ for (let i = 0; i < j.matrix.length; i++) {
   }
   assert(r.assertions.length && r.commands.length && r.source.length && r.observer.length);
   assert(r.commands.every(c => commandIds.has(c)));
-  assert(r.observer.every(o => ['D', 'S', 'P', 'H'].includes(o)));
-  assert.equal(r.status, i === 29 ? 'LOCAL_PASS_CI_NOT_RUN' : 'PASS_LOCAL');
-  assert.equal(r.blockers.length > 0, i === 29);
+  assert(r.observer.every(o => Object.hasOwn(j.observers, o)));
+  assert.equal(r.status, i === 29 ? 'PASS' : 'PASS_LOCAL');
+  assert.equal(r.blockers.length, 0);
   for (const name of r.tests) assert(rust.includes('fn ' + name + '('), name);
   for (const source of r.source) {
     const m = source.match(/^(.+?):(\d+)(?:-(\d+))?$/);
@@ -491,9 +637,24 @@ for (let i = 0; i < j.matrix.length; i++) {
     assert(+m[2] >= 1 && +(m[3] || m[2]) <= lines, source);
   }
 }
-for (const m of md.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-  if (/^https?:/.test(m[1])) continue;
-  assert(fs.existsSync(path.resolve(path.dirname(human), m[1].split('#')[0])), m[1]);
+for (const p of allowedPaths.filter(p => p.endsWith('.md'))) {
+  const text = fs.readFileSync(p, 'utf8');
+  for (const m of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(m[1])) continue;
+    assert(fs.existsSync(path.resolve(path.dirname(p), m[1].split('#')[0])), `${p}: ${m[1]}`);
+  }
+}
+for (const p of allowedPaths.filter(p => p !== human && p !== report)) {
+  const text = fs.readFileSync(p, 'utf8').replace(/[*`]/g, '').replace(/\s+/g, ' ');
+  assert.match(text, /complete and accepted|ACCEPTED; complete; accepted=true; hosted CI PASS/, p);
+  for (const value of ['v1a.0', revision, '35320097103', '35320100396',
+    'all six Cargo steps', 'Ubuntu/macOS/Windows', 'external GitHub merge-readiness evidence']) {
+    assert(text.includes(value), `${p}: ${value}`);
+  }
+  if (p === 'docs/ARCHITECTURE.md') {
+    assert(text.includes('V1-A in-process ownership is complete and accepted under contract v1a.0'), p);
+    assert(text.includes('Ordinary CLI persistence, V1-B networking, browser protocol and GUI remain unimplemented.'), p);
+  }
 }
 assert.equal(j.test_counts.per_all_target_pass.reduce((s, t) => s + t.passed, 0), 750);
 assert.equal(j.test_counts.per_all_target_pass.reduce((s, t) => s + t.ignored, 0), 6);
@@ -503,27 +664,33 @@ assert.equal(j.test_counts.total_failed, 0);
 for (const key of ['live_started', 'network_service_implemented', 'normal_cli_persistence_implemented']) assert.equal(j[key], false);
 for (const key of ['real_credential_reads', 'private_skill_reads', 'provider_generations']) assert.equal(j[key], 0);
 assert.deepEqual(j.ledger, {used: 31, cap: 50, remaining: 19, changed: false});
-assert.equal(git('rev-parse', 'HEAD').toString().trim(), j.tested_revision);
-assert.equal(git('rev-parse', 'HEAD^').toString().trim(), j.baseline);
-assert.equal(git('diff', '--cached', '--name-only').toString(), '');
-assert.equal(sha(git('ls-files', '--stage', '-z')), j.worktree.index_sha256);
-const protectedPaths = all.filter(p => !excludes.has(p));
-assert.equal(protectedPaths.length, j.worktree.protected_file_count);
-const hash = crypto.createHash('sha256');
-for (const p of protectedPaths) hash.update(p).update('\0').update(fs.readFileSync(p)).update('\0');
-assert.equal(hash.digest('hex'), j.worktree.sha256);
-assert.deepEqual(split(git('diff', '--name-only', '-z')).sort(), j.worktree.preserved_modified_paths.slice().sort());
-const untracked = split(git('ls-files', '--others', '--exclude-standard', '-z')).sort();
-assert.deepEqual(untracked, [...j.worktree.preserved_untracked_paths, ...excludes].sort());
-assert.equal(untracked.length, 17);
-for (const p of untracked) {
+git('merge-base', '--is-ancestor', j.baseline, revision);
+const snapshot = j.worktree;
+assert.equal(snapshot.kind, 'historical_pre_commit_review_snapshot');
+assert.equal(git('rev-parse', `${revision}^`).toString().trim(), snapshot.head);
+assert.equal(git('rev-parse', `${snapshot.head}^`).toString().trim(), j.baseline);
+assert.equal(snapshot.protected_file_count, 342);
+assert.match(snapshot.sha256, /^[a-f0-9]{64}$/);
+assert.match(snapshot.index_sha256, /^[a-f0-9]{64}$/);
+assert.equal(snapshot.preserved_modified_paths.length, 19);
+assert.equal(snapshot.preserved_untracked_paths.length, 15);
+assert.equal(snapshot.final_dirty_paths, 36);
+assert.equal(snapshot.final_untracked_paths, 17);
+assert.deepEqual(snapshot.report_paths_excluded_from_self_hash, [human, report]);
+assert.deepEqual(j.reviews.filter(r => r.reviewed_worktree_sha256).map(r => r.reviewed_worktree_sha256), [
+  '8631ae894d298200632e4c0326ebb61deaf37b2aa1a94b4920294382b041e338',
+  snapshot.sha256,
+]);
+for (const p of [human, report]) {
   const text = fs.readFileSync(p, 'utf8');
   assert(!/[ \t]+$/m.test(text), `trailing whitespace: ${p}`);
   assert(!/^ +\t/m.test(text), `space before tab: ${p}`);
   assert(text.endsWith('\n') && !text.endsWith('\n\n'), `EOF whitespace: ${p}`);
 }
-console.log('PASS: JSON/schema, all30, command/count/status/ledger, source/test references, links, whitespace and preservation');
-console.log(`protected_files=${protectedPaths.length} sha256=${j.worktree.sha256} untracked=${untracked.length} staged=0`);
+console.log('PASS: JSON/schema, all30, accepted status, exact-head CI (2 runs/6 jobs/36 Cargo steps)');
+console.log('PASS: commands/counts/ledger, source/test references, local links, whitespace and historical snapshot metadata');
+console.log('PASS: normalized accepted status in all six current docs including ARCHITECTURE');
+console.log(`PASS: tested revision ancestry; eight-file scope (${commits.length} descendant commits, ${new Set(worktreePaths).size} worktree paths); scope regression fixtures`);
 ```
 
 The JSON follows the machine minimum in [MATRIX.md](MATRIX.md), with explicit local
@@ -532,11 +699,15 @@ file for V1-A; the assertions above check the required structure and consistency
 
 ## 9. Remaining limits and authorization
 
-- **Hosted CI NOT RUN** is the remaining acceptance limit. Push and pull-request
-  workflows on the exact future submitted head must pass all six Cargo gates on
-  Ubuntu/macOS/Windows after separate authorization. Old B2 CI cannot satisfy this.
-- Current execution evidence is local Linux/WSL2. The retained Windows watchdog
-  observations are not proven fixed by local success or historical same-SHA success.
+- Hosted runs 35320097103/35320100396 prove only implementation head
+  `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`, not documentation-only descendants.
+  PR #8 was observed open and draft, not merged, during acceptance preparation.
+  Current PR-head merge checks are external GitHub merge-readiness evidence, separate
+  from fixed implementation evidence; this record asserts no current-head CI result.
+  The parent supplied verified hosted evidence; this increment did not independently
+  fetch it or rerun Cargo gates.
+- Local execution evidence is Linux/WSL2; hosted Cargo evidence covers Ubuntu/macOS/Windows.
+  Passing V1-A runs do not prove the retained Windows watchdog causes repaired.
 - Graceful shutdown requires keeping the runtime alive and awaiting its ticket.
   Runtime/process destruction, panic=abort, physical power loss and noncooperative
   blocking code do not acquire a graceful completion guarantee.

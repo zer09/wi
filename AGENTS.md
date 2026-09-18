@@ -1,10 +1,14 @@
 # Wi: V1-A service-owned execution handoff
 
-Current status: **v1a.0 is locally complete; exact-head hosted CI is NOT RUN**.
-Accepted baseline: `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
-The implementation remains uncommitted for owner review. `accepted=false` until a separately
-authorized push completes exact-head hosted CI. Do not resume the V1-A or P1-B2 implementation
-prompts. P1-B2 plus B2-E01 is merged in PR #7.
+Current status: **v1a.0 is complete and accepted** at implementation head
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+Accepted foundation: `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
+During acceptance preparation, PR #8 was observed **open and draft, not merged**.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
+Do not resume the V1-A or P1-B2 implementation prompts. P1-B2 plus B2-E01 is merged in PR #7.
 
 Read in order:
 1. docs/slices/v1a/CONTRACT.md
@@ -41,7 +45,7 @@ or assigned today's account. No account/model/transport fallback or automatic re
 
 ## Implemented V1-A boundary
 
-The current worktree adds a shared in-process run host owning execution independently of
+The accepted implementation adds a shared in-process run host owning execution independently of
 clients/tickets. Dispatch, committed acceptance and actual completion are distinct. The
 implementation adds only the specified private receipt notifier and preserves existing
 public execution APIs and failure/certainty semantics. Cancellation is explicit; owner
@@ -58,15 +62,16 @@ automatic task restart, retry/failover, hosted skills/API billing or speculative
 
 ## Verification and authorization
 
-V1A-00..28 are PASS_LOCAL. V1A-29 is LOCAL_PASS_CI_NOT_RUN because push is unauthorized.
-`docs/slices/v1a/VERIFICATION.md` and `verification.json` record the actual worktree,
-local gates, independent complete-diff reviews, failures and limits. Source/CI/local/live
-remain distinct evidence. Preserve historical reports and plan-time statuses; do not
-weaken jobs, lints or tests.
+V1A-00..28 are complete with PASS_LOCAL evidence. V1A-29 is PASS with no blockers;
+`accepted=true` and hosted CI is PASS for the implementation head above.
+`docs/slices/v1a/VERIFICATION.md` and `verification.json` record exact run/job evidence,
+local gates, independent complete-diff reviews, historical pre-commit fingerprints,
+failures and limits. Source/CI/local/live remain distinct evidence. Preserve historical
+reports and plan-time statuses; do not weaken jobs, lints or tests.
 
 Use synthetic roots/skills/credentials and scripted/loopback providers only. No real
 profile/private-skill reads, auth commands or live provider requests. Ledger remains
 **31/50 used,19 remaining**. Build caches are allowed, provider probes are not.
-Leave implementation uncommitted for owner review. Commit/push/merge/release/deployment,
-V1-B and live verification require separate authorization. Planning commits in this
-branch contain documentation only; an old prompt is not fresh permission.
+The authorized implementation commit and push are complete. Further staging, commits,
+pushes, PR state changes, merge/release/deployment, V1-B and live verification require
+separate authorization. An old prompt is not fresh permission.

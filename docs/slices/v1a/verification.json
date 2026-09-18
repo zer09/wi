@@ -1,21 +1,56 @@
 {
   "contract": "v1a.0",
-  "status": "LOCAL_COMPLETE_CI_NOT_RUN",
-  "accepted": false,
+  "status": "ACCEPTED",
+  "accepted": true,
   "local_complete": true,
-  "hosted_ci_status": "NOT_RUN",
+  "hosted_ci_status": "PASS",
   "verification_date": "2026-09-18",
   "time_zone": "+08:00",
   "baseline": "50f4dffe5d912615014edc46cf1bf1e1b68e6857",
-  "tested_revision": "a013e77f4fafa7834b14b98b7a17ab9f89a4eb69",
-  "revision_meaning": "Planning HEAD plus the preserved, uncommitted implementation identified below. Not a committed implementation revision or hosted acceptance.",
+  "tested_revision": "fad3855db70ff4151a5c27ec3f64d04fa9097cbb",
+  "revision_meaning": "Committed implementation head, feat: add service-owned execution host, tested by both exact-head hosted workflows. Local G01-G17 and reviews identify the historical pre-commit snapshots below. The acceptance record documents fixed implementation evidence for this revision only, not CI for documentation-only descendants.",
+  "acceptance_record_update": {
+    "kind": "docs_only_acceptance_record",
+    "based_on_revision": "fad3855db70ff4151a5c27ec3f64d04fa9097cbb",
+    "preparation_start_worktree": "clean",
+    "evidence_scope": "Current PR-head merge checks are external GitHub merge-readiness evidence, separate from fixed implementation evidence. This record asserts no current PR-head CI result.",
+    "preparation_git_transitions_performed": false,
+    "allowed_paths": [
+      "AGENTS.md",
+      "CHANGELOG.md",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/README.md",
+      "docs/WI_PRODUCT_DIRECTION.md",
+      "docs/slices/v1a/VERIFICATION.md",
+      "docs/slices/v1a/verification.json"
+    ]
+  },
+  "pull_request": {
+    "observation_phase": "acceptance_preparation",
+    "meaning": "Historical PR observation during acceptance preparation, not a current head, state or merge-readiness assertion.",
+    "number": 8,
+    "url": "https://github.com/zer09/wi/pull/8",
+    "head_sha": "fad3855db70ff4151a5c27ec3f64d04fa9097cbb",
+    "state": "OPEN",
+    "draft": true,
+    "merged": false,
+    "mergeable": "MERGEABLE",
+    "merge_state_status": "CLEAN",
+    "observer": "C"
+  },
   "observers": {
-    "D": "Commands and checks executed by the final report increment on this worktree.",
-    "S": "Current source, configuration, ancestry and worktree inspection.",
+    "D": "Commands and checks executed by the original local verification increment on the historical pre-commit worktree.",
+    "S": "Source, configuration, ancestry and worktree inspection at the recorded stages.",
     "P": "Prior parent/delegate completion and review evidence; retained local records inspected. Not a new independent execution.",
-    "H": "Historical P1-A/B1/B2 reports and V1-A VALIDATION. Not current V1-A CI."
+    "H": "Historical P1-A/B1/B2 reports and V1-A VALIDATION. Not current V1-A CI.",
+    "C": "Parent-supplied verified exact-head hosted workflow/job/step evidence and historical PR observation during acceptance preparation. Not independently fetched by this docs-only increment.",
+    "A": "Local documentation consistency checks performed by this acceptance-record increment; no Cargo, hosted or live rerun."
   },
   "worktree": {
+    "kind": "historical_pre_commit_review_snapshot",
+    "head": "a013e77f4fafa7834b14b98b7a17ab9f89a4eb69",
+    "meaning": "Post-documentation-alignment review snapshot before the implementation commit. All counts, paths, fingerprints and Git-state fields in this object describe that snapshot, not the current committed tree or acceptance-record increment. Reports were excluded to avoid recursive self-hashes.",
     "algorithm": "SHA-256 over sorted unique UTF-8 paths from git ls-files --cached --others --exclude-standard -z, excluding the two report paths; append path, NUL, exact file bytes, NUL for each file.",
     "protected_file_count": 342,
     "sha256": "995851188f598a10ed8664a4733836162d5e1a006519f6606aeec057ee737394",
@@ -171,7 +206,7 @@
     "expected_fixture_stderr":"synthetic failure lines appeared in successful all-target CLI fixtures; no test failed."
   },
   "matrix": [
-    {"id":"V1A-00","status":"PASS_LOCAL","assertions":["HEAD is the documentation-only child of the accepted baseline; all 27 pre-existing dirty paths preserved.","Index, dependencies, CI configuration and frozen reports unchanged; B2-E01 closure and ledger retained."],"tests":[],"commands":["G01","G02","G03","G04","G05","G06","G07","G17"],"source":["AGENTS.md:1","Cargo.toml:1","Cargo.lock:1","docs/slices/v1a/VALIDATION.md:7"],"observer":["D","S","H"],"blockers":[]},
+    {"id":"V1A-00","status":"PASS_LOCAL","assertions":["Historical local verification used the planning child of the accepted baseline and preserved all 27 pre-existing dirty paths. Committed implementation fad3855db70ff4151a5c27ec3f64d04fa9097cbb descends from that planning head.","Historical index and worktree fingerprints remain review snapshots, not current Git-state assertions. Dependencies, CI configuration, frozen reports, B2-E01 closure and ledger remain unchanged."],"tests":[],"commands":["G01","G02","G03","G04","G05","G06","G07","G17"],"source":["AGENTS.md:1","Cargo.toml:1","Cargo.lock:1","docs/slices/v1a/VALIDATION.md:7"],"observer":["D","S","H"],"blockers":[]},
     {"id":"V1A-01","status":"PASS_LOCAL","assertions":["Non-Clone RunHost consumes SessionStore; Weak clients and passive cloneable Send+Sync tickets match the additive API.","Constructor uses captured runtime without provider/tool operations; static runtime-unavailable error; public legacy execution signatures preserved."],"tests":["public_types_and_static_errors","construction_outside_runtime_is_unavailable","submit_uses_captured_runtime_from_a_thread_without_runtime_context"],"commands":["G02","G03","G07"],"source":["src/service/mod.rs:29-109","src/service/types.rs:8-70","src/service/tests/mod.rs:64-123","src/service/tests/admission.rs:71"],"observer":["D","S"],"blockers":[]},
     {"id":"V1A-02","status":"PASS_LOCAL","assertions":["Tracker registration and shutdown admission use one gate; registered-before-spawn work is cancelled and drained.","Rejected prepared guards drop outside the gate; dispatch is not SQL acceptance."],"tests":["registered_before_spawn_is_cancelled_and_drained_by_shutdown","concurrent_dispatch_and_shutdown_share_one_registration_gate","rejection_drops_prepared_tools_outside_gate_and_is_not_worker_loss"],"commands":["G03","G07"],"source":["src/service/mod.rs:137-248","src/service/tests/mod.rs:187-227","src/service/tests/admission.rs:1"],"observer":["D","S"],"blockers":[]},
     {"id":"V1A-03","status":"PASS_LOCAL","assertions":["Before acceptance commit accepted() is pending and provider work is zero; after commit the exact receipt precedes completion.","Notifier follows check_commit in both branches; first replay is empty and prepared input/definitions remain exact."],"tests":["notifier_waits_for_unwarned_commit_and_precedes_completion","dispatch_receipt_and_completion_are_distinct_and_observers_can_disappear","v1a_21_host_websocket_awaits_acceptance_binding_and_result_commits"],"commands":["G03","G07"],"source":["src/execution/mod.rs:164-228","src/execution/tests/in_session/notifier.rs:4-58","src/service/tests/execution.rs:24-105","src/providers/openai_codex/tests/replay/joined_host.rs:251-344"],"observer":["D","S"],"blockers":[]},
@@ -199,8 +234,8 @@
     {"id":"V1A-25","status":"PASS_LOCAL","assertions":["All existing P1-A/B1/B2/C1/S1/S2/R1/auth offline regressions pass; direct APIs remain compatible.","No dependency/feature/schema/event/error/provider/tool/auth/CI behavior change, new loop, limits, retry, retention cap, network service, normal CLI persistence or GUI."],"tests":[],"commands":["G01","G02","G03","G04","G05","G06","G07","G08","G09","G10","G11","G12","G13","G14"],"source":["Cargo.toml:1","Cargo.lock:1","src/execution/mod.rs:28-127","src/lib.rs:12",".github/workflows/ci.yml:1"],"observer":["D","S"],"blockers":[]},
     {"id":"V1A-26","status":"PASS_LOCAL","assertions":["Public host_offline demonstrates real SQLite/S2/addition, early receipt, total A observer loss, independent saved-output read and normal A completion.","Orderly shutdown, no-work reopen, explicit B, explicit cancellation and all six older examples pass."],"tests":["v1a_24_host_s2_saved_bytes_survive_mutated_and_deleted_sources"],"commands":["G03","G07","G09","G10","G11","G12","G13","G14","G15","G16"],"source":["examples/host_offline.rs:467-810","examples/run_offline.rs:130","examples/skills_offline.rs:146","examples/skill_loading_offline.rs:163","examples/storage_offline.rs:125","examples/persisted_run_offline.rs:1","examples/conversation_offline.rs:1"],"observer":["D","S"],"blockers":[]},
     {"id":"V1A-27","status":"PASS_LOCAL","assertions":["Prior and new dev/release receipt/completion/cancel/shutdown samples and registry/connection observations are retained separately.","No SLA or fastest claim; finite fixture sizes are not product limits. Prior watchdog failures remain reliability observations, not fixed flakes."],"tests":["finite_submissions_retire_entries_and_retained_tickets_release_resources"],"commands":["G03","G07","G12","G13","G14","G15","G16"],"source":["examples/host_offline.rs:45-55","examples/host_offline.rs:453-792","src/service/tests/storage.rs:294-359","docs/slices/v1a/VALIDATION.md:7-21"],"observer":["D","S","P","H"],"blockers":[]},
-    {"id":"V1A-28","status":"PASS_LOCAL","assertions":["Both reports contain all 30 unique rows, real source paths, command/count distinctions, failures, review attribution, exact worktree identity and unchanged ledger.","Debug/static errors redact payloads; process panic hook is unchanged. Frozen contracts/reports remain untouched; service is in-process only."],"tests":["public_types_and_static_errors"],"commands":["G03","G07","G17"],"source":["docs/slices/v1a/VERIFICATION.md:1","docs/slices/v1a/verification.json:1","src/service/types.rs:14-70","src/service/tickets.rs:116-126","src/service/mod.rs:196-200"],"observer":["D","S","P"],"blockers":[]},
-    {"id":"V1A-29","status":"LOCAL_PASS_CI_NOT_RUN","assertions":["Prior incremental complete-diff reviews passed after notifier coverage remediation.","Three fresh independent final reviews passed the historical pre-documentation-alignment worktree diff, including all 17 untracked source, test, example and report files, not later documentation edits. All required local commands pass on the preserved source worktree.","Exact-head hosted push/PR CI on Ubuntu/macOS/Windows is NOT RUN; previous B2 CI is not V1-A acceptance."],"tests":[],"commands":["G01","G02","G03","G04","G05","G06","G07","G08","G09","G10","G11","G12","G13","G14","G15","G16","G17"],"source":["docs/slices/v1a/MATRIX.md:55",".github/workflows/ci.yml:1","docs/slices/v1a/VERIFICATION.md:1"],"observer":["D","S","P"],"blockers":["Push is explicitly unauthorized; exact-head hosted CI has not run. Full contract acceptance remains false."]}
+    {"id":"V1A-28","status":"PASS_LOCAL","assertions":["Both reports contain all 30 unique rows, real source paths, command/count distinctions, failures, review attribution, exact tested implementation revision, historical worktree snapshots and unchanged ledger.","Debug/static errors redact payloads; process panic hook is unchanged. Frozen contracts/reports remain untouched; service is in-process only."],"tests":["public_types_and_static_errors"],"commands":["G03","G07","G17"],"source":["docs/slices/v1a/VERIFICATION.md:1","docs/slices/v1a/verification.json:1","src/service/types.rs:14-70","src/service/tickets.rs:116-126","src/service/mod.rs:196-200"],"observer":["D","S","P"],"blockers":[]},
+    {"id":"V1A-29","status":"PASS","assertions":["Prior incremental complete-diff reviews passed after notifier coverage remediation.","Three fresh independent final reviews passed the historical pre-documentation-alignment diff, including all 17 then-untracked source, test, example and report files. Three later reviewers passed the documentation-alignment snapshot after remediation. All required local commands passed; neither review snapshot covers this acceptance-record update.","Exact-head push 35320097103 and pull_request 35320100396 passed at fad3855db70ff4151a5c27ec3f64d04fa9097cbb. Ubuntu/macOS/Windows jobs and all six Cargo steps succeeded in both runs; submitted_ci records exact job IDs, commands and URLs. This proves only the fixed implementation head, not documentation-only descendants or live/provider behavior."],"tests":[],"commands":["G01","G02","G03","G04","G05","G06","G07","G08","G09","G10","G11","G12","G13","G14","G15","G16","G17"],"source":["docs/slices/v1a/MATRIX.md:55",".github/workflows/ci.yml:1","docs/slices/v1a/VERIFICATION.md:1"],"observer":["D","S","P","C"],"blockers":[]}
   ],
   "ownership_and_fault_evidence": [
     {"area":"receipt","source":"src/execution/mod.rs:164-221","observation":"check_commit then private notifier, then duplicate read or the one admitted engine; both branches tested including read failure after notification."},
@@ -226,8 +261,9 @@
     {"observer":"P","scope":"Recovered increment 2 complete diff","result":"Three reviews passed. One fresh-target compilation passed after default-target corrupt metadata; another reviewer removed only 908 zero-length ignored cache files and rebuilt successfully.","completion_records_utc":["2026-09-17T23:01:09.092Z","2026-09-17T23:01:09.093Z"]},
     {"observer":"P","scope":"Increment 3 source accumulated diff, 12 modified plus 15 then-untracked source/example files","result":"Three independent local reviews passed with no actionable blocking findings. Included joined WS/SSE, S2 example, notifier, dispatch/shutdown/drop, failure fidelity, quarantine and restart. Full-suite results and targeted reviewer runs remain prior evidence.","completion_records_utc":["2026-09-17T23:45:41.341Z","2026-09-17T23:45:41.342Z"]},
     {"observer":"D","scope":"Final report increment","result":"All required local gates independently reproduced; existing source/tests/examples preserved and both reports created."},
-    {"observer":"P","scope":"Final independent complete diff at the historical pre-documentation-alignment snapshot, 12 modified plus all 17 untracked files including both reports","reviewed_worktree_sha256":"8631ae894d298200632e4c0326ebb61deaf37b2aa1a94b4920294382b041e338","later_documentation_edits_not_reviewed":["AGENTS.md","CHANGELOG.md","README.md","docs/ARCHITECTURE.md","docs/EVENTS.md","docs/README.md","docs/WI_PRODUCT_DIRECTION.md"],"result":"Three fresh reviewers passed the full v1a.0 contract review with no blocking or actionable findings at this historical snapshot. They validated source semantics, joined WS/SSE/S2 evidence, loss/quarantine/restart coverage, reports, all30 statuses, privacy and ledger fields, and reproduced its 342-file fingerprint. This snapshot predates the seven listed current-documentation edits. These reviews did not cover those later edits or this documentation remediation. The sole current fingerprint is worktree.sha256, not reviewed_worktree_sha256. Hosted CI remains NOT RUN."},
-    {"observer":"P","scope":"Current-documentation alignment and remediation, complete current worktree","reviewed_worktree_sha256":"995851188f598a10ed8664a4733836162d5e1a006519f6606aeec057ee737394","result":"Three reviewers found two low-severity documentation gaps. Independent verification confirmed both. Remediation updated the product-direction roadmap and distinguished the historical review fingerprint from the current identity. Three repeated reviews then passed with no actionable findings, reproducing 342 protected files, the 19-file +381/-171 tracked diff, all30 reports, links and whitespace. Hosted CI remains NOT RUN and accepted=false."}
+    {"observer":"P","scope":"Final independent complete diff at the historical pre-documentation-alignment snapshot, 12 modified plus all 17 untracked files including both reports","reviewed_worktree_sha256":"8631ae894d298200632e4c0326ebb61deaf37b2aa1a94b4920294382b041e338","later_documentation_edits_not_reviewed":["AGENTS.md","CHANGELOG.md","README.md","docs/ARCHITECTURE.md","docs/EVENTS.md","docs/README.md","docs/WI_PRODUCT_DIRECTION.md"],"result":"Three fresh reviewers passed the full v1a.0 contract review with no blocking or actionable findings at this historical snapshot. They validated source semantics, joined WS/SSE/S2 evidence, loss/quarantine/restart coverage, reports, all30 statuses, privacy and ledger fields, and reproduced its 342-file fingerprint. This snapshot predates the seven listed current-documentation edits. These reviews did not cover those later edits or this documentation remediation. Both this hash and worktree.sha256 are historical pre-commit snapshots, not the current tree. This snapshot predates the authorized implementation commit and hosted workflows."},
+    {"observer":"P","scope":"Historical pre-commit documentation alignment and remediation, complete then-current worktree","reviewed_worktree_sha256":"995851188f598a10ed8664a4733836162d5e1a006519f6606aeec057ee737394","result":"Three reviewers found two low-severity documentation gaps. Independent verification confirmed both. Remediation updated the product-direction roadmap and distinguished the earlier review fingerprint from the then-current identity. Three repeated reviews then passed with no actionable findings, reproducing 342 protected files, the 19-file +381/-171 tracked diff, all30 reports, links and whitespace. This snapshot predates the authorized implementation commit and hosted workflows; it does not cover this acceptance-record update."},
+    {"observer":"P","scope":"Acceptance-record review, finding verification, remediation and repeated complete-diff review","result":"The initial three-review gate reported two documentation findings: lifecycle-dependent provenance/check assertions and omitted ARCHITECTURE acceptance status. Independent verification confirmed both; no source defect was reported. Remediation corrected both and added regression checks. Three fresh repeated reviewers then passed the complete eight-file diff with no actionable findings, reproducing all30, exact CI records, descendant scope enforcement, links, whitespace and fixed implementation/live-provider boundaries."}
   ],
   "failure_and_correction_history": [
     {"observer":"P","phase":"increment 1","failure":"Initial test compilation Arc type mismatch and Clippy test lock-scope warning.","correction":"Delegate corrected test typing and lock scope; focused checks passed. Exact initial diagnostics not retained in completion summary."},
@@ -242,9 +278,86 @@
     {"observer":"P","phase":"increment 3 example","failure":"host_offline initially expected no catalog diagnostics although supported behavior emitted UnsupportedBehavioralMetadata.","correction":"Fixture asserts the exact diagnostic kind/scope/count. Metadata was retained; production behavior unchanged; dev and release examples passed."},
     {"observer":"H","phase":"prior B2 hosted Windows attempts","failure":"Push 35227116004 attempts 1 and 2 had existing public-session/final-result/child-exit watchdog expirations although new joined tests passed.","correction":"Final same-SHA push attempt 3 and PR 35227120456 attempt 1 passed all three OS. Root cause and timing sensitivity are NOT proven fixed; retained in VALIDATION and frozen B2 report."},
     {"observer":"D","phase":"initial inventory","failure":"Broad parent-directory instruction discovery timed out after 10 seconds.","correction":"Scoped repository discovery completed, found only repository AGENTS.md and no nested CONTEXT.md/CLAUDE.md. No file change."},
-    {"observer":"D","phase":"measurement wrapper","failure":"Six /usr/bin/time wrapper launches failed with exit 127 because the executable is absent. None started Cargo.","correction":"Diagnosed missing wrapper; removed it. G01 through G06 each then ran directly once. No source correction and no further retry."}
+    {"observer":"D","phase":"measurement wrapper","failure":"Six /usr/bin/time wrapper launches failed with exit 127 because the executable is absent. None started Cargo.","correction":"Diagnosed missing wrapper; removed it. G01 through G06 each then ran directly once. No source correction and no further retry."},
+    {"observer":"A","phase":"acceptance-record status scan","failure":"The first literal-phrase assertion failed because all six Cargo steps spans a Markdown line break in CHANGELOG.md.","correction":"Normalized whitespace in the check; the second attempt passed all five current docs. No content correction was needed."},
+    {"observer":"A","phase":"acceptance-record check extraction","failure":"The first launcher stopped at backticks inside a JavaScript regex, truncating the embedded check and causing a SyntaxError.","correction":"Matched the closing Markdown fence at line start; the second launcher executed the complete check successfully. No report assertion was weakened."},
+    {"observer":"A","phase":"acceptance-record remediation inventory","failure":"Broad parent-directory instruction discovery timed out after 10 seconds.","correction":"Repository-scoped discovery completed; only root AGENTS.md and no nested CONTEXT.md/CLAUDE.md. No file change from discovery."},
+    {"observer":"A","phase":"acceptance-record finding 1 remediation","failure":"Verified lifecycle-dependent provenance and PR/check assertions would become stale after a docs-only commit. The pre-fix documentation regression detected transient claims and missing eight-path scope metadata.","correction":"Replaced lifecycle state with fixed implementation provenance and phase-qualified PR observations. The embedded check requires tested_revision ancestry and restricts every intervening commit plus staged/unstaged/untracked paths to eight docs/reports. Read-only scope fixtures accept allowed descendant paths and reject source changes in either committed or worktree paths. Current PR-head merge checks remain external evidence with no result asserted."},
+    {"observer":"A","phase":"acceptance-record finding 2 remediation","failure":"Verified ARCHITECTURE still described V1-A as only locally complete. The pre-fix documentation regression detected missing accepted implementation provenance.","correction":"Updated ARCHITECTURE to v1a.0 accepted at fad3855 with the two exact-head hosted runs; kept V1-B/browser/GUI/ordinary CLI persistence unimplemented. Expanded scope and normalized current-status checks from seven files/five current docs to eight files/six current docs. Post-fix documentation regression and acceptance-record checks passed."},
+    {"observer":"A","phase":"acceptance-record remediation check launcher","failure":"The first launcher used a shared VM context and redeclared fs, causing a SyntaxError before any embedded assertion ran.","correction":"Executed the unchanged embedded check in an isolated function scope; the second attempt passed. No assertion was weakened."}
   ],
-  "submitted_ci": [],
+  "submitted_ci": [
+    {
+      "run": 35320097103,
+      "workflow": "Rust source validation",
+      "event": "push",
+      "head_sha": "fad3855db70ff4151a5c27ec3f64d04fa9097cbb",
+      "conclusion": "success",
+      "url": "https://github.com/zer09/wi/actions/runs/35320097103",
+      "observer": "C",
+      "jobs": [
+        {"id":105520455006,"os":"Ubuntu","runner":"ubuntu-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320097103/job/105520455006","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]},
+        {"id":105520455249,"os":"macOS","runner":"macos-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320097103/job/105520455249","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]},
+        {"id":105520455296,"os":"Windows","runner":"windows-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320097103/job/105520455296","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]}
+      ]
+    },
+    {
+      "run": 35320100396,
+      "workflow": "Rust source validation",
+      "event": "pull_request",
+      "head_sha": "fad3855db70ff4151a5c27ec3f64d04fa9097cbb",
+      "conclusion": "success",
+      "url": "https://github.com/zer09/wi/actions/runs/35320100396",
+      "observer": "C",
+      "jobs": [
+        {"id":105520471681,"os":"Ubuntu","runner":"ubuntu-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320100396/job/105520471681","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]},
+        {"id":105520471423,"os":"macOS","runner":"macos-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320100396/job/105520471423","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]},
+        {"id":105520471721,"os":"Windows","runner":"windows-latest","conclusion":"success","url":"https://github.com/zer09/wi/actions/runs/35320100396/job/105520471721","cargo_steps":[
+          {"command":"cargo fmt --all -- --check","conclusion":"success"},
+          {"command":"cargo check --all-targets","conclusion":"success"},
+          {"command":"cargo test --all-targets","conclusion":"success"},
+          {"command":"cargo clippy --all-targets -- -D warnings","conclusion":"success"},
+          {"command":"cargo build --all-targets","conclusion":"success"},
+          {"command":"cargo test --doc","conclusion":"success"}
+        ]}
+      ]
+    }
+  ],
   "historical_ci": {
     "observer":"H",
     "v1a_evidence":false,
@@ -271,14 +384,15 @@
   "performance_limits":"Finite WSL2 synthetic fixtures, existing caches and scheduling/API/reader overhead. A completion timing observes stored completion after observer loss; B uses the ticket. Cancellation timing includes NotTracked retirement. No SLA, fastest claim, isolated SQL benchmark, network latency claim or production lifetime limit.",
   "consistency_checks": {
     "status":"PASS",
-    "observer":"D",
-    "result":"Embedded read-only Node check passed: JSON structure, all30 rows, exact commands and counts, source/test references, links, privacy/ledger/status, 342-file fingerprint, unchanged index and all 17 untracked files.",
-    "checks":["JSON syntax and required fields/types","30 unique ordered V1A rows in JSON and Markdown","command IDs and exact required command list","test names and source paths/line ranges exist","test counts and privacy/ledger/status agree","Markdown local links resolve","342-file preservation fingerprint and index unchanged","all final untracked files and report whitespace"]
+    "observer":"A",
+    "result":"Acceptance-record checks passed: JSON structure, all30 rows, accepted status, two exact-head workflows, six jobs and 36 successful Cargo steps, command/count/source/test references, local links, privacy/ledger, stale transient-token scan, normalized status in all six current docs including ARCHITECTURE, whitespace and eight-file docs-only scope. The embedded check passed against the uncommitted remediation state. Historical fingerprints are preserved as snapshots, not asserted against current Git state.",
+    "checks":["JSON syntax and required fields/types","30 unique ordered V1A rows in JSON and Markdown with no blockers","two exact-head hosted runs, events, URLs and six job/OS IDs","all six Cargo commands succeed in each hosted job","command IDs, required command list and test counts","test names and source paths/line ranges exist","accepted status and unchanged privacy/ledger agree","local links resolve in all seven allowed Markdown files","historical fingerprint metadata and failure history preserved","stale transient-token scan across all eight files","normalized current-status scan across six docs including ARCHITECTURE","tested_revision is an ancestor of HEAD","all paths in every commit tested_revision..HEAD plus staged/unstaged/untracked paths are within the eight allowed docs/reports","read-only scope fixtures allow docs-only descendants and reject committed/worktree source changes","pre-fix documentation regression fails and post-fix regression passes","git diff --check; preparation/remediation left no staged or untracked files"],
+    "historical_pre_commit_check":{"observer":"D","result":"Embedded read-only Node check passed: JSON structure, all30 rows, exact commands and counts, source/test references, links, privacy/ledger/status, 342-file fingerprint, unchanged index and all 17 untracked files."}
   },
   "limitations": [
-    "V1A-29 hosted CI NOT RUN: no authorized push; no exact-head push/PR evidence on Ubuntu/macOS/Windows. accepted=false is intentional despite local completion.",
-    "Current execution evidence is Linux/WSL2 only. Prior Windows watchdog causes are not proven repaired by any local or later passing historical run.",
-    "Prior review records remain attributed P. Three fresh independent reviewers also passed the historical pre-documentation-alignment complete diff including both reports, not the seven later current-documentation edits or this remediation. Historical CI is H, not current CI. Missing exact earlier diagnostics or command spellings are not invented.",
+    "Hosted runs 35320097103/35320100396 prove only implementation head fad3855db70ff4151a5c27ec3f64d04fa9097cbb, not documentation-only descendants. PR #8 was observed open and draft, not merged, during acceptance preparation. Current PR-head merge checks are external GitHub merge-readiness evidence, separate from fixed implementation evidence; no current-head result or Git/hosted transition is asserted or authorized by this record.",
+    "Local execution evidence is Linux/WSL2; hosted Cargo evidence covers Ubuntu/macOS/Windows. Passing V1-A runs do not prove the prior Windows watchdog causes repaired, or establish live/provider behavior, Node self-tests or offline example mains beyond their separately recorded local evidence.",
+    "Prior reviews remain attributed P and cover their historical pre-commit snapshots, including the later documentation-alignment remediation, not this acceptance-record update. Historical CI is H; exact-head V1-A hosted facts are parent-supplied verified C evidence, not a new independent fetch. Missing earlier diagnostics or command spellings are not invented.",
     "Graceful shutdown requires the application to keep the runtime alive and await its ticket. Runtime/process destruction, panic=abort, physical power loss and noncooperative blocking code are not graceful guarantees.",
     "The library does not replace the process panic hook; an embedding application's panic hook can expose its own panic payload. Fixtures use nonsecret synthetic data.",
     "No network/browser/client-auth/GUI service, normal CLI persistence, V1-B, deployment, migration, dependency change, retry/failover or automatic resumption is delivered or authorized.",

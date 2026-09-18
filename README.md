@@ -33,15 +33,21 @@ identifies the exact source and hosted evidence revisions. PR #7 is merged at `5
 Ordinary CLI persistence, browser protocol, GUI, and automatic task resumption/retry
 remain unimplemented.
 
-**V1-A status: locally complete under contract v1a.0; hosted CI is NOT RUN.**
+**V1-A status: complete and accepted under contract v1a.0.**
+Implementation head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb` passed exact-head push
+run **35320097103** and pull-request run **35320100396**, including all six Cargo steps
+on Ubuntu/macOS/Windows. During acceptance preparation, PR #8 was observed open and draft,
+not merged.
 The additive `wi::service` module provides an in-process `RunHost`, weak `RunClient`,
 passive run tickets, explicit session-and-run cancellation, and orderly drain-before-close
 shutdown. Dispatch is distinct from commit-backed acceptance and final completion.
 Execution uses the existing B2 path and SQLite store; client or ticket loss does not
 cancel host-owned work. See the [V1-A verification report](docs/slices/v1a/VERIFICATION.md),
 [machine report](docs/slices/v1a/verification.json), and
-[`host_offline` example](examples/host_offline.rs). The implementation remains uncommitted
-and `accepted=false` until separately authorized exact-head hosted CI passes.
+[`host_offline` example](examples/host_offline.rs). The recorded runs prove only the
+implementation revision above. Current PR-head merge checks are external GitHub
+merge-readiness evidence, separate from this fixed implementation evidence.
+Hosted Cargo checks do not establish live/provider behavior.
 
 **S2 status: implemented and offline accepted under contract s2.1.**
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows

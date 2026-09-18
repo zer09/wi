@@ -2,9 +2,14 @@
 
 Prepared 2026-09-11. This is a requirements record, not an implementation report.
 Runtime baseline at preparation: `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c` (C1 merged).
-Current implementation note: V1-A provides the in-process execution owner and is
-locally complete; `accepted=false`, exact-head hosted CI NOT RUN. V1-B network,
-client-authentication and browser protocol work remains future scope.
+Current implementation note: V1-A v1a.0 is complete and accepted at implementation
+head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+During acceptance preparation, PR #8 was observed open and draft, not merged.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
+V1-B network, client-authentication and browser protocol work remains future scope.
 
 ## 1. Product and ownership
 
@@ -108,15 +113,16 @@ preparation, not an in-memory-only substitute for persistent application session
 | P1-A | Shared SQLite application-session store, catalog, receipts and history | Completed, accepted and merged. Retention/deletion policy remains deferred. |
 | P1-B1 | Actual runtime capture through the shared execution path | Completed, accepted and merged in PR #6. |
 | P1-B2 | Validated stored-context replay for a new explicit task | Completed, accepted and merged in PR #7, including B2-E01. No automatic task resumption. |
-| V1-A | In-process execution owner using the shared core and persistent sessions | Locally complete; `accepted=false`; exact-head hosted CI NOT RUN. Client/ticket Drop does not cancel. |
+| V1-A | In-process execution owner using the shared core and persistent sessions | Complete and accepted under v1a.0 at `fad3855`; both exact-head workflows passed all six Cargo steps on Ubuntu/macOS/Windows. PR #8 was observed open/draft, not merged, during acceptance preparation. Client/ticket Drop does not cancel. |
 | V1-B | One-owner multi-device network service, client authentication and browser protocol | Future scope; not implemented. Uses V1-A; GUI follows the service API. |
 | Later explicitly agreed slices | Actual coding tools, skill references/scripts where authorized, steering, search/PTC/async tools, UI | Not authorized by this document. |
 | H1 hosted skills | Hosted upload/version/execution integration | Removed from the active roadmap, not left as an implementation dependency. |
 
-Completed S1/S2/P1 work does not authorize V1-B or other later slices. Normal CLI
+Accepted S1/S2/P1/V1-A work does not authorize V1-B or other later slices. Normal CLI
 persistence, network/client authentication, browser protocol and GUI remain deferred.
 V1 must not be accepted as an ephemeral in-memory session service that promises to
-add required persistence someday. V1-A local completion is not hosted acceptance.
+add required persistence someday. V1-A acceptance covers the in-process owner, not
+network-service or live/provider acceptance.
 
 ## 4. Evidence and non-regression policy
 

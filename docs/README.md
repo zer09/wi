@@ -22,12 +22,17 @@ on Ubuntu/macOS/Windows. Earlier watchdog failures remain in the evidence; a pas
 rerun is not proof they were fixed. [Merge closure](https://github.com/zer09/wi/pull/7#issuecomment-5716447572)
 records the exact review, attempts and scope.
 
-## Locally complete: V1-A service-owned execution
+## Accepted: V1-A service-owned execution
 
 Contract **v1a.0**, baseline `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
-Status: **LOCAL_COMPLETE_CI_NOT_RUN; accepted=false**. V1A-00..28 pass locally and
-V1A-29 retains one blocker: exact-head hosted CI has not run because push is not
-authorized. The implementation remains uncommitted for owner review.
+Status: **ACCEPTED; complete; accepted=true; hosted CI PASS** at implementation head
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+V1A-00..28 are complete with local evidence; V1A-29 is PASS with no blockers.
+During acceptance preparation, PR #8 was observed open and draft, not merged.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
 
 The additive in-process `wi::service::RunHost` owns tracked B2 execution independently
 of client, ticket and waiter lifetimes. Actual committed acceptance is observable before
@@ -36,8 +41,9 @@ owner shutdown drains work before closing storage. Construction or reopen does n
 old work. This reuses B2 rather than adding another model/tool loop.
 
 - [V1-A verification](slices/v1a/VERIFICATION.md) and
-  [machine report](slices/v1a/verification.json): Current local evidence, all 30 row
-  dispositions, complete-diff reviews, failure history, measurements and hosted-CI limit.
+  [machine report](slices/v1a/verification.json): Local and exact-head hosted evidence,
+  all 30 row dispositions, complete-diff reviews, historical pre-commit fingerprints,
+  failure history, measurements and limits. Hosted Cargo checks are not live/provider proof.
 - [`host_offline`](../examples/host_offline.rs): Public host APIs with synthetic SQLite,
   S2 skill loading, real tools, dropped observers, explicit replay and orderly shutdown.
 - [V1-A contract](slices/v1a/CONTRACT.md), [API](slices/v1a/API.md),

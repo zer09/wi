@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- An in-process `wi::service::RunHost` that owns explicitly submitted persisted runs
+  independently of weak clients, passive tickets, and acceptance/completion waiters.
+- Separate dispatch, commit-backed acceptance, and final completion boundaries.
+- Session-and-run-addressed cancellation and orderly shutdown that drains tracked work
+  before closing SQLite storage.
+- Worker-loss reporting, storage-quarantine preservation, restart-without-resumption
+  coverage, joined WebSocket/SSE loopback tests, and the offline `host_offline` example.
+
+### Verification
+- V1-A local gates and independent complete-diff reviews pass under contract `v1a.0`.
+- Exact-head hosted CI is not run, so V1-A remains `accepted=false` pending separate push
+  authorization. See `docs/slices/v1a/VERIFICATION.md`.
+
+### Not included
+- Network commands, client authentication, browser-safe protocol, subscriptions, GUI,
+  ordinary CLI persistence, automatic retry/failover, or automatic task resumption.
+
 ## 0.2.0 — source milestone, 2026-09-07
 
 ### Added

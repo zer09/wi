@@ -20,31 +20,34 @@ P1-B2 plus B2-E01 joined acceptance is accepted and merged in PR #7 at `50f4dff`
 Its reviewed head `e25279a` passed push35227116004 attempt3 and PR35227120456 attempt1
 on Ubuntu/macOS/Windows. Earlier watchdog failures remain in the evidence; a passing
 rerun is not proof they were fixed. [Merge closure](https://github.com/zer09/wi/pull/7#issuecomment-5716447572)
-records the exact review, attempts and scope. V1-A below is new planning, not implementation.
+records the exact review, attempts and scope.
 
-## Active plan: V1-A service-owned execution
+## Locally complete: V1-A service-owned execution
 
 Contract **v1a.0**, baseline `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
-All30 V1A-00..29 rows are NOT RUN. This first service slice adds a shared in-process
-RunHost: tracked execution outlives caller/ticket loss, actual committed acceptance is
-observable before completion, cancellation is explicit, and owner shutdown drains runs
-before closing storage. It reuses B2 rather than adding another model/tool loop.
+Status: **LOCAL_COMPLETE_CI_NOT_RUN; accepted=false**. V1A-00..28 pass locally and
+V1A-29 retains one blocker: exact-head hosted CI has not run because push is not
+authorized. The implementation remains uncommitted for owner review.
 
-- [V1-A contract](slices/v1a/CONTRACT.md): Ownership, dispatch/receipt/completion,
-  notifier integration, duplicate/cancellation/failure/shutdown boundaries and exclusions.
-- [V1-A API](slices/v1a/API.md): Additive trusted Rust interfaces and exact state meanings;
-  no database or network schema change.
-- [V1-A matrix](slices/v1a/MATRIX.md): Thirty concrete acceptance rows, joined public host
-  WS/SSE cases, real SQLite, process tests, gates and required report structure.
-- [V1-A validation](slices/v1a/VALIDATION.md): Actual baseline interfaces, new decisions,
-  dependency semantics, source-review and previous CI evidence limits.
-- [V1-A implementor prompt](slices/v1a/IMPLEMENTOR_PROMPT.md): Fresh local implementation
-  assignment; no Git/live/network-service permission beyond its stated scope.
+The additive in-process `wi::service::RunHost` owns tracked B2 execution independently
+of client, ticket and waiter lifetimes. Actual committed acceptance is observable before
+completion, cancellation explicitly identifies the application session and run, and
+owner shutdown drains work before closing storage. Construction or reopen does not start
+old work. This reuses B2 rather than adding another model/tool loop.
 
-V1-B will separately provide network commands, client authentication, browser-safe
-protocol and reconnect/subscription behavior. GUI follows that API. Neither V1-A nor
-V1-B is currently implemented. Existing session/history read APIs remain canonical;
-ordinary CLI persistence and new coding tools are not incidental additions to this plan.
+- [V1-A verification](slices/v1a/VERIFICATION.md) and
+  [machine report](slices/v1a/verification.json): Current local evidence, all 30 row
+  dispositions, complete-diff reviews, failure history, measurements and hosted-CI limit.
+- [`host_offline`](../examples/host_offline.rs): Public host APIs with synthetic SQLite,
+  S2 skill loading, real tools, dropped observers, explicit replay and orderly shutdown.
+- [V1-A contract](slices/v1a/CONTRACT.md), [API](slices/v1a/API.md),
+  [matrix](slices/v1a/MATRIX.md), [validation](slices/v1a/VALIDATION.md), and
+  [implementor prompt](slices/v1a/IMPLEMENTOR_PROMPT.md): Frozen planning records. Their
+  `PLAN ONLY` and `NOT RUN` text describes the state when authored, not the current result.
+
+V1-B remains deferred. It will separately cover network commands, client authentication,
+browser-safe protocol and reconnect/subscription behavior. GUI and ordinary CLI
+persistence also remain unimplemented. Existing session/history read APIs remain canonical.
 
 ## Current implementation: P1-B2 stored conversation submissions
 
@@ -79,9 +82,10 @@ history. The actual opened account must match before installation or generation.
 - [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
   stored skill content and an explicit new task after reopen; no credentials or network.
 
-Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. V1 service
-ownership, service authentication, browser protocol and GUI remain unimplemented.
-B2 does not add automatic task resumption, retries or a service task manager.
+Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. B2 alone
+did not add service ownership, but V1-A now composes B2 under the in-process `RunHost`.
+Service authentication, browser protocol and GUI remain unimplemented. Neither B2 nor
+V1-A adds automatic task resumption or retries.
 
 ## Accepted and merged: P1-B1 actual runtime capture
 
@@ -114,10 +118,11 @@ persisted_run_offline`, or add `--release`. The [top-level measurement notes](..
 define finite latency samples, the counted operation window and post-close size limits.
 Catalog refresh is explicit. The caller retains and awaits the execution future.
 
-B1 remains supplied-input capture, not restored-history execution. B2 now supplies
-new explicit tasks with compatible provider/account-bound native history. Neither path
-implements ordinary CLI persistence, V1 service/browser/GUI, or automatic task
-resumption/retry. The future service owns execution independently of readers.
+B1 remains supplied-input capture, not restored-history execution. B2 supplies new
+explicit tasks with compatible provider/account-bound native history. V1-A now owns
+those executions independently of readers through the in-process `RunHost`. Ordinary
+CLI persistence, V1-B networking/browser/GUI, and automatic task resumption/retry remain
+unimplemented.
 
 ## Current acceptance: P1-A storage only
 

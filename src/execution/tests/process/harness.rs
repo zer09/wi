@@ -21,7 +21,7 @@ pub(super) fn private_dir(path: &Path) {
 }
 
 // Follow storage::process_tests: explicit stdin, cleared environment, drained pipes and reaping.
-pub(in crate::execution::tests) struct Process {
+pub(crate) struct Process {
     child: Child,
     ready: mpsc::Receiver<()>,
     stdout: Option<thread::JoinHandle<String>>,

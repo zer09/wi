@@ -36,8 +36,9 @@ Provider-session IDs and source sequences are not durable application replay cur
 P1-B1 is accepted and merged in PR #6 at `6fe0a53`. P1-B2 is implemented in source
 revision `80f3872`; evidence head `cc9a6a2` passed push and PR workflows on Ubuntu,
 macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md) identifies
-the exact source and hosted evidence revisions. PR #7 remains unmerged. B2 initializes session database schema 2 and lazily migrates valid
-schema-1 sessions on explicit open, preserving old event/receipt bytes and identities.
+the exact source and hosted evidence revisions. PR #7 is merged at `50f4dff`. B2
+initializes session database schema 2 and lazily migrates valid schema-1 sessions on
+explicit open, preserving old event/receipt bytes and identities.
 Catalog schema remains 1; stored/runtime/provider envelopes remain 1/2/1. Legacy
 schema-1 history stays readable but lacks native replay provenance; migration does
 not create missing selection or binding evidence.
@@ -472,14 +473,16 @@ limit. The controller has no durable replay, event store, internal unbounded que
 or detached tool task. B1 composes this same controller with P1-A storage; the legacy
 `run()` callback path does not automatically persist observations.
 
-The future one-owner, multiple-device service must keep work independent of browser
-disconnection and persist application sessions. A client subscription must not
-own this fallible run observer directly. Restart stops active tasks without
-automatically resuming or restarting them. B1 supplies explicit incremental recording;
-B2 supplies stored conversation/provider-account history for new explicit tasks.
-Ordinary CLI persistence, automatic resumption/retry and V1 service/browser/GUI remain
-unimplemented. Application sequences and IDs stay separate from unchanged
-runtime/provider fields.
+V1-A keeps explicitly submitted work independent of in-process client, ticket and waiter
+lifetimes and persists application sessions through the existing event store. Tickets do
+not own the fallible run observer or provider receiver. Restart leaves a new empty host;
+old tasks are not resumed or restarted automatically. B1 supplies incremental recording,
+B2 supplies stored conversation/provider-account history for explicit new tasks, and
+V1-A owns that existing path without changing runtime/provider event schemas.
+
+Ordinary CLI persistence, automatic resumption/retry, V1-B network subscriptions,
+browser protocol and GUI remain unimplemented. Application sequences and IDs stay
+separate from unchanged runtime/provider fields.
 
 ## Not emitted yet
 

@@ -7,7 +7,8 @@ use crate::storage::{
 use crate::{ConversationReplay, ReplayIdentity};
 
 mod admission;
-mod fixture;
+pub(crate) mod fixture;
+mod notifier;
 mod process;
 mod startup;
 use fixture::*;

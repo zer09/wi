@@ -29,8 +29,19 @@ closed conversation exchanges. `prepare_session_replay` prepares that history th
 storage-only reads. Session schema 2 adds lazy schema-1 migration and canonical history
 selection/provider binding. Evidence head `cc9a6a2` passed push and PR workflows on
 Ubuntu, macOS and Windows. [B2 verification](docs/slices/p1b2/VERIFICATION.md)
-identifies the exact source and hosted evidence revisions. PR #7 remains unmerged. Ordinary CLI persistence, V1
-service/browser/GUI, and automatic task resumption/retry remain unimplemented.
+identifies the exact source and hosted evidence revisions. PR #7 is merged at `50f4dff`.
+Ordinary CLI persistence, browser protocol, GUI, and automatic task resumption/retry
+remain unimplemented.
+
+**V1-A status: locally complete under contract v1a.0; hosted CI is NOT RUN.**
+The additive `wi::service` module provides an in-process `RunHost`, weak `RunClient`,
+passive run tickets, explicit session-and-run cancellation, and orderly drain-before-close
+shutdown. Dispatch is distinct from commit-backed acceptance and final completion.
+Execution uses the existing B2 path and SQLite store; client or ticket loss does not
+cancel host-owned work. See the [V1-A verification report](docs/slices/v1a/VERIFICATION.md),
+[machine report](docs/slices/v1a/verification.json), and
+[`host_offline` example](examples/host_offline.rs). The implementation remains uncommitted
+and `accepted=false` until separately authorized exact-head hosted CI passes.
 
 **S2 status: implemented and offline accepted under contract s2.1.**
 The [S2 verification report](docs/slices/s2/VERIFICATION.md) records all 24 rows
@@ -86,8 +97,9 @@ CLI / library caller
 
 The deterministic `add_numbers` executor is a separate module. The provider
 never executes files, commands, model-generated JavaScript, or unknown tools.
-There is no web server, GUI, persistent agent service, or sandbox here.
-The separate storage library does not persist ordinary CLI runs.
+There is no web server, network service, GUI, persistent daemon, or sandbox here.
+The in-process `wi::service::RunHost` owns explicitly submitted work independently of
+client and ticket lifetimes. The storage library still does not persist ordinary CLI runs.
 The cancellation-aware `wi::run::run` controller supports ordinary tool/result cycles.
 
 ## What is implemented in source
@@ -511,16 +523,23 @@ SSE retains full native/effective history. Live opaque portability remains unver
 `cargo run --example conversation_offline` demonstrates actual tools and stored skill
 content, close/reopen, read-only preparation and a new explicit submission using synthetic
 roots and a scripted provider. See [B2 evidence](docs/slices/p1b2/VERIFICATION.md) for its
-local observations, hosted workflow evidence and remaining limits. PR #7 remains unmerged.
+local observations, hosted workflow evidence and remaining limits. PR #7 is merged.
 
-## Ordinary CLI and V1 service (not implemented)
+## In-process V1-A service ownership
 
-Ordinary `wi run` remains nonpersistent and has no session commands. B2 adds library
-composition, not a service or automatic task resumption/retry. V1 remains separately
-scoped: a one-owner, multi-device service must own work across browser disconnects and
-must not resume tasks automatically after restart. Service authentication, browser
-protocol and GUI remain unimplemented. `ProviderSession` is an in-memory transport
-handle, not a persistent application session. See
+Ordinary `wi run` remains nonpersistent and has no session commands. V1-A adds the
+trusted in-process `wi::service::RunHost`; it is not an HTTP server or persistent daemon.
+The host owns explicitly submitted B2 executions across client, ticket and waiter loss.
+`RunTicket::accepted` returns only the actual committed acceptance receipt, while
+`completion` returns the final execution or concrete failure. Cancellation addresses both
+application session and run, and orderly shutdown cancels and drains tracked jobs before
+closing storage. Reopening creates an empty host and never resumes old work automatically.
+
+V1-B remains separately scoped for network commands, client authentication, browser-safe
+DTOs, subscriptions and reconnect behavior. GUI and ordinary CLI persistence also remain
+unimplemented. `ProviderSession` is an in-memory provider transport handle, not the
+persistent application session. See [V1-A verification](docs/slices/v1a/VERIFICATION.md),
+[`host_offline`](examples/host_offline.rs), and
 [product direction](docs/WI_PRODUCT_DIRECTION.md).
 
 ## Experimental Wi browser login

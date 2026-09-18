@@ -83,7 +83,9 @@ pub async fn prepare_session_replay(
     let mut page = session.history_page(0, None, 128).await.map_err(storage)?;
     let through = page.through_sequence();
     #[cfg(test)]
-    crate::storage::test_hooks::hit(crate::storage::test_hooks::Point::ReplayHeadCaptured)
+    session
+        .test_hooks()
+        .hit(crate::storage::test_hooks::Point::ReplayHeadCaptured)
         .await
         .map_err(storage)?;
     let mut builder = Builder::default();

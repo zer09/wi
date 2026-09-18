@@ -1,8 +1,10 @@
 # Wi: V1-A service-owned execution handoff
 
-Current assignment: **v1a.0**, planning only until implementation is verified.
+Current status: **v1a.0 is locally complete; exact-head hosted CI is NOT RUN**.
 Accepted baseline: `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
-P1-B2 plus B2-E01 is merged in PR #7. Do not resume its completed implementation prompt.
+The implementation remains uncommitted for owner review. `accepted=false` until a separately
+authorized push completes exact-head hosted CI. Do not resume the V1-A or P1-B2 implementation
+prompts. P1-B2 plus B2-E01 is merged in PR #7.
 
 Read in order:
 1. docs/slices/v1a/CONTRACT.md
@@ -10,12 +12,13 @@ Read in order:
 3. docs/slices/v1a/MATRIX.md
 4. docs/slices/v1a/VALIDATION.md
 5. docs/slices/v1a/IMPLEMENTOR_PROMPT.md
-6. The actual mapped source and prior P1-A/B1/B2 evidence.
+6. docs/slices/v1a/VERIFICATION.md and verification.json
+7. The actual mapped source and prior P1-A/B1/B2 evidence.
 
-Implement this fixed plan, not a replacement architecture. Inspect HEAD/ancestry and
-all staged, unstaged and untracked work. Preserve owner changes; no reset, clean,
-forced checkout, unsolicited stash or historical report rewrite. Report an actual
-contract conflict with exact producer/consumer evidence before widening scope.
+Review and preserve the fixed implementation, not a replacement architecture. Inspect
+HEAD/ancestry and all staged, unstaged and untracked work. Preserve owner changes; no
+reset, clean, forced checkout, unsolicited stash or historical report rewrite. Report
+an actual contract conflict with exact producer/consumer evidence before widening scope.
 
 ## Accepted foundation
 
@@ -36,13 +39,14 @@ conversation means empty prior replay; fresh provider connection does not mean f
 conversation. Incomplete/unbound histories stay readable but are not silently repaired
 or assigned today's account. No account/model/transport fallback or automatic resumption.
 
-## V1-A boundary
+## Implemented V1-A boundary
 
-Add a shared in-process run host owning execution independently of clients/tickets.
-New dispatch, committed acceptance and actual completion are distinct. Add only the
-specified private receipt notifier, preserve existing public execution APIs and all
-failure/certainty semantics. Cancel explicitly; owner shutdown cancels/drains before
-closing storage. Client/ticket Drop never cancels; owner Drop initiates shutdown.
+The current worktree adds a shared in-process run host owning execution independently of
+clients/tickets. Dispatch, committed acceptance and actual completion are distinct. The
+implementation adds only the specified private receipt notifier and preserves existing
+public execution APIs and failure/certainty semantics. Cancellation is explicit; owner
+shutdown cancels/drains before closing storage. Client/ticket Drop never cancels; owner
+Drop initiates shutdown.
 No browser/HTTP/authentication service, normal CLI session interface, GUI, second loop,
 provider/tool change, schema migration, dependency change or network deployment.
 V1-B network/client protocol remains later work, not incidental implementation.
@@ -54,11 +58,11 @@ automatic task restart, retry/failover, hosted skills/API billing or speculative
 
 ## Verification and authorization
 
-All30 V1A-00..29 start NOT RUN. Create docs/slices/v1a/VERIFICATION.md and verification.json
-from actual work. Source/CI/local/live are distinct evidence. Preserve historical reports;
-current documentation may be aligned without altering old observations. Gates and
-independent complete-diff review are in MATRIX.md. Record failures, platform conditions,
-ignored helpers, test definitions and reruns separately. Do not weaken jobs/lints/tests.
+V1A-00..28 are PASS_LOCAL. V1A-29 is LOCAL_PASS_CI_NOT_RUN because push is unauthorized.
+`docs/slices/v1a/VERIFICATION.md` and `verification.json` record the actual worktree,
+local gates, independent complete-diff reviews, failures and limits. Source/CI/local/live
+remain distinct evidence. Preserve historical reports and plan-time statuses; do not
+weaken jobs, lints or tests.
 
 Use synthetic roots/skills/credentials and scripted/loopback providers only. No real
 profile/private-skill reads, auth commands or live provider requests. Ledger remains

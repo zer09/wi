@@ -94,6 +94,7 @@ pub(crate) enum Point {
 pub(crate) enum Action {
     Pause(Arc<Pause>),
     Fail(StorageErrorKind),
+    Panic,
     Exit,
 }
 
@@ -141,6 +142,15 @@ impl Hooks {
                 .replace((Some(record), point, action))
                 .is_none()
         );
+    }
+
+    pub async fn hit(self: &Arc<Self>, point: Point) -> Result<(), StorageError> {
+        // Keep explicitly isolated reader hooks; host workers use their store's hooks.
+        if ACTIVE.try_with(|_| ()).is_ok() {
+            hit(point).await
+        } else {
+            self.scope(hit(point)).await
+        }
     }
 
     pub async fn scope<T>(self: &Arc<Self>, future: impl Future<Output = T>) -> T {
@@ -203,6 +213,7 @@ pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
             }
         }
         Some(Action::Fail(kind)) => return Err(StorageError::new(kind)),
+        Some(Action::Panic) => panic!("synthetic storage ownership unwind"),
         // exit bypasses Rust destructors, including transaction/connection/lease cleanup.
         Some(Action::Exit) => std::process::exit(73),
         None => {}

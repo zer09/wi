@@ -1,77 +1,70 @@
-# Wi: V1-A service-owned execution handoff
+# Wi: current V1-B implementation handoff
 
-Current status: **v1a.0 is complete and accepted** at implementation head
-`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
-pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
-Accepted foundation: `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
-During acceptance preparation, PR #8 was observed **open and draft, not merged**.
-The recorded runs prove only the implementation revision above. Current PR-head merge
-checks are external GitHub merge-readiness evidence, separate from this fixed
-implementation evidence.
-Do not resume the V1-A or P1-B2 implementation prompts. P1-B2 plus B2-E01 is merged in PR #7.
+Active contract: **v1b.0**, documentation-only planning. Accepted runtime baseline:
+`16d623a3317abc7796ec203e4fe15d580791a769` (V1-A merged, PR #8).
+All V1B-00 through V1B-39 are NOT RUN. No network-service implementation or new
+acceptance result is included in the planning commit.
 
-Read in order:
-1. docs/slices/v1a/CONTRACT.md
-2. docs/slices/v1a/API.md
-3. docs/slices/v1a/MATRIX.md
-4. docs/slices/v1a/VALIDATION.md
-5. docs/slices/v1a/IMPLEMENTOR_PROMPT.md
-6. docs/slices/v1a/VERIFICATION.md and verification.json
-7. The actual mapped source and prior P1-A/B1/B2 evidence.
+Read docs/slices/v1b/CONTRACT.md, API.md, SECURITY.md, MATRIX.md, VALIDATION.md
+and IMPLEMENTOR_PROMPT.md before editing. The [slice index](docs/slices/README.md)
+separates the active task from completed milestones. Follow the fixed assignment,
+not a new architecture exercise. Check actual HEAD/ancestry and all worktree files;
+preserve owner changes, including staged/untracked work. No reset, clean, forced
+checkout, unsolicited stash or historical evidence rewrite.
 
-Review and preserve the fixed implementation, not a replacement architecture. Inspect
-HEAD/ancestry and all staged, unstaged and untracked work. Preserve owner changes; no
-reset, clean, forced checkout, unsolicited stash or historical report rewrite. Report
-an actual contract conflict with exact producer/consumer evidence before widening scope.
+## Accepted baseline
 
-## Accepted foundation
+P1-B2/B2-E01 merged in PR #7 at50f4dff. V1-A implements RunHost, weak clients,
+passive tickets, actual post-commit acceptance, explicit addressed cancellation
+and run drain before storage close. Source fad3855db70ff4151a5c27ec3f64d04fa9097cbb,
+evidence c828f8a0e1164aea4731ba8784c3c0e838e962b4, merge16d623a. Exact-head push
+35325229157 and PR35325232536, both attempt2, passed six Cargo steps on Ubuntu,
+macOS and Windows. The merge tree equals that head. First-attempt watchdog failures
+remain reliability observations, not proven fixed; local750 Rust/6 helpers/152Node
+and examples/reviews remain attributed evidence, not new test-count targets.
 
-Wi is a Rust harness backend with a provider gateway. OpenAI-Codex subscription auth,
-managed profiles, C1 full RunLimits deletion, S1 global/project context, S2 main skill
-loading, R1/NB-02, P1-A SQLite store, B1 actual capture and B2 explicit stored-context
-replay are complete. Session DB2/catalog1/stored envelope1/runtime2/provider1 remain.
+Gateway/managed auth, M3/C1, S1/S2, R1/NB-02, P1-A storage, B1 capture and B2 replay
+remain completed. Do not revive old prompts, budgets, hosted skills or unfinished-
+work replay. Empty application session has no old model context. A fresh provider
+connection may restore compatible history from the selected existing conversation.
+Incomplete/unbound history stays readable without automatic repair or account adoption.
 
-B2 final head e25279ad867d900487c4b41215fb957972493408 passed push35227116004 attempt3
-and PR35227120456 attempt1 on all three OS. Its merge tree is unchanged. The new joined
-host-like caller tests closed B2-E01 but did not implement a service owner. Existing
-Windows watchdog failures on attempts1/2 remain reliability observations, not proven
-production defects or fixed flakes. Reports retain earlier failures and unrun live cases.
+## Current scope
 
-P1-B2 uses one loop, receipt-first acceptance, fixed-head native/effective replay,
-actual opened-account binding, real tool results and awaited storage. Empty application
-conversation means empty prior replay; fresh provider connection does not mean fresh
-conversation. Incomplete/unbound histories stay readable but are not silently repaired
-or assigned today's account. No account/model/transport fallback or automatic resumption.
+Implement a headless authenticated HTTP service over the shared library, not a GUI,
+second agent loop, subprocess wrapper, task queue or replacement storage engine.
+HTTP JSON commands and canonical-history SSE use the existing host/B2/store. Return
+actual acceptance receipts, isolate observers, preserve raw-command duplicate identity
+and current provider/account protections. Keep native/binding/credential internals
+out of browser views; page/cursor data comes from committed storage, not live queues.
 
-## Implemented V1-A boundary
+The first service uses a separately provisioned shared owner bearer token, explicit
+workspace allowlist, loopback listener and documented same-host HTTPS proxy for
+remote devices. This is a new service-client boundary, not provider OAuth/billing.
+No insecure public HTTP, cookie/device login, native TLS or deployment is included.
+Only the specified Axum direct dependency and necessary transitive additions are allowed.
+Core APIs/database schemas and existing CLI commands remain compatible.
 
-The accepted implementation adds a shared in-process run host owning execution independently of
-clients/tickets. Dispatch, committed acceptance and actual completion are distinct. The
-implementation adds only the specified private receipt notifier and preserves existing
-public execution APIs and failure/certainty semantics. Cancellation is explicit; owner
-shutdown cancels/drains before closing storage. Client/ticket Drop never cancels; owner
-Drop initiates shutdown.
-No browser/HTTP/authentication service, normal CLI session interface, GUI, second loop,
-provider/tool change, schema migration, dependency change or network deployment.
-V1-B network/client protocol remains later work, not incidental implementation.
-
-Use actual host -> B2 -> SQLite -> loopback provider -> real tools in the required
-joined tests. Do not substitute separate adapter and fake-host tests. No RunLimits,
-optional budgets, task deadlines, lifetime session/history caps, retention deletion,
-automatic task restart, retry/failover, hosted skills/API billing or speculative framework.
+Actual HTTP -> RunHost -> B2 -> SQLite -> OpenAI loopback -> real tools is mandatory
+acceptance evidence. Separate component tests do not satisfy the joined rows.
+Shutdown may close network waiters, never abort core runs or owned SQL; observe the
+existing host outcome and quarantine. No task resumes on service restart.
 
 ## Verification and authorization
 
-V1A-00..28 are complete with PASS_LOCAL evidence. V1A-29 is PASS with no blockers;
-`accepted=true` and hosted CI is PASS for the implementation head above.
-`docs/slices/v1a/VERIFICATION.md` and `verification.json` record exact run/job evidence,
-local gates, independent complete-diff reviews, historical pre-commit fingerprints,
-failures and limits. Source/CI/local/live remain distinct evidence. Preserve historical
-reports and plan-time statuses; do not weaken jobs, lints or tests.
+Implement, test, independently review complete diff and report under the fixed40-row
+matrix. Create docs/slices/v1b/VERIFICATION.md and verification.json from actual
+observations. Do not label source review as execution, reruns as unique tests, old
+CI as new-head CI, or loopback as live/provider approval. Preserve failed attempts.
 
-Use synthetic roots/skills/credentials and scripted/loopback providers only. No real
-profile/private-skill reads, auth commands or live provider requests. Ledger remains
-**31/50 used,19 remaining**. Build caches are allowed, provider probes are not.
-The authorized implementation commit and push are complete. Further staging, commits,
-pushes, PR state changes, merge/release/deployment, V1-B and live verification require
-separate authorization. An old prompt is not fresh permission.
+Synthetic roots/skills/owner and provider secrets, loopbacks and scripted providers
+only. No real credentials/private skills, auth commands or provider requests.
+Ledger31/50 used,19 remaining; balance is not permission. Build-cache/dependency
+traffic is development work. Implementation Git writes, merge, release/deployment
+and later milestones require separate owner authorization.
+
+No RunLimits/optional replacement budget/global call quotas/task deadlines, lifetime
+session/history cap, deletion/retention policy, auto-resume, retry/failover, hosted
+skills/API billing, new executors/providers/schema/store, permissions framework,
+GUI, native TLS, per-device administration or unrelated reorganization. Report any
+genuine contract/source conflict with exact producer/consumer evidence before widening scope.

@@ -9,6 +9,7 @@ pub mod gateway;
 pub mod provider;
 pub mod providers;
 pub mod run;
+pub mod service;
 pub mod storage;
 pub mod tools;
 

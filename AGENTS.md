@@ -1,100 +1,77 @@
-# Wi: P1-B2 source and verification boundary
+# Wi: V1-A service-owned execution handoff
 
-Current contract: **p1b2.0**.
-Accepted P1-B1 baseline: `6fe0a538edf6bae39c9f933db8394b7d8483e2be`.
-P1-B2 source is committed at `80f3872`; evidence head `cc9a6a2` passed push and
-PR workflows on Ubuntu, macOS and Windows. The B2-E01 joined acceptance repair and
-its test-timeout portability correction are committed through `c0534f4`; exact-head
-push workflow `35221955828` and PR workflow `35221961938` passed all six Cargo gates
-on Ubuntu, macOS and Windows. PR #7 remains open and unmerged. Frozen planning
-documents retain NOT RUN statuses; current reports identify the source, repair and
-hosted evidence revisions.
+Current status: **v1a.0 is complete and accepted** at implementation head
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+Accepted foundation: `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
+During acceptance preparation, PR #8 was observed **open and draft, not merged**.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
+Do not resume the V1-A or P1-B2 implementation prompts. P1-B2 plus B2-E01 is merged in PR #7.
 
 Read in order:
-1. docs/slices/p1b2/CONTRACT.md
-2. docs/slices/p1b2/SCHEMA.md
-3. docs/slices/p1b2/MATRIX.md
-4. docs/slices/p1b2/VALIDATION.md
-5. docs/slices/p1b2/IMPLEMENTOR_PROMPT.md
-6. The mapped current source and prior P1-A/P1-B1 verification reports.
+1. docs/slices/v1a/CONTRACT.md
+2. docs/slices/v1a/API.md
+3. docs/slices/v1a/MATRIX.md
+4. docs/slices/v1a/VALIDATION.md
+5. docs/slices/v1a/IMPLEMENTOR_PROMPT.md
+6. docs/slices/v1a/VERIFICATION.md and verification.json
+7. The actual mapped source and prior P1-A/B1/B2 evidence.
 
-Follow the current scoped assignment. Preserve the implemented contract; do not
-execute completed milestone prompts or broaden remediation. Preserve user changes,
-including untracked and staged work. No reset, clean, force checkout, unsolicited
-stash, or historical report rewrite. Report a genuine source/contract conflict with
-its exact producer/consumer evidence before changing behavior or widening scope.
+Review and preserve the fixed implementation, not a replacement architecture. Inspect
+HEAD/ancestry and all staged, unstaged and untracked work. Preserve owner changes; no
+reset, clean, forced checkout, unsolicited stash or historical report rewrite. Report
+an actual contract conflict with exact producer/consumer evidence before widening scope.
 
-## Baseline
+## Accepted foundation
 
-P1-A is merged in PR #5 at `34b4cfd`. P1-B1 is merged in PR #6 at `6fe0a53`.
-Its source revision is `b1e46f3`, evidence revision `ba83a5f`, and documentation-only
-closure `2948b8c`. Push workflow 35088046786 and PR workflow 35088051822 passed all
-six Cargo gates on Ubuntu, macOS and Windows at the reviewed head. The merge tree
-matches that head. Local 601 Rust passes, two child helpers, 152 Node self-tests and
-five examples are attributed earlier observations, not B2 results or count targets.
+Wi is a Rust harness backend with a provider gateway. OpenAI-Codex subscription auth,
+managed profiles, C1 full RunLimits deletion, S1 global/project context, S2 main skill
+loading, R1/NB-02, P1-A SQLite store, B1 actual capture and B2 explicit stored-context
+replay are complete. Session DB2/catalog1/stored envelope1/runtime2/provider1 remain.
 
-B1 already records actual supplied-input execution with the shared loop, awaited
-observations/results, receipt-first concurrency and storage lifecycle ownership.
-It does not restore prior history. B2 now supplies that capability through the same engine.
+B2 final head e25279ad867d900487c4b41215fb957972493408 passed push35227116004 attempt3
+and PR35227120456 attempt1 on all three OS. Its merge tree is unchanged. The new joined
+host-like caller tests closed B2-E01 but did not implement a service owner. Existing
+Windows watchdog failures on attempts1/2 remain reliability observations, not proven
+production defects or fixed flakes. Reports retain earlier failures and unrun live cases.
 
-## Implemented boundary
+P1-B2 uses one loop, receipt-first acceptance, fixed-head native/effective replay,
+actual opened-account binding, real tool results and awaited storage. Empty application
+conversation means empty prior replay; fresh provider connection does not mean fresh
+conversation. Incomplete/unbound histories stay readable but are not silently repaired
+or assigned today's account. No account/model/transport fallback or automatic resumption.
 
-`run_in_session` and shared read-only `prepare_session_replay` use canonical history
-at a fixed head, actual recorded results and native/effective response items. Keep
-one shared engine and B1 recording/failure semantics. No transcript flattening,
-historical skill rereads, repeated tool effects or speculative old-parent request.
+## Implemented V1-A boundary
 
-Session schema 2 has tested lazy schema-1 migration, canonical `run.history.selected`
-and `run.provider.bound` facts, and additive default-unsupported provider replay methods.
-Catalog schema remains 1; preserve old history and receipts. Stored envelopes remain 1;
-runtime/provider schemas remain 2/1. Keep public run/Tool interfaces and legacy CLI behavior.
-Legacy schema-1 history stays readable but lacks native replay provenance. Migration
-never supplies missing selection or account binding.
+The accepted implementation adds a shared in-process run host owning execution independently of
+clients/tickets. Dispatch, committed acceptance and actual completion are distinct. The
+implementation adds only the specified private receipt notifier and preserves existing
+public execution APIs and failure/certainty semantics. Cancellation is explicit; owner
+shutdown cancels/drains before closing storage. Client/ticket Drop never cancels; owner
+Drop initiates shutdown.
+No browser/HTTP/authentication service, normal CLI session interface, GUI, second loop,
+provider/tool change, schema migration, dependency change or network deployment.
+V1-B network/client protocol remains later work, not incidental implementation.
 
-Only closed exchanges and complete actual results are replayable. Nonempty normal
-terminal runs can use committed `RunFinished` without a final `RunResult` when canonical
-exchanges validate its outcome and summary. Empty-run exclusion still requires an
-actual zero-attempt/admission result. Authorized complete ProcessRestart cases remain
-usable only for a new explicit task; missing evidence is not repaired. Incomplete,
-uncertain and legacy unbound history remains readable but is not silently repaired
-or assigned the current account. Identity comes from the credentials already used by
-the provider opening, not an extra read or alias guess. No account search/failover.
-The first new WebSocket request sends full native history without an old parent ID;
-subsequent requests use that connection's new response ID. SSE retains native history.
-
-## Compatibility and exclusions
-
-Preserve ToolFailed -> gateway_error, actual is_error, original result/request/call
-identities, whole-batch preflight, sticky recording failures, cleanup certainty,
-final execution versus delivery, S1/S2 source checks, R1/NB-02 and accepted auth.
-
-No new dependency, storage engine, RunLimits or replacement budget, task quota or
-deadline, history/session lifetime ceiling, auto-deletion, automatic task restart,
-retry/failover, hosted skills or billing path, provider, tool, permission framework,
-compaction, import/export, normal CLI session commands, server, GUI or unrelated
-reorganization. V1 remains separate. The service will own work across browser
-connections; a reader disconnect is not an owning-future cancellation.
+Use actual host -> B2 -> SQLite -> loopback provider -> real tools in the required
+joined tests. Do not substitute separate adapter and fake-host tests. No RunLimits,
+optional budgets, task deadlines, lifetime session/history caps, retention deletion,
+automatic task restart, retry/failover, hosted skills/API billing or speculative framework.
 
 ## Verification and authorization
 
-Use synthetic temporary roots, skills, credentials, scripted providers and loopback
-transports. No real profile/private-skill access, authentication commands or live
-provider requests. Ledger remains **31/50 used, 19 remaining**.
+V1A-00..28 are complete with PASS_LOCAL evidence. V1A-29 is PASS with no blockers;
+`accepted=true` and hosted CI is PASS for the implementation head above.
+`docs/slices/v1a/VERIFICATION.md` and `verification.json` record exact run/job evidence,
+local gates, independent complete-diff reviews, historical pre-commit fingerprints,
+failures and limits. Source/CI/local/live remain distinct evidence. Preserve historical
+reports and plan-time statuses; do not weaken jobs, lints or tests.
 
-The accepted 36-row local and hosted implementation evidence and the B2-E01 joined
-acceptance closure are recorded in:
-- docs/slices/p1b2/VERIFICATION.md
-- docs/slices/p1b2/verification.json
-
-Do not rewrite frozen contracts or historical reports. Evidence updates require their
-own assignment and must identify exact source revisions/worktrees, first failures,
-checks, platform limits and unsupported cases. Follow the current assignment's gate
-and review scope rather than rerunning completed milestones automatically.
-
-Source counts, reruns, examples and child helpers are not additional unique tests.
-Do not weaken CI, lints or security assertions. Original implementation-evidence
-push workflow 35167416739 and PR workflow 35167422773 passed all six Cargo gates on
-Ubuntu, macOS and Windows at `cc9a6a2`. B2-E01 remediation push workflow 35221955828
-and PR workflow 35221961938 passed the same gates at `c0534f4`. Further commit, push,
-merge, release, deployment, live tests and later work require separate owner
-authorization. Old checkpoints and frozen prompts are historical references.
+Use synthetic roots/skills/credentials and scripted/loopback providers only. No real
+profile/private-skill reads, auth commands or live provider requests. Ledger remains
+**31/50 used,19 remaining**. Build caches are allowed, provider probes are not.
+The authorized implementation commit and push are complete. Further staging, commits,
+pushes, PR state changes, merge/release/deployment, V1-B and live verification require
+separate authorization. An old prompt is not fresh permission.

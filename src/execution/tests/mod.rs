@@ -28,10 +28,10 @@ use tokio::sync::{Notify, mpsc};
 mod admission;
 mod commit_boundaries;
 mod faults;
-mod in_session;
+pub(crate) mod in_session;
 mod independent;
 mod lifecycle;
-mod process;
+pub(crate) mod process;
 mod recording;
 mod remediation;
 mod sql_failures;
@@ -40,26 +40,26 @@ const ID: &str = "execution-script";
 const PARTIAL: &str = "partial 雪\n\0";
 
 #[derive(Default)]
-struct Barrier {
-    reached: Notify,
-    release: Notify,
+pub(crate) struct Barrier {
+    pub reached: Notify,
+    pub release: Notify,
 }
 impl Barrier {
-    async fn wait(&self) {
+    pub async fn wait(&self) {
         self.reached.notify_one();
         self.release.notified().await;
     }
 }
 
 #[derive(Default)]
-struct Records {
-    opens: AtomicUsize,
-    closes: AtomicUsize,
+pub(crate) struct Records {
+    pub opens: AtomicUsize,
+    pub closes: AtomicUsize,
     calls: AtomicUsize,
-    capabilities: AtomicUsize,
-    inputs: Mutex<Vec<Vec<InputItem>>>,
+    pub capabilities: AtomicUsize,
+    pub inputs: Mutex<Vec<Vec<InputItem>>>,
     options: Mutex<Vec<SessionOptions>>,
-    events: Mutex<Vec<EventEnvelope>>,
+    pub events: Mutex<Vec<EventEnvelope>>,
     waiting: Notify,
     tool_entered: Notify,
 }
@@ -506,7 +506,7 @@ impl Rig {
     }
 }
 
-fn response(id: &str, calls: Vec<OutputItem>, text: &str) -> ModelResponse {
+pub(crate) fn response(id: &str, calls: Vec<OutputItem>, text: &str) -> ModelResponse {
     ModelResponse {
         id: id.into(),
         model: Some("synthetic".into()),
@@ -518,7 +518,7 @@ fn response(id: &str, calls: Vec<OutputItem>, text: &str) -> ModelResponse {
         output_provenance: Default::default(),
     }
 }
-fn call(id: &str, a: i64, b: i64) -> OutputItem {
+pub(crate) fn call(id: &str, a: i64, b: i64) -> OutputItem {
     OutputItem {
         id: Some(format!("item-{id}")),
         kind: ItemKind::FunctionCall,
@@ -534,13 +534,13 @@ fn call(id: &str, a: i64, b: i64) -> OutputItem {
         native: json!({"opaque_call": [a, b]}),
     }
 }
-fn value(value: &impl Serialize) -> Value {
+pub(crate) fn value(value: &impl Serialize) -> Value {
     serde_json::to_value(value).unwrap()
 }
 fn count(value: &AtomicUsize) -> usize {
     value.load(Ordering::SeqCst)
 }
-async fn history(session: &SessionHandle) -> Vec<StoredEvent> {
+pub(crate) async fn history(session: &SessionHandle) -> Vec<StoredEvent> {
     let page = session.history_page(0, None, 200).await.unwrap();
     assert!(!page.has_more());
     page.records().to_vec()

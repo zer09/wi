@@ -13,8 +13,14 @@ P1-B1 execution-to-storage composition is accepted and merged in PR #6 at `6fe0a
 with local validation and exact-head Ubuntu/macOS/Windows CI. P1-B2 restored history is
 implemented in source revision `80f3872`. Evidence head `cc9a6a2` passed push and PR
 workflows on Ubuntu, macOS and Windows. Its [verification report](slices/p1b2/VERIFICATION.md)
-identifies the exact source and hosted evidence revisions. PR #7 remains unmerged. Ordinary CLI
-persistence and V1 service/browser/GUI remain unimplemented.
+identifies the exact source and hosted evidence revisions. PR #7 is merged at `50f4dff`.
+V1-A in-process ownership is complete and accepted under contract **v1a.0** at implementation
+head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Hosted CI passed: exact-head push run
+**35320097103** and pull-request run **35320100396** passed all six Cargo steps on
+Ubuntu/macOS/Windows. See the [V1-A verification report](slices/v1a/VERIFICATION.md).
+These runs prove only that implementation revision. Current PR-head merge checks are
+external GitHub merge-readiness evidence, separate from this fixed implementation evidence.
+Ordinary CLI persistence, V1-B networking, browser protocol and GUI remain unimplemented.
 
 ## One crate, explicit module boundaries
 
@@ -164,7 +170,7 @@ observer runs; failure of that observer stops later work but does not undo the c
 The ordinary next model request consumes the skill result on the same session,
 using the [existing continuation strategies](#continuation-strategies). Session
 instructions stay fixed; native recovery and consistency validation are unchanged.
-The CLI and a future service call the same library, not a CLI subprocess.
+The CLI and the in-process `RunHost` call the same library, not a CLI subprocess.
 
 [`skill_loading_offline.rs`](../examples/skill_loading_offline.rs) exercises discovery,
 the paired helper, registry and public controller using temporary synthetic roots
@@ -602,20 +608,34 @@ transports; they do not establish live opaque portability. B2 retains B1 owned-f
 cleanup-certainty and execution-versus-recording semantics. Account markers and native
 content are private application data, not safe logs or encrypted identity proof.
 
-## Future service ownership (requirements only)
+## In-process service ownership (V1-A)
 
-P1-A, B1 and B2 do not integrate ordinary `wi run` persistence or implement a service.
-The future V1 service serves one
-owner across multiple devices. A browser disconnect must not cancel admitted
-service-owned work. A client subscription must not own the controller's observer
-or provider receiver directly, because sink/receiver failure currently stops work.
-Application sessions must persist in storage. Service restart stops active tasks
-without automatic restart, resume, provider submission or tool replay. Continuing
-requires an explicit user action. B1 supplies actual capture of a supplied input;
-B2 supplies valid restored conversation/provider-account history for explicit new
-submissions. Storage recovery is not agent execution or service-wide adoption of sessions.
-The current `ProviderSession` is an in-memory transport handle, not that persistent
-application session. See [product direction](WI_PRODUCT_DIRECTION.md).
+The additive `wi::service::RunHost` consumes one `SessionStore` and owns explicitly
+submitted B2 executions independently of clients, tickets and waiters. `RunClient` holds
+weak host ownership. A `RunTicket` separately exposes the actual committed acceptance
+receipt and the final shared completion; returning from `submit` means only local host
+dispatch. Dropping clients or tickets does not cancel work.
+
+Host registration and shutdown share one synchronous gate. Registration enters the
+`TaskTracker` before spawn, so shutdown cannot pass a registered-but-unpolled job. Explicit
+cancellation signals only tracked entries matching both application session and run IDs.
+Orderly shutdown closes admission, signals and drains tracked jobs while SQLite remains
+writable, then closes the store. Owner Drop starts this sequence without blocking. Worker
+loss fails admission closed and preserves existing storage quarantine rather than
+fabricating a durable terminal result.
+
+The host uses the existing `run_in_session` engine through a crate-private receipt
+notification after unwarned acceptance. It adds no second model/tool loop, queue, retry,
+startup scan or automatic task resumption. A new host after restart is empty; continuing
+requires an explicit new task using B2's validated stored history. Existing storage APIs
+remain the read interface. `ProviderSession` remains an in-memory provider transport
+handle, not the persistent application session.
+
+V1-A is a trusted Rust library boundary, not the one-owner multi-device network service.
+V1-B still owns network commands, client authentication, browser-safe DTOs, subscriptions
+and reconnect behavior. Ordinary `wi run` persistence and GUI integration remain deferred.
+See [V1-A verification](slices/v1a/VERIFICATION.md) and
+[product direction](WI_PRODUCT_DIRECTION.md).
 
 ## Intentionally deferred
 

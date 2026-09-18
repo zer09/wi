@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn identity(principal: char) -> ReplayIdentity {
+pub(crate) fn identity(principal: char) -> ReplayIdentity {
     ReplayIdentity::new(
         ID.into(),
         "scripted-v1".into(),
@@ -9,12 +9,15 @@ pub(super) fn identity(principal: char) -> ReplayIdentity {
     .unwrap()
 }
 
-pub(super) struct Plan {
+pub(crate) struct Plan {
     pub identity: Option<ReplayIdentity>,
     pub responses: Vec<ModelResponse>,
     pub install_error: bool,
     pub install_pause: Option<Arc<Barrier>>,
     pub unsupported: bool,
+    pub open_pause: Option<Arc<Barrier>>,
+    pub panic_open: bool,
+    pub response_pause: Option<Arc<Barrier>>,
 }
 impl Default for Plan {
     fn default() -> Self {
@@ -24,12 +27,15 @@ impl Default for Plan {
             install_error: false,
             install_pause: None,
             unsupported: false,
+            open_pause: None,
+            panic_open: false,
+            response_pause: None,
         }
     }
 }
 
 #[derive(Default)]
-pub(super) struct ToolCounts {
+pub(crate) struct ToolCounts {
     pub definitions: AtomicUsize,
     pub validations: AtomicUsize,
     pub effects: AtomicUsize,
@@ -59,7 +65,7 @@ impl Tool for SumTool {
     }
 }
 
-pub(super) fn replay_tools(session: &SessionHandle) -> (Arc<ToolRegistry>, Arc<ToolCounts>) {
+pub(crate) fn replay_tools(session: &SessionHandle) -> (Arc<ToolRegistry>, Arc<ToolCounts>) {
     let counts = Arc::new(ToolCounts::default());
     let mut tools = ToolRegistry::new();
     tools
@@ -71,7 +77,7 @@ pub(super) fn replay_tools(session: &SessionHandle) -> (Arc<ToolRegistry>, Arc<T
     (Arc::new(tools), counts)
 }
 
-pub(super) struct Fixture {
+pub(crate) struct Fixture {
     pub temp: tempfile::TempDir,
     pub store: SessionStore,
     pub session: SessionHandle,
@@ -107,7 +113,7 @@ impl Fixture {
     }
 }
 
-pub(super) struct Task {
+pub(crate) struct Task {
     pub gateway: Arc<Gateway>,
     pub session: SessionHandle,
     pub observed: Arc<Observations>,
@@ -206,7 +212,7 @@ struct ReplayScript {
     observed: Arc<Observations>,
 }
 #[derive(Default)]
-pub(super) struct Observations {
+pub(crate) struct Observations {
     pub records: Records,
     pub validations: AtomicUsize,
     pub identity_reads: AtomicUsize,
@@ -292,7 +298,12 @@ impl Provider for ReplayScript {
                 .unwrap()
                 .is_none()
         );
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        if let Some(pause) = &self.plan.open_pause {
+            pause.wait().await;
+        }
+        assert!(!self.plan.panic_open, "synthetic provider unwind");
+        let (sender, mut receiver) = mpsc::unbounded_channel::<EventEnvelope>();
+        let response_pause = self.plan.response_pause.clone();
         let control = ReplayControl {
             binding: self.binding.clone(),
             observed: self.observed.clone(),
@@ -301,13 +312,20 @@ impl Provider for ReplayScript {
             install_pause: self.plan.install_pause.clone(),
             sender,
             responses: Mutex::new(self.plan.responses.clone().into()),
+            partial: response_pause.is_some(),
         };
         Ok(ProviderSession {
             id: format!("provider-{}", self.binding.run_id),
             control: Arc::new(control),
-            events: Box::pin(
-                async_stream::stream! { while let Some(event) = receiver.recv().await { yield event; } },
-            ),
+            events: Box::pin(async_stream::stream! {
+                while let Some(event) = receiver.recv().await {
+                    if matches!(event.event, ProviderEvent::ResponseFinished { .. })
+                        && let Some(pause) = &response_pause {
+                        pause.wait().await;
+                    }
+                    yield event;
+                }
+            }),
         })
     }
 }
@@ -320,6 +338,7 @@ struct ReplayControl {
     install_pause: Option<Arc<Barrier>>,
     sender: mpsc::UnboundedSender<EventEnvelope>,
     responses: Mutex<VecDeque<ModelResponse>>,
+    partial: bool,
 }
 #[async_trait]
 impl SessionControl for ReplayControl {
@@ -406,12 +425,22 @@ impl SessionControl for ReplayControl {
             .unwrap()
             .pop_front()
             .expect("extra generation");
-        for event in [
-            ProviderEvent::ResponseStarted {
+        let mut emitted = vec![ProviderEvent::ResponseStarted {
+            response_id: response.id.clone(),
+        }];
+        if self.partial {
+            emitted.push(ProviderEvent::OutputItemUpdated {
                 response_id: response.id.clone(),
-            },
-            ProviderEvent::ResponseFinished { response },
-        ] {
+                item_id: "message".into(),
+                output_index: 0,
+                content_index: Some(0),
+                summary_index: None,
+                kind: DeltaKind::Text,
+                delta: PARTIAL.into(),
+            });
+        }
+        emitted.push(ProviderEvent::ResponseFinished { response });
+        for event in emitted {
             let mut events = self.observed.records.events.lock().unwrap();
             let sequence = events.len() as u64 + 1;
             let event = EventEnvelope {

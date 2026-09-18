@@ -382,6 +382,27 @@ impl SessionHandle {
         self.inner.hooks.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn test_accept_history_run_uncoordinated(
+        &self,
+        operation_id: OperationId,
+        run_id: RunId,
+        input: RecordedRunInput,
+        selection: StoredHistorySelection,
+    ) -> Result<CommitResult> {
+        // Inject a competing SQL acceptance after guarded lookups. Production keeps its lock.
+        self.record(
+            operation_id,
+            run_id,
+            run_store::Mutation::AcceptHistory {
+                input: Box::new(input),
+                selection,
+            },
+            None,
+        )
+        .await
+    }
+
     pub async fn lookup_receipt(&self, operation_id: OperationId) -> Result<Option<CommitReceipt>> {
         let id = self.id.clone();
         let result = self

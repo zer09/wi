@@ -16,9 +16,44 @@ ledgers, and unrun checks describe each record's own stage, not the current HEAD
 
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
 at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
-P1-B2 history restoration is implemented in source revision `80f3872`. Evidence head
-`cc9a6a2` passed push and PR workflows on Ubuntu, macOS and Windows. PR #7 remains
-unmerged. V1 service remains separately scoped and unimplemented.
+P1-B2 plus B2-E01 joined acceptance is accepted and merged in PR #7 at `50f4dff`.
+Its reviewed head `e25279a` passed push35227116004 attempt3 and PR35227120456 attempt1
+on Ubuntu/macOS/Windows. Earlier watchdog failures remain in the evidence; a passing
+rerun is not proof they were fixed. [Merge closure](https://github.com/zer09/wi/pull/7#issuecomment-5716447572)
+records the exact review, attempts and scope.
+
+## Accepted: V1-A service-owned execution
+
+Contract **v1a.0**, baseline `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
+Status: **ACCEPTED; complete; accepted=true; hosted CI PASS** at implementation head
+`fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+V1A-00..28 are complete with local evidence; V1A-29 is PASS with no blockers.
+During acceptance preparation, PR #8 was observed open and draft, not merged.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
+
+The additive in-process `wi::service::RunHost` owns tracked B2 execution independently
+of client, ticket and waiter lifetimes. Actual committed acceptance is observable before
+completion, cancellation explicitly identifies the application session and run, and
+owner shutdown drains work before closing storage. Construction or reopen does not start
+old work. This reuses B2 rather than adding another model/tool loop.
+
+- [V1-A verification](slices/v1a/VERIFICATION.md) and
+  [machine report](slices/v1a/verification.json): Local and exact-head hosted evidence,
+  all 30 row dispositions, complete-diff reviews, historical pre-commit fingerprints,
+  failure history, measurements and limits. Hosted Cargo checks are not live/provider proof.
+- [`host_offline`](../examples/host_offline.rs): Public host APIs with synthetic SQLite,
+  S2 skill loading, real tools, dropped observers, explicit replay and orderly shutdown.
+- [V1-A contract](slices/v1a/CONTRACT.md), [API](slices/v1a/API.md),
+  [matrix](slices/v1a/MATRIX.md), [validation](slices/v1a/VALIDATION.md), and
+  [implementor prompt](slices/v1a/IMPLEMENTOR_PROMPT.md): Frozen planning records. Their
+  `PLAN ONLY` and `NOT RUN` text describes the state when authored, not the current result.
+
+V1-B remains deferred. It will separately cover network commands, client authentication,
+browser-safe protocol and reconnect/subscription behavior. GUI and ordinary CLI
+persistence also remain unimplemented. Existing session/history read APIs remain canonical.
 
 ## Current implementation: P1-B2 stored conversation submissions
 
@@ -38,7 +73,8 @@ terminal history can contribute without a final-result append when `RunFinished`
 canonical exchanges agree. Empty-run exclusion needs the actual zero-attempt result.
 Complete process-interrupted exchanges may inform a new task; incomplete, uncertain,
 active or unbound history is rejected without repair, truncation or automatic resumption.
-A fresh WebSocket sends full native history without an old parent ID. SSE retains native
+A fresh WebSocket sends the selected conversation's history without an old parent ID;
+that history is empty for the first task in a new application session. SSE retains native
 history. The actual opened account must match before installation or generation.
 
 - [P1-B2 contract](slices/p1b2/CONTRACT.md), [schema](slices/p1b2/SCHEMA.md) and
@@ -47,13 +83,15 @@ history. The actual opened account must match before installation or generation.
   [implementor prompt](slices/p1b2/IMPLEMENTOR_PROMPT.md): Historical planning handoff.
 - [P1-B2 verification](slices/p1b2/VERIFICATION.md) and
   [machine report](slices/p1b2/verification.json): Local and exact-head hosted evidence
-  for the source and evidence revisions; live opaque portability remains unsupported.
+  for the source and evidence revisions, including B2-E01 joined closure; live opaque
+  portability is not established.
 - [conversation_offline](../examples/conversation_offline.rs): Public APIs, actual tools,
   stored skill content and an explicit new task after reopen; no credentials or network.
 
-Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. V1 service
-ownership, service authentication, browser protocol and GUI remain unimplemented.
-B2 does not add automatic task resumption, retries or a service task manager.
+Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. B2 alone
+did not add service ownership, but V1-A now composes B2 under the in-process `RunHost`.
+Service authentication, browser protocol and GUI remain unimplemented. Neither B2 nor
+V1-A adds automatic task resumption or retries.
 
 ## Accepted and merged: P1-B1 actual runtime capture
 
@@ -86,10 +124,11 @@ persisted_run_offline`, or add `--release`. The [top-level measurement notes](..
 define finite latency samples, the counted operation window and post-close size limits.
 Catalog refresh is explicit. The caller retains and awaits the execution future.
 
-B1 remains supplied-input capture, not restored-history execution. B2 now supplies
-new explicit tasks with compatible provider/account-bound native history. Neither path
-implements ordinary CLI persistence, V1 service/browser/GUI, or automatic task
-resumption/retry. The future service owns execution independently of readers.
+B1 remains supplied-input capture, not restored-history execution. B2 supplies new
+explicit tasks with compatible provider/account-bound native history. V1-A now owns
+those executions independently of readers through the in-process `RunHost`. Ordinary
+CLI persistence, V1-B networking/browser/GUI, and automatic task resumption/retry remain
+unimplemented.
 
 ## Current acceptance: P1-A storage only
 
@@ -160,7 +199,6 @@ The committed reports describe the pre-push stage. Subsequent submitted-head CI 
 merge closure are recorded in [PR #4](https://github.com/zer09/wi/pull/4): final head
 `a4ee1db`, merge `dd720c0`. R1 adds no feature or runtime budget and does not reopen
 S2 or managed authentication. These earlier results are not P1-A execution evidence.
-
 - [R1 contract](slices/r1/CONTRACT.md): Exact fixes, compatibility boundaries,
   allowed edits, implementation sequence and authorization.
 - [R1 matrix](slices/r1/MATRIX.md): R1-00..R1-19, all initially NOT RUN;

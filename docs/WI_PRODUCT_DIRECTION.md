@@ -1,7 +1,15 @@
 # Wi product direction — confirmed decisions and slice boundaries
 
 Prepared 2026-09-11. This is a requirements record, not an implementation report.
-Runtime baseline: `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c` (C1 merged).
+Runtime baseline at preparation: `b33ca4bb1cdf8ae58da8d83123b87956535d6a2c` (C1 merged).
+Current implementation note: V1-A v1a.0 is complete and accepted at implementation
+head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Exact-head push run **35320097103** and
+pull-request run **35320100396** passed all six Cargo steps on Ubuntu/macOS/Windows.
+During acceptance preparation, PR #8 was observed open and draft, not merged.
+The recorded runs prove only the implementation revision above. Current PR-head merge
+checks are external GitHub merge-readiness evidence, separate from this fixed
+implementation evidence.
+V1-B network, client-authentication and browser protocol work remains future scope.
 
 ## 1. Product and ownership
 
@@ -15,7 +23,9 @@ external sources retained; no silent Platform API billing fallback.
 ```text
 Web GUI / another authorized client
                |
-        Wi service adapter                 future V1
+        Wi network adapter                 future V1-B
+               |
+   In-process execution owner              V1-A
                |
  Workspace and context preparation         S1 / S2
                |
@@ -68,27 +78,29 @@ subscription, cursor, and storage guarantees belong to the later contracts.
 
 ### Service restart and storage
 
-**Application sessions always persist in storage.** The storage technology,
-record layout, flush/commit policy, schema, migrations, and retention/deletion
-policy will be designed later with the user. Do not choose SQLite, JSONL, another
-backend, or an event-sourcing framework implicitly in S1.
+**Application sessions always persist in storage.** P1-A implements the shared
+SQLite store with per-session databases, a catalog, commit receipts and schema
+migration rules. P1-B1 records actual execution; P1-B2 restores validated stored
+context for a new explicit task. These slices are complete and merged. Retention
+and deletion policy remain deferred; ordinary CLI persistence is not implemented.
 
 **Service restart does not resume or restart any task automatically.** Previously
 active tasks must not trigger provider submissions, tool calls, retries, or replay
 when Wi starts. Stored records remain available; unfinished work is represented
 truthfully as interrupted/stopped due to restart, not fabricated completion or
-proof that external side effects were undone. Exact state names are for the
-storage/service design. Continuing work later requires a new explicit user action;
-no automatic replay of an unfinished tool is implied.
+proof that external side effects were undone. Existing storage recovery records
+interruption without starting work. Continuing work later requires a new explicit
+user action; no automatic replay of an unfinished tool is implied.
 
-Graceful shutdown should cooperatively stop owned tasks. Unexpected process loss
-cannot undo remote or already completed effects. No detached executor capable of
-surviving the service should be introduced without a separate lifecycle design.
+V1-A graceful shutdown cancels and drains owned tasks before closing storage.
+Unexpected process loss cannot undo remote or already completed effects. No detached
+executor capable of surviving the service should be introduced without a separate
+lifecycle design.
 
 The existing transport `ProviderSession` is an in-memory connection/context handle,
-not the future persistent user session. Current run IDs/provider session IDs are
-not a persistence design. S1 remains pre-run preparation and does not introduce a
-new in-memory-only application-session product as a substitute for storage.
+not a persistent application session. Application sessions now use P1-A storage;
+transport and run IDs do not replace stored session identity. S1 remains pre-run
+preparation, not an in-memory-only substitute for persistent application sessions.
 
 ## 3. Slice map
 
@@ -96,17 +108,21 @@ new in-memory-only application-session product as a substitute for storage.
 |---|---|---|
 | Gateway + Wi authentication | Provider protocol, subscription profiles/login/renewal and ordinary tool cycle | Accepted within historical evidence limits; do not redesign. |
 | M3 + C1 | Reusable run/turn orchestration with no RunLimits feature | Accepted baseline; retain cancellation and validation. |
-| S1 | Workspace resolution, base/project instruction composition, global-plus-project skill metadata, explicit activation, hosted-placeholder removal | This PR supplies the fixed offline implementation contract. |
-| S2 | Model-selected skill activation and approved on-demand resources using the local catalog | Separate next skills matrix. Metadata listing in S1 is not implicit selection or a read tool. |
-| P1 | Persistent application-session/history design and implementation | Requirements recorded now; storage design deferred. Required before V1 acceptance. No automatic task resume. |
-| V1 | One-owner multi-device headless service using the shared core and persistent sessions | Depends on P1 and S1's library boundary; need not wait for advanced skill/tool features. Browser disconnect is not cancellation. |
+| S1 | Workspace resolution, base/project instruction composition, global-plus-project skill metadata, explicit activation, hosted-placeholder removal | Completed and merged in PR #2. |
+| S2 | Model-selected main `SKILL.md` loading using the local catalog | Offline accepted; live model selection/adherence NOT RUN. Supporting files and scripts remain deferred. |
+| P1-A | Shared SQLite application-session store, catalog, receipts and history | Completed, accepted and merged. Retention/deletion policy remains deferred. |
+| P1-B1 | Actual runtime capture through the shared execution path | Completed, accepted and merged in PR #6. |
+| P1-B2 | Validated stored-context replay for a new explicit task | Completed, accepted and merged in PR #7, including B2-E01. No automatic task resumption. |
+| V1-A | In-process execution owner using the shared core and persistent sessions | Complete and accepted under v1a.0 at `fad3855`; both exact-head workflows passed all six Cargo steps on Ubuntu/macOS/Windows. PR #8 was observed open/draft, not merged, during acceptance preparation. Client/ticket Drop does not cancel. |
+| V1-B | One-owner multi-device network service, client authentication and browser protocol | Future scope; not implemented. Uses V1-A; GUI follows the service API. |
 | Later explicitly agreed slices | Actual coding tools, skill references/scripts where authorized, steering, search/PTC/async tools, UI | Not authorized by this document. |
 | H1 hosted skills | Hosted upload/version/execution integration | Removed from the active roadmap, not left as an implementation dependency. |
 
-S2 and P1 are separate design decisions after S1, not an automatic next task. V1
-must not be accepted as an ephemeral in-memory session service that promises to
-add required persistence someday. Conversely, S1 need not implement persistence
-just to prepare a prompt. No GUI implementation is included here.
+Accepted S1/S2/P1/V1-A work does not authorize V1-B or other later slices. Normal CLI
+persistence, network/client authentication, browser protocol and GUI remain deferred.
+V1 must not be accepted as an ephemeral in-memory session service that promises to
+add required persistence someday. V1-A acceptance covers the in-process owner, not
+network-service or live/provider acceptance.
 
 ## 4. Evidence and non-regression policy
 

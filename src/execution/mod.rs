@@ -8,7 +8,7 @@ pub use replay::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use types::{
     PersistentRunCause, PersistentRunFailure, PersistentRunRequest, PersistentRunResult,
@@ -32,7 +32,41 @@ pub async fn run_in_session(
     tools: &ToolRegistry,
     cancel: CancellationToken,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
-    run_owned(gateway, session, request, tools, cancel, true).await
+    run_owned(
+        gateway,
+        session,
+        request,
+        tools,
+        cancel,
+        RunMode {
+            restore_history: true,
+            accepted: None,
+        },
+    )
+    .await
+}
+
+// Only the host supplies this synchronous, infallible, nonblocking receipt sink.
+pub(crate) async fn run_in_session_notifying(
+    gateway: &Gateway,
+    session: &SessionHandle,
+    request: PersistentRunRequest,
+    tools: &ToolRegistry,
+    cancel: CancellationToken,
+    accepted: &(dyn Fn(CommitResult) + Sync),
+) -> Result<PersistentRunResult, PersistentRunFailure> {
+    run_owned(
+        gateway,
+        session,
+        request,
+        tools,
+        cancel,
+        RunMode {
+            restore_history: true,
+            accepted: Some(accepted),
+        },
+    )
+    .await
 }
 
 pub async fn run_persisted(
@@ -42,7 +76,23 @@ pub async fn run_persisted(
     tools: &ToolRegistry,
     cancel: CancellationToken,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
-    run_owned(gateway, session, request, tools, cancel, false).await
+    run_owned(
+        gateway,
+        session,
+        request,
+        tools,
+        cancel,
+        RunMode {
+            restore_history: false,
+            accepted: None,
+        },
+    )
+    .await
+}
+
+struct RunMode<'a> {
+    restore_history: bool,
+    accepted: Option<&'a (dyn Fn(CommitResult) + Sync)>,
 }
 
 async fn run_owned(
@@ -51,7 +101,7 @@ async fn run_owned(
     request: PersistentRunRequest,
     tools: &ToolRegistry,
     cancel: CancellationToken,
-    restore_history: bool,
+    mode: RunMode<'_>,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
     let hold = session.execution_hold().map_err(|error| {
         PersistentRunFailure::storage(
@@ -67,7 +117,7 @@ async fn run_owned(
         tools,
         cancel,
         hold.closing_token(),
-        restore_history,
+        mode,
     )
     .await;
     // Only a returned orchestration result proves local work has stopped. Drop/panic quarantines.
@@ -82,7 +132,7 @@ async fn run_held(
     tools: &ToolRegistry,
     cancel: CancellationToken,
     closing: CancellationToken,
-    restore_history: bool,
+    mode: RunMode<'_>,
 ) -> Result<PersistentRunResult, PersistentRunFailure> {
     let PersistentRunRequest {
         operation_id,
@@ -113,7 +163,7 @@ async fn run_held(
     };
     if let Some(receipt) = receipt {
         // Storage verifies the original method and content before returning the old receipt.
-        let accepted = if restore_history {
+        let accepted = if mode.restore_history {
             acceptance_guard
                 .repeat_history_run(run_id.clone(), input, &receipt)
                 .await
@@ -125,10 +175,13 @@ async fn run_held(
             operation_id.clone(),
             accepted,
         )?;
+        if let Some(notify) = mode.accepted {
+            notify(acceptance.clone());
+        }
         return duplicate(session, run_id, acceptance).await;
     }
 
-    let prepared = if restore_history {
+    let prepared = if mode.restore_history {
         let request = input.prepared_request();
         Some(prepare_session_replay(session, &request.provider_id, &request.options.model).await?)
     } else {
@@ -161,6 +214,9 @@ async fn run_held(
         operation_id.clone(),
         accepted,
     )?;
+    if let Some(notify) = mode.accepted {
+        notify(acceptance.clone());
+    }
     if acceptance.duplicate() {
         return duplicate(session, run_id, acceptance).await;
     }

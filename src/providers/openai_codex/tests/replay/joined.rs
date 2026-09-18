@@ -17,6 +17,8 @@ use tokio_util::sync::CancellationToken;
 
 #[path = "joined_gates.rs"]
 mod gates;
+#[path = "joined_host.rs"]
+mod host;
 
 const MODEL: &str = "requested-alias";
 const PROMPT_A: &str = "Add 17 and 25. Keep the result for the next task. 雪\r\n";
@@ -57,7 +59,7 @@ impl Tool for CountedAdd {
     }
 }
 
-fn value(value: &impl serde::Serialize) -> Value {
+fn value(value: &(impl serde::Serialize + ?Sized)) -> Value {
     serde_json::to_value(value).unwrap()
 }
 
@@ -439,7 +441,7 @@ impl Task {
 }
 
 struct Loopback {
-    gateway: Gateway,
+    gateway: Arc<Gateway>,
     auth: Arc<CountedAuth>,
     tasks: mpsc::Sender<(Task, oneshot::Sender<()>)>,
     stop: oneshot::Sender<()>,
@@ -510,7 +512,7 @@ impl Loopback {
             )))
             .unwrap();
         Self {
-            gateway,
+            gateway: Arc::new(gateway),
             auth,
             tasks,
             stop,
@@ -518,9 +520,14 @@ impl Loopback {
         }
     }
 
-    async fn execute(&self, task: &Task, tools: &ToolRegistry) -> RunResult {
+    async fn enqueue(&self, task: &Task) -> oneshot::Receiver<()> {
         let (done, closed) = oneshot::channel();
         self.tasks.send((task.clone(), done)).await.unwrap();
+        closed
+    }
+
+    async fn execute(&self, task: &Task, tools: &ToolRegistry) -> RunResult {
+        let closed = self.enqueue(task).await;
         // Only current input crosses this boundary. Stored replay has no test-side install path.
         let execution = run_in_session(
             &self.gateway,

@@ -84,7 +84,7 @@ impl StoredA {
     }
 }
 
-fn pause(task: &Task, record: Record, point: Point) -> Arc<Pause> {
+pub(super) fn pause(task: &Task, record: Record, point: Point) -> Arc<Pause> {
     let pause = Arc::new(Pause::default());
     task.session
         .test_hooks()
@@ -92,12 +92,10 @@ fn pause(task: &Task, record: Record, point: Point) -> Arc<Pause> {
     pause
 }
 
-async fn reader(fixture: &StoredA) -> SqliteConnection {
-    let id = fixture.session.session_id().as_str();
-    let path = fixture
-        .temp
-        .path()
-        .join("store/sessions")
+pub(super) async fn reader(root: &std::path::Path, session: &SessionHandle) -> SqliteConnection {
+    let id = session.session_id().as_str();
+    let path = root
+        .join("sessions")
         .join(&id[..2])
         .join(id)
         .join("session.sqlite3");
@@ -113,7 +111,7 @@ async fn reader(fixture: &StoredA) -> SqliteConnection {
     .unwrap()
 }
 
-async fn paused_records(
+pub(super) async fn paused_records(
     reader: &mut SqliteConnection,
     pause: &Pause,
     task: &Task,
@@ -155,7 +153,7 @@ async fn durability(transport: Transport) {
         3
     };
     fixture.loopback.auth.assert_loads(loads);
-    let mut reader = reader(&fixture).await;
+    let mut reader = reader(&fixture.temp.path().join("store"), &fixture.session).await;
     let acceptance = pause(&b, Record::Acceptance, Point::BeforeCommit);
     let gates = async {
         acceptance.reached.notified().await;
@@ -248,7 +246,7 @@ async fn b2mr_03_public_session_sse_awaits_acceptance_binding_and_result_commits
     durability(Transport::Sse).await;
 }
 
-fn negative_gateway(
+pub(super) fn negative_gateway(
     auth: Arc<CountedAuth>,
     transport: Transport,
     address: std::net::SocketAddr,
@@ -285,6 +283,14 @@ async fn failed_execution(
     .await
     .unwrap()
     .unwrap();
+    observe_failure(task, &execution, code).await
+}
+
+pub(super) async fn observe_failure(
+    task: &Task,
+    execution: &PersistentRunResult,
+    code: &str,
+) -> (RunResult, Vec<RunEventEnvelope>) {
     let PersistentRunResult::Executed {
         acceptance,
         final_record,
@@ -293,7 +299,7 @@ async fn failed_execution(
     else {
         panic!("a rejected new task must record its actual execution")
     };
-    for commit in [&acceptance, &final_record] {
+    for commit in [acceptance, final_record] {
         assert!(!commit.duplicate());
         assert_eq!(commit.cleanup_warning(), None);
         assert_eq!(commit.receipt().run_id(), Some(&task.request.run_id));
@@ -367,7 +373,7 @@ async fn failed_execution(
         matches!(records.last().unwrap().payload(), StoredEventPayload::RunResultRecorded(actual)
         if value(actual) == value(&result))
     );
-    (*result, runtime)
+    (result.as_ref().clone(), runtime)
 }
 
 async fn identity_guard(transport: Transport) {

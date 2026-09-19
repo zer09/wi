@@ -148,10 +148,6 @@ fn run_child(sandbox: &Path, fixture: &ChildInput) {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
-    #[cfg(windows)]
-    if let Some(value) = std::env::var_os("SystemRoot") {
-        command.env("SystemRoot", value);
-    }
     let mut child = command.spawn().unwrap();
     writeln!(
         child.stdin.take().unwrap(),

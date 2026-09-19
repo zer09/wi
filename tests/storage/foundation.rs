@@ -42,12 +42,10 @@ async fn storage_requires_explicit_absolute_root_and_never_treats_paths_as_uris(
         assert_eq!(error.certainty(), CommitCertainty::NotApplicable);
     }
     let fixture = Fixture::new();
-    let leaf = if cfg!(windows) {
-        "literal%3Fmode=memory"
-    } else {
-        "literal?mode=memory&cache=shared"
-    };
-    let root = fixture.root.join("nested").join(leaf);
+    let root = fixture
+        .root
+        .join("nested")
+        .join("literal?mode=memory&cache=shared");
     let store = SessionStore::open(root.clone()).await.unwrap();
     store.close().await.unwrap();
     assert!(root.join("catalog.sqlite3").is_file());
@@ -137,10 +135,6 @@ fn storage_explicit_root_without_home_or_workspace_state() {
         .env_clear()
         .env(CHILD, &fixture.root)
         .current_dir(&workspace);
-    #[cfg(windows)]
-    if let Some(root) = std::env::var_os("SystemRoot") {
-        command.env("SystemRoot", root);
-    }
     let output = command.output().unwrap();
     assert!(
         output.status.success(),

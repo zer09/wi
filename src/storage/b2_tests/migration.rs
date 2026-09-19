@@ -462,10 +462,6 @@ fn child(root: &Path, id: &ApplicationSessionId, stage: u8) {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    if let Some(value) = std::env::var_os("SystemRoot") {
-        command.env("SystemRoot", value);
-    }
     let mut child = command.spawn().unwrap();
     child
         .stdin

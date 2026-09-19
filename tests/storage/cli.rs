@@ -23,10 +23,6 @@ fn p1a28_process_normal_cli_help_and_noop_create_no_storage() {
             .env("TMPDIR", temp.path().join("tmp"))
             .env("TEMP", temp.path().join("tmp"))
             .env("TMP", temp.path().join("tmp"));
-        #[cfg(windows)]
-        if let Some(value) = std::env::var_os("SystemRoot") {
-            command.env("SystemRoot", value);
-        }
         let output = command.output().unwrap();
         assert_eq!(output.status.code(), Some(exit));
         for directory in ["home", "xdg", "codex", "tmp", "workspace"] {

@@ -23,10 +23,6 @@ pub fn isolated(command: &mut Command, sandbox: &Path) {
         .env("TMPDIR", sandbox)
         .env("TEMP", sandbox)
         .env("TMP", sandbox);
-    #[cfg(windows)]
-    if let Some(value) = std::env::var_os("SystemRoot") {
-        command.env("SystemRoot", value);
-    }
 }
 
 pub struct Process {

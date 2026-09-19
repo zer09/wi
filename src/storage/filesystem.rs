@@ -33,14 +33,6 @@ fn private(metadata: &Metadata, directory: bool) -> Result<()> {
             return Err(StorageError::new(StorageErrorKind::Unavailable));
         }
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // Reparse checks are not an ACL check. The owner must select a protected root.
-        if metadata.file_attributes() & 0x400 != 0 {
-            return Err(StorageError::new(StorageErrorKind::Unavailable));
-        }
-    }
     Ok(())
 }
 

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "record_type": "owner_platform_followup",
+  "date": "2026-09-20",
+  "timezone": "Asia/Manila",
+  "contract": "v1b.0",
+  "runtime_baseline": "16d623a3317abc7796ec203e4fe15d580791a769",
+  "original_head": "f0adbddc31cc1f967ccb2df68c3481b2c7ff5b53",
+  "original_tested_source": "6e28cc339f25a95b78170e7c4171de48f122d07a",
+  "original_evidence_unchanged": true,
+  "original_status": {"status": "LOCAL_VERIFIED", "accepted": false, "pass": 38, "partial": 2},
+  "native_platforms_retained": ["linux", "macos"],
+  "native_windows": "WITHDRAWN_BY_OWNER",
+  "windows_browser_clients_prohibited": false,
+  "applicability_changes": [
+    {"id": "V1B-03", "withdrawn": "native Windows token reparse-point/ACL proof", "non_windows_requirements": "unchanged"},
+    {"id": "V1B-33", "withdrawn": "native Windows Ctrl+C proof", "non_windows_requirements": "unchanged"}
+  ],
+  "published_source_commits": [
+    "4e79cffb0e0f9fec63b0810e06cdc25082a90185",
+    "3ccf63d7931c3e4d3c7454edc67fe6e1b87f3a90",
+    "b2ba6c69aa7b3957fea4b4ce9a5010595eb23148",
+    "4edb2d73a6c52b6617feecb60d18cfab0c510150"
+  ],
+  "tested_cleanup_source": "4edb2d73a6c52b6617feecb60d18cfab0c510150",
+  "observed_ci": [
+    {"event": "push", "run_id": 35458188836, "attempt": 1, "ubuntu": "PASS_SIX_CARGO_GATES", "macos": "PASS_SIX_CARGO_GATES"},
+    {"event": "pull_request", "run_id": 35458191471, "attempt": 1, "ubuntu": "PASS_SIX_CARGO_GATES", "macos": "PASS_SIX_CARGO_GATES"}
+  ],
+  "retained_intermediate_failures": [
+    {"revision": "3ccf63d7931c3e4d3c7454edc67fe6e1b87f3a90", "category": "planner inventory rustfmt failure before tests", "resolution": "format corrected; gate retained"},
+    {"revision": "b2ba6c69aa7b3957fea4b4ce9a5010595eb23148", "category": "new inventory identified ten remaining Windows test paths", "resolution": "narrow cleanup in 4edb2d7; runtime test results not relabeled"}
+  ],
+  "review": {"observer": "planner", "kind": "scoped source-and-hosted-evidence review", "new_confirmed_in_scope_production_blockers": 0, "exhaustive_security_or_codebase_audit": false, "local_commands_rerun": false, "new_independent_local_agent_reviews": false},
+  "final_documentation_head_ci": "REQUIRED_SEPARATE_PR_CLOSURE",
+  "merge": "REQUIRES_EXACT_FINAL_HEAD_GREEN_CHECK",
+  "fresh_local_platform_audit": "REQUIRED_NOT_YET_RUN",
+  "core_and_schema_policy_changed": false,
+  "provider_auth_policy_changed": false,
+  "dependencies_changed": false,
+  "live_started": false,
+  "real_credential_reads": 0,
+  "provider_generations": 0,
+  "ledger": {"used": 31, "cap": 50, "remaining": 19, "changed": false}
+}

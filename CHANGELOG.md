@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- V1-B authenticated `wi::http_api::serve` and `wi serve --config` over RunHost/B2/SQLite,
+  with strict operator configuration and a separately provisioned shared owner bearer token.
+- Literal-loopback HTTP with Host/Origin checks, explicit workspace authority, actual
+  durable acceptance receipts, receipt-first raw retries, and addressed cancellation.
+- Closed browser projections, fixed-head history and reconnectable committed-history SSE;
+  observer loss does not cancel runs. Network shutdown drains through the original host.
+- Joined HTTP/OpenAI-loopback/tool coverage and finite dev/release/loaded observations
+  in `http_api_offline`. No real credentials or live provider traffic were used.
 - An in-process `wi::service::RunHost` that owns explicitly submitted persisted runs
   independently of weak clients, passive tickets, and acceptance/completion waiters.
 - Separate dispatch, commit-backed acceptance, and final completion boundaries.
@@ -12,6 +20,12 @@
   coverage, joined WebSocket/SSE loopback tests, and the offline `host_offline` example.
 
 ### Verification
+- V1-B is **LOCAL_VERIFIED, accepted=false** at tested implementation revision
+  `6e28cc339f25a95b78170e7c4171de48f122d07a`, with accepted baseline `16d623a`.
+  Local gates, final/remediation reviews, and exact-head push/PR CI passed on all three
+  workflow platforms. Windows reparse-point and Ctrl+C proof remains deferred.
+  See [V1-B evidence](docs/slices/v1b/VERIFICATION.md) for all 40 row dispositions,
+  first failures, attributed reviews, measurements and platform limits.
 - V1-A is complete and accepted under contract `v1a.0` at implementation head
   `fad3855db70ff4151a5c27ec3f64d04fa9097cbb`. Local gates and independent reviews passed.
 - Exact-head push run **35320097103** and pull-request run **35320100396** passed all six
@@ -22,8 +36,8 @@
   implementation evidence.
 
 ### Not included
-- V1-B network commands, client authentication, browser-safe protocol, subscriptions, GUI,
-  ordinary CLI persistence, automatic retry/failover, or automatic task resumption.
+- GUI, native TLS, device login/per-device administration, ordinary `wi run` persistence,
+  automatic retry/failover, or automatic task resumption.
 - Live/provider verification, release, or deployment.
 
 ## 0.2.0 — source milestone, 2026-09-07

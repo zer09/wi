@@ -53,10 +53,6 @@ impl Process {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        if let Some(value) = std::env::var_os("SystemRoot") {
-            command.env("SystemRoot", value);
-        }
         let mut child = command.spawn().unwrap();
         writeln!(
             child.stdin.as_mut().unwrap(),

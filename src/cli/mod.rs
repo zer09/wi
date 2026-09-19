@@ -25,6 +25,7 @@ mod generate_tests;
 #[cfg(test)]
 mod presentation_tests;
 mod run_cli;
+mod serve_cli;
 mod skills_cli;
 mod smoke;
 
@@ -46,6 +47,8 @@ enum Command {
     Generate(GenerateArgs),
     /// Run a task with workspace context, explicit skills, and optional addition tools.
     Run(run_cli::RunArgs),
+    /// Serve the authenticated headless HTTP API on loopback.
+    Serve(serve_cli::ServeArgs),
     /// Inspect local skill metadata without credentials or provider work.
     Skills(skills_cli::SkillsCommand),
     /// Demonstrate one ordinary, bounded, read-only function-tool round trip.
@@ -362,6 +365,7 @@ async fn tool_demo(args: ModelArgs) -> Result<()> {
 async fn run(cli: Cli) -> context_cli::CliResult<i32> {
     let result = match cli.command {
         Command::Run(args) => return run_cli::run(args).await,
+        Command::Serve(args) => return Ok(serve_cli::run(args).await),
         Command::Skills(args) => return skills_cli::run(args).await,
         Command::Auth(command) => command.run().await,
         Command::AuthCheck(args) => {
@@ -382,6 +386,7 @@ pub(super) async fn main() {
     let command = std::env::args_os().nth(1);
     let is_run = command.as_ref().is_some_and(|arg| arg == "run");
     let is_skills = command.as_ref().is_some_and(|arg| arg == "skills");
+    let is_serve = command.as_ref().is_some_and(|arg| arg == "serve");
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
@@ -390,7 +395,10 @@ pub(super) async fn main() {
                 _ if is_run => 1,
                 _ => error.exit_code(),
             };
-            if is_run || is_skills {
+            if is_serve && error.use_stderr() {
+                // Clap errors can quote config paths or unexpected secret-bearing arguments.
+                eprintln!("error: api.invalid_arguments");
+            } else if is_run || is_skills {
                 // Preserve diagnostic lines, but never pass argument control bytes to a terminal.
                 let text = error
                     .to_string()

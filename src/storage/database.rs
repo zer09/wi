@@ -241,12 +241,7 @@ mod tests {
     #[tokio::test]
     async fn storage_bundled_engine_settings_private_cache_and_explicit_close() {
         let temp = tempfile::tempdir().unwrap();
-        let name = if cfg!(windows) {
-            "root%3Fcache=shared"
-        } else {
-            "root?cache=shared"
-        };
-        let root = filesystem::resolve_root(temp.path().join(name)).unwrap();
+        let root = filesystem::resolve_root(temp.path().join("root?cache=shared")).unwrap();
         let lifecycle = Lifecycle::new(filesystem::acquire_lease(&root).unwrap());
         let guard = lifecycle.admit().unwrap();
         let path = root.join("catalog.sqlite3");

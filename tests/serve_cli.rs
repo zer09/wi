@@ -62,7 +62,10 @@ fn real_serve_help_and_parse_errors_are_static_without_auth() {
     let process = Process::start(command, temp.path());
     assert_eq!(
         process.line("Usage: "),
-        "wi serve --config <ABSOLUTE_JSON_FILE>"
+        format!(
+            "wi{} serve --config <ABSOLUTE_JSON_FILE>",
+            std::env::consts::EXE_SUFFIX
+        )
     );
     let (stdout, stderr) = process.finish(0);
     assert!(stderr.is_empty());

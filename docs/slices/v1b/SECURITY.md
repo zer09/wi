@@ -1,9 +1,12 @@
 # V1-B security and deployment boundary
 
-Contract **v1b.0**. Tested at `6e28cc339f25a95b78170e7c4171de48f122d07a`;
-**LOCAL_VERIFIED, accepted=false**. [Verification](VERIFICATION.md) separates local and
-hosted evidence from intentionally deferred Windows reparse-point and Ctrl+C proof. These application-service choices
-do not redesign provider OAuth or claim completed security certification.
+Contract **v1b.0**. The [original verification](VERIFICATION.md) records the local
+and hosted observations at `6e28cc339f25a95b78170e7c4171de48f122d07a`, including its
+38 PASS/2 PARTIAL disposition. The owner's September 20, 2026
+[platform policy](../../PLATFORM_SUPPORT.md) withdraws native Windows support;
+those historical Windows gaps are not relabeled PASS. Current source changes and
+merge gates are in [PLATFORM_FOLLOWUP.md](PLATFORM_FOLLOWUP.md). These application-
+service choices do not redesign provider OAuth or claim security certification.
 
 ## 1. Principal and deployment
 
@@ -27,11 +30,16 @@ including control characters; a future GUI must render it as untrusted text, not
 
 Plain HTTP is allowed only for explicit literal-loopback local development. Never provide an insecure public-bind switch or recommend sending the secret over a LAN in cleartext. Checking the configured HTTPS public origin cannot prove a proxy actually uses TLS: document that limit. Provider TLS validation and fixed subscription endpoints remain unchanged. A non-loopback TcpListener passed to the library is rejected before serving too.
 
+Native backend build/CI targets are Linux and macOS. This does not extend Linux-only
+managed-auth storage or live-provider evidence to macOS. Windows native execution is
+not supported. A browser's operating system is independent of the backend platform;
+withdrawing the Windows backend is not a ban on authorized Windows browser clients.
+
 ## 2. Secret provisioning and verification
 
 The owner provisions 32 cryptographically random bytes encoded as 64 lowercase hexadecimal ASCII characters in a private file. Accept exactly 64 characters plus at most one final LF (not CRLF, BOM, spaces, extra lines or arbitrary passwords). The binary accepts a token FILE path, never a raw token flag/environment/query value. No automatic credential creation, token-printing command or browser token persistence is added. The deployment guide describes provisioning without inserting a real secret in documentation or shell history.
 
-For Unix, this operator-only example creates a new file in a trusted private directory.
+For supported Unix hosts, this operator-only example creates a new file in a trusted private directory.
 It generates the secret inside the process and writes it directly to the file. The
 command contains no secret and prints none. `O_EXCL` refuses to overwrite an existing
 file. Replace only the placeholder paths; do not run this as an acceptance test.
@@ -44,11 +52,10 @@ uv run --no-project python -c 'import os, secrets, sys; fd = os.open(sys.argv[1]
 Keep the file and its parent private. Transfer the token only through a separately
 trusted confidential channel to authorized clients. Never print it for a report,
 put it in `curl -H` shell arguments, save it in browser URLs, or log request headers.
-No browser token-storage mechanism is supplied. On Windows, provision the same byte
-format using a trusted local secret generator and owner-only ACLs; this Unix recipe
-and Linux results are not Windows ACL/reparse execution evidence.
+No browser token-storage mechanism is supplied. Native Windows provisioning,
+reparse-point handling and ACL support have been withdrawn, not newly certified.
 
-Load once at startup with a bounded read of at most 66 bytes so oversized files are detected. Require a regular file; reject final symlinks/reparse points and special files before reading. On Unix require no group/other permission bits, using the same style of safe open as existing local sources. On Windows reject reparse points and state that root/file ACL protection is operator-owned. Do not claim protection against a hostile same-user process, hardlinks, ancestor replacement or memory inspection. Keep all verifier/config secret types redacted and not serializable.
+Load once at startup with a bounded read of at most 66 bytes so oversized files are detected. Require a regular file; reject final symlinks and special files before reading. On supported Unix hosts require no group/other permission bits, using O_NOFOLLOW/O_NONBLOCK and pre/post-open regular-file checks. Do not claim protection against a hostile same-user process, hardlinks, ancestor replacement or memory inspection. Keep all verifier/config secret types redacted and not serializable.
 
 Use existing ring::hmac for constant-time token verification: generate an ephemeral HMAC_SHA256 key via ring SystemRandom, retain its tag over the expected canonical ASCII secret, and use hmac::verify for candidates of the valid fixed format. Zeroize the temporary expected-token buffer after verifier construction. This verifier/tag/key is process-private and is never written into SQLite, logs or responses. No production OAuth token, profile alias or account marker is reused as the API credential. Do not change B2's account identity derivation.
 
@@ -92,7 +99,8 @@ Source references checked for planning on 2026-09-19:
 
 Those planning references are not implementation proof. The [local report](VERIFICATION.md)
 and [machine report](verification.json) record actual and attributed observations,
-preserve failed attempts, and identify unobserved subcases. Local loopback success is
-not public deployment, penetration-test certification, live provider approval or
-cross-platform execution evidence. Native Windows reparse/ACL and Ctrl+C behavior,
-and native macOS behavior, remain unverified in this Linux worktree.
+preserve failed attempts, and identify unobserved subcases. Their native Windows
+reparse/ACL and Ctrl+C gaps remain historical gaps, now outside supported backend
+scope. Local Linux evidence is not a local macOS execution, public deployment,
+penetration-test certification or live provider approval. Later retained-platform
+CI and source review are recorded separately in [the follow-up](PLATFORM_FOLLOWUP.md).

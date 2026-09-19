@@ -7,14 +7,23 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
-**V1-B status: LOCAL_VERIFIED at `6e28cc339f25a95b78170e7c4171de48f122d07a`; accepted=false.**
+**Native platform policy, September 20, 2026: Linux and macOS.** Native Windows
+support and its CI job have been withdrawn by the owner. Windows-only first-party
+filesystem, signal and test branches are removed; this does not prohibit a Windows
+browser from accessing a supported server. Historical Windows results below remain
+historical evidence. See [platform support](docs/PLATFORM_SUPPORT.md) and the
+[PR #9 follow-up](docs/slices/v1b/PLATFORM_FOLLOWUP.md) for scope and verification.
+
+**V1-B is implemented; its original verification is preserved separately.**
+The original source `6e28cc339f25a95b78170e7c4171de48f122d07a` was LOCAL_VERIFIED
+with 38 PASS/2 PARTIAL and accepted=false. The two partial Windows-specific subcases
+are withdrawn from current support, not retroactively passed. The PR #9 follow-up
+records the subsequent platform edits and their separate merge gates.
 `wi::http_api::serve` and `wi serve --config` provide authenticated HTTP commands,
 browser-safe history and committed-history SSE over RunHost/B2/SQLite. The service
 uses a separate shared owner token, explicit workspaces and a loopback listener.
-Remote devices require a same-host HTTPS proxy. Three fresh final complete-diff
-reviews and exact-head push/PR CI passed on Ubuntu, macOS and Windows. Windows
-reparse-point and Ctrl+C proof remains intentionally deferred. See [service usage](#authenticated-headless-http-service-v1-b)
-and [V1-B verification](docs/slices/v1b/VERIFICATION.md) for row-level limits.
+Remote devices require a same-host HTTPS proxy. See [service usage](#authenticated-headless-http-service-v1-b)
+and [original V1-B verification](docs/slices/v1b/VERIFICATION.md) for row-level limits.
 
 **P1-A status: accepted under contract p1a.0.**
 The shared `wi::storage` library records supplied validated data in per-session
@@ -42,11 +51,11 @@ identifies the exact source and hosted evidence revisions. PR #7 is merged at `5
 Ordinary `wi run` persistence, GUI, and automatic task resumption/retry remain
 unimplemented. V1-B adds the browser protocol separately over B2 and RunHost.
 
-**V1-A status: complete and accepted under contract v1a.0.**
+**V1-A status: complete, accepted and merged in PR #8 at `16d623a`.**
 Implementation head `fad3855db70ff4151a5c27ec3f64d04fa9097cbb` passed exact-head push
 run **35320097103** and pull-request run **35320100396**, including all six Cargo steps
-on Ubuntu/macOS/Windows. During acceptance preparation, PR #8 was observed open and draft,
-not merged.
+on Ubuntu/macOS/Windows. During acceptance preparation, PR #8 was observed open and draft;
+that observation is historical and predates the merge.
 The additive `wi::service` module provides an in-process `RunHost`, weak `RunClient`,
 passive run tickets, explicit session-and-run cancellation, and orderly drain-before-close
 shutdown. Dispatch is distinct from commit-backed acceptance and final completion.
@@ -161,7 +170,9 @@ upload integration, API-key billing fallback, or hosted execution.
 
 ## Build and test first
 
-Use Rust 1.94 or newer with `cargo`, Rustfmt, and Clippy.
+Use the stable Rust toolchain selected by `rust-toolchain.toml`, with Cargo,
+Rustfmt and Clippy. The current CI does not establish a separately tested minimum
+Rust version; the former Rust 1.94 statement was not a minimum-version test result.
 Storage pins SQLx 0.9.0 with only `runtime-tokio` and `sqlite-bundled`; the local
 linked SQLite is 3.51.3, also the required compatibility floor.
 
@@ -183,10 +194,10 @@ uv run scripts/verify.py
 The tests use synthetic credentials and local loopback HTTP/WebSocket servers.
 They do not read your auth files or consume your subscription. Cargo dependency
 downloads still need network access. GitHub Actions runs the six Cargo gates on
-Ubuntu, macOS and Windows. On 2026-09-12, both the
+Ubuntu and macOS under the current native support policy. On 2026-09-12, both the
 [push run](https://github.com/zer09/wi/actions/runs/34678063675) and the
-[PR run](https://github.com/zer09/wi/actions/runs/34678065367) passed every configured
-OS job at `48e23b5330ba6aa69be0bf02a4aab6c8d7226426`. These are revision-specific
+[PR run](https://github.com/zer09/wi/actions/runs/34678065367) passed every then-configured
+OS job, including Windows, at `48e23b5330ba6aa69be0bf02a4aab6c8d7226426`. These are revision-specific
 results, not a claim about later commits or live provider behavior. Node
 self-tests, Python inventory checks and executed examples are separate local
 evidence; the GitHub workflow does not run those commands. The original
@@ -427,8 +438,8 @@ OS-backed exclusive lease, `catalog.sqlite3`, and canonical session databases at
 `sessions/<first-two-hex-digits>/<session-uuid>/session.sqlite3`. SQLite uses WAL/FULL,
 foreign keys, an untrusted schema, private caches and zero busy timeout. Connections
 open per operation and close before operation ownership ends; idle handles retain
-no SQLite worker. Unix files/directories are private. Windows ACL protection is
-caller-owned; native Windows/macOS behavior remains unverified locally.
+no SQLite worker. Unix files/directories remain private. Native Windows is unsupported;
+hosted platform results and local Linux observations are separate evidence.
 
 New sessions use database schema 2. Explicit `open_session()` lazily migrates valid
 schema-1 files transactionally, preserving original history bytes, identities and
@@ -591,7 +602,7 @@ not permission to make a live request.
 - Catalog pages are an as-of index, not live task truth. Use canonical session/run
   reads and explicit catalog refresh. New session/task work requires the current
   workspace allowlist; retired histories remain readable.
-- Unix SIGINT/SIGTERM and Windows Ctrl+C initiate drain-before-close shutdown.
+- SIGINT/SIGTERM on Linux/macOS initiate drain-before-close shutdown.
   Normal network termination plus host `Closed` exits 0; startup/serving/incomplete
   shutdown exits 1. Help exits 0; malformed `serve` arguments exit 2 with static
   diagnostics. No browser launches. Restart/reconnect never resumes an old task.
@@ -599,7 +610,8 @@ not permission to make a live request.
 No GUI, native TLS, device auth, deployment, new agent loop, task queue, automatic
 retry/failover or lifetime history cap is included. The [API](docs/slices/v1b/API.md)
 and [security boundary](docs/slices/v1b/SECURITY.md) define the wire and operator limits.
-Linux results do not establish native Windows/macOS behavior or security certification.
+Local Linux observations do not establish macOS live-provider behavior or security certification;
+retained-platform hosted checks and the native Windows withdrawal are recorded separately.
 
 The offline example uses actual authenticated loopback TCP, RunHost, SQLite, a
 scripted provider and real AddNumbers. It exercises acceptance before completion,
@@ -614,8 +626,9 @@ cargo run --locked --offline --example http_api_offline -- --loaded
 The dev/release/loaded outputs are finite timing and IO observations, not an SLA,
 RSS bound or benchmark comparison. The loaded fixture uses 40 records/10 MiB,
 four readers and 64 rejects/polls, not a runtime quota. See
-[V1-B evidence](docs/slices/v1b/VERIFICATION.md) and its
-[machine report](docs/slices/v1b/verification.json). Final acceptance remains pending.
+[original V1-B evidence](docs/slices/v1b/VERIFICATION.md), its
+[machine report](docs/slices/v1b/verification.json), and the separate
+[platform/merge follow-up](docs/slices/v1b/PLATFORM_FOLLOWUP.md).
 
 ## Experimental Wi browser login
 
@@ -670,9 +683,9 @@ reader does not access the keyring or modify your credential-storage settings.
 Use file-backed credentials only deliberately, or retain the existing client as
 your auth/runtime owner. API-key auth files are rejected, not silently reused.
 
-The file must be a regular file. On Unix it must exclude group/other permissions;
-the final path component is opened with `O_NOFOLLOW`. Protect its parent directory
-as well. Windows ACLs are not validated by this milestone. Paths are supplied by
+The file must be a regular file. On supported Unix hosts it must exclude group/other
+permissions; the final path component is opened with `O_NOFOLLOW`. Protect its parent
+directory as well. Native Windows is not supported. Paths are supplied by
 a trusted local caller; do not accept credential paths from remote HTTP users.
 
 The external-source reader never logs, writes, copies, or refreshes credentials.

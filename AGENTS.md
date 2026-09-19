@@ -1,81 +1,81 @@
-# Wi: current V1-B verified implementation handoff
+# Wi: V1-B review and native-platform follow-up
 
-Active contract: **v1b.0**. Accepted runtime baseline:
-`16d623a3317abc7796ec203e4fe15d580791a769` (V1-A merged, PR #8).
-The HTTP service and `wi serve --config` are committed at tested revision
-`6e28cc339f25a95b78170e7c4171de48f122d07a`.
-Status: **LOCAL_VERIFIED, accepted=false** because two Windows-specific subcases remain
-intentionally deferred. See
-[verification](docs/slices/v1b/VERIFICATION.md) and its
-[JSON](docs/slices/v1b/verification.json) for all 40 row dispositions and limits.
-Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
-push 35448837331 and pull_request 35448839843 passed six Cargo steps on Ubuntu,
-macOS and Windows. The planning commit itself contains no network-service implementation.
+The V1-B HTTP implementation is present in PR #9. Accepted runtime foundation:
+`16d623a3317abc7796ec203e4fe15d580791a769` (V1-A merge).
+Original submitted head: `f0adbddc31cc1f967ccb2df68c3481b2c7ff5b53`.
+Platform-cleanup source: `4edb2d73a6c52b6617feecb60d18cfab0c510150`.
+Its push 35458188836 and PR 35458191471 each passed all six Cargo gates on
+Ubuntu and macOS. This statement is exact-source CI, not local execution or
+CI for a later documentation head. Check the actual current PR state before
+claiming a merge. Do not resume old implementation prompts automatically.
 
-Read docs/slices/v1b/CONTRACT.md, API.md, SECURITY.md, MATRIX.md, VALIDATION.md
-and IMPLEMENTOR_PROMPT.md before editing. Read the current verification reports too.
-The frozen contract/matrix/validation retain plan-time NOT RUN statements; do not
-rewrite them as current evidence. The [slice index](docs/slices/README.md)
-separates the active task from completed milestones. Follow the fixed assignment,
-not a new architecture exercise. Check actual HEAD/ancestry and all worktree files;
-preserve owner changes, including staged/untracked work. No reset, clean, forced
-checkout, unsolicited stash or historical evidence rewrite.
+## Current owner decision
 
-## Accepted baseline
+Native Windows backend support is withdrawn as of September 20, 2026.
+Read docs/PLATFORM_SUPPORT.md and docs/slices/v1b/PLATFORM_FOLLOWUP.md first.
+Linux/macOS CI and their six existing Cargo gates remain. No native Windows
+runner, first-party reparse-point/signal implementation or Windows-only test
+accommodation should be restored. Third-party lockfile target metadata and
+historical Windows test results are not first-party platform support.
+This does not ban Windows browser clients or change Linux-in-WSL semantics.
+Existing Linux-only managed-auth filesystem behavior remains Linux-only; no
+new macOS auth or live-provider guarantee follows from Cargo CI.
 
-P1-B2/B2-E01 merged in PR #7 at50f4dff. V1-A implements RunHost, weak clients,
-passive tickets, actual post-commit acceptance, explicit addressed cancellation
-and run drain before storage close. Source fad3855db70ff4151a5c27ec3f64d04fa9097cbb,
-evidence c828f8a0e1164aea4731ba8784c3c0e838e962b4, merge16d623a. Exact-head push
-35325229157 and PR35325232536, both attempt2, passed six Cargo steps on Ubuntu,
-macOS and Windows. The merge tree equals that head. First-attempt watchdog failures
-remain reliability observations, not proven fixed; local750 Rust/6 helpers/152Node
-and examples/reviews remain attributed evidence, not new test-count targets.
+The original V1-B report remains LOCAL_VERIFIED, accepted=false, 38 PASS/2 PARTIAL
+at its original source. V1B-03's Windows token proof and V1B-33's Windows Ctrl+C
+proof are withdrawn from current applicability, not retroactively executed.
+All non-Windows assertions, privacy checks and core behavior remain required.
+Frozen CONTRACT/MATRIX/VALIDATION/IMPLEMENTOR_PROMPT and old verification reports
+are historical evidence. The dated support policy supersedes only their platform
+applicability; it does not authorize skipping remaining tests or new features.
 
-Gateway/managed auth, M3/C1, S1/S2, R1/NB-02, P1-A storage, B1 capture and B2 replay
-remain completed. Do not revive old prompts, budgets, hosted skills or unfinished-
-work replay. Empty application session has no old model context. A fresh provider
-connection may restore compatible history from the selected existing conversation.
-Incomplete/unbound history stays readable without automatic repair or account adoption.
+## Required fresh-agent check
 
-## Current scope
+Before the next authorized feature, independently inspect the complete accumulated
+change from f0adbdd through the accepted follow-up, including tracked/untracked work.
+Run `cargo test --test platform_support`, manually audit native-platform branches,
+process launchers, suffix/path alternatives, filesystem and signal code, current
+usage/security documentation and retained CI. A lexical scan alone is not proof
+of complete removal. Check that Unix permission/no-follow/hardlink/signal tests
+were preserved and the retired Windows-only tests were not shared regressions.
+Run the normal six Cargo gates, `uv run scripts/verify.py`, Node self-tests and all
+eight offline examples. Record actual commands and counts separately from historical
+ones. Preserve failures and report any residual discrepancy before broadening scope.
 
-Preserve the headless authenticated HTTP service over the shared library, not a GUI,
-second agent loop, subprocess wrapper, task queue or replacement storage engine.
-HTTP JSON commands and canonical-history SSE use the existing host/B2/store. Return
-actual acceptance receipts, isolate observers, preserve raw-command duplicate identity
-and current provider/account protections. Keep native/binding/credential internals
-out of browser views; page/cursor data comes from committed storage, not live queues.
+## Fixed foundation and invariants
 
-The first service uses a separately provisioned shared owner bearer token, explicit
-workspace allowlist, loopback listener and documented same-host HTTPS proxy for
-remote devices. This is a new service-client boundary, not provider OAuth/billing.
-No insecure public HTTP, cookie/device login, native TLS or deployment is included.
-Only the specified Axum direct dependency and necessary transitive additions are allowed.
-Core APIs/database schemas and existing CLI commands remain compatible.
+Gateway/managed auth, M3/C1, S1/S2, R1/NB-02, P1-A storage, B1 capture, B2 replay
+and V1-A ownership remain accepted dependencies. V1-B uses HTTP JSON plus committed-
+history SSE over RunHost/B2/SQLite. Dispatch, durable acceptance and actual completion
+remain different. Dropping HTTP clients/tickets/readers never cancels the host run.
+Cancellation is explicit and session/run addressed; shutdown drains while storage
+is writable before closing it. Restart performs no model/tool/task resumption.
+Empty application conversations have empty replay; a fresh provider connection is
+not a new application conversation. Incomplete/unbound history remains readable
+without automatic repair, truncation, account adoption or reexecution.
 
-Actual HTTP -> RunHost -> B2 -> SQLite -> OpenAI loopback -> real tools is mandatory
-acceptance evidence. Separate component tests do not satisfy the joined rows.
-Shutdown may close network waiters, never abort core runs or owned SQL; observe the
-existing host outcome and quarantine. No task resumes on service restart.
+Service authentication is a separate provisioned owner bearer secret, not provider
+OAuth or API billing. Preserve loopback binding, same-host HTTPS proxy requirements,
+authorized workspaces, strict request parsing and closed browser projections.
+Core APIs and sessionDB2/catalog1/stored1/runtime2/provider1 are unchanged.
+No RunLimits, optional budgets, global call quotas, whole-task deadlines, lifetime
+history caps, deletion, retries/failover, hosted skills, new executors/providers,
+permission framework or unrelated reorganization follows from this task.
 
-## Verification and authorization
+## Evidence and authority
 
-The local Cargo/verifier/Node/example gates, increment/final/remediation review gates
-and exact-head hosted CI passed as attributed in the reports. V1B-03 and V1B-33 stay
-PARTIAL for intentionally deferred Windows reparse-point and Ctrl+C proof.
-Maintain docs/slices/v1b/VERIFICATION.md and verification.json from actual observations
-under the fixed 40-row matrix. Do not treat LOCAL_VERIFIED as acceptance. Do not label source review as execution, reruns as unique tests, old
-CI as new-head CI, or loopback as live/provider approval. Preserve failed attempts.
+Read the current V1-B API and SECURITY documents, then frozen requirements and
+original VERIFICATION.md/verification.json plus the separate platform follow-up.
+Source review is not test execution; same-SHA rerun success is not a fixed-flake
+claim; old fingerprints apply to their original snapshots, not changed source.
+Current source/CI observations are separate from local implementation and reviewer
+reports. No new independent local-agent review was performed by the planner.
 
-Synthetic roots/skills/owner and provider secrets, loopbacks and scripted providers
-only. No real credentials/private skills, auth commands or provider requests.
-Ledger31/50 used,19 remaining; balance is not permission. Build-cache/dependency
-traffic is development work. Implementation Git writes, merge, release/deployment
-and later milestones require separate owner authorization.
-
-No RunLimits/optional replacement budget/global call quotas/task deadlines, lifetime
-session/history cap, deletion/retention policy, auto-resume, retry/failover, hosted
-skills/API billing, new executors/providers/schema/store, permissions framework,
-GUI, native TLS, per-device administration or unrelated reorganization. Report any
-genuine contract/source conflict with exact producer/consumer evidence before widening scope.
+The owner authorized PR #9 support-policy/code/docs commits and conditional merge.
+Any next local implementation commit/push/merge/release/deployment needs its own
+permission. The planner's follow-up does not grant live access. Use synthetic roots,
+skills, owner/provider credentials and loopback/scripted providers only. No real
+credentials/private skills, auth commands or provider generations. Ledger remains
+31/50 used, 19 remaining; balance is not authorization. Preserve owner work; no reset,
+clean, forced checkout or unsolicited stash. Report exact producer/consumer evidence
+for a genuine contract conflict instead of inventing another architecture.

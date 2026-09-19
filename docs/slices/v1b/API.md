@@ -1,17 +1,21 @@
 # V1-B API and committed-history protocol
 
 Contract **v1b.0**, baseline `16d623a3317abc7796ec203e4fe15d580791a769`.
-Implemented and tested at `6e28cc339f25a95b78170e7c4171de48f122d07a`.
-Status: **LOCAL_VERIFIED, accepted=false**. [Verification](VERIFICATION.md) records
-38 PASS/2 PARTIAL, final review and exact-head hosted CI. Windows reparse-point and
-Ctrl+C proof remains intentionally deferred. CONTRACT.md and SECURITY.md also govern. Frozen planning documents
-retain their original 2026-09-19 statuses.
+The HTTP implementation is present. [Original verification](VERIFICATION.md)
+records source `6e28cc339f25a95b78170e7c4171de48f122d07a`, LOCAL_VERIFIED,
+accepted=false and 38 PASS/2 PARTIAL. That historical record is not rewritten.
+The owner's September 20, 2026 [platform policy](../../PLATFORM_SUPPORT.md)
+withdraws native Windows support. The two Windows-specific proof gaps are
+withdrawn requirements, not passing tests. See [the follow-up](PLATFORM_FOLLOWUP.md)
+for later source changes and merge gates. CONTRACT.md and SECURITY.md also govern;
+frozen planning documents retain their original statuses except where the dated
+owner policy explicitly supersedes platform applicability.
 
 ## 0. Starting the service
 
-`wi serve --config <absolute-json-file>` starts the headless service. The config is
-a regular UTF-8 JSON file, at most 1 MiB (`MAX_INPUT_BYTES`). Final symlinks/reparse
-points and special files are rejected. Unknown fields, duplicate fields, missing
+`wi serve --config <absolute-json-file>` starts the headless service on Linux/macOS.
+The config is a regular UTF-8 JSON file, at most 1 MiB (`MAX_INPUT_BYTES`). Final
+symlinks and special files are rejected. Unknown fields, duplicate fields, missing
 fields, invalid options and non-UTF-8 input fail with static errors. All 12 fields
 are required; only `account` accepts null. There are no implicit config defaults.
 
@@ -63,11 +67,12 @@ Startup validates config/options/paths/token, binds the listener, constructs the
 managed provider without listing/selecting/reading/refreshing profiles, then opens
 storage and constructs RunHost. An explicit task can subsequently open managed
 provider credentials under the existing auth policy. The service bearer token is
-not a provider credential.
+not a provider credential. Platform withdrawal does not extend the existing
+Linux-specific managed-auth filesystem implementation or its live evidence to macOS.
 
 The process writes `api.listening <actual-address>` and static shutdown/error
 categories to stderr, not config contents, token values or credential paths.
-Unix SIGINT/SIGTERM and Windows Ctrl+C initiate owner shutdown. The service closes
+SIGINT/SIGTERM on Linux/macOS initiate owner shutdown. The service closes
 network waiters, cancels/drains host-owned work with storage writable, and awaits
 HTTP drain plus the original host outcome. No shutdown deadline is added.
 
@@ -84,8 +89,8 @@ in [SECURITY.md](SECURITY.md#1-principal-and-deployment). No GUI, native TLS, de
 login, deployment, task queue or automatic resumption is included. Ordinary
 `wi run` remains nonpersistent.
 
-Implementation references: `src/http_api/config.rs:164-237`,
-`src/cli/serve_cli.rs:65-188`, `src/cli/mod.rs:385-417`.
+Implementation references: `src/http_api/config.rs`,
+`src/cli/serve_cli.rs`, `src/cli/mod.rs`.
 
 ## 1. Wire rules
 

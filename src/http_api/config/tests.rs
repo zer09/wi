@@ -241,7 +241,14 @@ fn canonical_workspaces_deduplicate_and_reject_alias_replacement() {
     );
     assert_eq!(before, std::env::current_dir().unwrap());
     let invalid_utf8 = temp.path().join(std::ffi::OsString::from_vec(vec![0xff]));
-    fs::create_dir(&invalid_utf8).unwrap();
+    if let Err(error) = fs::create_dir(&invalid_utf8) {
+        // APFS can reject this name before the configuration code can inspect it.
+        if cfg!(target_os = "macos") && error.raw_os_error() == Some(libc::EILSEQ) {
+            eprintln!("invalid-UTF8 workspace fixture unavailable: filesystem rejects the name");
+            return;
+        }
+        panic!("creating invalid-UTF8 workspace fixture failed: {error}");
+    }
     assert!(
         ApiSettings::new(
             "https://example.test",

@@ -24,9 +24,22 @@ const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789a
 const ORIGIN: &str = "https://wi.example.test";
 
 async fn watchdog<T>(future: impl Future<Output = T>) -> T {
-    tokio::time::timeout(Duration::from_secs(15), future)
+    // Hosted runners can delay disk-backed completion; this bounds tests, not runs.
+    tokio::time::timeout(Duration::from_secs(60), future)
         .await
         .expect("HTTP test watchdog")
+}
+
+#[tokio::test(start_paused = true)]
+async fn watchdog_tolerates_slow_progress_but_still_bounds_stalls() {
+    watchdog(tokio::time::sleep(Duration::from_secs(30))).await;
+
+    let started = tokio::time::Instant::now();
+    let stalled = tokio::spawn(watchdog(std::future::pending::<()>()))
+        .await
+        .unwrap_err();
+    assert!(stalled.is_panic());
+    assert_eq!(started.elapsed(), Duration::from_secs(60));
 }
 
 struct Server {

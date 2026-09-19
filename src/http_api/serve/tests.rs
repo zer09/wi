@@ -119,6 +119,10 @@ impl Server {
 
     async fn start(temp: tempfile::TempDir, host: RunHost) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Self::start_on(temp, host, listener).await
+    }
+
+    async fn start_on(temp: tempfile::TempDir, host: RunHost, listener: TcpListener) -> Self {
         let address = listener.local_addr().unwrap();
         let config = config(&temp);
         let stop = CancellationToken::new();

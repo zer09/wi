@@ -40,23 +40,37 @@ async fn shutdown_drains_stalled_body_idle_sse_and_idle_socket() {
 
 #[tokio::test]
 async fn shutdown_wakes_nonreading_large_response_without_client_drop() {
-    let server = Server::new().await;
+    let temp = tempfile::tempdir().unwrap();
+    let store = SessionStore::open(temp.path().join("root")).await.unwrap();
+    let host = RunHost::new(store, Arc::new(Gateway::new())).unwrap();
+    // Small socket buffers force backpressure without a large database fixture.
+    let listener = tokio::net::TcpSocket::new_v4().unwrap();
+    listener.set_send_buffer_size(4096).unwrap();
+    listener.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let server = Server::start_on(temp, host, listener.listen(8).unwrap()).await;
     let session = session(&server.host).await;
     let title = "x".repeat(256 * 1024);
-    // A finite test response larger than the socket buffers, not a runtime limit.
-    for _ in 0..48 {
-        session
-            .rename(OperationId::new(), title.clone())
-            .await
-            .unwrap();
-    }
+    session
+        .rename(OperationId::new(), title.clone())
+        .await
+        .unwrap();
     let socket = tokio::net::TcpSocket::new_v4().unwrap();
     socket.set_recv_buffer_size(4096).unwrap();
     let mut slow = socket.connect(server.address).await.unwrap();
     slow.write_all(format!("GET /v1/sessions/{}/history?limit=128 HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {TOKEN}\r\n\r\n", session.session_id(), server.address).as_bytes()).await.unwrap();
     assert!(headers(&mut slow).await.starts_with("HTTP/1.1 200"));
-    watchdog(server.hooks.write_pending.notified()).await;
-    assert!(server.hooks.written.load(Ordering::SeqCst) < 48 * title.len());
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            server.hooks.write_pending.notified()
+        )
+        .await
+        .is_ok(),
+        "pending response write was not reported after {} bytes",
+        server.hooks.written.load(Ordering::SeqCst)
+    );
+    let written = server.hooks.written.load(Ordering::SeqCst);
+    assert!(written > 0 && written < title.len());
     let (outcome, _temp) = server.finish().await;
     closed(&outcome);
     // The server returned without waiting for the client to read or close its TCP socket.

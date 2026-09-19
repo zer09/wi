@@ -118,7 +118,8 @@ impl AsyncWrite for ClosingIo {
             if let Poll::Ready(Ok(bytes)) = result {
                 self.hooks.written.fetch_add(bytes, Ordering::SeqCst);
             }
-            if result.is_pending() && self.hooks.written.load(Ordering::SeqCst) > 1024 * 1024 {
+            // Small socket buffers can stall below 1 MiB; require progress, not a byte threshold.
+            if result.is_pending() && self.hooks.written.load(Ordering::SeqCst) > 0 {
                 self.hooks.write_pending.notify_one();
             }
         }

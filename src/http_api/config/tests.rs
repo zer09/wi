@@ -201,18 +201,26 @@ fn config_regular_utf8_bounded_read_and_missing_skill_root() {
 fn canonical_workspaces_deduplicate_and_reject_alias_replacement() {
     use std::os::unix::{ffi::OsStringExt, fs::symlink};
     let temp = tempfile::tempdir().unwrap();
-    let workspace = temp.path().join("workspace");
+    // Exercise a noncanonical parent even when the platform's temp root has no alias.
+    let root_alias = temp.path().join("root-alias");
+    symlink(temp.path(), &root_alias).unwrap();
+    let workspace = root_alias.join("workspace");
     let other = temp.path().join("other");
     let alias = temp.path().join("alias");
     fs::create_dir(&workspace).unwrap();
     fs::create_dir(&other).unwrap();
     symlink(&workspace, &alias).unwrap();
+    let canonical_workspace = fs::canonicalize(&workspace).unwrap();
     let before = std::env::current_dir().unwrap();
     let mut value = fixture(temp.path());
     value["workspaces"] = json!([workspace, alias, workspace.join(".")]);
     let config = parse(&value).unwrap();
     let settings = config.settings();
-    assert_eq!(settings.workspaces(), &[workspace.to_str().unwrap()]);
+    assert_eq!(
+        settings.workspaces(),
+        &[canonical_workspace.to_str().unwrap()]
+    );
+    assert!(settings.workspace(workspace.to_str().unwrap()).is_none());
     assert!(settings.workspace(alias.to_str().unwrap()).is_none());
     assert!(
         settings
@@ -221,14 +229,14 @@ fn canonical_workspaces_deduplicate_and_reject_alias_replacement() {
     );
     assert!(
         settings
-            .revalidate_workspace(workspace.to_str().unwrap())
+            .revalidate_workspace(canonical_workspace.to_str().unwrap())
             .is_ok()
     );
     fs::rename(&workspace, temp.path().join("moved")).unwrap();
     symlink(&other, &workspace).unwrap();
     assert!(
         settings
-            .revalidate_workspace(workspace.to_str().unwrap())
+            .revalidate_workspace(canonical_workspace.to_str().unwrap())
             .is_err()
     );
     assert_eq!(before, std::env::current_dir().unwrap());

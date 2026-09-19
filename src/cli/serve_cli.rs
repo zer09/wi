@@ -160,17 +160,6 @@ fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<()>>> {
     })
 }
 
-#[cfg(windows)]
-fn shutdown_signal() -> io::Result<impl Future<Output = io::Result<()>>> {
-    let mut interrupt = tokio::signal::windows::ctrl_c()?;
-    Ok(async move {
-        interrupt
-            .recv()
-            .await
-            .ok_or_else(|| io::Error::other("signal stream closed"))
-    })
-}
-
 pub(super) async fn run(args: ServeArgs) -> i32 {
     match handle(
         args,

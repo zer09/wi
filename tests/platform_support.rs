@@ -23,7 +23,10 @@ fn inspect(directory: &Path, root: &Path, findings: &mut Vec<String>) {
             continue;
         }
         let source = fs::read_to_string(&path).expect("read UTF-8 source");
-        let compact: String = source.chars().filter(|value| !value.is_whitespace()).collect();
+        let compact: String = source
+            .chars()
+            .filter(|value| !value.is_whitespace())
+            .collect();
         let markers = [
             "cfg(windows)",
             "cfg!(windows)",

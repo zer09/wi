@@ -1,10 +1,9 @@
 //! Local skill discovery and run preparation from explicit, host-selected roots.
 //!
 //! Roots belong to a trusted owner. Descendant links and special files are
-//! rejected before reads. Unix final opens use O_NOFOLLOW and O_NONBLOCK;
-//! Windows final opens retain reparse points so they can be rejected. Other
-//! platforms have only pre/post-open checks. Ancestor replacement races remain:
-//! this is not a hostile-filesystem sandbox or a hardlink-isolation boundary.
+//! rejected before reads. Unix final opens use O_NOFOLLOW and O_NONBLOCK.
+//! Ancestor replacement races remain: this is not a hostile-filesystem sandbox
+//! or a hardlink-isolation boundary.
 
 mod frontmatter;
 mod preparation;
@@ -356,12 +355,6 @@ impl SkillSource {
             use std::os::unix::fs::OpenOptionsExt;
             options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            // FILE_FLAG_OPEN_REPARSE_POINT opens the link, not its target.
-            options.custom_flags(0x0020_0000);
-        }
         let file = options
             .open(path)
             .map_err(|_| ContextErrorKind::ReadFailed)?;
@@ -374,13 +367,6 @@ impl SkillSource {
 }
 
 fn is_link(meta: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // Includes directory junctions, not just symbolic links.
-        meta.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
     meta.file_type().is_symlink()
 }
 

@@ -17,12 +17,6 @@ fn acceptable(meta: &Metadata, private: bool) -> bool {
 }
 
 fn is_link(meta: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        meta.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
     meta.file_type().is_symlink()
 }
 
@@ -37,11 +31,6 @@ pub(super) fn open_regular(path: &Path, private: bool) -> Result<File, ()> {
         use std::os::unix::fs::OpenOptionsExt;
         // A replacement link or FIFO must not redirect or block the startup read.
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
     }
     let file = options.open(path).map_err(|_| ())?;
     if !acceptable(&file.metadata().map_err(|_| ())?, private) {

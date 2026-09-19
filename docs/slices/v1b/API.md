@@ -1,10 +1,10 @@
 # V1-B API and committed-history protocol
 
 Contract **v1b.0**, baseline `16d623a3317abc7796ec203e4fe15d580791a769`.
-Implemented in the uncommitted worktree based on `d3ee103ae94dcc80bf40934d1b937096f47922fc`.
+Implemented and tested at `6e28cc339f25a95b78170e7c4171de48f122d07a`.
 Status: **LOCAL_VERIFIED, accepted=false**. [Verification](VERIFICATION.md) records
-row-level evidence and limits; final complete-diff review and exact-head hosted CI
-remain pending. CONTRACT.md and SECURITY.md also govern. Frozen planning documents
+38 PASS/2 PARTIAL, final review and exact-head hosted CI. Windows reparse-point and
+Ctrl+C proof remains intentionally deferred. CONTRACT.md and SECURITY.md also govern. Frozen planning documents
 retain their original 2026-09-19 statuses.
 
 ## 0. Starting the service

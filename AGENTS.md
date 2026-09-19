@@ -1,15 +1,16 @@
-# Wi: current V1-B local verification handoff
+# Wi: current V1-B verified implementation handoff
 
 Active contract: **v1b.0**. Accepted runtime baseline:
 `16d623a3317abc7796ec203e4fe15d580791a769` (V1-A merged, PR #8).
-The HTTP service and `wi serve --config` are implemented in the unstaged/untracked
-worktree over planning HEAD `d3ee103ae94dcc80bf40934d1b937096f47922fc`.
-Status: **LOCAL_VERIFIED, accepted=false, tested_revision=null**. See
+The HTTP service and `wi serve --config` are committed at tested revision
+`6e28cc339f25a95b78170e7c4171de48f122d07a`.
+Status: **LOCAL_VERIFIED, accepted=false** because two Windows-specific subcases remain
+intentionally deferred. See
 [verification](docs/slices/v1b/VERIFICATION.md) and its
 [JSON](docs/slices/v1b/verification.json) for all 40 row dispositions and limits.
 Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
-hosted CI remains pending separate commit/push authorization. The planning commit
-itself contains no network-service implementation or acceptance result.
+push 35448837331 and pull_request 35448839843 passed six Cargo steps on Ubuntu,
+macOS and Windows. The planning commit itself contains no network-service implementation.
 
 Read docs/slices/v1b/CONTRACT.md, API.md, SECURITY.md, MATRIX.md, VALIDATION.md
 and IMPLEMENTOR_PROMPT.md before editing. Read the current verification reports too.
@@ -60,9 +61,9 @@ existing host outcome and quarantine. No task resumes on service restart.
 
 ## Verification and authorization
 
-The local Cargo/verifier/Node/example gates, increment review gates and three fresh
-final complete-diff reviews passed as attributed in the reports. Exact-head hosted CI
-still requires separate commit/push authorization.
+The local Cargo/verifier/Node/example gates, increment/final/remediation review gates
+and exact-head hosted CI passed as attributed in the reports. V1B-03 and V1B-33 stay
+PARTIAL for intentionally deferred Windows reparse-point and Ctrl+C proof.
 Maintain docs/slices/v1b/VERIFICATION.md and verification.json from actual observations
 under the fixed 40-row matrix. Do not treat LOCAL_VERIFIED as acceptance. Do not label source review as execution, reruns as unique tests, old
 CI as new-head CI, or loopback as live/provider approval. Preserve failed attempts.

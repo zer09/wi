@@ -25,9 +25,9 @@ records the exact review, attempts and scope.
 ## Local verification: V1-B authenticated HTTP service
 
 Contract **v1b.0**, accepted baseline `16d623a3317abc7796ec203e4fe15d580791a769`.
-The implementation is unstaged/untracked over planning HEAD
-`d3ee103ae94dcc80bf40934d1b937096f47922fc`. Status: **LOCAL_VERIFIED, accepted=false**;
-no tested commit, new-head hosted CI, deployment or live-provider acceptance is claimed.
+The tested implementation is `6e28cc339f25a95b78170e7c4171de48f122d07a`.
+Status: **LOCAL_VERIFIED, accepted=false** because Windows reparse-point and Ctrl+C
+proof remains intentionally deferred. No deployment or live-provider acceptance is claimed.
 
 `wi::http_api::serve` and `wi serve --config` compose authenticated HTTP commands
 and committed-history SSE over RunHost/B2/SQLite. The service uses a separately
@@ -52,8 +52,9 @@ as-of indexes. Restart/reconnect never resumes an old task.
   Their original NOT RUN text is not the current verification disposition.
 
 Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
-hosted CI remains NOT_RUN. No GUI, native TLS, per-device auth, deployment or
-ordinary `wi run` persistence is included.
+push 35448837331 and pull_request 35448839843 passed all six Cargo steps on Ubuntu,
+macOS and Windows. No GUI, native TLS, per-device auth, deployment or ordinary
+`wi run` persistence is included.
 
 ## Accepted: V1-A service-owned execution
 

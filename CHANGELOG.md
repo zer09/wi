@@ -20,9 +20,10 @@
   coverage, joined WebSocket/SSE loopback tests, and the offline `host_offline` example.
 
 ### Verification
-- V1-B is **LOCAL_VERIFIED, accepted=false** in the uncommitted worktree over planning
-  HEAD `d3ee103ae94dcc80bf40934d1b937096f47922fc`, with accepted baseline `16d623a`.
-  Local gates and three fresh final complete-diff reviews passed. Exact-head hosted CI remains NOT_RUN.
+- V1-B is **LOCAL_VERIFIED, accepted=false** at tested implementation revision
+  `6e28cc339f25a95b78170e7c4171de48f122d07a`, with accepted baseline `16d623a`.
+  Local gates, final/remediation reviews, and exact-head push/PR CI passed on all three
+  workflow platforms. Windows reparse-point and Ctrl+C proof remains deferred.
   See [V1-B evidence](docs/slices/v1b/VERIFICATION.md) for all 40 row dispositions,
   first failures, attributed reviews, measurements and platform limits.
 - V1-A is complete and accepted under contract `v1a.0` at implementation head

@@ -7,12 +7,13 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
-**V1-B status: LOCAL_VERIFIED in the uncommitted worktree; accepted=false.**
+**V1-B status: LOCAL_VERIFIED at `6e28cc339f25a95b78170e7c4171de48f122d07a`; accepted=false.**
 `wi::http_api::serve` and `wi serve --config` provide authenticated HTTP commands,
 browser-safe history and committed-history SSE over RunHost/B2/SQLite. The service
 uses a separate shared owner token, explicit workspaces and a loopback listener.
 Remote devices require a same-host HTTPS proxy. Three fresh final complete-diff
-reviews passed; exact-head hosted CI remains NOT_RUN. See [service usage](#authenticated-headless-http-service-v1-b)
+reviews and exact-head push/PR CI passed on Ubuntu, macOS and Windows. Windows
+reparse-point and Ctrl+C proof remains intentionally deferred. See [service usage](#authenticated-headless-http-service-v1-b)
 and [V1-B verification](docs/slices/v1b/VERIFICATION.md) for row-level limits.
 
 **P1-A status: accepted under contract p1a.0.**

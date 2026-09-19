@@ -1,45 +1,43 @@
-# Wi V1-B local verification
+# Wi V1-B verification
 
 Contract **v1b.0**. Evidence recorded 2026-09-19.
-**LOCAL_VERIFIED; accepted=false; tested_revision=null.** This reports a dirty
-worktree, not an accepted implementation commit, security certification or deployment.
-The [machine report](verification.json) is the structured evidence record.
+**LOCAL_VERIFIED; accepted=false; tested_revision=6e28cc339f25a95b78170e7c4171de48f122d07a.**
+This is a committed implementation with exact-head hosted evidence, but it is not
+accepted because two Windows-specific subcases remain intentionally deferred. It is
+not a security certification or deployment. The [machine report](verification.json)
+is the structured evidence record.
 
-Current disposition: **37 PASS, 3 PARTIAL, 40 rows**. Only V1B-03, V1B-33 and
-V1B-39 remain PARTIAL. Persisted reference-reducer assertions close V1B-18;
-the complete post-remediation loaded sample closes V1B-37.
-Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
-hosted CI remains NOT_RUN pending separately authorized commit and push.
+Current disposition: **38 PASS, 2 PARTIAL, 40 rows**. Only V1B-03 and V1B-33
+remain PARTIAL. Persisted reference-reducer assertions close V1B-18; the complete
+loaded sample closes V1B-37. Three fresh final complete-diff reviews passed with no
+blocking findings. Exact-head push `35448837331` and pull_request `35448839843`
+passed all six Cargo steps on Ubuntu, macOS and Windows.
 
 ## 1. Revision, scope and preservation
 
 - Accepted baseline: `16d623a3317abc7796ec203e4fe15d580791a769`, V1-A merged in PR #8.
-- Planning/current HEAD: `d3ee103ae94dcc80bf40934d1b937096f47922fc`.
-  The baseline is an ancestor. HEAD does not contain the uncommitted implementation.
-- Initial documentation intake had 5 modified tracked and 50 untracked implementation
-  files. After the test-only remediation, synchronization intake has **5 modified
-  tracked files, 51 untracked implementation files, 0 staged files**. The inventory
-  includes every new module, test and example, not just `git diff` output.
-- This synchronization changes only `docs/slices/v1b/VERIFICATION.md` and
-  `docs/slices/v1b/verification.json`. Existing current summaries still describe the
-  pending reviews correctly and contain no obsolete row counts. They are unchanged.
-  API.md, SECURITY.md, all source/tests/examples/manifests/lockfiles and frozen
-  documents are preserved.
-- No staging, unstaging, commit, push, reset, clean, stash, hosted-service write,
+- Tested implementation head: `6e28cc339f25a95b78170e7c4171de48f122d07a`.
+  The accepted V1-A baseline and planning commit are ancestors.
+- Initial implementation intake had 5 modified tracked and 50 untracked files. The
+  implementation, reducer remediation and three hosted-CI remediation commits are now
+  committed. The final source inventory contains all 56 implementation paths.
+- This synchronization changes only current status/evidence documentation. Source,
+  tests, examples, manifests, lockfiles and frozen planning documents remain identical
+  to the tested implementation head.
+- Authorized commits and pushes occurred only for this V1-B branch. No merge,
   deployment, auth command, real credential read or live provider request occurred.
-  No other agent was started by this documentation increment.
 - `CONTRACT.md`, `MATRIX.md`, `VALIDATION.md`, `IMPLEMENTOR_PROMPT.md` and all old
   slice reports/contracts remain unchanged. Their NOT RUN headings describe planning,
-  not this report's row dispositions. No historical evidence was rewritten.
+  not this report's row dispositions. Failed hosted attempts remain recorded.
 
-The **56-file post-remediation implementation fingerprint** is
-`7f6a3e0afe42def326da138d4cc39cdcdf90a717d10a9d2ace02b08a957c0c6c`.
+The **56-file tested implementation fingerprint** is
+`815ffc38a7ad9de937430ac1b8d19cc3d5a30c97ca9cc81c301b7dc5dc8587fd`.
 The prior 55-file fingerprint was
 `a7cb2a897b9b7f8c6702500abfee91b3abe27e71a90eeb7348b64f5e6f769533`.
-The remediation added only `src/http_api/router/tests/run_tests/reducer.rs`
-and registered it at `src/http_api/router/tests/run_tests/mod.rs:23`.
-The **402-file synchronization preservation fingerprint**, excluding only these
-reports, is `71d13638fca9006a6a92b3d107a8ce72c35d5373b423fcb62f5922dcf623e8b7`.
+The reducer remediation added `src/http_api/router/tests/run_tests/reducer.rs`; later
+commits changed only tests to make exact assertions portable and bounded.
+The **395-file preservation fingerprint**, excluding the nine current status/evidence
+documents, is `8321b462eb3ddafcdd2979b4a5c342d4e05dae871d0f73dbdba9b17b803ac53f`.
 The **78 frozen-document fingerprint** is
 `8d8b3f06f535c6da925eb8ff3b8582306d23f5f11078b8eaa1f5426ebc0413eb`.
 The JSON contains the exact implementation paths and fingerprint algorithm:
@@ -51,8 +49,9 @@ These identify the observed worktree without inventing a tested commit.
 
 openSUSE/WSL2 Linux, x86_64, kernel `6.18.33.2-microsoft-standard-WSL2`;
 Rust `rustc 1.98.1`, Cargo `1.98.1`, uv `0.12.10`, Node `v24.18.0`, Git `2.55.0`.
-No native macOS or Windows execution is claimed. One prior increment-4 review called
-the environment Ubuntu; that label is not adopted here.
+Local execution used the Linux environment above. Exact-head hosted Cargo gates also
+ran on native Ubuntu, macOS and Windows runners. This does not prove the intentionally
+omitted Windows reparse-point or Ctrl+C subcases.
 
 Tests use synthetic temporary roots, skills, owner/provider credentials, isolated
 process configuration, scripted providers and actual OpenAI WS/SSE loopback adapters.
@@ -108,10 +107,10 @@ version-replaced. D checked the parsed HEAD/current lockfiles, not a dependency 
 
 ## 3. Commands, counts and outcomes
 
-All C01-C36 execution results are attributed to P. **C01-C19 are the pre-remediation
-final batch**, not the latest exact-worktree gates. C20-C21 are focused increment-7
-results. The new focused attempts, post-remediation gates and loaded rerun follow.
-The JSON `command_batches` ties each phase to its commands and applicable fingerprint.
+C01-C36 retain the original and reducer-remediation phases. C37-C42 are the six
+source-equivalent local Cargo gates after hosted remediation. **C01-C19 are the
+pre-remediation final batch**, not latest-head gates. C20-C21 are focused increment-7
+results. The JSON `command_batches` ties each phase to commands and fingerprints.
 D00-D03 describe initial documentation work; D04-D06 cover this synchronization.
 
 | Ref | Exact command | Result |
@@ -155,6 +154,12 @@ D00-D03 describe initial documentation work; D04-D06 cover this synchronization.
 | C34 | `uv run --no-sync scripts/verify.py` | PASS; 296 source files, 844 regex test definitions, 25 fixture events; internally reran six Cargo gates |
 | C35 | `node scripts/cli_retest.mjs --self-test` | PASS; 152, live_started=false |
 | C36 | `cargo run --locked --offline --example http_api_offline -- --loaded` | PASS; complete loaded/dev sample in section 6 |
+| C37 | `cargo fmt --all -- --check` | PASS, final source-equivalent gate |
+| C38 | `cargo check --locked --offline --all-targets` | PASS, final source-equivalent gate |
+| C39 | `cargo test --locked --offline --all-targets` | PASS; library 581 passed, 0 failed, 8 ignored; all remaining targets passed |
+| C40 | `cargo clippy --locked --offline --all-targets -- -D warnings` | PASS, final source-equivalent gate |
+| C41 | `cargo build --locked --offline --all-targets` | PASS, final source-equivalent gate |
+| C42 | `cargo test --locked --offline --doc` | PASS; 0 doctests |
 
 C07 and C34 internally invoke six Cargo gates without the standalone gates'
 `--locked --offline` flags. Those are overlapping reruns, not unique tests. The
@@ -163,7 +168,8 @@ passed; the separate focused reducer watchdog is retained. Eight ignored library
 entries include child helpers invoked by parent tests; their printed passes are not
 added again. The binary process helper is separate. Current source inventory is
 **296 files / 844 regex definitions**, not an executed-test total. C07's 295/843 and
-C03's 579 library passes remain historical. No aggregate unique Rust total is asserted.
+C03's 579 and C30's 580 library passes remain historical; C39 reports 581. No
+aggregate unique Rust total is asserted.
 Seven existing examples remain seven; dev/release/loaded remain three sample modes.
 C36 is one loaded rerun, not a new example or fourth sample mode. Test targets,
 focused reruns, verifier reruns, examples and zero doctests remain separate.
@@ -172,9 +178,10 @@ D00-D03 previously checked HEAD/ancestry, inventory, config/provisioning syntax,
 active statuses and documentation consistency. D03 passed on its second attempt;
 its first failure remains recorded. D04 independently passed
 `uv run --no-sync scripts/verify.py --static-only` with 296/844/25 and no Cargo run.
-D05 is the updated embedded validation in section 8. D06 passed JSON parsing,
-37/3 counts, all 53 untracked files' whitespace and `git diff --check` after the
-first narrow JSON syntax failure was corrected. Exact commands are in the JSON.
+D05 is the updated embedded validation in section 8. D06 historically passed JSON
+parsing and the then-current 37/3 snapshot after the first narrow JSON syntax failure
+was corrected. The hosted synchronization validates 38/2 and clean committed source.
+Exact commands and phases are in the JSON.
 
 ## 4. Fixed 40-row disposition
 
@@ -219,13 +226,13 @@ mechanisms and command references also appear on every JSON row.
 | V1B-30 | PASS | Admission/network closure plus original host/owned SQL drain; storage stays writable; no abort/deadline/unlock shortcut. T19/T20/T28; C03/C20/C21. | P stalled/nonreading sockets, commit gates, original outcome identity. No blocker. |
 | V1B-31 | PASS | Unpolled/polled owner Drop, serving error/unwind initiate despite clones; WorkerLost/Incomplete/quarantine remain. T19/T21/T26; C03/C20/C21. | P isolated children, record/lease checks; only awaited drain is called complete. No blocker. |
 | V1B-32 | PASS | Fresh process reads complete/partial/unbound history, interruption once, zero automatic work; explicit B2 rejects incomplete/unbound. T09/T23; C03. | P Linux child processes and separate work counters, not power-loss testing. No blocker. |
-| V1B-33 | PARTIAL | Actual serve/help/static errors, injected startup, port0, Linux SIGINT/SIGTERM, exit/drain and old CLI regression. T22-T24; C03/C08. | P isolated process/log captures; native Windows Ctrl+C and macOS not run. |
+| V1B-33 | PARTIAL | Actual serve/help/static errors, injected startup, port0, Linux and hosted macOS SIGINT/SIGTERM, exit/drain and old CLI regression. T22-T24; C03/C08. | P/H process captures; native Windows Ctrl+C intentionally deferred. |
 | V1B-34 | PASS | Whole route/error/SSE/Debug/normal diagnostic canary checks; auth before sensitive work, no raw native/error escape. T02/T04/T05/T07/T14/T22/T24/T25; C03/C20/C21/D03. | P captures; D report leak scan. Intended conversation text remains sensitive. No blocker. |
-| V1B-35 | PASS | Post-remediation old/new gates pass; only reducer test/registration changed; fixed core schemas/APIs, no new budget/store/executor/provider/GUI. C28-C35/D04/D05. | P gates/R prior increment reviews; D current inventory/preservation fingerprints. No blocker. |
+| V1B-35 | PASS | Post-remediation local/hosted gates pass; remediations changed only tests/test hooks; fixed core schemas/APIs, no new budget/store/executor/provider/GUI. C28-C42/D04/D05. | P gates/R prior increment reviews; D current inventory/preservation fingerprints. No blocker. |
 | V1B-36 | PASS | Public authenticated TCP example, actual acceptance/tools/history/SSE, reconnect/slow clients/shutdown; seven old examples. T29; C09-C18. | P executions and retained example review. No blocker. |
 | V1B-37 | PASS | Retained dev/release plus complete loaded/dev sample: acceptance 480.668ms, SSE 97.901ms, four pages 241.969ms, unread completion 2134.706ms, shutdown 144.367ms; full finite resources below. T29; C16/C17/C36. | P complete observations, no SLA/RSS claim. No blocker. |
-| V1B-38 | PASS | Synchronized human/JSON 40-row evidence; current summaries still valid; source/frozen/API/security files preserved. D00-D06. | D prior validation and current static/report checks. No blocker. |
-| V1B-39 | PARTIAL | Complete post-remediation Cargo/verifier/Node gates pass; unchanged examples/dev/release retained, loaded rerun complete; prior increment gates and three fresh final complete-diff reviews passed. C09-C17/C22/C23/C27-C36/D05/D06. | P/R/D; no blocking review finding; authorized exact-head cross-platform push/PR CI NOT_RUN. |
+| V1B-38 | PASS | Synchronized human/JSON 40-row evidence and nine current status documents; source, frozen plans and implementation preserved. D00-D06. | D prior validation and current static/report checks. No blocker. |
+| V1B-39 | PASS | Complete local gates/examples and all review gates pass. Exact-head push 35448837331 and pull_request 35448839843 passed six Cargo steps on Ubuntu/macOS/Windows at `6e28cc339f25a95b78170e7c4171de48f122d07a`; three failed attempt pairs are retained. C09-C17/C22/C23/C27-C36/D05/D06. | P/R/H/D; no blocker. |
 
 ### Concrete test/source map
 
@@ -298,6 +305,9 @@ blocking findings. The JSON records scopes and separates review from execution.
 | 7 | Joined real OpenAI loopback and tools | 2026-09-19 05:27:25 | Three PASS |
 | 8 | Offline example and finite resources | 2026-09-19 08:38:21 | Three PASS |
 | Final | Complete accumulated diff including these docs and all untracked files | 2026-09-19, after reducer/evidence synchronization | Three PASS; no blocking findings |
+| Hosted remediation 1 | Canonical paths and deterministic nonreading-response backpressure | Before `49a956c` | Three PASS; no blocking findings |
+| Hosted remediation 2 | APFS fixture limits, Unix socket fixtures and bounded generic watchdog | Before `ccd1403` | Three PASS; no blocking findings |
+| Hosted remediation 3 | Exact Windows executable suffix in CLI help test | Before `6e28cc3` | Three PASS; no blocking findings |
 
 Retained first failures and fixes, without counting retries as unique tests:
 
@@ -346,12 +356,27 @@ Retained first failures and fixes, without counting retries as unique tests:
     was not a runtime or embedded-validation failure.
 12. **Synchronization JSON check:** the first narrow parse failed because a report
     edit added an extra row delimiter. Two exact replacement attempts did not match
-    and made no change. Corrected delimiters passed D06, including JSON/counts,
-    all 53 untracked files' whitespace and tracked diff whitespace. No source or
-    validation assertion changed. F12 retains this first validation failure.
+    and made no change. Corrected delimiters passed D06. F12 retains this failure.
+13. **Hosted attempt 1:** push `35440634030` and pull_request `35440636096` failed
+    macOS and Windows Cargo tests at `85c8d7504c87cfaf419aa4e8a69e2c3d2e258768`.
+    macOS exposed `/var` versus `/private/var` canonicalization; both platforms exposed
+    a test hook that waited for more than 1 MiB although backpressure occurred earlier.
+    Canonical expectations and deterministic finite backpressure fixed both causes.
+14. **Hosted attempt 2:** push `35445158998` and pull_request `35445160488` failed
+    at `49a956ca28ce4b50ae386b12719b491246252806`. APFS returned EILSEQ before an
+    invalid-UTF8 fixture could be created. Windows buffered socket fixtures differently,
+    and slow generic HTTP work exceeded 15 seconds. The invalid-name proof remains where
+    supported; Unix/macOS retain socket proofs; a tested 60-second watchdog keeps generic
+    Windows coverage bounded.
+15. **Hosted attempt 3:** push `35447171227` and pull_request `35447174195` passed
+    Ubuntu/macOS but failed Windows at `ccd1403b92f2ee4b1d053bbacf9f353680f0d00b`.
+    The exact CLI help test expected `wi`, while the real executable is `wi.exe`.
+    Platform `EXE_SUFFIX` now preserves full-line equality.
+16. **Hosted attempt 4:** push `35448837331` and pull_request `35448839843` passed
+    all six Cargo steps on Ubuntu, macOS and Windows at
+    `6e28cc339f25a95b78170e7c4171de48f122d07a`. Job IDs and exact steps are in JSON.
 
 Historical V1-A first-attempt watchdog failures remain reliability observations.
-Current Linux passes do not diagnose or prove those historical timing issues fixed.
 No failure record, job, lint or assertion was removed to obtain a green result.
 
 ## 6. Final finite performance observations
@@ -420,12 +445,13 @@ benchmark comparison, task quota or lifetime history cap.
 
 ## 7. Remaining boundaries and authorization
 
-- **V1B-03/33:** native Windows reparse/ACL and Ctrl+C cases, and native macOS
-  filesystem/signals, remain unrun. Linux has positive Unix token/signal coverage.
-- **V1B-39:** three fresh final complete-diff reviews passed with no blocking findings.
-  Exact-head push and PR CI on Ubuntu/macOS/Windows is **NOT_RUN**, with no invented
-  PR, run ID or head.
-  Separately authorized commit/push is required first. Old V1-A CI is baseline only.
+- **V1B-03/33:** Windows reparse-point token proof and native Windows Ctrl+C remain
+  intentionally deferred. Linux and hosted macOS have positive Unix token/signal
+  coverage. Passing Windows Cargo jobs do not execute these omitted subcases.
+- **V1B-39:** three fresh final complete-diff reviews passed. Exact-head push
+  `35448837331` and pull_request `35448839843` passed all six Cargo steps on
+  Ubuntu/macOS/Windows at `6e28cc339f25a95b78170e7c4171de48f122d07a`.
+  Three earlier failed run pairs and their remediations are retained below.
 - One owner token authorizes all service operations/history. Rotation changes the
   file and restarts the service, revoking all devices together. There is no device
   identity/expiry/revocation system, cookie login or supplied browser token storage.
@@ -456,17 +482,17 @@ the observed pass produced the then-current 35 PASS/5 PARTIAL. F09 retains its f
 Those counts are historical, not the synchronized disposition.
 
 Current D04 passed static-only inventory (296/844/25), without Cargo. D06 passed
-JSON parsing, 37/3 count expectations, all 53 untracked files' whitespace and
-`git diff --check`; F12 retains the first narrow JSON syntax failure. D05 **passed
-on its first attempt** at **37 PASS/3 PARTIAL**, including 167 local links/anchors
-and the 402-file preservation fingerprint. Final confirmation uses the same command
-after recording this result and correcting unread-client record units.
+JSON parsing and the then-current 37/3 count expectations; F12 retains the first
+narrow JSON syntax failure. D05 passed at the pre-push 37 PASS/3 PARTIAL snapshot.
+This hosted synchronization updates expectations to **38 PASS/2 PARTIAL**, validates
+all retained CI attempts and job metadata, and uses the 395-file preservation
+fingerprint while permitting only current documentation descendants of the tested head.
 The exact D05 command is recorded in `verification.json.commands`. It extracts this
 read-only script and runs it with Node; it does not generate tokens or execute
 Cargo/tests/examples. The script checks exact row IDs/dispositions/blockers, command
 batches and source/test references, links, syntax, numeric/status consistency,
-source-definition counts, canaries, all untracked whitespace, current implementation,
-frozen and whole-preservation fingerprints, HEAD/ancestry and unchanged staging.
+source-definition counts, canaries, current implementation/frozen/preserved
+fingerprints, tested-revision ancestry, docs-only descendants/worktree and unchanged staging.
 External URLs are not probed; local link checks are not hosted-service reads.
 
 Validation script, starting at the `const fs` line below:
@@ -488,7 +514,7 @@ for (const k of ["schema_version", "contract", "baseline", "tested_revision", "t
 assert.equal(r.schema_version, 1);
 assert.equal(r.contract, "v1b.0");
 assert.equal(r.baseline, "16d623a3317abc7796ec203e4fe15d580791a769");
-assert.equal(r.tested_revision, null);
+assert.equal(r.tested_revision, "6e28cc339f25a95b78170e7c4171de48f122d07a");
 assert.equal(r.status, "LOCAL_VERIFIED");
 assert.equal(r.accepted, false);
 assert.equal(r.live_started, false);
@@ -501,10 +527,10 @@ const commands = new Set(r.commands.map(x => x.id));
 assert.equal(commands.size, r.commands.length);
 for (const c of r.commands) assert(c.command.length && c.observer.length && c.result.length, c.id);
 const batched = r.command_batches.flatMap(b => b.command_refs);
-assert.deepEqual([...batched].sort(), Array.from({length:36}, (_, i) => "C" + String(i + 1).padStart(2, "0")));
+assert.deepEqual([...batched].sort(), Array.from({length:42}, (_, i) => "C" + String(i + 1).padStart(2, "0")));
 for (const batch of r.command_batches) {
   for (const c of batch.command_refs) assert(commands.has(c), c);
-  if (batch.phase.startsWith("post_remediation")) assert.equal(batch.implementation_sha256, r.tested_worktree.implementation_sha256);
+  if (batch.phase === "hosted_remediation_final_local") assert.equal(batch.implementation_sha256, r.tested_worktree.implementation_sha256);
 }
 const humanRows = [...human.matchAll(/^\| (V1B-\d\d) \| (PASS|PARTIAL) \|/gm)].map(m => [m[1], m[2]]);
 assert.deepEqual(humanRows, r.matrix.map(x => [x.id, x.status]));
@@ -516,8 +542,11 @@ for (const row of r.matrix) {
   for (const c of row.command_refs) assert(commands.has(c), c);
   for (const t of row.tests) assert(Object.hasOwn(r.test_catalog, t), t);
 }
-assert.deepEqual(r.matrix.filter(x => x.status === "PARTIAL").map(x => x.id), ["V1B-03", "V1B-33", "V1B-39"]);
-assert(r.ci.every(c => c.status === "NOT_RUN" && c.head === null && c.run_id === null && c.pull_request === null));
+assert.deepEqual(r.matrix.filter(x => x.status === "PARTIAL").map(x => x.id), ["V1B-03", "V1B-33"]);
+assert.equal(r.ci.length, 2);
+assert(r.ci.every(c => c.status === "PASS" && c.head === r.tested_revision && c.jobs.length === 3 && c.steps.length === 6));
+assert.deepEqual(r.ci_attempts.map(x => x.status), ["FAIL", "FAIL", "FAIL", "PASS"]);
+assert.deepEqual(r.ci_attempts.map(x => x.head), ["85c8d7504c87cfaf419aa4e8a69e2c3d2e258768", "49a956ca28ce4b50ae386b12719b491246252806", "ccd1403b92f2ee4b1d053bbacf9f353680f0d00b", r.tested_revision]);
 const finalReview = r.reviews.find(x => x.scope.startsWith("Final"));
 assert.equal(finalReview.status, "PASS");
 assert.deepEqual(finalReview.roles, ["review-a", "review-b", "review-c"]);
@@ -526,10 +555,10 @@ assert(finalReview.result.includes("All three fresh final reviews passed"));
 for (let i = 1; i <= 8; i++) assert.equal(r.reviews.find(x => x.increment === i).roles.length, 3);
 const pass = r.matrix.filter(x => x.status === "PASS").length;
 assert.equal(r.counts.matrix_rows, 40);
-assert.equal(pass, 37);
-assert.equal(r.counts.matrix_pass, 37);
-assert.equal(r.counts.matrix_partial, 3);
-assert.equal(r.counts.library_passed, 580);
+assert.equal(pass, 38);
+assert.equal(r.counts.matrix_pass, 38);
+assert.equal(r.counts.matrix_partial, 2);
+assert.equal(r.counts.library_passed, 581);
 assert.equal(r.counts.library_failed, 0);
 assert.equal(r.counts.library_ignored, 8);
 assert.equal(r.counts.doc_tests, 0);
@@ -607,7 +636,7 @@ assert.equal(new Set(impl).size, 56);
 assert.equal(r.tested_worktree.implementation_files, 56);
 assert.equal(fingerprint(impl), r.tested_worktree.implementation_sha256);
 assert(human.includes(r.tested_worktree.implementation_sha256));
-const preserved = git(["ls-files", "--cached", "--others", "--exclude-standard", "-z"]).split("\0").filter(p => p && ![reportPath, "docs/slices/v1b/VERIFICATION.md"].includes(p));
+const preserved = git(["ls-files", "-z"]).split("\0").filter(p => p && !docs.includes(p));
 assert.equal(preserved.length, r.tested_worktree.synchronization_preserved_file_count);
 assert.equal(fingerprint(preserved), r.tested_worktree.synchronization_preserved_sha256);
 assert(human.includes(r.tested_worktree.synchronization_preserved_sha256));
@@ -615,11 +644,13 @@ const frozen = git(["ls-files", "-z", "docs"]).split("\0").filter(p => p && !doc
 assert.equal(frozen.length, r.tested_worktree.frozen_document_count);
 assert.equal(fingerprint(frozen), r.tested_worktree.frozen_documents_sha256);
 assert(human.includes(r.tested_worktree.frozen_documents_sha256));
-assert.equal(git(["rev-parse", "HEAD"]).trim(), r.tested_worktree.head);
-cp.execFileSync("git", ["merge-base", "--is-ancestor", r.baseline, "HEAD"]);
+cp.execFileSync("git", ["merge-base", "--is-ancestor", r.baseline, r.tested_revision]);
+cp.execFileSync("git", ["merge-base", "--is-ancestor", r.tested_revision, "HEAD"]);
+const descendant = git(["diff", "--name-only", r.tested_revision + "..HEAD"]).trim().split("\n").filter(Boolean);
+assert(descendant.every(p => docs.includes(p)), descendant.join(","));
 assert.equal(git(["diff", "--cached", "--name-only"]), "");
 const changed = git(["status", "--porcelain=v1", "--untracked-files=all", "-z"]).split("\0").filter(Boolean).map(x => x.slice(3));
-assert.deepEqual(changed.filter(p => !docs.includes(p)).sort(), [...impl].sort());
+assert(changed.every(p => docs.includes(p)), changed.join(","));
 const canaries = new Set();
 for (const p of impl.filter(p => p.endsWith(".rs"))) {
   const s = read(p);
@@ -635,7 +666,7 @@ for (const p of docs) {
 for (const p of changed) assert(!read(p).split("\n").some(line => /[ \t]+$/.test(line)), p + " trailing whitespace");
 const untracked = git(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0").filter(Boolean);
 for (const p of untracked) assert(read(p).endsWith("\n"), p + " missing final newline");
-assert.equal(untracked.filter(p => impl.includes(p)).length, r.tested_worktree.synchronization_untracked_implementation_files);
-console.log(`PASS: schema; 40 ordered unique rows (${pass} PASS/${40-pass} PARTIAL); test/command/source references; ${links} local links/anchors; config/recipe syntax; 296 source files/844 regex definitions/25 fixture events; numeric/status consistency; canary/whitespace scans (${untracked.length} untracked files); implementation/frozen/whole-worktree preservation; HEAD/ancestry; no staged changes.`);
+assert.equal(untracked.filter(p => impl.includes(p)).length, 0);
+console.log(`PASS: schema; 40 ordered unique rows (${pass} PASS/${40-pass} PARTIAL); test/command/source references; ${links} local links/anchors; config/recipe syntax; 296 source files/844 regex definitions/25 fixture events; CI attempts/jobs; numeric/status consistency; canary/whitespace scans; tested implementation/frozen/preserved fingerprints; allowed docs-only descendant/worktree; no staged changes.`);
 ```
 <!-- end-validation-script -->

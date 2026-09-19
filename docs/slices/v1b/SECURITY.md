@@ -1,8 +1,8 @@
 # V1-B security and deployment boundary
 
-Contract **v1b.0**. Implemented locally in the uncommitted worktree; **LOCAL_VERIFIED,
-accepted=false**. [Verification](VERIFICATION.md) separates local evidence, remaining
-subcases, pending final review and unrun hosted CI. These application-service choices
+Contract **v1b.0**. Tested at `6e28cc339f25a95b78170e7c4171de48f122d07a`;
+**LOCAL_VERIFIED, accepted=false**. [Verification](VERIFICATION.md) separates local and
+hosted evidence from intentionally deferred Windows reparse-point and Ctrl+C proof. These application-service choices
 do not redesign provider OAuth or claim completed security certification.
 
 ## 1. Principal and deployment

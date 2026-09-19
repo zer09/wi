@@ -22,6 +22,39 @@ on Ubuntu/macOS/Windows. Earlier watchdog failures remain in the evidence; a pas
 rerun is not proof they were fixed. [Merge closure](https://github.com/zer09/wi/pull/7#issuecomment-5716447572)
 records the exact review, attempts and scope.
 
+## Local verification: V1-B authenticated HTTP service
+
+Contract **v1b.0**, accepted baseline `16d623a3317abc7796ec203e4fe15d580791a769`.
+The implementation is unstaged/untracked over planning HEAD
+`d3ee103ae94dcc80bf40934d1b937096f47922fc`. Status: **LOCAL_VERIFIED, accepted=false**;
+no tested commit, new-head hosted CI, deployment or live-provider acceptance is claimed.
+
+`wi::http_api::serve` and `wi serve --config` compose authenticated HTTP commands
+and committed-history SSE over RunHost/B2/SQLite. The service uses a separately
+provisioned shared owner token, explicit workspaces and literal-loopback HTTP.
+Remote devices require a trusted same-host HTTPS proxy with SSE buffering disabled.
+Closed projections exclude native/binding/config internals; catalog views remain
+as-of indexes. Restart/reconnect never resumes an old task.
+
+- [Current slice register](slices/README.md): Accepted milestones and current limits.
+- [V1-B API and CLI configuration](slices/v1b/API.md): Exact strict JSON, routes,
+  cursors, projections, CLI signals and exit behavior.
+- [V1-B security/operator guide](slices/v1b/SECURITY.md): Safe token provisioning,
+  Host/Origin checks, proxy requirements and shared-token limits.
+- [V1-B verification](slices/v1b/VERIFICATION.md) and
+  [machine report](slices/v1b/verification.json): All 40 row dispositions, attributed
+  tests/reviews, retained failures, finite samples and unobserved subcases.
+- [`http_api_offline`](../examples/http_api_offline.rs): Authenticated TCP, scripted
+  provider, actual tools, committed history/SSE, observer isolation and shutdown.
+- [Contract](slices/v1b/CONTRACT.md), [matrix](slices/v1b/MATRIX.md),
+  [planning validation](slices/v1b/VALIDATION.md), and
+  [implementor prompt](slices/v1b/IMPLEMENTOR_PROMPT.md): Preserved planning records.
+  Their original NOT RUN text is not the current verification disposition.
+
+Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
+hosted CI remains NOT_RUN. No GUI, native TLS, per-device auth, deployment or
+ordinary `wi run` persistence is included.
+
 ## Accepted: V1-A service-owned execution
 
 Contract **v1a.0**, baseline `50f4dffe5d912615014edc46cf1bf1e1b68e6857`.
@@ -51,9 +84,9 @@ old work. This reuses B2 rather than adding another model/tool loop.
   [implementor prompt](slices/v1a/IMPLEMENTOR_PROMPT.md): Frozen planning records. Their
   `PLAN ONLY` and `NOT RUN` text describes the state when authored, not the current result.
 
-V1-B remains deferred. It will separately cover network commands, client authentication,
-browser-safe protocol and reconnect/subscription behavior. GUI and ordinary CLI
-persistence also remain unimplemented. Existing session/history read APIs remain canonical.
+V1-B now adds network commands, client authentication, browser-safe projections and
+reconnectable SSE over this host. GUI and ordinary `wi run` persistence remain
+unimplemented. Existing session/history read APIs remain canonical.
 
 ## Current implementation: P1-B2 stored conversation submissions
 
@@ -90,8 +123,8 @@ history. The actual opened account must match before installation or generation.
 
 Ordinary `wi run` remains nonpersistent, with no normal CLI session commands. B2 alone
 did not add service ownership, but V1-A now composes B2 under the in-process `RunHost`.
-Service authentication, browser protocol and GUI remain unimplemented. Neither B2 nor
-V1-A adds automatic task resumption or retries.
+V1-B supplies service authentication and browser protocol; GUI remains unimplemented.
+Neither B2, V1-A nor V1-B adds automatic task resumption or retries.
 
 ## Accepted and merged: P1-B1 actual runtime capture
 
@@ -127,8 +160,8 @@ Catalog refresh is explicit. The caller retains and awaits the execution future.
 B1 remains supplied-input capture, not restored-history execution. B2 supplies new
 explicit tasks with compatible provider/account-bound native history. V1-A now owns
 those executions independently of readers through the in-process `RunHost`. Ordinary
-CLI persistence, V1-B networking/browser/GUI, and automatic task resumption/retry remain
-unimplemented.
+`wi run` persistence, GUI, and automatic task resumption/retry remain unimplemented.
+V1-B networking and browser protocol are locally verified with the limits above.
 
 ## Current acceptance: P1-A storage only
 
@@ -167,8 +200,8 @@ records the source review, exact CI and retained limits without rewriting old re
   dirty-worktree history, review and submitted-CI results, platform limits and unchanged ledger.
 
 P1-A acceptance did not include runtime capture. Accepted B1 supplies that boundary;
-accepted B2 adds stored-history submissions. Ordinary `wi run` persistence, service
-authentication, browser protocol and GUI remain NOT IMPLEMENTED (V1).
+accepted B2 adds stored-history submissions. V1-B adds service authentication and
+browser protocol. Ordinary `wi run` persistence and GUI remain NOT IMPLEMENTED.
 P1-A, B1 and B2 have exact-head Ubuntu, macOS and Windows evidence.
 Windows symlink privilege, caller-owned ACLs and same-user TOCTOU remain explicit limits.
 

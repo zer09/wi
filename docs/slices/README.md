@@ -12,7 +12,7 @@ This register adds current state without rewriting frozen contracts, reports or 
 | P1-B1 actual runtime capture | Accepted/merged PR #6 | [Evidence](p1b1/VERIFICATION.md) |
 | P1-B2 stored replay and B2-E01 joined closure | Accepted/merged PR #7,50f4dff | [Evidence](p1b2/VERIFICATION.md) |
 | V1-A service-owned execution | Accepted/merged PR #8,16d623a | [Evidence](v1a/VERIFICATION.md) |
-| V1-B authenticated HTTP/API and history stream | Planning only,v1b.0;40 rows NOT RUN | [Contract](v1b/CONTRACT.md),[API](v1b/API.md),[security](v1b/SECURITY.md),[matrix](v1b/MATRIX.md),[validation](v1b/VALIDATION.md),[prompt](v1b/IMPLEMENTOR_PROMPT.md) |
+| V1-B authenticated HTTP/API and history stream | LOCAL_VERIFIED, v1b.0; accepted=false; uncommitted | [Evidence](v1b/VERIFICATION.md), [JSON](v1b/verification.json), [API/CLI](v1b/API.md), [security](v1b/SECURITY.md); frozen [contract](v1b/CONTRACT.md), [matrix](v1b/MATRIX.md), [validation](v1b/VALIDATION.md), [prompt](v1b/IMPLEMENTOR_PROMPT.md) |
 | Browser GUI | Not implemented; separate future task | Uses the service API; frontend language remains undecided. |
 
 V1-A sourcefad3855/evidencec828f8a was merged at16d623a with identical tree. Push
@@ -20,10 +20,15 @@ V1-A sourcefad3855/evidencec828f8a was merged at16d623a with identical tree. Pus
 Earlier watchdog failures are retained, not proven fixed. [Merge closure](https://github.com/zer09/wi/pull/8#issuecomment-5733501460)
 records recovery/source/CI scope. Local counts/examples/reviews are attributed to reports.
 
-V1-B is not a delivered server merely because a plan exists. New choices are HTTP
-JSON plus SSE, a separate shared owner bearer token, explicit workspace selection,
-loopback HTTP with same-host HTTPS proxy deployment and closed browser data views.
-No provider OAuth change, native TLS/device-login/GUI/deployment or live acceptance.
+V1-B now implements `wi::http_api::serve` and `wi serve --config` in the worktree
+based on planning HEAD `d3ee103ae94dcc80bf40934d1b937096f47922fc`, not a tested commit.
+Local gates, increment reviews and three fresh final complete-diff reviews passed;
+the report identifies unobserved platform subcases. Separately authorized exact-head
+CI remains NOT_RUN.
+HTTP JSON plus committed-history SSE uses a separate shared owner bearer token,
+explicit workspaces, literal-loopback HTTP, same-host HTTPS proxy requirements and
+closed browser views. No provider OAuth change, native TLS/device-login/GUI,
+deployment or live acceptance is claimed.
 
 The ledger remains31/50 used,19 remaining, not authorization. No task restarts
 on Wi startup. No RunLimits, replacement budgets, history-lifetime caps or automatic

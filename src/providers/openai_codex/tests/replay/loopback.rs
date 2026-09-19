@@ -5,6 +5,8 @@ use crate::{
 use futures_util::FutureExt;
 #[path = "boundary.rs"]
 mod boundary;
+#[path = "http_api_joined.rs"]
+mod http_api_joined;
 #[path = "joined.rs"]
 mod joined;
 

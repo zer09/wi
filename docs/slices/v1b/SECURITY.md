@@ -1,18 +1,52 @@
 # V1-B security and deployment boundary
 
-Contract **v1b.0**. PLAN ONLY. These are new application-service choices, not a redesign of provider OAuth or a claim of completed security certification.
+Contract **v1b.0**. Implemented locally in the uncommitted worktree; **LOCAL_VERIFIED,
+accepted=false**. [Verification](VERIFICATION.md) separates local evidence, remaining
+subcases, pending final review and unrun hosted CI. These application-service choices
+do not redesign provider OAuth or claim completed security certification.
 
 ## 1. Principal and deployment
 
 This first network service has one owner. Possession of a separately provisioned Wi-service bearer secret authorizes that owner's API operations and all their session history. Multiple devices may use it. There are no independent tenants, user database, role matrix, per-device credentials, browser login page, refresh tokens, cookies, password hashing, JWT or OAuth service in this slice.
 
-The server listens only on a literal loopback IP. For remote browsers/devices, a separately configured HTTPS reverse proxy on the same host is the public entry point; its upstream is the loopback listener. It must terminate valid TLS, preserve Authorization without logging it, stream SSE without response buffering, and either preserve the configured public Host or rewrite to the exact actual loopback listener authority. The trusted proxy and host OS are part of the deployment boundary. This plan provides documentation, not a deployed/certified proxy or native TLS implementation.
+The server listens only on a literal loopback IP. For remote browsers/devices, a separately configured HTTPS reverse proxy on the same host is the public entry point; its upstream is the loopback listener. It must terminate valid TLS, preserve Authorization without logging it, stream SSE without response buffering, and either preserve the configured public Host or rewrite to the exact actual loopback listener authority. The trusted proxy and host OS are part of the deployment boundary. This slice provides proxy requirements, not a deployed/certified proxy or native TLS implementation.
+
+Configure the proxy for the exact `public_origin` in [API.md](API.md#0-starting-the-service).
+Preserve the browser's Origin and allow Authorization, Content-Type and Last-Event-ID.
+Do not convert a forwarded identity header into authentication. Disable SSE response
+buffering and caching; flush frames as they arrive. Check proxy idle/stream timeouts
+separately. A proxy timeout can disconnect an observer but must not be interpreted as
+task cancellation or completion. No proxy product/configuration or remote-device
+browser has been validated by this local evidence.
+
+Native EventSource cannot set the bearer header. Browser consumers need authenticated
+fetch plus an SSE parser and reconnect logic. Reconnect after the last applied cursor,
+not the last received byte. Lost acknowledgments can replay records; deduplicate by
+session/sequence and detect conflicting duplicates. JSON/SSE preserves visible text,
+including control characters; a future GUI must render it as untrusted text, not HTML.
 
 Plain HTTP is allowed only for explicit literal-loopback local development. Never provide an insecure public-bind switch or recommend sending the secret over a LAN in cleartext. Checking the configured HTTPS public origin cannot prove a proxy actually uses TLS: document that limit. Provider TLS validation and fixed subscription endpoints remain unchanged. A non-loopback TcpListener passed to the library is rejected before serving too.
 
 ## 2. Secret provisioning and verification
 
 The owner provisions 32 cryptographically random bytes encoded as 64 lowercase hexadecimal ASCII characters in a private file. Accept exactly 64 characters plus at most one final LF (not CRLF, BOM, spaces, extra lines or arbitrary passwords). The binary accepts a token FILE path, never a raw token flag/environment/query value. No automatic credential creation, token-printing command or browser token persistence is added. The deployment guide describes provisioning without inserting a real secret in documentation or shell history.
+
+For Unix, this operator-only example creates a new file in a trusted private directory.
+It generates the secret inside the process and writes it directly to the file. The
+command contains no secret and prints none. `O_EXCL` refuses to overwrite an existing
+file. Replace only the placeholder paths; do not run this as an acceptance test.
+
+```sh
+install -d -m 700 /absolute/private
+uv run --no-project python -c 'import os, secrets, sys; fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600); f = os.fdopen(fd, "w", encoding="ascii"); f.write(secrets.token_hex(32) + "\n"); f.close()' /absolute/private/wi-owner-token
+```
+
+Keep the file and its parent private. Transfer the token only through a separately
+trusted confidential channel to authorized clients. Never print it for a report,
+put it in `curl -H` shell arguments, save it in browser URLs, or log request headers.
+No browser token-storage mechanism is supplied. On Windows, provision the same byte
+format using a trusted local secret generator and owner-only ACLs; this Unix recipe
+and Linux results are not Windows ACL/reparse execution evidence.
 
 Load once at startup with a bounded read of at most 66 bytes so oversized files are detected. Require a regular file; reject final symlinks/reparse points and special files before reading. On Unix require no group/other permission bits, using the same style of safe open as existing local sources. On Windows reject reparse points and state that root/file ACL protection is operator-owned. Do not claim protection against a hostile same-user process, hardlinks, ancestor replacement or memory inspection. Keep all verifier/config secret types redacted and not serializable.
 
@@ -56,4 +90,9 @@ Source references checked for planning on 2026-09-19:
 - https://docs.rs/ring/0.17.14/ring/hmac/fn.verify.html — constant-time HMAC verification.
 - https://docs.rs/axum/0.8.9/axum/serve/struct.Serve.html — serving/graceful shutdown facility, not an application-task owner.
 
-None of those sources establishes that Wi's unwritten implementation satisfies this contract. The local matrix must exercise the actual paths and preserve failures.
+Those planning references are not implementation proof. The [local report](VERIFICATION.md)
+and [machine report](verification.json) record actual and attributed observations,
+preserve failed attempts, and identify unobserved subcases. Local loopback success is
+not public deployment, penetration-test certification, live provider approval or
+cross-platform execution evidence. Native Windows reparse/ACL and Ctrl+C behavior,
+and native macOS behavior, remain unverified in this Linux worktree.

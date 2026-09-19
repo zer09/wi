@@ -1,12 +1,20 @@
-# Wi: current V1-B implementation handoff
+# Wi: current V1-B local verification handoff
 
-Active contract: **v1b.0**, documentation-only planning. Accepted runtime baseline:
+Active contract: **v1b.0**. Accepted runtime baseline:
 `16d623a3317abc7796ec203e4fe15d580791a769` (V1-A merged, PR #8).
-All V1B-00 through V1B-39 are NOT RUN. No network-service implementation or new
-acceptance result is included in the planning commit.
+The HTTP service and `wi serve --config` are implemented in the unstaged/untracked
+worktree over planning HEAD `d3ee103ae94dcc80bf40934d1b937096f47922fc`.
+Status: **LOCAL_VERIFIED, accepted=false, tested_revision=null**. See
+[verification](docs/slices/v1b/VERIFICATION.md) and its
+[JSON](docs/slices/v1b/verification.json) for all 40 row dispositions and limits.
+Three fresh final complete-diff reviews passed with no blocking findings. Exact-head
+hosted CI remains pending separate commit/push authorization. The planning commit
+itself contains no network-service implementation or acceptance result.
 
 Read docs/slices/v1b/CONTRACT.md, API.md, SECURITY.md, MATRIX.md, VALIDATION.md
-and IMPLEMENTOR_PROMPT.md before editing. The [slice index](docs/slices/README.md)
+and IMPLEMENTOR_PROMPT.md before editing. Read the current verification reports too.
+The frozen contract/matrix/validation retain plan-time NOT RUN statements; do not
+rewrite them as current evidence. The [slice index](docs/slices/README.md)
 separates the active task from completed milestones. Follow the fixed assignment,
 not a new architecture exercise. Check actual HEAD/ancestry and all worktree files;
 preserve owner changes, including staged/untracked work. No reset, clean, forced
@@ -31,7 +39,7 @@ Incomplete/unbound history stays readable without automatic repair or account ad
 
 ## Current scope
 
-Implement a headless authenticated HTTP service over the shared library, not a GUI,
+Preserve the headless authenticated HTTP service over the shared library, not a GUI,
 second agent loop, subprocess wrapper, task queue or replacement storage engine.
 HTTP JSON commands and canonical-history SSE use the existing host/B2/store. Return
 actual acceptance receipts, isolate observers, preserve raw-command duplicate identity
@@ -52,9 +60,11 @@ existing host outcome and quarantine. No task resumes on service restart.
 
 ## Verification and authorization
 
-Implement, test, independently review complete diff and report under the fixed40-row
-matrix. Create docs/slices/v1b/VERIFICATION.md and verification.json from actual
-observations. Do not label source review as execution, reruns as unique tests, old
+The local Cargo/verifier/Node/example gates, increment review gates and three fresh
+final complete-diff reviews passed as attributed in the reports. Exact-head hosted CI
+still requires separate commit/push authorization.
+Maintain docs/slices/v1b/VERIFICATION.md and verification.json from actual observations
+under the fixed 40-row matrix. Do not treat LOCAL_VERIFIED as acceptance. Do not label source review as execution, reruns as unique tests, old
 CI as new-head CI, or loopback as live/provider approval. Preserve failed attempts.
 
 Synthetic roots/skills/owner and provider secrets, loopbacks and scripted providers

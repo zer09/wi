@@ -1,7 +1,91 @@
 # V1-B API and committed-history protocol
 
 Contract **v1b.0**, baseline `16d623a3317abc7796ec203e4fe15d580791a769`.
-**PLAN ONLY / NOT RUN.** CONTRACT.md and SECURITY.md also govern.
+Implemented in the uncommitted worktree based on `d3ee103ae94dcc80bf40934d1b937096f47922fc`.
+Status: **LOCAL_VERIFIED, accepted=false**. [Verification](VERIFICATION.md) records
+row-level evidence and limits; final complete-diff review and exact-head hosted CI
+remain pending. CONTRACT.md and SECURITY.md also govern. Frozen planning documents
+retain their original 2026-09-19 statuses.
+
+## 0. Starting the service
+
+`wi serve --config <absolute-json-file>` starts the headless service. The config is
+a regular UTF-8 JSON file, at most 1 MiB (`MAX_INPUT_BYTES`). Final symlinks/reparse
+points and special files are rejected. Unknown fields, duplicate fields, missing
+fields, invalid options and non-UTF-8 input fail with static errors. All 12 fields
+are required; only `account` accepts null. There are no implicit config defaults.
+
+```json
+{
+  "schema_version": 1,
+  "listen": "127.0.0.1:8787",
+  "public_origin": "https://wi.example.test",
+  "data_root": "/absolute/wi-data",
+  "client_token_file": "/absolute/private/wi-owner-token",
+  "global_skills_root": "/absolute/wi-skills",
+  "workspaces": ["/absolute/project"],
+  "model": "operator-selected-model",
+  "instructions": "You are a helpful assistant.",
+  "provider_transport": "websocket",
+  "account": null,
+  "enable_add_numbers": false
+}
+```
+
+These are placeholders, not an installed configuration or permission to contact a
+provider. Provision a separate owner token using [SECURITY.md](SECURITY.md#2-secret-provisioning-and-verification).
+Do not put the secret itself in this JSON, command arguments, environment variables,
+URLs, shell history or documentation.
+
+- `schema_version` is the integer 1. `enable_add_numbers` is a boolean.
+- `listen` is a literal-loopback socket address, such as `127.0.0.1:8787` or
+  `[::1]:8787`. Port 0 is allowed; use the actual address from the startup notice.
+- `public_origin` is an explicit HTTPS origin with no credentials, query, fragment
+  or path other than an optional trailing slash. Local development may use HTTP
+  with a literal loopback IP, not a hostname resolved to loopback. The origin is
+  not inferred from Host or forwarded headers. Port 0 does not update this setting.
+- All configured file/data/skill paths are absolute. `workspaces` is nonempty;
+  each entry must be an existing directory with a UTF-8 canonical path. Startup
+  canonicalizes and deduplicates entries without changing cwd. HTTP workspace
+  selectors must equal the returned canonical strings. New tasks revalidate them.
+- A missing `global_skills_root` is allowed. Startup does not scan skill bodies.
+  New tasks use shared S1/S2 discovery and preparation off the Tokio worker, with
+  no explicit body selections. A nonempty catalog automatically adds `load_skill`.
+- `model` and `instructions` are operator-selected strings subject to existing
+  `SessionOptions` validation. `provider_transport` is exactly `websocket` or `sse`.
+  The CLI fixes the provider to `openai-codex`; callers cannot supply endpoints/tools.
+- `account` is null or an existing valid managed-profile alias. Null retains the
+  existing random selection policy. An explicit alias is recommended for B2
+  continuity. An account mismatch fails before historical transmission, without
+  profile search, fallback or adoption.
+
+Startup validates config/options/paths/token, binds the listener, constructs the
+managed provider without listing/selecting/reading/refreshing profiles, then opens
+storage and constructs RunHost. An explicit task can subsequently open managed
+provider credentials under the existing auth policy. The service bearer token is
+not a provider credential.
+
+The process writes `api.listening <actual-address>` and static shutdown/error
+categories to stderr, not config contents, token values or credential paths.
+Unix SIGINT/SIGTERM and Windows Ctrl+C initiate owner shutdown. The service closes
+network waiters, cancels/drains host-owned work with storage writable, and awaits
+HTTP drain plus the original host outcome. No shutdown deadline is added.
+
+Exit 0 requires normal HTTP termination and `ShutdownOutcome::Closed`, including
+normal signal shutdown. Exit 1 reports startup/output/signal failures, HTTP failure
+or `Incomplete`; it does not hide quarantine. Help exits 0. Malformed `serve`
+arguments retain Clap exit 2 with static `api.invalid_arguments`, not quoted inputs.
+These service exits differ from `wi run`'s cancellation exit 130. Dropping an
+unawaited library serving future proves shutdown initiation only. Process loss is
+not graceful shutdown. Restart or reconnect never resumes an old task.
+
+Remote devices require a separately configured same-host HTTPS proxy as described
+in [SECURITY.md](SECURITY.md#1-principal-and-deployment). No GUI, native TLS, device
+login, deployment, task queue or automatic resumption is included. Ordinary
+`wi run` remains nonpersistent.
+
+Implementation references: `src/http_api/config.rs:164-237`,
+`src/cli/serve_cli.rs:65-188`, `src/cli/mod.rs:385-417`.
 
 ## 1. Wire rules
 

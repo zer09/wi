@@ -1,0 +1,10 @@
+{
+  "titles": [
+    "  Mutation 雪\n<em>first title</em>  ",
+    " Changed 雪\n<em>second title</em>\n"
+  ],
+  "renames": [
+    "  Active rename 雪\n<em>one</em>  ",
+    " Lost rename 雪\n<em>two</em>\n"
+  ]
+}

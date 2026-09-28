@@ -21,6 +21,10 @@ use std::sync::Arc;
 #[cfg(test)]
 pub(super) mod test_hooks;
 
+#[cfg(test)]
+#[path = "runs/tool_fidelity_tests.rs"]
+mod tool_fidelity_tests;
+
 // Validate the canonical command, not merely a receipt with a non-null run ID.
 async fn raw_receipt(
     session: &SessionHandle,
@@ -113,6 +117,12 @@ pub(super) async fn submit(
     if let Some(receipt) = raw_receipt(&session, &command).await? {
         return Ok(TaskAcceptedView::receipt(&receipt, true, None, vec![]));
     }
+    if state
+        .client
+        .has_other_active_operation(&sid, &command.operation_id)
+    {
+        return reconcile(&session, &command, ErrorView::active_run().into()).await;
+    }
     let prepared = prepare(
         state.config.settings(),
         &session,
@@ -131,7 +141,7 @@ pub(super) async fn submit(
         .run_hooks
         .dispatched
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let ticket = match state.client.submit(
+    let ticket = match state.client.submit_exclusive(
         sid,
         PersistentRunRequest {
             operation_id: command.operation_id.clone(),
@@ -141,6 +151,9 @@ pub(super) async fn submit(
         tools,
     ) {
         Ok(ticket) => ticket,
+        Err(RunHostError::ActiveRun) => {
+            return reconcile(&session, &command, ErrorView::active_run().into()).await;
+        }
         Err(error) => {
             let error = host_error(error).with_notices(notices);
             return reconcile(&session, &command, error.into()).await;
@@ -206,6 +219,12 @@ async fn prepare(
                 .register(Arc::new(AddNumbers))
                 .map_err(|error| ErrorView::gateway(&error).with_notices(notices.clone()))?;
         }
+        #[cfg(test)]
+        if let Some(tool) = settings.test_tool() {
+            template
+                .register(tool.clone())
+                .map_err(|error| ErrorView::gateway(&error).with_notices(notices.clone()))?;
+        }
         let (prepared, tools) = prepare_run_with_skill_loading(
             RunRequest {
                 provider_id: settings.provider_id().to_owned(),
@@ -230,6 +249,7 @@ async fn prepare(
 fn host_error(error: RunHostError) -> ErrorView {
     match error {
         RunHostError::Closed => ErrorView::api(ApiError::Closed),
+        RunHostError::ActiveRun => ErrorView::active_run(),
         RunHostError::RuntimeUnavailable => ErrorView::api(ApiError::WorkerLost),
     }
 }

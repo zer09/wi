@@ -5,7 +5,10 @@ use crate::{ProviderEvent, run::RunEvent, tools::ToolExecutionEvent};
 use std::{
     cell::{Cell, RefCell},
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 use tokio::sync::Notify;
 
@@ -13,6 +16,7 @@ tokio::task_local! {
     static ACTIVE: Arc<Hooks>;
     static RECORD: RefCell<Option<(Record, OperationId)>>;
     static RECORDING: Cell<bool>;
+    static FINAL_ATTEMPT: RefCell<Option<crate::run::RunResult>>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,6 +34,15 @@ pub(crate) enum Record {
 
 pub(super) fn select_record(operation: &OperationId, mutation: &Mutation) {
     RECORDING.with(|recording| recording.set(true));
+    FINAL_ATTEMPT.with(|attempt| {
+        *attempt.borrow_mut() = match mutation {
+            Mutation::Append { records } => match records.as_slice() {
+                [AppendRunRecord::Result(result)] => Some(result.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+    });
     let record = match mutation {
         Mutation::Accept { .. } | Mutation::AcceptHistory { .. } => Some(Record::Acceptance),
         Mutation::Append { records } => match records.as_slice() {
@@ -104,6 +117,9 @@ pub(crate) struct Pause {
     pub release: Notify,
     pub rollback: bool,
     pub operation_id: Mutex<Option<OperationId>>,
+    // Private evidence of the attempted record, never a public result or receipt.
+    pub final_attempt: Mutex<Option<crate::run::RunResult>>,
+    pub hits: AtomicUsize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -159,7 +175,10 @@ impl Hooks {
                 self.clone(),
                 RECORD.scope(
                     RefCell::new(None),
-                    RECORDING.scope(Cell::new(false), future),
+                    RECORDING.scope(
+                        Cell::new(false),
+                        FINAL_ATTEMPT.scope(RefCell::new(None), future),
+                    ),
                 ),
             )
             .await
@@ -206,6 +225,11 @@ pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
     match action {
         Some(Action::Pause(pause)) => {
             *pause.operation_id.lock().unwrap() = record.map(|(_, operation)| operation);
+            *pause.final_attempt.lock().unwrap() = FINAL_ATTEMPT
+                .try_with(|attempt| attempt.borrow().clone())
+                .ok()
+                .flatten();
+            pause.hits.fetch_add(1, Ordering::SeqCst);
             pause.reached.notify_one();
             pause.release.notified().await;
             if pause.rollback {

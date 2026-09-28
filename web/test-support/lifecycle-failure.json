@@ -1,0 +1,12 @@
+{
+  "title": "Lifecycle failure session",
+  "task": "  Add 17 and 25, then describe the result. 雪\n<em>inert task</em>\n",
+  "call_id": "lifecycle-add",
+  "arguments": "{\"a\":17,\r\n \"b\":25}",
+  "output": "{\"sum\":42}",
+  "first_response": "lifecycle-tools",
+  "second_response": "lifecycle-partial",
+  "item_id": "lifecycle-message",
+  "partial": "雪🙂 provisional\r\n<em>inert</em><img src=\"https://invalid.example/\" onerror=\"globalThis.lifecycleCanary=1\">\rline\n",
+  "kinds": ["session.created", "run.accepted", "checkpoint", "run.started", "checkpoint", "turn.started", "response.started", "response.finished", "tool.started", "tool.result", "tool.finished", "turn.finished", "turn.started", "response.started", "response.item.started", "response.delta", "response.failed", "turn.finished", "run.finished"]
+}

@@ -1,6 +1,6 @@
 # Current Wi slice register
 
-Updated **September 20, 2026**. Accepted runtime baseline:
+Updated **September 28, 2026**. Accepted runtime baseline:
 **76bb32fd04fd4737c0efcceaabc7d10387453147** (V1-B and native Windows withdrawal,
 PR #9). [Platform authority](../PLATFORM_SUPPORT.md): retained native Linux/macOS
 build/CI; Windows backend withdrawn. Historical reports and matrices retain their
@@ -15,7 +15,7 @@ original platform observations and planning states.
 | P1-B2 stored replay and B2-E01 joined closure | Accepted/merged PR #7,50f4dff | [Evidence](p1b2/VERIFICATION.md) |
 | V1-A in-process execution owner | Accepted/merged PR #8,16d623a | [Evidence](v1a/VERIFICATION.md) |
 | V1-B authenticated HTTP/API and history SSE | Accepted for retained scope/merged PR #9,76bb32f | [Original evidence](v1b/VERIFICATION.md), [JSON](v1b/verification.json), [platform follow-up](v1b/PLATFORM_FOLLOWUP.md), [API](v1b/API.md), [security](v1b/SECURITY.md) |
-| G1 minimal browser conversation client | **Current documentation-only handoff, g1.0;32rows NOT RUN** | [Contract](g1/CONTRACT.md), [client protocol](g1/CLIENT_PROTOCOL.md), [matrix](g1/MATRIX.md), [validation](g1/VALIDATION.md), [fresh-agent prompt](g1/IMPLEMENTOR_PROMPT.md) |
+| G1 minimal browser conversation client | **Paused design review at a89aeb4; accepted=false** | [Checkpoint evidence](g1/VERIFICATION.md), [JSON](g1/verification.json), [design review](g1/DESIGN_REVIEW.md), [contract](g1/CONTRACT.md), [client protocol](g1/CLIENT_PROTOCOL.md), [matrix](g1/MATRIX.md) |
 
 Earlier gateway/auth/M3/C1/S1 history remains in the [documentation archive](../README.md).
 Do not reimplement completed slices because an old matrix contains NOT RUN or an old

@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "contract": "g1.0",
+  "baseline": "76bb32fd04fd4737c0efcceaabc7d10387453147",
+  "implementation_checkpoint": "a89aeb49929929901e3613cc9bd3f450f3719f33",
+  "date": "2026-09-28T20:12:01+08:00",
+  "overall_status": "PAUSED_DESIGN_REVIEW",
+  "accepted": false,
+  "draft_pull_request": 10,
+  "hosted_ci": "NOT_RUN_BY_OWNER_DIRECTION",
+  "design_blocker": {
+    "code": "history.latest_first_required",
+    "summary": "Contract g1.0 requires full ascending replay from sid:0, but the owner requires latest canonical activity first with older history loaded only by upward scrolling.",
+    "report": "docs/slices/g1/DESIGN_REVIEW.md"
+  },
+  "status_definitions": {
+    "PASS_LOCAL_REVIEWED": "Retained local evidence and applicable bounded independent reviews exist; not hosted CI or overall G1 acceptance.",
+    "PARTIAL": "Useful evidence exists but at least one required case, final review, or design-dependent assertion remains open.",
+    "BLOCKED_DESIGN": "The row cannot be accepted until the product/API contract is revised.",
+    "NOT_RUN": "No retained row-level execution evidence was established."
+  },
+  "counts": {
+    "PASS_LOCAL_REVIEWED": 15,
+    "PARTIAL": 14,
+    "BLOCKED_DESIGN": 2,
+    "NOT_RUN": 1,
+    "total": 32
+  },
+  "rows": [
+    {"id":"G1-00","status":"PASS_LOCAL_REVIEWED","summary":"Baseline, ancestry, whole worktree, reports, owner changes, and no-live authority inspected."},
+    {"id":"G1-01","status":"PASS_LOCAL_REVIEWED","summary":"Windows-removal audit and platform_support pass; Unix safety and Linux/macOS policy retained."},
+    {"id":"G1-02","status":"PASS_LOCAL_REVIEWED","summary":"Exact frontend pins, no production dependency, atomic generation, and six-asset reproducibility verified locally."},
+    {"id":"G1-03","status":"PASS_LOCAL_REVIEWED","summary":"Exact embedded asset inventory and HTTP boundary verified."},
+    {"id":"G1-04","status":"PASS_LOCAL_REVIEWED","summary":"Bearer, authority, Origin, CSP, and protected /v1 behavior retained."},
+    {"id":"G1-05","status":"PASS_LOCAL_REVIEWED","summary":"Memory-only shared owner token, connect/disconnect, 401 clearing, abort, privacy, and zero implicit cancel verified locally."},
+    {"id":"G1-06","status":"PASS_LOCAL_REVIEWED","summary":"Strict DTO, decimal, error, media, JSON, SSE, and malformed-schema validation verified locally."},
+    {"id":"G1-07","status":"PARTIAL","summary":"Create and lost-201 recovery pass; complete catalog pagination and ordering acceptance remain."},
+    {"id":"G1-08","status":"PARTIAL","summary":"Rename recovery and canonical reads pass; selection and refresh depend on latest-first redesign."},
+    {"id":"G1-09","status":"PARTIAL","summary":"Paused acceptance, receipt, canonical replacement, and warning evidence exist; whole-row closure remains."},
+    {"id":"G1-10","status":"PARTIAL","summary":"Lost-202 recovery and explicit reconciliation pass; remaining uncertainty variants and final review remain."},
+    {"id":"G1-11","status":"PARTIAL","summary":"Joined rejection and replay-policy cases exist; context-framing retained only two independent reviews."},
+    {"id":"G1-12","status":"BLOCKED_DESIGN","summary":"Ascending fixed-head replay was implemented and reviewed but proves the owner-rejected full-history UX."},
+    {"id":"G1-13","status":"PASS_LOCAL_REVIEWED","summary":"Standard SSE parsing, splits, comments, IDs, malformed data, EOF, and actual frames verified locally."},
+    {"id":"G1-14","status":"PASS_LOCAL_REVIEWED","summary":"BigInt, cursor, duplicate, gap, session identity, and apply-before-advance behavior verified locally."},
+    {"id":"G1-15","status":"PASS_LOCAL_REVIEWED","summary":"Selection, disconnect, and reload epoch races passed bounded reviews; reload semantics need redesign."},
+    {"id":"G1-16","status":"PASS_LOCAL_REVIEWED","summary":"Provisional and authoritative presentation, replacement, unsupported content, reload, and fallback evidence pass."},
+    {"id":"G1-17","status":"PARTIAL","summary":"Joined tool execution/reuse/isolation/error-shaped output pass; joined finish-without-result and provider-SSE parity remain."},
+    {"id":"G1-18","status":"PARTIAL","summary":"Provider EOF partial-output retention and final-result rollback pass; restart, shutdown/loss, provider-SSE, and interruption variants remain."},
+    {"id":"G1-19","status":"PARTIAL","summary":"Joined explicit requested cancellation passes; joined not_tracked, api.closed, and cross-client cases remain."},
+    {"id":"G1-20","status":"BLOCKED_DESIGN","summary":"Fault foundation and Window A pass; Window B is not observable with tested Chromium mechanisms and the row assumes the rejected history model."},
+    {"id":"G1-21","status":"PARTIAL","summary":"Two-context and stalled-reader evidence exists; required close/watch/reopen flow and redesigned history behavior remain."},
+    {"id":"G1-22","status":"PASS_LOCAL_REVIEWED","summary":"Joined native/recovered WebSocket two-task OpenAI loopback and tool path passes."},
+    {"id":"G1-23","status":"PASS_LOCAL_REVIEWED","summary":"Joined provider-SSE labelled/missing-MIME and native/recovered paths pass."},
+    {"id":"G1-24","status":"PARTIAL","summary":"Account mismatch joined evidence exists; load_skill history/restoration through both transports remains."},
+    {"id":"G1-25","status":"PASS_LOCAL_REVIEWED","summary":"Synthetic XSS, inert rendering, request blocking, and private-data boundaries pass locally."},
+    {"id":"G1-26","status":"NOT_RUN","summary":"No retained joined process-restart/browser-reopen acceptance."},
+    {"id":"G1-27","status":"PASS_LOCAL_REVIEWED","summary":"Responsive, keyboard, focus, controls, scroll, and live-region checks pass; backward-scroll UX must be added."},
+    {"id":"G1-28","status":"PARTIAL","summary":"Finite measurements exist but long-history measurements describe the rejected full-prefix replay design."},
+    {"id":"G1-29","status":"PARTIAL","summary":"Six Cargo gates, platform_support, 466 Node tests, typecheck, and assets pass; verify.py, CLI self-test, and eight examples were not freshly rerun."},
+    {"id":"G1-30","status":"PARTIAL","summary":"26 Chromium scenarios pass excluding the retained blocker; browser CI and final complete-diff reviews are absent."},
+    {"id":"G1-31","status":"PARTIAL","summary":"Reports and handoff exist; submitted-head CI is intentionally not run and acceptance remains false."}
+  ],
+  "local_gates": [
+    {"command":"cargo fmt --all -- --check","status":"PASS"},
+    {"command":"cargo check --locked --offline --all-targets","status":"PASS"},
+    {"command":"cargo test --locked --offline --all-targets","status":"PASS"},
+    {"command":"cargo clippy --locked --offline --all-targets -- -D warnings","status":"PASS"},
+    {"command":"cargo build --locked --offline --all-targets","status":"PASS"},
+    {"command":"cargo test --locked --offline --doc","status":"PASS"},
+    {"command":"cargo test --locked --offline --test platform_support","status":"PASS","passed":1},
+    {"command":"npm --prefix web run typecheck","status":"PASS"},
+    {"command":"npm --prefix web run verify:assets","status":"PASS","assets":6},
+    {"command":"npm --prefix web test","status":"PASS","passed":466},
+    {"command":"env -u NODE_OPTIONS npm --prefix web run test:e2e -- --workers=1 --grep-invert joined read reconnect","status":"PASS","passed":26}
+  ],
+  "retained_failures": [
+    "G1-20 Window B debugger-pause run produced no selected-frame identity-bearing Network.dataReceived evidence.",
+    "G1-20 Window B asynchronous pre-read gate produced no future Network.dataReceived evidence in two Chromium runs.",
+    "Context-framing increment lacks the originally requested third independent review.",
+    "The implemented full-prefix history model conflicts with the owner-required latest-first lazy-backscroll behavior."
+  ],
+  "environment": {
+    "node": "24.18.0",
+    "playwright": "1.58.2",
+    "chromium": "145.0.7632.6",
+    "local_host": "openSUSE Tumbleweed under WSL",
+    "native_ubuntu_ci": "NOT_RUN_FOR_CHECKPOINT",
+    "native_macos_ci": "NOT_RUN_FOR_CHECKPOINT",
+    "browser_ci": "NOT_RUN_FOR_CHECKPOINT",
+    "live_provider": "NOT_AUTHORIZED_NOT_RUN"
+  },
+  "authority": {
+    "real_credentials": false,
+    "private_skills": false,
+    "auth_commands": false,
+    "live_generations": false,
+    "deployment": false,
+    "merge": false,
+    "release": false,
+    "ledger_used": 31,
+    "ledger_remaining": 19
+  }
+}

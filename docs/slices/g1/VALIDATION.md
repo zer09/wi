@@ -2,9 +2,11 @@
 
 Contract **g1.0**. Date **September 20, 2026 (Asia/Manila)**.
 Baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**, the PR #9 merge.
-**This is planning/source review, not executed G1 verification.** All matrix rows
-remain NOT RUN; no browser app, Node lockfile, asset compiler or new test result is
-included in this planning commit.
+
+> **FROZEN PLANNING LEDGER.** This file remains the pre-implementation source review.
+> Actual checkpoint results are in [VERIFICATION.md](VERIFICATION.md) and
+> [verification.json](verification.json). Implementation is paused for the
+> latest-activity/lazy-backscroll decision in [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
 
 ## 1. Baseline and actual closure
 

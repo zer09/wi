@@ -1,10 +1,15 @@
-# Wi — G1 browser-client implementation handoff
+# Wi — G1 browser-client paused design review
 
-Current accepted baseline: **76bb32fd04fd4737c0efcceaabc7d10387453147**.
-PR #9 is merged with the exact reviewed6805640 tree. V1-B and the owner-authorized
-native Windows withdrawal are accepted for the retained scope. Current assignment:
-**G1 contract g1.0**, all32rows G1-00..G1-31 NOT RUN in this planning handoff.
-Do not execute historical milestone prompts or treat a planning status as test proof.
+Current accepted runtime baseline: **76bb32fd04fd4737c0efcceaabc7d10387453147**.
+Implementation checkpoint: **a89aeb49929929901e3613cc9bd3f450f3719f33** on
+draft PR #10. Overall status: **PAUSED_DESIGN_REVIEW; accepted=false**.
+
+Do not continue G1 feature implementation. Contract g1.0 requires full ascending
+history replay from `sid:0`, but the owner requires latest canonical activity first
+and older history only through upward-scroll pagination. Read
+`docs/slices/g1/VERIFICATION.md`, `verification.json`, and `DESIGN_REVIEW.md` before
+touching G1. Wait for a revised planner contract. Do not execute historical milestone
+prompts or treat a planning, checkpoint, or local-pass status as acceptance proof.
 
 Read in order:
 1. docs/PLATFORM_SUPPORT.md.

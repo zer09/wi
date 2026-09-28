@@ -2,9 +2,14 @@
 
 Implement **g1.0**, the minimal browser conversation client. Accepted baseline:
 **76bb32fd04fd4737c0efcceaabc7d10387453147** (V1-B/Windows-withdrawal PR #9 merge).
-The planning commit and branch are recorded on the G1 PR. This document is the
-assignment, not an old verification result. Every G1-00 through G1-31 row is NOT RUN
-until you observe it.
+
+> **PAUSED. DO NOT CONTINUE THIS ASSIGNMENT.** Checkpoint `a89aeb4` is not accepted.
+> The planned replay-from-zero history model conflicts with the owner's latest-first
+> lazy-backscroll requirement. Read [VERIFICATION.md](VERIFICATION.md) and
+> [DESIGN_REVIEW.md](DESIGN_REVIEW.md), then wait for a revised contract.
+
+The remaining text is the historical assignment used to produce the checkpoint. It
+is retained for traceability and is not authority to resume implementation.
 
 ## Read before editing
 

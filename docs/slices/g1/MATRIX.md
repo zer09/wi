@@ -1,9 +1,14 @@
 # G1 bounded implementation and acceptance matrix
 
 Contract **g1.0**. Baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**.
-**All 32 rows G1-00 through G1-31 are NOT RUN.** This is a requirements matrix,
-not evidence. CONTRACT.md and CLIENT_PROTOCOL.md govern every assertion. Bounded
-means scoped work and finite fixtures, not product task/time/history quotas.
+
+> **HISTORICAL REQUIREMENTS MATRIX.** The original rows below remain unchanged. The
+> implementation is paused at `a89aeb4`; current row dispositions are recorded in
+> [VERIFICATION.md](VERIFICATION.md). G1-12 and G1-20 are blocked by the history-design
+> conflict described in [DESIGN_REVIEW.md](DESIGN_REVIEW.md). G1 is not accepted.
+
+CONTRACT.md and CLIENT_PROTOCOL.md govern the original assertions. Bounded means
+scoped work and finite fixtures, not product task/time/history quotas.
 
 ## Oracles and isolation
 

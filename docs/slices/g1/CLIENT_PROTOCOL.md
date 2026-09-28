@@ -1,10 +1,16 @@
 # G1 client protocol and state rules
 
 Contract **g1.0**, baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**.
-**PLAN ONLY.** This document governs browser behavior; the accepted server wire
-contract is [V1-B API](../v1b/API.md), with the [current native-platform policy](../../PLATFORM_SUPPORT.md).
-Read actual src/http_api/dto/{mod,events,provider,errors}.rs and router code before
-writing TypeScript types. Do not replace the existing API with a client-invented one.
+
+> **PAUSED DESIGN BASELINE.** Sections 6 and 7 prescribe full ascending replay from
+> `sid:0`. The owner requires latest canonical activity first with older history loaded
+> only by upward scrolling. Preserve this text as historical checkpoint authority, but
+> do not implement further against it. See [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
+
+The accepted server wire contract is [V1-B API](../v1b/API.md), with the
+[current native-platform policy](../../PLATFORM_SUPPORT.md). Read actual
+src/http_api/dto/{mod,events,provider,errors}.rs and router code before revising the
+protocol. Do not replace the existing API with a client-invented one.
 
 ## 1. API adapter and runtime validation
 

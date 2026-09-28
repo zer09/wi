@@ -14,6 +14,13 @@ records remains historical. Later verification reports establish completion
 within their stated scope and evidence limits. Tested revisions, worktree states,
 ledgers, and unrun checks describe each record's own stage, not the current HEAD.
 
+G1 browser-client work is paused at implementation checkpoint `a89aeb4` on draft
+PR #10 and is not accepted. Its planned replay-from-zero history model conflicts with
+the owner-required latest-first lazy-backscroll experience. Read the
+[G1 checkpoint report](slices/g1/VERIFICATION.md) and
+[design review](slices/g1/DESIGN_REVIEW.md); do not resume the historical implementor
+prompt until the planner issues a revised contract.
+
 New slice documents use `docs/slices/<slice>/`. P1-A storage is accepted and merged
 at `34b4cfd`. P1-B1 runtime capture is accepted and merged in PR #6 at `6fe0a53`.
 P1-B2 plus B2-E01 joined acceptance is accepted and merged in PR #7 at `50f4dff`.

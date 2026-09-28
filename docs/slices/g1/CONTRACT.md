@@ -2,10 +2,16 @@
 
 Contract **g1.0**. Planning date: **September 20, 2026 (Asia/Manila)**.
 Accepted baseline: **76bb32fd04fd4737c0efcceaabc7d10387453147**, PR #9 merge.
-**PLANNING ONLY: all G1-00 through G1-31 are NOT RUN.**
+
+> **PAUSED DESIGN BASELINE.** Implementation checkpoint `a89aeb4` exists, but G1 is
+> not accepted. The required replay from `sid:0` conflicts with the owner-required
+> latest-activity and lazy-backscroll experience. Do not continue implementation from
+> this contract until the planner issues a revision. See [VERIFICATION.md](VERIFICATION.md)
+> and [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
+
 Read CLIENT_PROTOCOL.md, MATRIX.md, VALIDATION.md and IMPLEMENTOR_PROMPT.md together.
-This is a fixed local implementation assignment, not permission to reinterpret old
-milestones or to claim that the browser UI already exists.
+Historical requirements below remain unchanged so the checkpoint and contradiction
+stay auditable. This slice does not reopen V1-B or restore native Windows.
 
 ## 1. Goal and first prerequisite
 

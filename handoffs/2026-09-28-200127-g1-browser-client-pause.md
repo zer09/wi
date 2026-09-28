@@ -178,6 +178,6 @@ that it also cannot trigger CI.
 
 ## Working Tree Expectation
 
-After this handoff is committed, the branch should contain three checkpoint commits
-above the prior planning head: implementation, documentation, and this handoff. No
-source or generated asset should remain modified or untracked.
+After reconciliation, the branch contains four checkpoint commits above the prior
+planning head: implementation, documentation, this handoff, and preservation of the
+two original continuation handoff inputs. No file should remain modified or untracked.

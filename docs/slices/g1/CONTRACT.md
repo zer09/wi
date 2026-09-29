@@ -1,222 +1,108 @@
-# G1 — minimal browser conversation client
+# G1.1: human-anchored conversation views
 
-Contract **g1.0**. Planning date: **September 20, 2026 (Asia/Manila)**.
-Accepted baseline: **76bb32fd04fd4737c0efcceaabc7d10387453147**, PR #9 merge.
+Contract **g1.1**, September 29, 2026 (Asia/Manila). **IMPLEMENTATION HANDOFF, NOT ACCEPTANCE.**
+Accepted master: `76bb32fd04fd4737c0efcceaabc7d10387453147`.
+Preserved implementation checkpoint: `8f45dda2a2c168931735cf798560b8dfd02a1579` on PR #10.
+Read SCHEMA.md, CLIENT_PROTOCOL.md, SECURITY.md, MATRIX.md, DISPOSITION.md and VALIDATION.md together.
+Every new **G11-00 through G11-39** row starts NOT RUN. The owner authorized this design update and local implementation, not a merge or live test.
 
-> **PAUSED DESIGN BASELINE.** Implementation checkpoint `a89aeb4` exists, but G1 is
-> not accepted. The required replay from `sid:0` conflicts with the owner-required
-> latest-activity and lazy-backscroll experience. Do not continue implementation from
-> this contract until the planner issues a revision. See [VERIFICATION.md](VERIFICATION.md)
-> and [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
+## 1. Result and authority
 
-Read CLIENT_PROTOCOL.md, MATRIX.md, VALIDATION.md and IMPLEMENTOR_PROMPT.md together.
-Historical requirements below remain unchanged so the checkpoint and contradiction
-stay auditable. This slice does not reopen V1-B or restore native Windows.
+Wi opens the newest human interaction immediately. It requests older content only to fill unused initial viewport space or in response to subsequent upward navigation. The browser displays a server-produced conversation model; it does not reconstruct the agent from raw events. Live and saved views at the same committed point have identical message grouping, chronological order, content and recorded state. Typing animation and local scroll/focus state need not be replayed.
 
-## 1. Goal and first prerequisite
+One accepted human request/run is one interaction block in this slice. Run ID identifies the block; accepted_sequence orders blocks. Internal model turns are not block boundaries. One ordinary page contains ONLY the selected block. The newest block B renders before a request for A. There is no ordinary 30-entry page spanning human interactions.
 
-Deliver a small browser interface served by Wi's existing Rust HTTP service. An
-owner can connect, create/select/rename conversations, submit an explicit task,
-watch committed output, observe failure/cancellation, disconnect, and reopen the
-same persisted conversation without owning or restarting execution.
+This replaces g1.0's browser replay from sid:0 and its Window B browser-internals requirement. Preserve the old source, reports and failures using the pinned references in DISPOSITION.md. Do not relabel old PASS_LOCAL_REVIEWED rows as g1.1 acceptance.
 
-Before browser changes, the fresh local implementor must independently audit the
-PR #9 Windows withdrawal and current documentation. Compare original f0adbdd through
-6805640/this merge; run the platform inventory and manual semantic checks, preserve
-Unix protections, and run the baseline gates. G1-00/G1-01 record this work. Do not
-relabel the original 38 PASS/2 PARTIAL report as 40 Windows passes. The platform
-policy withdraws the native-Windows-only subcases, not the retained assertions.
+The owner's pagination handoff supplies the human-anchor and viewport semantics. Subsequent discussion adopts transactionally maintained display records instead of that handoff's read-time event reduction. Separate physical rows do not imply category-grouped UI. This is an explicit amendment, not a claim the handoff originally specified materialization.
 
-A residual Windows-only compatibility branch or directly conflicting current
-platform statement may receive a minimal, separately identified cleanup before G1.
-Such a finding must have exact source/diff evidence and a regression where applicable.
-Do not remove shared portable code, credential-isolation canaries, negative path
-fixtures, historical reports or transitive lockfile metadata merely for containing
-the word Windows. Other inherited runtime defects require a precise blocker report,
-not an incidental redesign. Native Linux/macOS gates remain mandatory.
+## 2. Architecture
 
-## 2. Explicit architecture decision
+Retain one Rust process, the existing RunHost/B2/controller/registry/provider path, canonical SQLite events and receipts, and the existing TypeScript build/assets. Add a shared Rust conversation projection and storage reads. The same typed projector produces the state used by historical pages and live display updates.
 
-Use **framework-free TypeScript browser modules**, ordinary HTML and CSS. Rust
-continues to own the server, authentication boundary, sessions, execution and tools.
-There is no TypeScript/Node forwarding server, SSR layer, alternative agent loop or
-browser-held provider credential. TypeScript is the selected implementation language
-for this first small GUI, not an assertion that Rust/Wasm was technically impossible.
-No React/Vue/Leptos, router framework, state framework, UI kit, bundler or Markdown
-library is needed for this text-first increment.
+```
+canonical write + affected display rows + projection head -> same session transaction
+                                       |
+                        indexed display page / changed rows
+                                       |
+                              HTTP and SSE display DTOs
+                                       |
+                     small browser view store + safe rendering
+```
 
-Suggested module boundaries are web/src/api.ts, sse.ts, state.ts, view.ts and app.ts:
-request/DTO validation, streaming parser, pure reducer, safe DOM and orchestration.
-Behavior-based splitting is allowed; every emitted production module must have an
-explicit embedded asset entry. Do not introduce a general plugin/component framework.
+No second agent loop, category-specific browser joins, raw provider reducer in JavaScript, Node server, new database engine, background projection queue, broadcast transcript cache or generic event-sourcing framework.
 
-Exactly two direct JavaScript **development** dependencies are authorized:
-- typescript **5.9.3**;
-- @playwright/test **1.58.2**.
+Add a `conversation` module for typed display values and deterministic interpretation. It may depend on existing provider/run/tool types but not HTTP, CLI, credentials or browser code. Storage owns SQL. HTTP owns decimal-string wire adaptation and request errors. Do not introduce storage -> HTTP module dependencies. Reuse or move existing allowlisted scalar extraction without broad public-API breakage.
 
-Pin exact versions in web/package.json and commit the npm lockfile. Use Node24.x
-for build/tests, not production serving. These are deliberate documented release
-pins, not a latest-version or security-certification claim. No JavaScript production
-package dependency or new Rust dependency is authorized. Resolve only necessary dev
-transitives; keep Cargo.toml/Cargo.lock unchanged unless a genuine contract blocker
-is reported. Normal npm/browser downloads are build traffic, not provider probes.
+## 3. Persisted display representation
 
-Use strict TypeScript, noEmitOnError=true, target/module ES2022, DOM/DOM.Iterable
-libraries, relative .js imports, rootDir src and outDir dist. No source maps or
-declarations in public assets. Commit the generated web/dist JavaScript so Cargo
-builds need no Node/npm/network or build.rs compiler. A nonmutating verifier must
-compile to a temporary output directory and compare the complete output-file set
-and bytes with checked-in dist, including untracked output files; git diff alone is
-not a sufficient oracle. Type errors cannot publish a partial new asset set.
+Keep immutable `events` and `commands`. Add the derived tables specified in SCHEMA.md in the SAME session database. Store interaction headers, ordered display entries, field metadata and bounded text chunks, not a whole interaction JSON blob.
 
-## 3. Narrow Rust delivery change
+An entry's immutable position and stable ID determine its location. Its kind determines rendering only. Human text, assistant messages and tools are never regrouped by category. Update the same assistant entry as text grows. Finalization replaces that entry's authoritative contents without adding a second answer. Tool results use the actual output and is_error, not JSON-shape inference. RunResult updates outcome metadata, not assistant content.
 
-Add private fixed-asset serving inside the existing http_api module and router.
-Embed web/index.html, web/style.css and each committed dist module with compile-time
-inclusion. No runtime web-root path, directory traversal, arbitrary file endpoint,
-external CDN, source-map endpoint, index fallback for arbitrary paths or filesystem
-asset reads. Production has one Rust executable and the existing configuration.
+Ordinary reads must not reconstruct the selected run or scan its earlier canonical deltas. Ordinary writes update only affected rows and chunks; do not rebuild a whole interaction after each event. Reading/serializing requested rows is allowed. Scanning a bounded page plus indexed lookups is allowed. An oversized message must not require fetching its full text merely to produce a preview.
 
-Exact public resources: GET/HEAD `/`, `/index.html`, `/assets/wi.css`, and explicit
-`/assets/<module>.js` entries for the emitted production modules. This is an
-intentional additive exception to V1-B's formerly all-protected router:
+## 4. Pagination and oversized content
 
-1. Run the existing Host/absolute-authority and Origin validation unchanged.
-2. Only for an exact known asset with GET/HEAD and no query/body, return embedded
-   bytes (HEAD has no body). Do not consume/validate provider or owner credentials,
-   open a session, migrate data, prepare context or dispatch work for this request.
-3. All `/v1` paths and all requests not matching that narrow exception follow the
-   existing authorization/router behavior. No unauthenticated prefix wildcard.
+Three different continuations are required: previous interaction, earlier entries within the same interaction, and earlier content within one entry. All are server-produced and session-qualified. They are not the live cursor.
 
-Known static paths with query or nonempty body reject without echoing input. HEAD
-must have the same MIME and security headers as GET. Unknown paths/methods keep the
-existing authenticated error behavior; do not add a permissive SPA fallback.
-Public assets contain no installation data, workspaces, token, model, instructions,
-paths or current session history. Settings are fetched from the authenticated API.
-Existing tests asserting that `/` was private may be adapted only for these exact
-new resources; preserve every `/v1` denial and common-boundary regression.
+Normal latest response: B's human anchor, B's recorded state, B's complete ordinary activity, and previous-block cursor. Oversized response: same anchor/state plus the newest contiguous activity segment and explicit earlier-in-block/content continuations. Navigation completes earlier content/activity in B before requesting A. The repeated anchor is metadata for the same human entry, never an extra message.
 
-Use correct HTML/CSS/JavaScript MIME, no-store, nosniff and Referrer-Policy:no-referrer.
-The HTML response must enforce CSP:
-`default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`.
-Use external same-origin modules/styles, no inline handlers, eval, unsafe-inline,
-remote fonts, telemetry, service worker or cache manifest. No new HTTP mutation,
-settings, credential or transcript endpoint is needed.
+Fixed observation settings, not run limits:
+- At most **64 activity entries per block segment**, exclusively within one block.
+- At most **512 KiB encoded JSON** per conversation page or live batch.
+- At most **32 KiB encoded JSON** per compact entry/anchor fragment, including its metadata/cursors.
+- Stored text chunks at most **8 KiB of UTF-8 bytes**, cut on scalar boundaries.
+These settings bound one response/read. They never reject, truncate or delete canonical work and never stop a task. Exact serialized overhead counts. SCHEMA/CLIENT_PROTOCOL define mandatory progress for long content and many fields.
 
-## 4. Owner connection and security
+Backward membership uses immutable positions. Page contents are current as of each page's own snapshot head, not an indefinitely retained database transaction or invented time-travel snapshot. Newer writes cannot shift older membership. Replacements invalidate only incompatible content cursors. No cursor expiry timer or history retention is added.
 
-The UI connects only to its own origin and fixed `/v1` paths. Permit HTTPS or
-literal-loopback HTTP consistent with the current service policy. Do not add an
-arbitrary backend URL/proxy, insecure remote-HTTP mode or weaker Host/Origin/CORS.
-Remote access still needs the separately configured same-host HTTPS proxy. G1 does
-not deploy that proxy or implement native TLS.
+## 5. Browser responsibilities
 
-Provide a labelled password-style owner-token field and explicit Connect action.
-Require the exact 64 lowercase hex characters; do not quote invalid input in errors.
-Keep the token in page memory only, clear the input after connection is attempted,
-and use Authorization:Bearer on authenticated fetches. Use credentials:omit,
-redirect:error and cache:no-store. Never store the secret in URLs, cookies,
-localStorage/sessionStorage/IndexedDB, history state, logs, screenshots, reports,
-telemetry, compiled assets, config or provider state. There is no remember-me feature.
-Autocomplete suppression is best effort, not control of browser extensions/password
-managers. JavaScript reference disposal is not a memory-zeroization guarantee.
+Keep only presentation state: selected session, loaded blocks/entries/text ranges, server revisions/cursors, viewport/focus/draft, and pending command identity. Do not retain a fingerprint ledger of every historical event, infer run state from provider lifecycle, interpret tool success, or calculate B2 receipt ranges.
 
-Connect reads settings and session listings, not a provider or auth profile. A401
-clears the connection secret and sensitive in-memory/DOM state and returns to the
-connection screen. Other failures retain appropriate visible state without showing
-raw response/parser/exception details. Disconnect locally aborts observation/read
-requests, clears drafts/history/token references, and does **not** call cancel or
-revoke the shared owner secret. Other devices and RunHost work continue.
+Initial selection or page refresh:
+1. Request latest block and matching snapshot head.
+2. Validate and install it; render at latest activity.
+3. Attach display SSE after that head, independently of older loading.
+4. After layout, if no overflow, request exactly one earlier content/segment/block.
+5. Recheck after each render and stop when filled/end reached.
+If B fills the viewport, A is never initially requested. Live growth before the next older request cancels that need. An already admitted older read can finish and merge safely; then remeasure. Resize/layout changes after initial fill do not restart automatic backfill. Later requests require upward intent near the top or an accessible Load older control. At most one older read per selection is in flight.
 
-All model/user/tool/title strings are untrusted text. Construct DOM with textContent,
-form values and explicit element creation. No innerHTML, insertAdjacentHTML,
-DOMParser-generated content, HTML Markdown, untrusted href/src/style, eval, or automatic
-links/images/resource fetches from conversation data. Tool arguments/results display
-as their original strings; an error-shaped successful tool result remains success
-unless its actual is_error says otherwise. No content scanning or secret-removal
-claim is made for text intentionally supplied by the owner/model/tools.
+Preserve a stable visible entry/field and pixel offset while prepending. At-bottom readers follow live output; readers above bottom retain position and get a New activity indicator. New block arrival while reading older content cannot force navigation. Session/connection epochs discard stale pages and frames without cancelling execution.
 
-## 5. User-visible interface
+## 6. Live and saved parity
 
-A small responsive layout is sufficient:
-- Top bar: Wi, connection/observation state, current provider/model as read-only
-  settings, and Disconnect. Never expose provider alias/token/internal config.
-- Session pane: catalog-as-of list, load-more, refresh-list, create-title/workspace
-  form using only returned allowed workspaces. Creation returns the real session ID.
-- Conversation pane: canonical title/workspace, rename, explicit catalog refresh,
-  ordered messages and collapsible text-only reasoning/tool details, and clear
-  accepted/running/terminal/interrupted/recording states.
-- Composer: multiline task text, explicit Send, pending/uncertain receipt state,
-  explicit reconcile/retry controls, and separately labelled Cancel current run.
+New display SSE uses self-contained entry/header upserts, not raw event replay. It can coalesce intermediate revisions, but preserves current content and terminal facts. The same compact-entry encoder is used by page, content and stream reads. CLIENT_PROTOCOL defines revision, generation and range handling. Stable source correlation stays server-side.
 
-Session selection may be reflected only as `#session=<UUID>`; reject malformed or
-extra fragment forms and never put secrets or drafts there. Reopen reads that selected
-session only after Connect. Hash navigation/refresh is a read action, never task
-submission. The empty session view says no messages yet; metadata/private checkpoints
-are not phantom messages. Catalog ordering is the existing ID-keyset order, not an
-invented activity-sort guarantee.
+Snapshot and captured canonical head H are read together. Stream starts after H, not after a separately read 'now'. Every newer committed display state remains observable; no browser holds a SQLite transaction. Private-only canonical records advance the watermark without exposing payloads. The stream is a current-state synchronization protocol, not an audit event feed.
 
-Do not trim, normalize or silently truncate text/titles. Enter inserts a newline in
-the composer; Send or Ctrl/Cmd+Enter is the explicit submission action, with duplicate
-activation guarded. The current server may reject a new task while another run is
-active; show its actual error and retain the draft. Do not implement steering, a queue
-or automatic follow-up. A receipt is shown as accepted, never finished/successful.
-Do not put optimistic text into the canonical conversation before its stored event.
+On EOF/error, freeze visible state as disconnected. Explicit Reconnect latest discards the old observation epoch, obtains B anew, replaces loaded history only after success, resets backward traversal, then attaches after the new H. Failed rebase retains stale content. Same-page pending commands/receipts survive rebase and are checked through addressed server reconciliation; no task POST is automatic. A newly loaded page has no persisted token or pending command and submits nothing by itself.
 
-Cancellation is explicit, addressed by selected session and known active run ID.
-`requested` means signal requested, not confirmed rollback/stopped upstream work.
-`not_tracked` is not proof of success or cancellation. Subsequent canonical evidence
-controls the final display. Closing a tab, changing sessions, signout, navigation,
-pagehide/beforeunload and network failure must not send cancellation.
+## 7. Local access decision
 
-Use accessible labels, visible keyboard focus, semantic headings/buttons/forms and
-status/error regions. Do not announce every streamed token as an alert or steal focus
-on updates. Preserve newlines/indentation with CSS, wrap long text without page-wide
-horizontal overflow, and keep controls usable at 360x800 and1440x900 viewports. A
-near-bottom reader can follow new content; a scrolled-away reader gets a new-content
-control instead of forced scrolling. No external font/image asset is required.
-Plain text is deliberate: rich Markdown/code editing/terminal rendering is deferred.
+Retain the existing small, centralized Wi owner bearer check and memory-only Connect flow. This resolves the final discussion conservatively: no authentication removal, optional bypass, cookie login, JWT, device registry or new credential mechanism. All APIs including new conversation routes require the same token. Existing fetch/SSE parsing remains a small transport utility; removing domain reduction is the simplification here. Native EventSource cannot silently replace header-authenticated fetch.
 
-## 6. Actual client protocol
+Literal-loopback HTTP is a NORMAL local mode, not a requirement to install HTTPS. Provider TLS/OAuth remains unchanged. No local certificate/reverse proxy is needed. Remote access stays outside this slice's acceptance; existing proxy documentation is conditional on choosing remote access. Full page refresh needs Connect again because token storage remains memory-only. Document this tradeoff instead of inventing persistent login. See SECURITY.md.
 
-CLIENT_PROTOCOL.md defines exact DTO consumption, commands, immutable operation
-identity, fixed-head pages, incremental SSE parsing, duplicate/gap detection, reducer
-semantics and observation epochs. It is mandatory, not a mock API suggestion.
+## 8. Compatibility and migration
 
-The browser never installs native provider replay, reads SQLite, fabricates tool
-results, mutates accepted context or determines model continuation. Only the server
-performs those actions. Stream reconnect is observation, not execution recovery.
-Use explicit read reconnect after an interrupted stream; no automatic POST retry,
-backoff framework or polling-based task restart. No transport/library change follows.
+Session schema advances to **3** only to add display projections. Catalog1, stored1, runtime2, provider1 and existing HTTP API1 remain. New display protocol is separately `conversation_version:1`. Preserve raw /history and /events for existing callers, and preserve all old mutation routes and result/error semantics.
 
-## 7. Tests, build and scope
+Existing schema1/2 sessions upgrade once during explicit open under existing ownership. Schema1 first uses the existing 1->2 migration, then 2->3. Initial backfill is the documented exception to no event reduction on reads. The browser shows Preparing conversation during first-open upgrade; measure it separately. After successful upgrade, opening/paging cannot repeatedly backfill. Do not scan/upgrade every session merely to list the catalog. No provider/tool execution, account assignment or old-file overwrite occurs in upgrade. Details and failure rules are in SCHEMA.md.
 
-MATRIX.md requires pure protocol/reducer tests, real Rust asset-boundary tests and
-real Chromium integration through actual Rust HTTP/RunHost/B2/SQLite/loopback
-provider/tools. A stubbed HTTP response cannot prove that joined acceptance path.
-A cfg(test) ignored Rust child fixture controlled through synthetic stdin is allowed;
-no production fake-provider command, endpoint, environment flag or auth bypass.
+Add one read-only task reconciliation route using the existing raw_receipt validation. This keeps receipt semantics on the server; it never dispatches work. Original ordinary CLI run remains nonpersistent. No separate migration CLI is required.
 
-Add one Ubuntu-only browser CI job, preserving both native Linux/macOS jobs and all
-six existing Cargo gates. The browser job uses Node24, npm ci, typecheck, nonmutating
-asset verification, unit tests and Playwright Chromium end-to-end checks. Use the
-existing checkout/toolchain action convention plus an official Node setup action;
-record its selected revision and actual tools in evidence. No Windows job returns.
-Chromium offline evidence is not Firefox/Safari/native-Windows or real-device proof.
+## 9. Work phases and exclusions
 
-Allowed files: web source/assets/package/lock/build-check/test support; private
-Rust embedded-asset/router changes and tests; narrowly necessary cfg(test) fixture
-sharing; browser CI job; current usage/security/index docs; G1 reports. Small residual
-platform cleanup from G1-01 must be separately identified before feature edits.
-No new Rust dependency, core/provider/auth/tool/schema behavior, general static file
-server, UI framework, Markdown parser, desktop app, service worker, persistent browser
-cache, uploads, source editor/shell, search, branching, compaction, skills resources,
-new provider, model/settings mutation, device auth or deployment is authorized.
-No RunLimits, optional budgets, task-wide quotas/deadlines, lifetime history/session
-ceilings, deletion, retry/failover or automatic task/model/tool resumption.
+Phase A: preserve checkpoint; verify source/requirements/platform audit; implement schema/projector/reads and deterministic tests.
+Phase B: add display HTTP/SSE and reconciliation with real storage/security tests.
+Phase C: replace browser event reconstruction with display rendering and human-anchor navigation.
+Phase D: joined browser acceptance, performance evidence, full regression, independent review and documentation.
+All phases belong to this one contract; do not claim whole acceptance at a phase boundary.
 
-All fixtures use temporary synthetic secrets/workspaces and loopback/scripted
-providers only. No real credential/private-skill reads, authentication commands or
-live model requests. Ledger31/50used19remaining stays unchanged. The owner authorized
-this handoff; local implementation commits/push/merge/release/deployment and later
-slices still require separate permission. Leave implementation uncommitted for review.
+Only a scoped residual platform defect, projection integration change or contradiction exposed by these requirements may be corrected. No new dependencies or toolchains: retain locked SQLx/Axum, TypeScript5.9.3, Playwright1.58.2 and Node24 tooling. Necessary schema3 additions, shared projection module, new display DTOs/routes and test replacement are explicitly authorized. Internal layout is flexible within these decisions; required semantics are not left to redesign.
+
+No RunLimits, execution quota/deadline, optional budget, lifetime history cap, auto-deletion, model/tool retry, auto-resume, compaction, branching, new provider/tool, shell/editor, skill resources, token provisioning redesign, native Windows restoration, general project-management subsystem or deployment.
+
+Verification is synthetic/offline/loopback only. Ledger remains 31/50 used,19 remaining. No real credentials/private skills/auth commands/provider generations. Existing host inference used to implement is not a Wi live test. Local changes remain uncommitted until owner authorizes commit/push. Merge, release and deployment are not authorized by this handoff.

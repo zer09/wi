@@ -1,129 +1,90 @@
-# G1 source-to-contract validation ledger
+# G1.1 planning validation and source map
 
-Contract **g1.0**. Date **September 20, 2026 (Asia/Manila)**.
-Baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**, the PR #9 merge.
+Date: September29,2026. Classification: **source/design validation, not implementation acceptance**. PR #10 checkpoint inspected at `8f45dda2a2c168931735cf798560b8dfd02a1579`; accepted master is76bb32fd04fd4737c0efcceaabc7d10387453147. The revised planner commit changes documentation only. No G11 row is passed by this document.
 
-> **FROZEN PLANNING LEDGER.** This file remains the pre-implementation source review.
-> Actual checkpoint results are in [VERIFICATION.md](VERIFICATION.md) and
-> [verification.json](verification.json). Implementation is paused for the
-> latest-activity/lazy-backscroll decision in [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
+## 1. Requested product basis
 
-## 1. Baseline and actual closure
+The uploaded G1_Design_Handoff_Human-Message-Anchored_Pagination.md defines a human message/run as the backward-navigation block, B-before-A rendering, viewport fill and separate oversized-block/content continuations. Later owner discussion explicitly adopts saved display records in addition to immutable events and requires identical live/history chronological chat. Its read-time reduction suggestion is consequently superseded, not misquoted as materialization.
 
-PR #9 final reviewed head was6805640444e98cd00ef06dcbad1e966b4d4d8a65. The merge
-comparison has zero file differences and master was confirmed at76bb32f. Push
-35458920521 and PR35458921748 attempt1 passed all six Cargo gates on Ubuntu/macOS.
-Those jobs establish that head's native gates, not G1 TypeScript/browser behavior
-or new local Node/example executions. See [PR #9 closure](https://github.com/zer09/wi/pull/9#issuecomment-5744102056).
+The final access discussion permits a small existing authorization boundary if its cost stays small. This contract RETAINS the existing bearer mechanism without adding an authentication system. Earlier proposals to omit authorization or use a new browser session/cookie are not adopted. Loopback HTTP is the normal local path; HTTPS is not a local prerequisite.
 
-The owner's native Windows withdrawal is in [PLATFORM_SUPPORT.md](../../PLATFORM_SUPPORT.md).
-Original V1-B source6e28cc3/reportheadf0adbdd remains38PASS/2PARTIAL/accepted=false
-in its historical evidence. Windows-only V1B-03 and V1B-33 assertions are withdrawn,
-not retroactively tested. Separate [follow-up](../v1b/PLATFORM_FOLLOWUP.md) records
-planner source changes, early inventory failures, later CI and limitations.
-A fresh local audit is explicitly still required by G1-01; no independent local
-review of that removal is falsely claimed here.
+The owner authorized updating PR #10's specifications and resuming local implementation. No runtime source edit, acceptance, merge, provider test or deployment was requested of this planning pass.
 
-## 2. Existing interfaces inspected versus new work
+## 2. Actual producer/consumer map
 
-All repository paths below refer to the accepted merge tree (identical to6805640).
-Their meanings were checked against actual producer/consumer paths, not inferred
-from Rust variant names or an illustrative transcript.
+All links in this section are interpreted against the checkpoint, not current moving master:
+https://github.com/zer09/wi/tree/8f45dda2a2c168931735cf798560b8dfd02a1579
 
-| Actual source | Observed baseline boundary | G1 use or authorized addition |
+| Source | Actual reviewed behavior | g1.1 implication |
 |---|---|---|
-| src/http_api/router.rs | Common authority/origin/preflight/auth gate precedes `/v1` dispatch. Explicit routes, strict bodies/query parsing, no public GUI resources. | Add only an exact embedded GET/HEAD asset exception after unchanged authority/origin checks; keep all API auth and fallback behavior. This exception is NEW, not existing functionality. |
-| src/http_api/boundary.rs and token.rs | Separate bearer credential, exact authority/origin checks and bounded verifier; not provider OAuth. | Browser supplies the existing owner token in memory via header. No new auth issuance, cookie or device identity. |
-| src/http_api/config.rs and cli/serve_cli.rs | Explicit origin/workspaces/model/settings; loopback startup; supported Unix signal handling. No client deployment configuration endpoint. | Keep config shape and Rust CLI. Browser uses same-origin authenticated settings. No runtime Node or arbitrary API URL. |
-| src/http_api/dto/mod.rs | Flat success objects, canonical SessionView wrapper, flattened catalog observations, actual receipt IDs, decimal strings and separate result_recorded. | TypeScript runtime guards mirror these exact shapes. No universal data envelope or invented last_activity/current catalog guarantee. |
-| src/http_api/dto/errors.rs | ErrorView is flat api_version/code/stage/certainty/acceptance/notices; static safe mapping. | Handle command versus network uncertainty and retained acceptance; never expect a nested error object or display parser excerpts. |
-| src/http_api/dto/events.rs | One EventView per stored event; selection/binding/extensions project to checkpoint; tool result bytes separate from finish. | Apply checkpoint sequences without phantom messages and render actual outputs only. Core storage/native schema unchanged. |
-| src/http_api/dto/provider.rs | Closed ItemView/ResponseView, supported text blocks, actual provenance/usage and unsupported marker; no native field. | Browser handles projected content, not encrypted/native provider state. Authoritative response replaces provisional output. |
-| src/http_api/router/events.rs | Initial committed page before SSE200, one qualified ID per emitted record, fixed window/head, later polling; noID wi.error/optional closure. | Fetch parser and applied-cursor reconnection. Network chunk/EOF cannot stand in for an event or task completion. |
-| src/http_api/router/runs.rs | Raw operation/run/text retry validates actual B2 acceptance before current context; accepted receipt distinct from completion. | Immutable pending command and explicit same-body retry/reconciliation. No automatic POST/provider retry or changed IDs. |
-| src/http_api/serve.rs and serve/transport.rs | Network waiter cancellation is separate from RunHost work; drain-before-close and guarded ownership. | Browser aborts observation only. New public assets cannot replace the server owner or change shutdown. |
-| src/service/mod.rs and tickets.rs | Host owns task; weak client and passive ticket; early actual acceptance. | Closing a browser does not cancel. Only explicit existing cancel endpoint signals a run. |
-| src/execution/mod.rs and replay.rs | B2 restores compatible selected history for explicit new task; no automatic resumption. | Client neither rebuilds provider context nor silently edits refused incomplete history. |
-| src/providers/openai_codex/tests/replay/http_api_joined.rs and child modules | Actual HTTP/SQLite/OpenAI-loopback fixtures already exist. | Reuse privately where helpful, but browser joined rows must add actual DOM actions/assets and real wire observation rather than claiming these older tests prove GUI behavior. |
-| tests/platform_support.rs | Lexical first-party regression inventory, not exhaustive semantic platform proof. | Run and supplement with manual removal audit; preserve portable/dependency/historical distinctions. |
-| .github/workflows/ci.yml | Ubuntu and macOS six Cargo gates, no Windows after owner change. | Add an Ubuntu browser job; do not remove either native job or its assertions. |
+| docs/slices/g1/DESIGN_REVIEW.md | Rejects full-prefix product behavior and distinguishes failed Window B observation from a production defect. | Explicit supersession and replacement proof, not implementation blame. |
+| web/src/client.ts::selectSession/startObservation | Loops history pages until complete before SSE. | Replace, do not merely reverse SQL ordering. |
+| web/src/state.ts::applyEvent/reduceEvent | Requires consecutive raw event prefix, retains fingerprints and reconstructs runs/turns/responses/tools. | Remove browser domain reducer; keep only generic display/epoch state. |
+| web/src/state.ts::responseSections/selectDisplay | Resolves provisional/authoritative content, fallback, tool state and chronological first_sequence ordering. | Move those rules into one server projector; same live/history encoder. |
+| src/storage/session_v2.sql | events/runs/tool_results/commands/manifest, no persisted conversation body projection. | Explicit additive schema3 work is necessary for the adopted saved representation. |
+| src/storage/run_store.rs::mutate/append | Receipt-first duplicate, actual event insertion and run/tool projection within BEGIN IMMEDIATE; final manifest/receipt commit. | Add affected display updates in this transaction. Never create a separate eventually consistent writer. |
+| src/storage/session.rs::rename_transaction/open/connection | Owned session operations; lazy1->2 migration on explicit open; checks canonical/catalog identity. | Add2->3 to this path and metadata projection; preserve lifecycle/receipt/retirement. |
+| src/storage/interruption.rs::reconcile | Inserts run.interrupted and updates run/manifest in one transaction for prior-instance unfinished work. | Display interruption must join that same transaction. No resumed execution. |
+| src/storage/session_schema.rs::version/structure | Accepts1/2 and validates released canonical definitions/indexes. | Targeted3 support and projection checks; keep real old/future fixtures. |
+| src/storage/migration.rs | Transactional1->2 table rebuild, setting restoration, owned cleanup and preservation checks. | Preserve existing step; additive2->3 needs its own tests and watermark. |
+| src/http_api/router/runs.rs::raw_receipt/submit | Server already verifies actual method/input/selection and exact raw user text before returning receipt; checkpoint uses submit_exclusive. | Reuse for a read-only reconciliation endpoint. Remove duplicate browser storage-range proof, not server proof. |
+| src/http_api/mod.rs | Existing token/boundary/assets modules and fixed server adapters. | Preserve one centralized bearer check and one fetch transport. No new auth module family. |
+| src/http_api/config.rs | Actual listener validation rejects non-loopback; explicit config owns token path, roots/model/settings. | LocalHTTP is already supported. No certificate requirement or new no-auth/public-bind mode. |
+| src/http_api/router/events.rs | Raw fixed-head pages then later canonical polling with250ms idle reads. | Keep compatibility; add distinct display route/cursor. Never change raw cursor semantics beneath old callers. |
+| web/e2e/read-reconnect.spec.mjs and test-support/read-reconnect*.mjs | Attempts a selected native read/CDP byte-window gate with global instrumentation. | Retire exclusive prototype; prove application atomicity deterministically and browser recovery by latest rebase. |
 
-P1 stored DB2/catalog1/stored-envelope1/runtime2/provider1 and V1-B HTTPapi1 are
-unchanged. Native Windows withdrawal does not implement managed authentication on
-macOS. The old Linux-specific auth and live limits remain even though native build
-and loopback CI cover macOS. G1 offline fixtures must not silently use real profiles
-to bridge that gap.
+Checked source blob identities for later comparison:
+- run_store.rs:929a9fa444d8b70c4b1bb2009856241231c78558
+- session.rs:c8c252bbe67168b6352632016627f2558400b89b
+- session_schema.rs:b62b380151421bd432454fceb67d0398d40fe859
+- session_v2.sql:d3e78a9facfb351b9dc52474cf58b02c68648328
+- interruption.rs:4e74a86d47e759a59981a8ce6dbc025cdf540de7
+- migration.rs:ef24184e891537e0d6bebe727ba266fd03913bec
+- web/src/state.ts:d324caad342f67ea9a938755e2f306a563277b70
+- router/runs.rs:a0934a1dffc633419c36e2d89b9b13fe9359d087
+- http_api/config.rs:6bb7672491de760f3b0c6e1d078595fdea3923af
 
-## 3. Newly selected G1 decisions
+This is a targeted source review of the relevant boundaries, not a full audit of all203 checkpoint paths. The local final review must inspect the complete accumulated diff.
 
-These are deliberate requirements of this handoff, not statements that they came
-from Pi, Codex, the old TypeScript repo or previously shipped Rust behavior:
+## 3. Explicit changes versus preserved behavior
 
-- A text-first, framework-free TypeScript client and fixed embedded HTML/CSS/modules,
-  rather than Rust/Wasm or a full IDE framework. Rust still owns all backend work.
-- Exact two dev-only package pins, checked-in compiled assets and a reproducibility
-  verifier. Cargo users need no npm at startup/build; no runtime CDN dependency.
-- Only same-origin requests; owner token held in page memory and cleared on local
-  Disconnect/401. No browser credential/draft persistence or per-device revocation.
-- Explicit manual observation reconnect and same-command retry. No automatic mutation
-  retry, queue, steering or retry/backoff subsystem.
-- Strict runtime wire validation, BigInt-backed decimal ordering, one applied
-  canonical cursor and epoch fencing, plus pure reducer before safe DOM rendering.
-- A narrow unauthenticated static-page exception that remains behind Host/Origin;
-  all installation data still requires the existing API bearer.
-- Plain text/collapsible tool/reasoning presentation with no unsafe Markdown/HTML,
-  external images/links/fonts or service worker. Rich editing is deferred.
-- A required independent Windows-removal preflight and a real Chromium->HTTP->host
-  joined oracle, rather than treating old source tests as browser evidence.
+New: shared saved display model, session3 projection tables/chunking/migration, indexed conversation APIs, changed-entity SSE cursor, read-only task reconciliation, human-block viewport rules, canonical latest rebase, thin display store, revised test levels.
+Preserved: canonical event/receipt bytes and immutability; B2 replay selection/native account binding; provider request capacities; authority/whole-batch validation; ToolFailed->gateway_error; actual tool output/is_error; current host ownership/cancellation/shutdown; catalog1; raw HTTP routes/API1; Linux/macOS support; no RunLimits.
 
-These choices keep the first UI small without restricting useful task duration,
-model/tool call counts, stored history lifetime or later compatible frontend changes.
-No dependency or performance winner was established by this design review.
+None of the new interfaces is claimed to exist in the checkpoint. RUST_API.md explicitly authorizes the required storage read surface. Exact Rust internal names beyond those interfaces can follow current organization. A small input preview or display page is not a provider prompt, and projection output must never be used as B2 input.
 
-## 4. Primary external references consulted
+## 4. Planning checks actually performed
 
-The following official references were opened/checked during planning. They establish
-release/API behavior only, not compilation of this new client or secure deployment.
-Versions are selected pins, not assertions that they are latest.
+Inspected PR metadata/head, changed-file inventory, checkpoint decision packet, core storage transaction/migration/interruption paths, browser reducer/loading and current documentation. Existing user research was read as supplied, not treated as a new upstream benchmark.
 
-- [TypeScript5.9.3 release](https://github.com/microsoft/TypeScript/releases/tag/v5.9.3).
-- [TypeScript noEmitOnError](https://www.typescriptlang.org/tsconfig/noEmitOnError.html):
-  emitting after type errors must be explicitly disabled for this build policy.
-- [Playwright1.58.2 release](https://github.com/microsoft/playwright/releases/tag/v1.58.2).
-- [Playwright network testing](https://playwright.dev/docs/network): network interception
-  can replace the backend; such mocks are deliberately not the joined acceptance oracle.
-- [HTML Standard SSE](https://html.spec.whatwg.org/multipage/server-sent-events.html):
-  line/data/event/ID framing and blank-line dispatch inform the fetch parser. Wi's
-  explicit token/cursor/error policy remains its own protocol, not automatic EventSource
-  reconnect or an execution-resumption instruction.
+A local Python sqlite3 **3.46.1** smoke check executed the proposed five-table DDL against minimal synthetic events/runs tables, verified the8192-byte chunk constraint, traversed100 same-sequence entries with a key tie-break in13-row pages without omission/duplicates, and confirmed EXPLAIN uses conversation_entries_order for the backward tuple lookup. This establishes draft SQL syntax/selected constraints and a small keyset illustration ONLY. It is not full Wi-schema compatibility, SQLx execution, a changed-entity moving-row proof, a benchmark, migration/crash acceptance or any G11 PASS.
 
-Normal dev dependency/browser installation is allowed offline-test preparation. No
-external reference authorizes reading owner credentials or contacting a live provider.
-The local agent must record exact resolved packages, Node/Rust/browser versions,
-actual build/asset checks and browser execution, and report a dependency conflict
-before silently changing this contract's pins.
+Rust/Cargo were unavailable in this planner runtime. A direct container Git clone could not resolve github.com; repository reads/writes used the connected GitHub tool. No compilation, runtime suite, Node/browser acceptance, real credential read, provider request or new independent local-agent review is claimed.
 
-## 5. Known limits and evidence required
+Primary reference checks on September29:
+- https://sqlite.org/lang_transaction.html : explicit transactions and rollback semantics.
+- https://sqlite.org/isolation.html : matching data/head requires one actual read snapshot.
+- https://sqlite.org/rowvalue.html : indexed keyset scrolling, not deep OFFSET.
+- https://html.spec.whatwg.org/multipage/server-sent-events.html : standard framing and native EventSource interface/reconnect behavior.
+These support mechanisms, not the correctness or performance of unimplemented Wi code.
 
-This planner did not compile a G1 Rust asset adapter or TypeScript, launch Chromium,
-run a GUI accessibility audit, benchmark render performance, verify real HTTPS proxy
-configuration, or exercise a real owner's model. Those are not hidden completed tasks.
-The matrix specifies offline executable evidence for the local implementor.
+## 5. Documentation drift observed
 
-A pure reducer test is not real DOM/network evidence. A screenshot is not a durable
-receipt or provider call. A mocked API plus old provider test is not the joined
-browser path. Source-marker absence is not semantic absence of every Windows-specific
-accommodation. Green Cargo cannot certify browser versions or Linux-only auth on macOS.
-Reruns do not erase failures or count as unique tests.
+The checkpoint slice register/index correctly records a pause but also retains earlier planning-only/unimplemented statements. The architecture overview still says V1-B is unimplemented; its event introduction retains unqualified R1 exact-head NOT RUN despite later closure. The new current indexes/overviews separate accepted master, partial checkpoint, historical evidence and unimplemented g1.1. Detailed old overviews remain available at the immutable checkpoint URL. Historical verification and handoffs are not rewritten.
 
-Memory-only token handling cannot protect against a malicious same-origin script,
-browser extension, debugger or compromised host. Authenticated conversation content
-can itself contain secrets. No comprehensive penetration-test/Internet-edge/constant-
-RSS/exactly-once browser guarantee is claimed. Long selected histories can cost memory
-and rendering time; no silent cap/eviction/truncation is authorized.
+Root README's links continue through the current documentation index. Its accepted-runtime schema2 descriptions remain current UNTIL local implementation changes schema3; the final implementor must update runtime documentation/examples/help at G11-39, not claim schema3 exists in this planning commit. The immutable source/prompt archive is linked from DISPOSITION.md.
 
-Future work remains: richer Markdown/editor/terminal, persistent client drafts/device
-auth, compatibility beyond observed Chromium, general coding executors, steering,
-parallel tools, compaction/branching/search/import, extra providers and deployment.
-None is incidental G1 implementation. Source/document conflicts need exact evidence
-and a narrow resolution, not another speculative architecture exercise.
+## 6. Review hazards to avoid
+
+- No vague 'one block' assertion while fetching all blocks or one unbounded JSON blob.
+- No32KiB preview created by first reading a whole giant body.
+- No category-based sorting or final-answer duplicate on history reload.
+- No raw full-prefix reducer moved from browser to every HTTP GET.
+- No display watermark update outside the event transaction.
+- No watermark advancement past unreturned entities sharing one sequence.
+- No mutation/resume side effects hidden in observation reconnect.
+- No browser proof requiring undocumented CDP scheduling or global monkeypatches.
+- No token removal, cookies or access mode inferred from old alternatives.
+- No forged accepted=true, review identity, source equivalence or platform evidence.
+
+Genuine blockers require exact producer/consumer evidence and a scoped correction. The local implementor executes this specification; it is not asked to invent a second architecture plan.

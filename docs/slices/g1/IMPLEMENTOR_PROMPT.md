@@ -1,122 +1,61 @@
-# Fresh local implementor assignment — G1
+# Local implementor assignment: G1.1
 
-Implement **g1.0**, the minimal browser conversation client. Accepted baseline:
-**76bb32fd04fd4737c0efcceaabc7d10387453147** (V1-B/Windows-withdrawal PR #9 merge).
+Implement contract **g1.1** on PR #10, branch `docs/g1-browser-conversation-client`.
+Accepted master: `76bb32fd04fd4737c0efcceaabc7d10387453147`.
+Preserved unaccepted checkpoint: `8f45dda2a2c168931735cf798560b8dfd02a1579`.
+The latest documentation commit is the resume-plan revision; inspect actual HEAD and record it. Do not confuse it with the tested runtime source.
 
-> **PAUSED. DO NOT CONTINUE THIS ASSIGNMENT.** Checkpoint `a89aeb4` is not accepted.
-> The planned replay-from-zero history model conflicts with the owner's latest-first
-> lazy-backscroll requirement. Read [VERIFICATION.md](VERIFICATION.md) and
-> [DESIGN_REVIEW.md](DESIGN_REVIEW.md), then wait for a revised contract.
+## Read before edits
 
-The remaining text is the historical assignment used to produce the checkpoint. It
-is retained for traceability and is not authority to resume implementation.
+Read root AGENTS.md, then these files in docs/slices/g1:
+1. CONTRACT.md
+2. SCHEMA.md and RUST_API.md
+3. CLIENT_PROTOCOL.md and SECURITY.md
+4. MATRIX.md
+5. DISPOSITION.md
+6. VALIDATION.md
+7. historical VERIFICATION.md, verification.json and DESIGN_REVIEW.md
 
-## Read before editing
+Read applicable existing V1-B API/security, storage/source code and platform policy. Old paused handoffs and g1.0 instructions are historical. This new owner-approved contract resolves the pause. Do not run the old full-prefix or Window B assignment.
 
-1. AGENTS.md and docs/PLATFORM_SUPPORT.md.
-2. docs/slices/v1b/PLATFORM_FOLLOWUP.md and platform-followup.json.
-3. docs/slices/g1/CONTRACT.md.
-4. docs/slices/g1/CLIENT_PROTOCOL.md.
-5. docs/slices/g1/MATRIX.md.
-6. docs/slices/g1/VALIDATION.md and this prompt.
-7. Current V1-B API/security and actual mapped source, including DTOs/router,
-   RunHost/B2, platform inventory and joined provider fixtures.
+## Preserve the actual checkpoint
 
-Inspect actual HEAD/ancestry and every staged, unstaged and untracked file. Preserve
-owner work. No reset, clean, forced checkout, unsolicited stash or execution of old
-M3/C1/S1/S2/R1/P1/V1 prompts. Do not treat historical NOT RUN/platform requirements or
-old report fingerprints as the current native-support policy.
+Inspect HEAD/ancestry and all staged, unstaged and untracked work. Preserve owner changes; no reset, clean, forced checkout or unsolicited stash. Verify the existing platform audit/USERPROFILE cleanup and retained Unix behavior. Use the current Node24 and locked TS5.9.3/Playwright1.58.2 tooling; no new dependencies. G1 already has a substantial partial implementation. Reuse valid assets, transport, security, commands, fixtures and rendering; do not restart from an empty project.
 
-## First complete the independent platform audit
+The design and40-row matrix are fixed. Implement and verify them rather than returning another architecture plan. If a specific statement conflicts with actual code, report exact producer/consumer evidence before changing scope.
 
-G1-00 and G1-01 precede browser edits. Independently inspect the entire PR #9 follow-up
-from f0adbddc31cc1f967ccb2df68c3481b2c7ff5b53 through6805640444e98cd00ef06dcbad1e966b4d4d8a65.
-Run `cargo test --test platform_support`, manually audit all native Windows branches,
-process launchers, signals, reparse handling, suffix/path accommodations and current
-usage/security docs. Verify both Linux/macOS CI jobs and all six Cargo gates remain.
-Check that Unix/shared safety assertions were not lost. Do not rely only on the
-lexical scanner or planner signoff.
+## Implement in four phases
 
-Native Windows is withdrawn. Its old V1B-03/V1B-33 gaps stay historical and are not
-PASS. Portable APIs, Windows browser compatibility, WSL Linux, negative path tests,
-synthetic environment poisoning and transitive Cargo target metadata are different
-things. Do not remove them merely by keyword. Do not port managed auth to macOS or
-reintroduce Windows to satisfy an old report. Minimal residual platform/doc cleanup
-is allowed only as the narrowly evidenced G1-01 preflight repair; separate that diff
-and evidence before proceeding. Report an unrelated runtime/contract blocker rather
-than silently expanding the assignment.
+A. Add shared server display interpretation, session3 saved projection tables, text chunks, one-time existing-session upgrade and indexed reads. Integrate display updates in the SAME transactions as canonical events/receipts. No background projector or warm history reconstruction. No single growing JSON row per human interaction.
 
-## Implement the fixed browser slice
+B. Add the specified display page/content/SSE routes and server read-only task reconciliation. Snapshot and head are one consistent read. Changed-entity cursors include the same-sequence tie-break. Keep existing raw routes and mutation semantics compatible. Retain one centralized bearer check; local HTTP needs no HTTPS/proxy. Do not add/remove authentication modes.
 
-Use framework-free TypeScript modules, HTML and CSS. The backend remains Rust. Use
-exact dev dependencies typescript5.9.3 and @playwright/test1.58.2, Node24.x for tooling,
-strict TypeScript and reproducibly committed compiled modules. No UI runtime package,
-new Rust dependency, bundler or Node server. Cargo must build the embedded assets
-without Node; the nonmutating verifier compares complete output sets and bytes.
+C. Replace browser raw-event/domain reconstruction with a thin display store. Show newest human interaction B before requesting A. Fill only unused initial viewport space one older request at a time; later loading requires upward intent. Keep separate previous-block, within-block, content and live positions. Maintain normal chronological layout and stable anchors. Live and reopened chat must have identical IDs/order/grouping/content/status at the same committed H. Use server decisions for finalization/tool outcomes. Explicit reconnect gets a new latest snapshot; never resubmit work.
 
-Add only fixed embedded GET/HEAD static resources after existing Host/Origin checks.
-All `/v1` operations stay authenticated. No arbitrary directory/static fallback,
-source maps, config injection, auth cookie, public metadata endpoint or auth bypass.
-Serve CSP/no-store/nosniff/no-referrer headers as specified.
+D. Complete G11-00 through G11-39 with the indicated proof level, all regression/build/browser gates and three final independent complete-diff reviews. Review the complete master->checkpoint->current diff, including generated/untracked files and test removal inventory.
 
-Use the actual V1-B DTOs, including flat ErrorView, flattened catalog fields and
-exact decimal strings. Runtime-validate before the pure reducer. Fetch only same
-origin with the separate owner bearer token in page memory; never persist/log it.
-No provider OAuth or credentials in browser state. Disconnect/401 clears local data;
-cleanup/navigation/stream loss never cancels host-owned work.
+## Required removal and retention
 
-Deliver settings-driven creation/list/open/rename, canonical history, explicit task
-submission and actual durable receipt, text/refusal/reasoning/tool views, lifecycle,
-explicit cancel, and manual observation reconnect. Preserve task/title/result bytes.
-Keep pending draft/unknown acceptance separate from canonical saved conversation.
-Retries are explicit same-command actions; never an automatic POST or provider retry.
+Delete/replace the browser full-prefix history loop, history.complete gate, raw event fingerprints, provider/tool state machine and storage receipt-range proof. Move authoritative/provisional interpretation to the shared projector. Preserve generic SSE parsing, safe wire checks, epochs, text DOM and pending exact command identity.
 
-Apply fixed-head pages and SSE afterH with one session-qualified applied cursor.
-Decode streaming UTF-8 and SSE framing, not network chunks as events. Advance after
-successful application only; verify IDs, duplicates/gaps and epochs. Authoritative
-snapshots replace provisional text; run.result never duplicates the answer; actual
-tool is_error is authoritative. Render untrusted content only as safe text, not HTML.
-Never reconstruct native model replay, hide an incomplete tail or restart old work.
+Retire the Window B native-network/CDP prototype and exclusively dependent helpers from active suites. Preserve the checkpoint's failed experiments in Git/reports. Do not claim Window B PASS. Test frame/application atomicity at deterministic function boundaries and real browser recovery by latest-state rebase. No global browser monkeypatch framework or final grep-invert workaround.
 
-Implement the keyboard/responsive/accessibility requirements without a UI framework,
-Markdown engine, IDE, terminal, file tool, new server feature or redesign.
+Preserve canonical events/receipts, B2 provider replay/account semantics, actual tool result bytes/is_error, current error categories, execution ownership/cancellation/drain, Linux/macOS support and C1's full RunLimits deletion. Session3 is explicitly authorized; catalog1/stored1/runtime2/provider1 and existing API1 semantics stay. A display projection is never used as provider context.
 
-## Verification and delivery
+## Evidence and stopping rule
 
-Complete every G1-00..G1-31 assertion with actual named evidence. Joined tests MUST use
-real browser actions/assets -> real HTTP/auth/preparation -> RunHost/B2 -> real SQLite
--> actual OpenAI loopback -> real tools -> HTTP/SSE -> DOM. Existing component tests
-or route.fulfill mocks are not substitutes. Private cfg(test) child fixtures are
-allowed; production fake-provider configuration is not. Reap all children.
+Create, from observed work only:
+- docs/slices/g1/VERIFICATION_G1_1.md
+- docs/slices/g1/verification-g1.1.json
 
-Run all existing six Cargo gates, platform inventory, verify.py, Node CLI self-tests,
-eight offline examples and the specified HTTP release/loaded samples. Run npmci,
-typecheck, nonmutating asset verification, unit tests and actual Playwright Chromium
-cases. Add the Ubuntu browser CI job without changing the retained native gates.
-Obtain three fresh independent complete-diff reviews including untracked/generated
-files and the platform preflight. Preserve each failure, fix and rerun; distinguish
-native Rust, Node, browser, hosted, source-inspection and live evidence.
+Do not overwrite the g1.0 reports, design packet or handoffs. Record40 unique rows, actual tests/commands/observers, source/worktree revisions, migration/preservation checks, old-test disposition, failures/fixes, measurements and limits. Count unique tests honestly. Query-plan/planner checks are not Rust/browser acceptance.
 
-Create:
-- docs/slices/g1/VERIFICATION.md
-- docs/slices/g1/verification.json
+Run the matrix's six Cargo gates, platform_support, verify.py, Node CLI self-tests, eight retained examples, new conversation_view_offline, retained HTTP release/loaded samples, npmci/typecheck/nonmutating asset check/unit tests and actual Chromium suite. Add the Ubuntu browser CI job without weakening native Linux/macOS jobs. Exact submitted-head CI follows an owner-authorized push; no [skip ci] closure or silent exclusion of required tests.
 
-Record actual baseline/final revisions, worktree, platform-audit findings, every row,
-commands/test names/counts, reviewers, generated assets, finite measurements, current
-docs and limits. Do not fabricate reviews/CI or inflate unique tests with reruns,
-ignored helper executions or source-definition counts. Historical reports stay intact.
+Use real SQLite and actual producer-to-consumer paths. Joined rows use actual browser actions -> actual HTTP -> RunHost/B2 -> SQLite -> actual OpenAI loopback -> real tools -> display SSE/HTTP -> DOM. Mocked browser APIs plus old provider tests are not sufficient. Rare SQL/parser faults use their specified lower-level proofs, not invasive browser-internal timing experiments.
 
-No RunLimits, replacement budgets, task deadlines, lifetime history caps, deletion,
-automatic resumption, retries/failover, hosted skills/billing, new providers/executors,
-storage schemas, core/auth policy, arbitrary filesystem API, native TLS/device login,
-ordinary CLI persistence, deployment or later milestone.
+Synthetic temp roots, skills, owner/provider credentials and loopback/scripted providers only. No real credentials/private skills, login/status/profile/refresh commands or live provider requests. Ledger stays31/50used19remaining. Normal build downloads are allowed; they are not model tests.
 
-Use only synthetic temporary roots/skills/owner and provider credentials plus
-scripted/loopback providers. No real credential/private-skill reads, auth commands,
-provider generations or live smoke. Ledger31/50used19remaining remains unchanged.
-Normal package/browser installation is development traffic, not live authorization.
+No RunLimits/budgets/task deadlines/history caps/deletion, task/model/tool retries, automatic resume, new providers/tools, hosted skills/billing, compaction, framework/engine, Node server, native Windows restoration, cookie/device login, deployment or unrelated cleanup.
 
-The planner has supplied the design and concrete matrix. Implement it rather than
-planning it again. Raise a genuine contradiction with exact producer/consumer evidence
-before changing policy. Leave implementation uncommitted for owner review. No commit,
-push, merge, publication, release, deployment or later work without separate permission.
+Leave implementation uncommitted for owner review unless the owner separately authorizes commit/push. Do not merge, release, deploy or start another milestone. Final acceptance requires all40 rows, current documentation reflecting implemented behavior, retained evidence and actual review/CI, not merely source completion.

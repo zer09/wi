@@ -1,263 +1,162 @@
-# G1 client protocol and state rules
+# G1.1 conversation HTTP and browser protocol
 
-Contract **g1.0**, baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**.
+Contract **g1.1**. NEW interfaces and replacement behavior, not checkpoint implementation evidence. Existing V1-B API1 commands and raw /history and /events remain compatible. SECURITY.md applies to every new route. RUST_API.md fixes the shared read surface.
 
-> **PAUSED DESIGN BASELINE.** Sections 6 and 7 prescribe full ascending replay from
-> `sid:0`. The owner requires latest canonical activity first with older history loaded
-> only by upward scrolling. Preserve this text as historical checkpoint authority, but
-> do not implement further against it. See [DESIGN_REVIEW.md](DESIGN_REVIEW.md).
+## 1. Types and errors
 
-The accepted server wire contract is [V1-B API](../v1b/API.md), with the
-[current native-platform policy](../../PLATFORM_SUPPORT.md). Read actual
-src/http_api/dto/{mod,events,provider,errors}.rs and router code before revising the
-protocol. Do not replace the existing API with a client-invented one.
+Display responses use api_version1 plus conversation_version1. Sequences, counters, byte offsets, ordinals and timestamps are canonical decimal STRINGS; boolean/version fields retain their actual types. Rust uses checked integers; browser uses BigInt only where arithmetic is necessary. UUID/enum validation stays strict. Do not parse large numbers through JavaScript Number first.
 
-## 1. API adapter and runtime validation
+`BlockView` has run_id, accepted_sequence, revision, state, result_recorded, outcome, summary, events_complete, sink_error and human. state uses existing accepted/running/completed/failed/cancelled_locally/interrupted. outcome/summary use V1-B's safe recorded representations or null. events_complete:boolean|null and sink_error:safe-code|null report actual evidence. human is the compact EntryView for the one human anchor.
 
-Use fixed same-origin `/v1` URLs and authenticated fetch. Read JSON only when the
-response has the expected media type. Validate objects as unknown values at runtime;
-TypeScript `as` casts alone are not validation. Distinguish authentication failure,
-HTTP command failure, network/aborted reply and malformed protocol. No raw JSON,
-exception/body/URL/Authorization dump goes to the UI console or ordinary diagnostics.
-Errors show static client categories and the validated server code/stage/certainty.
+`EntryView` has run_id, entry_id, position:{sequence,slot}, revision, content_epoch, kind, recorded_state, provisional, reference, fields, earlier_content and content_complete. kind=human|assistant|tool|reuse|notice. recorded_state=accepted|in_progress|completed|incomplete|failed|cancelled|interrupted|unknown. reference=null or {run_id,entry_id}. For uniform closed decoding add result_recorded:boolean|null, finish_recorded:boolean|null and is_error:boolean|null; these are meaningful for tool/reuse entries, null otherwise. The browser does not derive block/tool outcome from event order or JSON shape.
 
-The server uses flat DTOs, not a universal `{data:...}` or `{error:...}` wrapper:
+`FieldFragment` has field_id, order_key, kind, generation, total_bytes, from_byte, to_byte, text, has_earlier and has_later. Text encodes exact UTF-8 bytes[from_byte,to_byte), with scalar-aligned offsets. Fields arrive in server display order. kind is text|refusal|reasoning_summary|reasoning_text|function_name|function_arguments|tool_name|tool_result|authoritative_text|unsupported|notice. Human single text field can use order_key="0"; response numeric-index order keys follow SCHEMA.md. No native maps, prepared instructions, provider binding/digests or credential/config objects are public.
 
-| Response | Actual fields to validate/use |
-|---|---|
-| SettingsView | api_version,workspaces,provider_id,model,provider_transport,enable_add_numbers |
-| CreateView | api_version,session_id,receipt,duplicate,warning_code |
-| RenameView | api_version,receipt,duplicate,warning_code,catalog_refresh |
-| RefreshView | api_version,session_id,disposition |
-| SessionListView | api_version,entries,next_after_id,has_more |
-| SessionView | session_id,title,workspace,created_at_ms,updated_at_ms,head_sequence,view; canonical GET adds top-level api_version |
-| CatalogEntryView | flattened observed SessionView plus observed_head_sequence,availability,fault_code,last_run_id,last_run_state; head_sequence is the same observed value, not a new canonical read |
-| HistoryView | api_version,session_id,through_sequence,next_after,has_more,events |
-| TaskAcceptedView | api_version,receipt,duplicate,warning_code,notices |
-| RunView | api_version,run_id,state,user_text,accepted_sequence,terminal_sequence,result_sequence,result_recorded,result |
-| Operation lookup | api_version,receipt |
-| CancelView | api_version,session_id,run_id,disposition |
-| ErrorView | api_version,code,stage,certainty,acceptance,notices — these are top-level fields |
+New storage ConversationError maps Storage(error) through existing ErrorView::storage. CursorInvalid adds api.conversation_cursor_invalid/400; CursorStale adds api.conversation_cursor_stale/409. Existing flat ErrorView structure, stages and certainty remain. Invalid syntax/resource/future boundary is400. Replaced content generation/epoch is409. Missing session/entry is404. Corrupt/future DB is its actual storage error, not empty history. Do not echo cursor/content diagnostics.
 
-Null and omitted are not interchangeable. Reuse the exact source enum strings,
-including `cancelled_locally`, `not_tracked`, `native_terminal` and
-`validated_output_item_done`; do not invent camelCase serialized names. Check
-api_version===1, required fields and supported variant data. Reject unknown event
-kinds/unsupported versions rather than silently dropping a durable record. Unknown
-private provider extensions already arrive as the known checkpoint view.
+## 2. Latest and backward pages
 
-Receipt fields are operation_id,session_id,run_id|null,first_sequence,last_sequence.
-Treat UUIDs as identities and validate the request/session associations. Sequences,
-ordinals, indices, counters and timestamps are canonical decimal strings. Parse with
-BigInt for ordering/arithmetic, never Number/parseInt. Syntax is `0|[1-9][0-9]*`.
-Session sequences/timestamps remain within nonnegative i64; counters within u64.
-Indices retain their source optional/null semantics. Version numbers and booleans
-are not decimal strings. Formatting timestamps is optional; a Number conversion is
-allowed only after an explicit representable Date-range check, otherwise display
-the exact string. Do not convert unknown large integers through floating point.
+```http
+GET /v1/sessions/{sid}/conversation
+GET /v1/sessions/{sid}/conversation?before=<previous_block>
+GET /v1/sessions/{sid}/conversation?within=<earlier_activity>
+```
 
-The state reducer accepts the same validated EventView from pages and SSE, not two
-slightly different message schemas. The UI exposes the server's closed views only;
-it never parses provider-native or prepared-context payloads.
+Latest returns exactly newest accepted block B at a consistent read head H. No runs gives block=null and empty entries. Each ordinary response is one block, never A+B to reach an entry target. before returns greatest accepted_sequence strictly below its boundary; within returns the preceding contiguous entry segment inside the same run. Results are in forward display order after backward selection. Reject unknown/repeated queries or simultaneous before+within. No offset/limit/through query for these routes.
 
-## 2. Session operations
+`ConversationPage` fields: api_version,conversation_version,session_id,snapshot_head,session,block,entries,earlier_activity,previous_block,live_after. session is the existing public metadata shape. entries excludes the human anchor already supplied by block.human. live_after is present ONLY on Latest; backward pages return null and cannot reset live observation. A backward response with no older block is200 with block=null and no older cursors.
 
-Connect -> GET settings -> GET sessions. Neither step submits a task. Session list
-uses after_id/limit32 and the actual next_after_id/has_more. Show that entries are a
-catalog observation; a selected canonical session header comes from GET session.
-An explicit refresh-list starts again from the first catalog page. Do not claim a
-newest-first order or overwrite a canonical title with a stale catalog observation.
+Example of a newly accepted B with no assistant activity yet:
 
-Create captures one immutable `{operation_id,title,workspace}` at explicit Create.
-Use crypto.randomUUID; absence of the secure browser API is an unsupported-client
-error, not a homegrown random fallback. workspace must be selected from authenticated
-settings exactly; no arbitrary path box. Send POST /v1/sessions.201 is new and200 is
-duplicate; validate returned original identity/receipt. A lost response leaves the
-same captured command available for explicit retry, never allocates another ID on
-an automatic action. A current workspace403 remains a refusal even on a duplicate
-create. No client bypass of workspace retirement.
+```json
+{
+  "api_version":1,
+  "conversation_version":1,
+  "session_id":"11111111-1111-4111-8111-111111111111",
+  "snapshot_head":"211",
+  "session":{"session_id":"11111111-1111-4111-8111-111111111111","title":"Review","workspace":"/synthetic/project","created_at_ms":"1","updated_at_ms":"10","head_sequence":"211"},
+  "block":{
+    "run_id":"22222222-2222-4222-8222-222222222222",
+    "accepted_sequence":"210","revision":"210","state":"accepted",
+    "result_recorded":false,"outcome":null,"summary":null,"events_complete":null,"sink_error":null,
+    "human":{
+      "run_id":"22222222-2222-4222-8222-222222222222","entry_id":"e:210:0",
+      "position":{"sequence":"210","slot":"0"},"revision":"210","content_epoch":"210",
+      "kind":"human","recorded_state":"accepted","provisional":false,"reference":null,
+      "result_recorded":null,"finish_recorded":null,"is_error":null,
+      "fields":[{"field_id":"text","order_key":"0","kind":"text","generation":"210","total_bytes":"6","from_byte":"0","to_byte":"6","text":"Task B","has_earlier":false,"has_later":false}],
+      "earlier_content":null,"content_complete":true
+    }
+  },
+  "entries":[],"earlier_activity":null,
+  "previous_block":"<encoded g11b cursor before210>",
+  "live_after":"<encoded g11l watermark211>"
+}
+```
 
-Rename captures its own operation_id and exact title, POSTs rename, displays the
-actual receipt and independent catalog_refresh result, then reads the canonical
-manifest. An accepted rename with a failed refresh is not rolled back in the UI.
-Explicit Refresh catalog uses the existing endpoint. No deletion/archive/search,
-workspace registration or settings mutation is implemented.
+Cursor placeholders above explain locations only; real DTOs use the encodings below. The acceptance has two canonical records210/211; private selection advances the snapshot watermark without adding display content. Timestamps are illustrative Unix milliseconds, not canonical sequence values.
 
-For ambiguous create/rename replies retain the captured command in memory until an
-explicit retry/reconciliation or deliberate discard. Changing text means a new
-explicit command; do not reuse an old operation ID with silently changed content.
-Reload/Disconnect loses unaccepted local drafts and pending-command memory. Warn of
-that limitation in usage; do not compensate with browser persistence of secrets or
-automatic submissions. The canonical accepted conversation remains on the server.
+A previous-block request using that g11b cursor returns A (accepted_sequence<210), A's anchor and entries, a new earlier_activity/previous_block if needed, its own snapshot_head and live_after:null. Newer B/C activity cannot shift A's membership. Example request meaning after decoding: [1,S,"210"] selects A, not 'skip210 events'.
 
-## 3. Task submission and receipts
+For huge B, select newest contiguous activity fitting at most64 entries and512KiB encoded page, including anchor/header overhead. Each compact anchor/entry is<=32KiB. Return explicit earlier_activity and per-entry earlier_content; complete B's missing content/activity before navigating A. Repeated human metadata is the same entry, not another canonical message.
 
-At explicit Send capture session_id, new operation_id, new run_id and exact composer
-text as one immutable pending command. Do not trim/normalize it. UI may reject blank
-input under existing server semantics; it must not add a task-count/time/history
-budget. Guard duplicate button/keyboard activation locally for that command.
-POST `/v1/sessions/{sid}/runs` with exactly operation_id,run_id,text.
+## 3. Entry/content reads
 
-Pending means awaiting acceptance, not already saved. Keep any optimistic draft in a
-separate labelled pending area, never append it to the canonical transcript.202 must
-validate the real receipt's session/run/operation IDs and sequence range. Show accepted
-with any safe warning/notices, not completed. The stored `run.accepted` view supplies
-the canonical user message exactly once; clear the pending display when matched.
+```http
+GET /v1/sessions/{sid}/conversation/entries/{run_id}/{entry_id}
+GET /v1/sessions/{sid}/conversation/content?cursor=<earlier_content>
+```
 
-An HTTP failure, read abort or lost reply may follow dispatch or commit. Follow the
-actual ErrorView certainty and acceptance; do not infer not_committed from network
-failure, missing reply, EOF, or a404 receipt read. Known matching acceptance evidence
-wins over a later observation failure. Read-only reconciliation is exposed explicitly:
-GET the operation receipt, then the run view and relevant canonical history as needed.
-Validate matching operation/session/run, the two-record B2 acceptance range,
-RunView.accepted_sequence and exact original user_text before calling it this task's
-accepted command. A receipt for another method/run or mismatching content is a visible
-conflict, not permission to submit with a replacement ID.
+Return {api_version,conversation_version,session_id,snapshot_head,block,entry}; no live cursor. Addressed entry read supplies its current compact state for stale-content recovery. A reuse's content reference may target the original same-run tool entry; it does not create a second result or execute work.
 
-`Retry same submission` is an explicit owner action using the identical captured
-body. Never automatically POST on connect, navigation, stream end, retry timer, reload,
-provider error or reconciliation. A user-edited task requires a new explicit command.
-No execute-again button masquerades as recovery. If the tab loses the command before
-learning acceptance, the owner can inspect canonical history; the client cannot
-promise seamless recovery of an uncommitted lost draft.
+Compact encoding walks entry fields in reverse display order and reads newest field bytes first within32KiB, then returns selected fragments in forward order. It also bounds descriptor scanning for many empty fields (at most64 field descriptors per fragment). Earlier_content identifies the immediately preceding field/byte boundary, so it covers preceding fields and earlier text. Each nonterminal request yields at least one scalar or one previously absent empty/unsupported field descriptor. No zero-progress cursor loop. JSON escaping, metadata and token overhead count. Never fetch a complete huge value to slice a preview.
 
-An active-run409, stale-history409, unsupported/incomplete-history error, account
-mismatch or provider failure remains truthful. Do not queue, steer, truncate old
-history, change model/account, retry the provider or discard an uncertain tail.
-B2's compatible-history decision stays exclusively in the server.
+Within an unchanged content_epoch and field generation, append growth does not move an already issued upper boundary. Authoritative replacement invalidates old content cursors with409. Client shows Content changed and can explicitly refresh that entry, not silently retry or clear unrelated blocks.
 
-Cancellation is POST /v1/sessions/{sid}/runs/{rid}/cancel with `{}` and an explicit
-button action. A requested signal does not establish completed cancellation. Only
-canonical RunView/events determine state. Client reads, mutation-reply waiters,
-streaming and navigation have separate AbortControllers; none calls run cancellation
-as cleanup. Only the server owns execution.
+Generic range merging: same-epoch/generation overlapping bytes must agree; merge compatible ranges once and keep their earlier loaded portions. New epoch clears only that entry's old field/range layout. New field generation replaces that field. A missing interval is labelled and has a continuation, not an invented concatenation. Entry revision/state comes from the newest received representation; an older page cannot overwrite it. This is display-buffer management, not provider-event reconstruction.
 
-## 4. Observation epochs and fixed-head loading
+## 4. Distinct cursor types
 
-Maintain a connection epoch and a selected-session observation epoch. Each async
-callback verifies both before modifying visible state. Switching sessions invalidates
-and aborts the old reader/page/stream; already delivered old callbacks cannot mutate
-the new session's reducer or cursor. Completion of an old session's HTTP mutation
-may update its pending command record, but not the new conversation view. Disconnect
-invalidates both epochs and clears sensitive state; no cancellation is sent.
+Prefix plus URL-safe base64 without padding of minified UTF-8 JSON array. Version is number1; numeric positions/ranks are canonical decimal strings. Parse strict field counts/types, at most4096 encoded bytes. No embedded file path, SQL, token or provider object. Cursors are not authentication. Validate IDs/boundaries against the authenticated SessionHandle.
 
-On selected session load:
-1. Reset that session's display reducer and applied cursor to sid:0.
-2. Read canonical manifest and GET history after=sid:0&limit=32. Capture the actual
-   through_sequence H from this first page.
-3. Apply each validated record atomically in sequence. Continue using returned
-   next_after and the SAME through=H until has_more=false. Validate stable session/H,
-   cursor progress, record order and page metadata. Never silently stop at one page.
-4. Attach authenticated fetch SSE after=sid:H. The applied cursor, not an arbitrary
-   client timestamp/provider ID, bridges the snapshot and later history.
+- g11b. + [1,sid,before_accepted_sequence]. Actual block boundary; select strictly older block.
+- g11s. + [1,sid,run_id,before_entry_sequence,before_slot]. Actual same-run boundary; select strictly older entries.
+- g11c. + [1,sid,run_id,entry_id,content_epoch,upper_field_id,upper_generation,exclusive_upper_byte]. Epoch/generation must match; upper byte is scalar-aligned and within append-compatible length. Upper0 means move to preceding field. Validate epoch before treating an old missing field as ordinary not_found.
+- g11l. + [1,sid,sequence,rank,run_id_or_empty,entry_id_or_empty]. rank="0"metadata,"1"block,"2"entry,"3"watermark. IDs are empty only as their rank requires. Initial cursor is [1,sid,H,"3","",""] and represents all state at/below H.
 
-A metadata-only fresh application session has no prior messages although it has
-session-created/private checkpoint records. Do not restore another session's content.
-Opening after service restart is reading and may observe existing storage interruption;
-it never starts an old task. No task is triggered by hash routing or refresh.
+Order changed entities by (sequence,rank,run_id,entry_id) using numeric first two fields and canonical ASCII identity order. Browser handles cursors opaquely, with lightweight version/session checks; server owns query semantics. No time expiry. New writes do not invalidate immutable older membership. Do not promise older pages are frozen at the initialH: each returns current revisions from its own snapshot while retaining stable membership.
 
-After a stream drops, mark observation disconnected while retaining the valid
-applied prefix and actual run state. Expose Reconnect observation. It attaches with
-`after=<last_applied_cursor>` (or pages after that cursor before attachment) and does
-not clear/reapply already accepted messages or resubmit work. A deliberate full
-Reload history resets and replays from0 under a new epoch. No automatic reconnect
-backoff/retry framework or silent infinite error loop is required in G1.
+## 5. Display stream
 
-## 5. Incremental SSE parser
+```http
+GET /v1/sessions/{sid}/conversation/events?after=<g11l cursor>
+```
 
-Use fetch's ReadableStream plus streaming fatal UTF-8 decoding. A network chunk is
-not an event or code-point boundary. Support split multibyte UTF-8, a single initial
-BOM, LF/CR/CRLF including split CRLF, comments, blank-line dispatch, field value rules
-and multi-line data joined with LF. A dispatched record requires its blank delimiter.
-EOF with an unfinished frame is not applied, and EOF is never a task terminal event.
+Require after. If Last-Event-ID is also supplied it must exactly match. Reject before200 on conflict. Keep existing raw/events unchanged.
 
-The Wi frame is event:wi.event, id:<sid>:<seq>, data:<JSON EventView>. Validate both
-the SSE id and JSON identity; they must agree with the selected session. Comments do
-not advance the cursor. A wi.error contains a flat ErrorView and no id; show a safe
-observation error and end that reader without advancing or cancelling. wi.closed,
-when present, has a static reason and no id; it means observation/server closure,
-not that every run completed. Unknown/malformed Wi events or bad UTF-8 fail the reader
-with a static protocol error, preserving the last applied prefix. Do not execute
-SSE retry fields; Wi does not supply an automatic task-retry protocol.
+```
+event: wi.conversation
+id: <next g11l cursor>
+data: {"api_version":1,"conversation_version":1,"session_id":"...","observed_head":"...","changes":[...],"next_after":"..."}
 
-Every connection locally starts its parser empty but receives the explicit applied
-cursor. Do not assign a new durable sequence to a heartbeat or no-ID error. An
-invalid/mismatched cursor error must not trigger a new-session fallback or a task.
-Release/cancel the read stream on navigation/Disconnect and fence late callbacks.
+```
 
-## 6. One application of each canonical record
+Closed change union:
+- {kind:"session.upsert",session:<public metadata>}
+- {kind:"block.upsert",block:<BlockView>}
+- {kind:"entry.upsert",block:<BlockView>,entry:<EntryView>}
 
-Track exact validated EventViews for applied sequences, or a deterministic identity
-and canonical-content fingerprint with an equivalent comparison oracle. Recursive
-object-key sorting may be used for a canonical comparison; preserve array order and
-string bytes. JSON object key order alone does not constitute conflicting data.
+Header and human anchor accompany an entry update so it is self-contained. A human entry upsert updates the same block.human identity, not a second bubble. Changes can coalesce intermediate revisions. This is current display-state synchronization, not an audit feed or guarantee of every raw event/delta.
 
-For a new record require sequence=last_applied+1, matching session, valid event_id and
-consistent run identity. Apply the reducer first, then advance the applied cursor.
-For a previously applied sequence, identical event identity/content is ignored;
-different identity/content is a visible integrity error. A gap is not silently
-skipped. Stop the reader at the last valid prefix. This includes checkpoint records.
-Do not label network delivery exactly-once across crashes; the client applies known
-records idempotently during its in-memory lifetime.
+Actual server algorithm:
+1. Open short consistent read transaction and capture canonical/projection head U.
+2. Merge indexed current metadata/blocks/entries with changed tuple>after and changed_sequence<=U. Each source partition fetches at most64 candidates plus bounded lookahead. No entire-projection scan.
+3. Emit a prefix fitting512KiB. If candidates remain, next_after is exactly the last emitted entity tuple, including ties. Otherwise use U's rank3 watermark, including an empty change batch if private-only events advanced U.
+4. Retire SQL/locks before yielding. Continue from next_after. When caught up wait250ms; idle heartbeat every15s. Slow clients keep bounded pages only, not a producer queue.
 
-Keep only the selected conversation's materialized display/history and unresolved
-command records needed by this page. No all-session transcript cache or server-state
-copy. G1 has no lifetime history quota or eviction/truncation policy. Memory/DOM can
-grow with a long selected conversation; report finite measurements without constant-
-RSS claims. Further virtualization is a later performance requirement, not a hidden
-history cap.
+Several entities can share a transaction's sequence. Never watermark toU after emitting only some of them. An entity updated between reads moves to a newer sequence and is subsequently delivered at that state; it cannot be skipped by a same-sequence page tie. Head and projections must come from one snapshot. Current rows do not disappear: field replacement uses epochs, not entry deletion. No need for a second per-delta display event log/full-text copies.
 
-## 7. Pure conversation reducer
+Snapshot H and stream afterH form one handshake: events committed after snapshot/before attach are reflected by newer projected revisions. Starting at an independently read 'now' is prohibited. A stream does not have to reproduce intermediate states already superseded, but must converge to the latest committed state without missing a final change.
 
-Use `(run_id,response_id)` for responses and `(run_id,call_id)` for tool results;
-provider response/call IDs must not collide across runs or conversations. Render runs
-in accepted application-sequence order, response/items in their provider output
-order, and content using its defined content/summary indices. Do not order by random
-UUID or network completion time.
+Client inserts/replaces loaded entries by stable ID/position/revision. Older revisions cannot overwrite. Equal-generation overlapping content must match. Unloaded older entries remain unloaded; their upserts do not append out-of-context content at bottom or trigger backscroll. Newer blocks are appended with their anchors. Generic display changes apply atomically before cursor advancement, with no consecutive raw-sequence requirement. Server metadata updates do not change conversation order.
 
-| EventView kind | Required effect |
-|---|---|
-| session.created/renamed | Update metadata only, not a chat message. |
-| run.accepted | Add original user_text once for this run; expose selected skill IDs as optional metadata, not hidden skill bodies. |
-| checkpoint | Advance application cursor without rendering private data or a phantom message. |
-| run.started,turn.started/finished | Update lifecycle/turn metadata without adding user or assistant text. |
-| response.started/status | Create/update response state, preserving its real identity. |
-| response.delta | Update provisional content keyed by item ID/output index and content/summary index/kind. Do not parse partial function JSON as an executable command. |
-| response.item.started/finished | Replace that provisional item with the current ItemView at its output index; do not append snapshot text after the same deltas. |
-| response.finished | Replace the response with authoritative ResponseView, provenance, output/items, usage and outcome. Never append a second copy of its provisional answer. |
-| response.failed/closed | Preserve visible partial content and explicit uncertainty; a closed stream or response is not automatically a completed task. |
-| tool.started/finished | Update intent/execution status; finish alone does not invent result bytes. |
-| tool.result | Store/display exact output string and actual is_error, including error-shaped successful JSON. |
-| tool.reused | Refer to the existing result with reused indication, not a second effect or duplicate result message. A reference lacking its earlier loaded record is a visible protocol issue, not fabricated output. |
-| run.finished | Update actual outcome and summary; terminal execution does not imply final result was recorded. |
-| run.result | Update recording/result summary only. There is no last_response in this DTO to append as an answer. |
-| run.interrupted | Preserve partial output and mark the stored interruption. Never restart or complete it synthetically. |
+Retain existing safe wi.error and wi.closed observation endings. EOF/shutdown is not execution completion; a disconnected observer never sends Cancel implicitly.
 
-A response renders supported ItemView.content blocks where available, and uses
-normalized response.text only as the response-level fallback when no displayable
-message text/refusal exists; do not render both as duplicate answers. Reasoning blocks
-are separate collapsible text, not ordinary final-answer text. When normalized text
-contains additional information that cannot be represented by available blocks,
-show one clearly labelled authoritative text fallback instead of silently losing it
-or appending it twice. unsupported_content stays visible as a marker. Finalized-item
-recovery is displayed using the actual projected authoritative items and provenance,
-without changing the stored native terminal or assuming it was nonempty.
+## 6. Selection, rebase and scrolling
 
-RunView polling is read-only and explicit or triggered by canonical terminal
-observations; it must not synthesize an event or advance the history cursor. Use
-result_recorded/result_sequence to distinguish terminal state from final recording.
-A response outcome completed does not mean the whole tool loop has finished.
+```
+select/refresh -> latest read -> render B -> SSE after H
+                              -> initial viewport fill independently
+read failure -> disconnected/stale current view
+explicit Reconnect latest -> new observation epoch -> latest read
+ success -> replace loaded window/older cursors -> SSE after newH -> fill
+ failure -> retain old stale window, no mutation or automatic retry
+```
 
-## 8. Testable interfaces and limitations
+Full page reload requires Connect under the retained memory-only token policy. Same-page rebase preserves draft/pending IDs/known receipts and clears them only through explicit resolution or Disconnect. A new page does not recover page-memory commands and POST them. Session/connection epochs ignore stale readers and replies.
 
-Keep parser, validators and reducer independently importable without document/window
-side effects; app.ts alone wires the DOM and fetch lifecycle. Unit tests use compiled
-modules and actual-schema fixtures. Browser tests inspect textContent, visible status,
-real HTTP requests and persisted evidence; DOM screenshots are useful layout evidence
-but not proof of tool execution or receipt durability.
+Render B before asking for A. After layout, if no overflow, request one earlier content/segment/block. Recheck after render/live growth. If filled before another read, stop. A read already admitted can complete subject to epochs; then stop if filled. Once initial fill ends, resize/font/layout callbacks cannot restart it.
 
-No third-party model HTML, resource download, provider key, native replay, shell/file
-execution, UI model switching, persistent local drafts, per-device logout/revocation,
-automatic task retry, compaction or browser compatibility claim beyond tested Chromium
-is added. Native Windows support remains withdrawn; browser OS is an independent
-consumer capability that needs its own observed evidence before being certified.
+After initial fill, upward human intent within96CSSpx of top or accessible Load older activates one read. Programmatic scroll after prepend/intersection/resize alone cannot cascade. Preserve stable entry/field+pixel anchor within2CSSpx in deterministic tests. Follow bottom only if within24px before update; otherwise show New activity and preserve reading position. Backscroll errors get a local retry; healthy live observation continues. End-of-history disables further older requests.
+
+## 7. Pending tasks and server reconciliation
+
+Keep existing create/rename/task/cancel/operation/run routes. Task body remains {operation_id,run_id,text}. Immutable page-memory command identity survives an ambiguous reply.202 means actual acceptance, never successful execution. Explicit retry uses the same body; rebase/EOF does not automatically POST.
+
+Add:
+
+```http
+POST /v1/sessions/{sid}/runs/reconcile
+Content-Type: application/json
+{"operation_id":"...","run_id":"...","text":"exact original task"}
+```
+
+Reuse router/runs.rs::raw_receipt including its actual method/hash/input proof. No context preparation, host submission, credential/provider open or tool work. Existing explicit-open storage migration/interruption is the sole maintenance qualification. Return200 {api_version:1,state:"accepted",acceptance:<ReceiptView>,run:<RunView>} or {api_version:1,state:"not_found",acceptance:null,run:null}. not_found is only a point-in-time absence, not proof of rollback of a previously unknown operation. Conflict/read failures use existing flat errors and certainty.
+
+The browser checks returned operation/session/run identity, not B2 sequence arithmetic or raw-event types. Off-screen accepted tasks resolve without walking all older blocks. It may show their acceptance without forced navigation. No queue/steering/account fallback or redispatch for reconciliation.
+
+## 8. Retained catalog and thin-client boundary
+
+Catalog remains ID-keyset/as-of with explicit refresh, not a false globally recent list. Selected session metadata updates live. Global recent-session ordering is deferred.
+
+Retain generic same-origin fetch/media/DTO/UTF8 validation, one SSE framing parser, UI epochs, pending commands, range store and safe DOM. Remove raw run/turn/tool/provider reconstruction, full-prefix fingerprints, finalization heuristics and receipt method proof from JavaScript. No new framework, unsafe HTML, secret persistence or external resources. The SAME server projection and encoder feed live and history. At a fixed committed H, their visible grouping/order/content/recorded state must match.

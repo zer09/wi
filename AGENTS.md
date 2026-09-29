@@ -1,96 +1,31 @@
-# Wi — G1 browser-client paused design review
+# Wi: G1.1 resume assignment
 
-Current accepted runtime baseline: **76bb32fd04fd4737c0efcceaabc7d10387453147**.
-Implementation checkpoint: **a89aeb49929929901e3613cc9bd3f450f3719f33** on
-draft PR #10. Overall status: **PAUSED_DESIGN_REVIEW; accepted=false**.
+Updated September29,2026. Accepted master is76bb32fd04fd4737c0efcceaabc7d10387453147. PR #10 contains an unaccepted implementation checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579. The owner approved replacing the rejected history design and resuming local implementation under **g1.1**. This is not G1 acceptance or merge authorization.
 
-Do not continue G1 feature implementation. Contract g1.0 requires full ascending
-history replay from `sid:0`, but the owner requires latest canonical activity first
-and older history only through upward-scroll pagination. Read
-`docs/slices/g1/VERIFICATION.md`, `verification.json`, and `DESIGN_REVIEW.md` before
-touching G1. Wait for a revised planner contract. Do not execute historical milestone
-prompts or treat a planning, checkpoint, or local-pass status as acceptance proof.
+## Read first
 
-Read in order:
-1. docs/PLATFORM_SUPPORT.md.
-2. docs/slices/v1b/PLATFORM_FOLLOWUP.md and platform-followup.json.
-3. docs/slices/g1/CONTRACT.md.
-4. docs/slices/g1/CLIENT_PROTOCOL.md.
-5. docs/slices/g1/MATRIX.md.
-6. docs/slices/g1/VALIDATION.md.
-7. docs/slices/g1/IMPLEMENTOR_PROMPT.md.
-8. Current V1-B API/security, actual mapped DTO/router/service source and prior reports.
+Read docs/slices/g1/CONTRACT.md, SCHEMA.md, RUST_API.md, CLIENT_PROTOCOL.md, SECURITY.md, MATRIX.md, DISPOSITION.md, VALIDATION.md and IMPLEMENTOR_PROMPT.md. Then read the historical VERIFICATION.md/verification.json/DESIGN_REVIEW.md and current applicable source/platform documents. Old pause/continuation handoffs and g1.0 prompts remain historical; their blocked full-prefix/Window B requirements are superseded by g1.1.
 
-## Mandatory independent platform preflight
+## Fixed result
 
-Before G1 feature edits, the fresh agent must complete G1-00/G1-01: inspect the whole
-f0adbdd-to6805640 removal/alignment diff, run `cargo test --test platform_support`,
-and manually verify Windows-only branches/scripts/process/signal/reparse/suffix/path
-handling and current docs. Confirm retained Unix safety assertions and both native
-Ubuntu/macOS six-gate jobs. A lexical scan or planner review alone is not this proof.
-A minimal genuinely residual Windows-only branch or direct current-platform doc
-contradiction can be repaired under G1-01 with exact evidence and a separate diff.
-Unrelated runtime defects require a focused blocker report, not scope expansion.
+Latest human interaction B renders before asking for A. Initial viewport filling asks for one earlier content/segment/block at a time until filled/end; later reads require upward intent. The server maintains ordered display rows alongside immutable canonical events in the same SQLite transaction. Live and reopened chat use the same representation and chronological layout. No one-giant-row interaction, category regrouping, browser agent-event reconstruction or warm raw-history replay.
 
-Native Windows backend support is withdrawn, not merely optional. Do not restore it.
-Do not remove portable standard-library APIs, synthetic credential-isolation variables,
-negative path tests, historical Windows evidence or third-party Cargo target metadata
-by keyword. Windows browsers are independent clients; WSL Linux is a Linux executable.
-Other native targets are not newly certified. Existing managed-auth store remains
-Linux-specific: macOS Cargo/loopback success is not a new managed-auth implementation
-or live provider evidence. Do not add fallback to bridge that distinction.
+Implement additive session schema3 and existing-session backfill, typed display reads, self-contained display HTTP/SSE, server task reconciliation and a small browser display store. Separate backscroll/content cursors from live state. Matching snapshot H precedes live observation; reconnect explicitly obtains latest canonical state. Old raw endpoints and B2 provider context remain unchanged. Retain one existing bearer check and memory-only Connect; normal local loopback HTTP needs no HTTPS/proxy. Do not add/remove authentication modes.
 
-Original V1-B report at6e28cc3/f0adbdd remains LOCAL_VERIFIED/accepted=false with
-38PASS/2PARTIAL. Only the Windows subcases of V1B-03 and V1B-33 were withdrawn by owner;
-they are not retroactive PASS. The platform-cleanup source4edb2d7 passed both native
-workflows, and final reviewed6805640 passed push35458920521/PR35458921748 attempt1,
-all six Cargo gates on Ubuntu/macOS. PR9merge76bb32f has identical tree. Old failures
-and original report fingerprints are retained; no new local planner suite is claimed.
+## Execution discipline
 
-## Fixed G1 scope
+Inspect actual HEAD/ancestry/staged/unstaged/untracked files. Preserve owner work; no reset/clean/force checkout/unsolicited stash. Reuse checkpoint work and fixtures where valid. Follow the specified phases, implement and test; do not return a second architecture plan. Report an actual source/contract conflict with exact evidence before policy changes.
 
-A small text-first TypeScript browser client over the existing Rust service, not a
-Node server or another engine. Exact dev-only pins TypeScript5.9.3/Playwright1.58.2,
-Node24 tooling, no JavaScript production dependency/new Rust dependency/framework.
-Commit generated modules and prove reproducibility without requiring Node in Cargo.
-Only exact embedded page/assets become public after unchanged Host/Origin checks;
-all `/v1` installation data stays bearer-protected. No arbitrary file/static fallback.
+G11-00..G11-39 are the NEW40 requirements, all initially NOT RUN. Old checkpoint dispositions are not new passes. Preserve exact old reports/handoffs and their failed tests. New evidence paths are docs/slices/g1/VERIFICATION_G1_1.md and verification-g1.1.json.
 
-Memory-only owner token, same-origin fetch, strict actual DTO guards, decimal strings
-and BigInt, immutable pending commands, real receipt acceptance, pure reducer,
-fixed-head pages/SSE applied cursors/epoch fences, and safe text DOM. No browser
-secret persistence, unsafe HTML, provider-native replay, automatic task retry or
-cancellation on client loss. Stream EOF is not completion. Authoritative responses
-replace provisional output; final run results do not duplicate answers.
+Delete/replace the browser full-prefix loop, history.complete gate, raw fingerprints/domain reducer and browser receipt-range proof. Retire the exclusive Window B/CDP/global-monkeypatch prototype after replacement coverage is present; do not silently filter a required failing test. Keep framing/identity/privacy/epoch coverage and real joined producer tests. Tests use the matrix's appropriate S/H/C/B/J/P level; not every rare SQL invariant needs browser fault machinery.
 
-Use real Chromium actions -> real HTTP/auth/preparation -> RunHost/B2 -> real SQLite
--> actual OpenAI loopback -> real tools for joined acceptance. Old component tests or
-mocked responses cannot substitute. No production fake-provider endpoint/flag.
-Observe each matrix assertion and obtain fresh independent complete-diff review,
-including untracked/generated files and the platform preflight.
+Preserve the prior independent Windows-removal audit and verify new work doesn't restore Windows support. Native Linux/macOS six Cargo gates remain; add required Ubuntu browser job. No credential-isolation canary/portable API/transitive lockfile deletion by keyword. Existing managed-auth live evidence remains Linux-specific.
 
-## Preserved core and authority
+Keep one RunHost/B2/controller/registry/provider loop, actual tool-result bytes/is_error, uncertain commits, cleanup warnings, quarantine and drain-before-storage-close. No RunLimits/replacement budgets, task deadlines/quotas, lifetime history caps, deletion, automatic model/tool resume or retries, extra providers/tools, hosted billing, Node backend, new dependencies, cookie/device login, deployment or unrelated restructuring.
 
-Gateway/auth, C1 deletion, S1/S2, R1/NB-02, P1-A/B1/B2, V1-A and V1-B remain fixed
-runtime dependencies. SessionDB2/catalog1/stored1/runtime2/provider1/API1 stay.
-One owner across clients; Rust owns work; Disconnect is not Cancel; restart starts
-no old tasks. Empty conversation means empty prior replay, not unrelated history.
-No RunLimits, optional budgets, global call quotas, whole-task deadlines, lifetime
-history/session cap, retention/deletion, retries/failover, hosted skills/billing,
-new tools/providers, native TLS/device auth, compaction/search/editor/terminal or
-ordinary CLI persistence is incidental G1 work.
+Use only synthetic roots, skills, owner/provider credentials and loopback/scripted providers. No real credentials/private skills/auth commands/live generations. Ledger31/50 used19remaining is unchanged and not permission. Normal build/browser downloads are development traffic.
 
-Inspect HEAD/ancestry and every staged/unstaged/untracked file; preserve owner changes.
-No reset/clean/forced checkout/unsolicited stash. Report exact producer/consumer
-contradictions rather than silently changing policy or replanning the architecture.
+Run all required native/offline/browser gates and measurements; three fresh final complete-diff reviewers inspect original master->checkpoint->new work, including generated/untracked files and test dispositions. Distinguish source review, local execution, hosted CI and live evidence. Preserve initial failures. Do not invent review/counts/acceptance. Final documentation describes actual implemented behavior, not plan text as fact.
 
-Create docs/slices/g1/VERIFICATION.md and verification.json only with actual evidence.
-Keep old reports frozen. Distinguish source review/local/native/browser/CI/live and
-retain initial failures. Run the prescribed baseline/new gates and eight examples.
-No fabricated review or target test-count inflation. The owner authorized the G1
-handoff, not automatic implementation commits/push/merge/release/deployment.
-Leave changes uncommitted for review until separately authorized.
-
-Synthetic roots/skills/owner and provider credentials and loopbacks only. No real
-credentials/private skills, auth commands, live smoke or provider generations.
-Ledger31/50used19remaining unchanged; balance is not authorization.
+Local changes stay uncommitted until separate owner commit/push authorization. No merge/release/deployment/new milestone automatically follows. The planner's documentation commits on PR #10 do not authorize local Git writes.

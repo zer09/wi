@@ -63,6 +63,14 @@ The canonical projector is crate-private. Implement it as typed transforms plus 
 
 For HTTP, map ConversationError::Storage through existing ErrorView::storage; CursorInvalid and CursorStale use the two API codes in CLIENT_PROTOCOL. Preserve source stage/commit certainty rather than report generic success/empty history. Debug/Display of new errors and cursor types must not reveal secret paths or content.
 
+## Explicit source-level adaptations
+
+The existing session_schema::validate path selects payload_json from the last event even when only event metadata is checked. Do not defeat bounded display reads by loading a huge canonical response payload through this shared prerequisite. A narrow query split is authorized: read last-event type/version/time first, and fetch the payload only for the existing session.renamed title check. Preserve every validation assertion and its error classification. Creation identity validation remains; it must not become a full accepted-prompt/run scan. Add regressions showing the metadata-only path avoids unrelated large payloads without bypassing identity/head validation.
+
+Likewise, public run_record returns RecordedRunInput and may include a full final result. New display reads must use the saved compact block/header projection instead of reading full run input/result to build a title/status. Receipt reconciliation intentionally retains the existing raw_receipt proof and can read the addressed acceptance; it is not a warm history-page implementation.
+
+Encoded HTTP byte bounds and generic Rust views must use the same field-size calculation/encoder contract. Do not create storage -> http_api dependencies: keep the bounded display-wire encoding helper in the shared conversation module, or have HTTP budget construction call the same bounded fragment builder without refetching whole content. The nested SessionView retains api_version1/view canonical as explicitly shown in CLIENT_PROTOCOL. This check caught a draft omission before publication; no new public shape is inferred from it.
+
 ## Deliberately unchanged surfaces
 
 Do not change raw SessionHandle::history_page, provider-native replay, RunRequest, accepted receipt shapes, RunEventEnvelope, ProviderEventEnvelope, ToolRegistry execution, provider account identity, or context preparation to accommodate display. Existing public HTTP raw routes keep their meaning. No new session store engine, write queue, pool, repair API, generic background projector or callback into JavaScript is introduced.

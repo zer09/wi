@@ -10,7 +10,9 @@ Display responses use api_version1 plus conversation_version1. Sequences, counte
 
 `EntryView` has run_id, entry_id, position:{sequence,slot}, revision, content_epoch, kind, recorded_state, provisional, reference, fields, earlier_content and content_complete. kind=human|assistant|tool|reuse|notice. recorded_state=accepted|in_progress|completed|incomplete|failed|cancelled|interrupted|unknown. reference=null or {run_id,entry_id}. For uniform closed decoding add result_recorded:boolean|null, finish_recorded:boolean|null and is_error:boolean|null; these are meaningful for tool/reuse entries, null otherwise. The browser does not derive block/tool outcome from event order or JSON shape.
 
-`FieldFragment` has field_id, order_key, kind, generation, total_bytes, from_byte, to_byte, text, has_earlier and has_later. Text encodes exact UTF-8 bytes[from_byte,to_byte), with scalar-aligned offsets. Fields arrive in server display order. kind is text|refusal|reasoning_summary|reasoning_text|function_name|function_arguments|tool_name|tool_result|authoritative_text|unsupported|notice. Human single text field can use order_key="0"; response numeric-index order keys follow SCHEMA.md. No native maps, prepared instructions, provider binding/digests or credential/config objects are public.
+`FieldFragment` has field_id, order_key, kind, generation, total_bytes, from_byte, to_byte, text, has_earlier and has_later. Text encodes exact UTF-8 bytes[from_byte,to_byte), with scalar-aligned offsets. Fields arrive in server display order. kind is text|refusal|reasoning_summary|reasoning_text|function_name|function_arguments|tool_name|tool_result|authoritative_text|unsupported|notice. Human single text field uses field_id="text",order_key="0"; response numeric-index order keys follow SCHEMA.md. No native maps, prepared instructions, provider binding/digests or credential/config objects are public.
+
+The nested `session` is the EXISTING SessionView including api_version:1 and view:"canonical", not a new abbreviated shape. Keep all of its fields: session_id,title,workspace,created_at_ms,updated_at_ms,head_sequence. Existing ReceiptView has no nested api_version; existing RunView has one. Follow the actual DTO source rather than inventing a uniform wrapper around every object.
 
 New storage ConversationError maps Storage(error) through existing ErrorView::storage. CursorInvalid adds api.conversation_cursor_invalid/400; CursorStale adds api.conversation_cursor_stale/409. Existing flat ErrorView structure, stages and certainty remain. Invalid syntax/resource/future boundary is400. Replaced content generation/epoch is409. Missing session/entry is404. Corrupt/future DB is its actual storage error, not empty history. Do not echo cursor/content diagnostics.
 
@@ -24,7 +26,7 @@ GET /v1/sessions/{sid}/conversation?within=<earlier_activity>
 
 Latest returns exactly newest accepted block B at a consistent read head H. No runs gives block=null and empty entries. Each ordinary response is one block, never A+B to reach an entry target. before returns greatest accepted_sequence strictly below its boundary; within returns the preceding contiguous entry segment inside the same run. Results are in forward display order after backward selection. Reject unknown/repeated queries or simultaneous before+within. No offset/limit/through query for these routes.
 
-`ConversationPage` fields: api_version,conversation_version,session_id,snapshot_head,session,block,entries,earlier_activity,previous_block,live_after. session is the existing public metadata shape. entries excludes the human anchor already supplied by block.human. live_after is present ONLY on Latest; backward pages return null and cannot reset live observation. A backward response with no older block is200 with block=null and no older cursors.
+`ConversationPage` fields: api_version,conversation_version,session_id,snapshot_head,session,block,entries,earlier_activity,previous_block,live_after. entries excludes the human anchor already supplied by block.human. live_after is present ONLY on Latest; backward pages return null and cannot reset live observation. A backward response with no older block is200 with block=null and no older cursors.
 
 Example of a newly accepted B with no assistant activity yet:
 
@@ -34,7 +36,7 @@ Example of a newly accepted B with no assistant activity yet:
   "conversation_version":1,
   "session_id":"11111111-1111-4111-8111-111111111111",
   "snapshot_head":"211",
-  "session":{"session_id":"11111111-1111-4111-8111-111111111111","title":"Review","workspace":"/synthetic/project","created_at_ms":"1","updated_at_ms":"10","head_sequence":"211"},
+  "session":{"api_version":1,"session_id":"11111111-1111-4111-8111-111111111111","title":"Review","workspace":"/synthetic/project","created_at_ms":"1","updated_at_ms":"10","head_sequence":"211","view":"canonical"},
   "block":{
     "run_id":"22222222-2222-4222-8222-222222222222",
     "accepted_sequence":"210","revision":"210","state":"accepted",
@@ -102,7 +104,7 @@ data: {"api_version":1,"conversation_version":1,"session_id":"...","observed_hea
 ```
 
 Closed change union:
-- {kind:"session.upsert",session:<public metadata>}
+- {kind:"session.upsert",session:<SessionView>}
 - {kind:"block.upsert",block:<BlockView>}
 - {kind:"entry.upsert",block:<BlockView>,entry:<EntryView>}
 

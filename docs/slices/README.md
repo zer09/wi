@@ -1,55 +1,29 @@
 # Current Wi slice register
 
-Updated **September 28, 2026**. Accepted runtime baseline:
-**76bb32fd04fd4737c0efcceaabc7d10387453147** (V1-B and native Windows withdrawal,
-PR #9). [Platform authority](../PLATFORM_SUPPORT.md): retained native Linux/macOS
-build/CI; Windows backend withdrawn. Historical reports and matrices retain their
-original platform observations and planning states.
+Updated **September29,2026**. Accepted runtime baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**, PR #9. Native Linux/macOS only; see [platform policy](../PLATFORM_SUPPORT.md). Historical Windows results are not current support.
 
-| Slice | Current status | Evidence/assignment |
+| Slice | Status | Evidence or assignment |
 |---|---|---|
-| S2 model-selected main SKILL.md loading | Accepted/merged PR #3 | [Evidence](s2/VERIFICATION.md) |
-| R1/NB-02 inherited repairs | Accepted/merged PR #4 | [Evidence](r1/VERIFICATION.md) |
-| P1-A SQLite application sessions | Accepted/merged PR #5 | [Evidence](p1a/VERIFICATION.md) |
-| P1-B1 actual runtime capture | Accepted/merged PR #6 | [Evidence](p1b1/VERIFICATION.md) |
-| P1-B2 stored replay and B2-E01 joined closure | Accepted/merged PR #7,50f4dff | [Evidence](p1b2/VERIFICATION.md) |
-| V1-A in-process execution owner | Accepted/merged PR #8,16d623a | [Evidence](v1a/VERIFICATION.md) |
-| V1-B authenticated HTTP/API and history SSE | Accepted for retained scope/merged PR #9,76bb32f | [Original evidence](v1b/VERIFICATION.md), [JSON](v1b/verification.json), [platform follow-up](v1b/PLATFORM_FOLLOWUP.md), [API](v1b/API.md), [security](v1b/SECURITY.md) |
-| G1 minimal browser conversation client | **Paused design review at a89aeb4; accepted=false** | [Checkpoint evidence](g1/VERIFICATION.md), [JSON](g1/verification.json), [design review](g1/DESIGN_REVIEW.md), [contract](g1/CONTRACT.md), [client protocol](g1/CLIENT_PROTOCOL.md), [matrix](g1/MATRIX.md) |
+| S2 model-selected main SKILL.md | Accepted/merged PR3 | [Evidence](s2/VERIFICATION.md) |
+| R1/NB-02 repairs | Accepted/merged PR4 | [Evidence](r1/VERIFICATION.md) |
+| P1-A storage | Accepted/merged PR5,34b4cfd | [Evidence](p1a/VERIFICATION.md) |
+| P1-B1 runtime capture | Accepted/merged PR6,6fe0a53 | [Evidence](p1b1/VERIFICATION.md) |
+| P1-B2 replay and joined repair | Accepted/merged PR7,50f4dff | [Evidence](p1b2/VERIFICATION.md) |
+| V1-A execution owner | Accepted/merged PR8,16d623a | [Evidence](v1a/VERIFICATION.md) |
+| V1-B HTTP service | Accepted for retained scope/merged PR9,76bb32f | [Original evidence](v1b/VERIFICATION.md), [platform follow-up](v1b/PLATFORM_FOLLOWUP.md) |
+| G1 original g1.0 | Unaccepted implementation checkpoint8f45dda; rejected history requirements superseded | [Checkpoint](g1/VERIFICATION.md), [design packet](g1/DESIGN_REVIEW.md) |
+| **G1 replacement g1.1** | **Current local implementation assignment;40 G11 rows NOT RUN** | [Handoff index](g1/README.md), [contract](g1/CONTRACT.md), [matrix](g1/MATRIX.md), [prompt](g1/IMPLEMENTOR_PROMPT.md) |
 
-Earlier gateway/auth/M3/C1/S1 history remains in the [documentation archive](../README.md).
-Do not reimplement completed slices because an old matrix contains NOT RUN or an old
-report predates storage/service work. Old source pins are evidence, not current HEAD.
+G1 is not an empty planning-only PR: it contains203 checkpoint paths and partial code/tests. The new design commits change documents only. Valid checkpoint work is retained or adapted; full-prefix browser reconstruction and Window B proof are replaced explicitly. No original report has been relabelled PASS.
 
-## V1-B closure and platform evidence
+## V1-B/platform closure
 
-Original V1-B source6e28cc3/reportheadf0adbdd retained38PASS/2PARTIAL/accepted=false.
-The owner subsequently withdrew native Windows support and its V1B-03/V1B-33 proof
-subcases; they are not retroactively passed. CI job removal, code/test cleanup and
-current docs alignment were separate commits. Original frozen requirements/reports
-remain untouched, with only platform applicability superseded by the dated policy.
+Original source6e28cc3/reportheadf0adbdd recorded38PASS/2PARTIAL/accepted=false. The owner withdrew the Windows-only V1B-03/V1B-33 subcases, not their non-Windows assertions. Final reviewed6805640 passed push35458920521 and PR35458921748 attempt1, all six Cargo gates on Ubuntu/macOS; merge76bb32f has the same tree. [Merge closure](https://github.com/zer09/wi/pull/9#issuecomment-5744102056).
 
-Source-cleanup4edb2d7 passed push35458188836/PR35458191471 attempt1 on Linux/macOS.
-Final reviewed head6805640 passed push35458920521/PR35458921748 attempt1 on both
-retained OS, all six Cargo gates. Merge76bb32f has identical file tree. Earlier
-Windows watchdogs and planner inventory failures remain recorded, not claimed fixed
-by later green checks or by platform withdrawal. [PR #9 merge closure](https://github.com/zer09/wi/pull/9#issuecomment-5744102056).
+The G1 checkpoint reports an independent Windows-removal audit and residual USERPROFILE removal. G11-01 verifies that evidence and new changes; it does not restore native Windows or claim macOS managed-auth/live support. Prior watchdog and inventory failures remain preserved.
 
-The next fresh local agent must **independently audit Windows removal and current
-docs alignment before GUI edits** (G1-00/G1-01). Scanner success alone is not full
-semantic proof. Preserve Unix checks, portable APIs, historical evidence and
-third-party target metadata. No new macOS managed-auth or live guarantee is implied.
+## Scope boundaries
 
-## G1 boundary
+Local Wi uses loopback HTTP and the existing shared owner token. No local HTTPS/proxy is required. Remote access/deployment, persistent browser login, project-management UI, rich Markdown/editor/terminal, general coding tools, skill resources/scripts, steering/queues, parallel tools, compaction/branching/search/import and new providers remain separate.
 
-G1 is a framework-free TypeScript page served as fixed embedded assets by the same
-Rust HTTP service. No Node backend, runtime UI package, new Rust dependency or new
-agent loop. It uses existing owner bearer/API/SSE with memory-only client credentials,
-real durable receipts, explicit cancel/reconnect and safe text conversation rendering.
-It remains unimplemented at this planning commit; local/browser/CI rows are NOT RUN.
-
-Richer Markdown/editor/terminal, general coding tools, skill resources/scripts,
-steering/queues, parallel tools, compaction/branching/search/import, additional providers,
-per-device authentication and deployment remain separately scoped. No task auto-resumes
-on reconnect or restart. No RunLimits, replacement budget or history-lifetime ceiling.
-Ledger31/50used19remaining is unchanged and does not authorize live calls.
+No automatic task resume, RunLimits/replacement budgets, task deadlines or lifetime history caps. Ledger31/50used19remaining remains unchanged and is not live-test permission. Earlier milestone material is indexed in [documentation](../README.md); historical prompts do not authorize current work.

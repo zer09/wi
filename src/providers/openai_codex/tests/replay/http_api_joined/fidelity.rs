@@ -19,7 +19,7 @@ fn results() -> Vec<Value> {
         output("gone", "{\"error\":{\"code\":\"gateway_error\"}}"),
     ]
 }
-fn assert_saved(
+pub(super) fn assert_saved(
     records: &[StoredEvent],
     body: &Value,
     replies: &[(&str, Vec<Value>)],

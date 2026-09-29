@@ -10,7 +10,7 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    ApiConfig, ConfigError,
+    ApiConfig, ConfigError, assets,
     boundary::{self, Boundary},
     dto::{self, ApiError, ErrorView},
     input, validate_listener,
@@ -25,6 +25,9 @@ use crate::{
 
 mod events;
 mod runs;
+
+#[cfg(test)]
+pub(crate) use events::test_hooks as event_test_hooks;
 
 struct ApiState {
     host: Arc<RunHost>,
@@ -53,6 +56,24 @@ pub(super) fn router(
         Default::default(),
         #[cfg(test)]
         Default::default(),
+    )
+}
+
+#[cfg(test)]
+pub(super) fn router_with_event_hooks(
+    host: Arc<RunHost>,
+    config: ApiConfig,
+    listener: SocketAddr,
+    network_close: CancellationToken,
+    event_hooks: Arc<event_test_hooks::Hooks>,
+) -> Result<Router, ConfigError> {
+    router_inner(
+        host,
+        config,
+        listener,
+        network_close,
+        Default::default(),
+        event_hooks,
     )
 }
 
@@ -184,6 +205,9 @@ async fn handle(State(state): State<Arc<ApiState>>, mut request: Request) -> Res
             .map_err(ErrorView::api)?;
         if request.method() == Method::OPTIONS {
             return Ok(preflight(&request, origin.is_some()).map_err(ErrorView::api)?);
+        }
+        if let Some(response) = assets::response(&request) {
+            return Ok(response.map_err(ErrorView::api)?);
         }
         boundary::authenticate(request.headers_mut(), &state.config).map_err(ErrorView::api)?;
         tokio::select! {

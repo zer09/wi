@@ -16,6 +16,7 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
+mod active;
 mod failures;
 mod preparation;
 mod races;

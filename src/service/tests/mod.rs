@@ -15,6 +15,19 @@ mod loss;
 mod replay;
 mod storage;
 
+impl RunClient {
+    // Joined fixture stimuli use the same store without creating a second owner.
+    pub(crate) async fn test_open_session(&self, id: ApplicationSessionId) -> SessionHandle {
+        self.inner
+            .upgrade()
+            .expect("fixture host missing")
+            .store
+            .open_session(id)
+            .await
+            .expect("fixture session open failed")
+    }
+}
+
 async fn watchdog<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(20), future)
         .await
@@ -76,6 +89,7 @@ fn public_types_and_static_errors() {
     for (error, code) in [
         (RunHostError::RuntimeUnavailable, "host.runtime_unavailable"),
         (RunHostError::Closed, "host.closed"),
+        (RunHostError::ActiveRun, "host.active_run"),
     ] {
         assert_eq!(error.code(), code);
         assert_eq!(error.to_string(), code);
@@ -191,7 +205,12 @@ async fn registered_before_spawn_is_cancelled_and_drained_by_shutdown() {
     let client = host.client();
     let (ticket, worker) = host
         .inner
-        .register(session.session_id().clone(), request(), ToolRegistry::new())
+        .register(
+            session.session_id().clone(),
+            request(),
+            ToolRegistry::new(),
+            false,
+        )
         .unwrap();
     assert_eq!(host.inner.tracker.len(), 1);
     assert!(futures_util::poll!(Box::pin(ticket.accepted())).is_pending());
@@ -233,11 +252,21 @@ async fn dropped_unpolled_worker_fails_closed_and_cancels_siblings() {
     let client = host.client();
     let (lost, worker) = host
         .inner
-        .register(ApplicationSessionId::new(), request(), ToolRegistry::new())
+        .register(
+            ApplicationSessionId::new(),
+            request(),
+            ToolRegistry::new(),
+            false,
+        )
         .unwrap();
     let (sibling, sibling_worker) = host
         .inner
-        .register(ApplicationSessionId::new(), request(), ToolRegistry::new())
+        .register(
+            ApplicationSessionId::new(),
+            request(),
+            ToolRegistry::new(),
+            false,
+        )
         .unwrap();
     drop(worker);
     assert!(matches!(

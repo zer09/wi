@@ -38,7 +38,7 @@ async fn shutdown_drains_stalled_body_idle_sse_and_idle_socket() {
     reopened.close().await.unwrap();
 }
 
-// Windows can buffer the whole response despite these socket sizes; its proof is deferred.
+// This backpressure fixture targets the supported Unix hosts.
 #[cfg(unix)]
 #[tokio::test]
 async fn shutdown_wakes_nonreading_large_response_without_client_drop() {

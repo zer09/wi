@@ -5,7 +5,7 @@ use crate::{
     storage::{AppendRunRecord, RecordedRunInput},
 };
 
-fn captured(text: &str) -> RecordedRunInput {
+pub(super) fn captured(text: &str) -> RecordedRunInput {
     RecordedRunInput::new(
         text.into(),
         RunRequest {

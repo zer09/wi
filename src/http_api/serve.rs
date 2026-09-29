@@ -72,6 +72,21 @@ pub fn serve(
     )
 }
 
+#[cfg(test)]
+pub(crate) fn serve_with_event_faults(
+    listener: TcpListener,
+    host: RunHost,
+    config: ApiConfig,
+    shutdown: CancellationToken,
+    faults: Arc<router::event_test_hooks::FaultHook>,
+) -> impl Future<Output = ServeOutcome> + Send {
+    let hooks = tests::Hooks::with_events(Arc::new(router::event_test_hooks::Hooks::with_faults(
+        &faults,
+    )));
+    // Only the caller owns the control hook. Dropping it also wakes open faulted bodies.
+    serve_inner(listener, host, config, shutdown, Arc::new(hooks))
+}
+
 fn serve_inner(
     listener: TcpListener,
     host: RunHost,
@@ -99,12 +114,20 @@ fn serve_inner(
             let network = async move {
                 let address = address?;
                 validate_listener(address).map_err(|_| ServeError::NonLoopbackListener)?;
-                let app = router::router(host, config, address, network_close.clone()).map_err(
-                    |error| match error {
-                        ConfigError::Listener => ServeError::NonLoopbackListener,
-                        _ => ServeError::Configuration,
-                    },
-                )?;
+                #[cfg(not(test))]
+                let app = router::router(host, config, address, network_close.clone());
+                #[cfg(test)]
+                let app = router::router_with_event_hooks(
+                    host,
+                    config,
+                    address,
+                    network_close.clone(),
+                    hooks.events.clone(),
+                );
+                let app = app.map_err(|error| match error {
+                    ConfigError::Listener => ServeError::NonLoopbackListener,
+                    _ => ServeError::Configuration,
+                })?;
                 let listener = transport::ClosingListener {
                     listener,
                     network_close: network_close.clone(),

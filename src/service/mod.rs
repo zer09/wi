@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::{
     Gateway,
     execution::{PersistentRunRequest, run_in_session_notifying},
-    storage::{ApplicationSessionId, RunId, SessionStore},
+    storage::{ApplicationSessionId, OperationId, RunId, SessionStore},
     tools::ToolRegistry,
 };
 
@@ -54,8 +54,21 @@ struct Gate {
 
 struct Entry {
     session_id: ApplicationSessionId,
+    operation_id: OperationId,
     run_id: RunId,
     cancel: CancellationToken,
+}
+
+impl Gate {
+    fn has_other_operation(
+        &self,
+        session_id: &ApplicationSessionId,
+        operation_id: &OperationId,
+    ) -> bool {
+        self.entries
+            .values()
+            .any(|entry| &entry.session_id == session_id && &entry.operation_id != operation_id)
+    }
 }
 
 impl RunHost {
@@ -104,10 +117,34 @@ impl RunClient {
         tools: ToolRegistry,
     ) -> Result<RunTicket, RunHostError> {
         let host = self.inner.upgrade().ok_or(RunHostError::Closed)?;
-        let (ticket, worker) = host.register(session_id, request, tools)?;
+        let (ticket, worker) = host.register(session_id, request, tools, false)?;
         // A stopped runtime can destroy this future here. Its guard must not hold the gate.
         host.runtime.spawn(worker);
         Ok(ticket)
+    }
+
+    pub(crate) fn submit_exclusive(
+        &self,
+        session_id: ApplicationSessionId,
+        request: PersistentRunRequest,
+        tools: ToolRegistry,
+    ) -> Result<RunTicket, RunHostError> {
+        let host = self.inner.upgrade().ok_or(RunHostError::Closed)?;
+        let (ticket, worker) = host.register(session_id, request, tools, true)?;
+        host.runtime.spawn(worker);
+        Ok(ticket)
+    }
+
+    pub(crate) fn has_other_active_operation(
+        &self,
+        session_id: &ApplicationSessionId,
+        operation_id: &OperationId,
+    ) -> bool {
+        let Some(host) = self.inner.upgrade() else {
+            return false;
+        };
+        let gate = host.gate();
+        !gate.closing && gate.has_other_operation(session_id, operation_id)
     }
 
     pub fn cancel(&self, session_id: &ApplicationSessionId, run_id: &RunId) -> CancelDisposition {
@@ -139,6 +176,7 @@ impl HostInner {
         session_id: ApplicationSessionId,
         request: PersistentRunRequest,
         tools: ToolRegistry,
+        exclusive: bool,
     ) -> Result<(RunTicket, impl Future<Output = ()> + Send + 'static), RunHostError> {
         let ticket = RunTicket::new(
             session_id.clone(),
@@ -149,6 +187,7 @@ impl HostInner {
         let cancel = self.cancel.child_token();
         let entry = Entry {
             session_id,
+            operation_id: request.operation_id.clone(),
             run_id: request.run_id.clone(),
             cancel: cancel.clone(),
         };
@@ -165,6 +204,12 @@ impl HostInner {
                 // Prepared tools and guards can have destructors. Release the gate first.
                 drop(gate);
                 return Err(RunHostError::Closed);
+            }
+            // HTTP rejects other operations before replay, but same-operation retries
+            // still need the existing receipt and command validation.
+            if exclusive && gate.has_other_operation(&entry.session_id, &entry.operation_id) {
+                drop(gate);
+                return Err(RunHostError::ActiveRun);
             }
             gate.entries.insert(dispatch, entry);
             guard.registered = true;

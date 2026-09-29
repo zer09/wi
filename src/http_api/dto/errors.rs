@@ -179,6 +179,13 @@ impl ErrorView {
         };
         Self::new(error.code(), status, error.certainty())
     }
+    pub(in crate::http_api) fn active_run() -> Self {
+        Self::new(
+            "storage.active_run_exists",
+            409,
+            CommitCertainty::NotCommitted,
+        )
+    }
     pub(in crate::http_api) fn command_conflict() -> Self {
         Self::new(
             "storage.command_conflict",

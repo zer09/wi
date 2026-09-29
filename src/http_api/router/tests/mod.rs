@@ -11,6 +11,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod asset_tests;
 mod authority_tests;
 mod boundary_tests;
 mod events_tests;

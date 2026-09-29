@@ -9,7 +9,7 @@ use super::*;
 use crate::storage::{HistoryPage, SessionHandle};
 
 #[cfg(test)]
-pub(super) mod test_hooks;
+pub(crate) mod test_hooks;
 #[cfg(test)]
 mod tests;
 
@@ -80,10 +80,10 @@ fn stream_response(
     #[cfg(test)] hooks: Arc<test_hooks::Hooks>,
 ) -> Response {
     #[cfg(test)]
-    let reader = hooks.enter();
+    let wrap = (hooks.clone(), session.session_id().clone(), closing.clone());
+    #[cfg(test)]
+    let initial_after = after;
     let stream = async_stream::stream! {
-        #[cfg(test)]
-        let _reader = reader;
         let mut through = Some(page.through_sequence());
         let mut heartbeat = tokio::time::Instant::now() + HEARTBEAT_INTERVAL;
         'pages: loop {
@@ -150,7 +150,10 @@ fn stream_response(
             }
         }
     };
-    Sse::new(stream).into_response()
+    let response = Sse::new(stream).into_response();
+    #[cfg(test)]
+    let response = wrap.0.wrap(response, wrap.1, initial_after, wrap.2);
+    response
 }
 
 fn closed() -> Event {

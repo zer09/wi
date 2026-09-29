@@ -1,0 +1,10 @@
+{
+  "title": "  title 雪 é 😀\n<script>globalThis.wiCanary=1</script><img src=https://canary.invalid/title onerror=globalThis.wiCanary=2><a href=javascript:globalThis.wiCanary=3>title</a>\u001b[31m\u0007  ",
+  "user": "  user 雪 é 😀\n<script>globalThis.wiCanary=4</script><img src=https://canary.invalid/user onerror=globalThis.wiCanary=5><a href=javascript:globalThis.wiCanary=6>user</a>\u001b[32m\u0007\n",
+  "text": "text 雪 é 😀\r\n<script>globalThis.wiCanary=7</script><img src=https://canary.invalid/text onerror=globalThis.wiCanary=8><a href=javascript:globalThis.wiCanary=9>text</a>\u001b[33m\u0001\n",
+  "refusal": "refusal 雪 é 😀\r\n<script>globalThis.wiCanary=10</script><img src=https://canary.invalid/refusal onerror=globalThis.wiCanary=11><a href=javascript:globalThis.wiCanary=12>refusal</a>\u001b[34m\u0002\n",
+  "summary": "summary 雪 é 😀\r\n<script>globalThis.wiCanary=13</script><img src=https://canary.invalid/summary onerror=globalThis.wiCanary=14><a href=javascript:globalThis.wiCanary=15>summary</a>\u001b[35m\u0003\n",
+  "reasoning": "reasoning 雪 é 😀\r\n<script>globalThis.wiCanary=16</script><img src=https://canary.invalid/reasoning onerror=globalThis.wiCanary=17><a href=javascript:globalThis.wiCanary=18>reasoning</a>\u001b[36m\u0004\n",
+  "arguments": "arguments 雪 é 😀\r\n<script>globalThis.wiCanary=19</script><img src=https://canary.invalid/arguments onerror=globalThis.wiCanary=20><a href=javascript:globalThis.wiCanary=21>arguments</a>\u001b[37m\u0005\n",
+  "tool": "{\"error\":\"successful skill content, not is_error\"}\r\ntool 雪 é 😀\r\n<script>globalThis.wiCanary=22</script><img src=https://canary.invalid/tool onerror=globalThis.wiCanary=23><a href=javascript:globalThis.wiCanary=24>tool</a>\u001b[0m\u0006\n"
+}

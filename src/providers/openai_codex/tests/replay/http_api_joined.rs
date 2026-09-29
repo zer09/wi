@@ -15,6 +15,8 @@ use sqlx::{ConnectOptions, Connection, Row, SqliteConnection, sqlite::SqliteConn
 use std::{future::Future, path::Path};
 use tokio_util::sync::CancellationToken;
 
+#[path = "http_api_joined/browser.rs"]
+mod browser;
 #[path = "http_api_joined/failures.rs"]
 mod failures;
 #[path = "http_api_joined/fidelity.rs"]

@@ -231,7 +231,7 @@ async fn sse_only_committed_partial_output_and_reader_loss_never_cancels_host() 
     server.finish().await;
 }
 
-// This fixture depends on OS socket backpressure; Windows proof is deferred.
+// This fixture depends on socket backpressure on supported Unix hosts.
 #[cfg(unix)]
 #[tokio::test]
 async fn sse_unread_snapshot_and_live_clients_leave_writer_and_fast_client_free() {

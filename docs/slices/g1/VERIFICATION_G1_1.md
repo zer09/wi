@@ -1,10 +1,44 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B50_INTERRUPTED_DISPLAY_PARITY_REVIEWED_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C3B51D1_CONNECT_DIAGNOSTICS_REVIEWED_ALL40_PARTIAL**.
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
-## Latest scoped C50 result
+## Latest diagnostic-only C51D1 result
+
+[C51D1 Connect diagnostics](C3B_UPGRADE_DISPLAY_PARITY.md) are COMPLETED_SCOPED_REVIEWED. The owner approved no Chromium rerun and supplied an independent report requiring freezing inside the first rejecting operation before propagation. The code copies a scalar packet at that cutoff, retaining not_started/pending/resolved/failed per-iteration states and exact Request identity/status/media/count/fault facts. Sibling settlement/collector changes/cleanup cannot alter the packet. No diagnostic await/UI/body/helper HTTP/SQL or production reader change occurs. Diagnostic failures preserve existing sanitized failure reporting/cleanup; Response observed is not application body/DTO/migration proof.
+
+All194old controls remain;72new actual-path controls produce266PASS. Focused895/default-scheduling unfiltered Node4288/syntax3/typecheck/static/eightassets/unfiltered84cases29files no-body collection PASS. Six Linux-local1217passed11ignored/four-thread native gates are rebound/reused, not rerun. Browser/native/provider executions0, no new attempt marker. Both fresh scoped reviews PASS/no findings; neither reran test bodies. Original C51 and C51R1 roles/markers remain FAILED, total2failed0completed. All40rows PARTIAL/acceptedfalse; C15/active1/reader/default-SSE/platform/ledger remain unchanged.
+
+At implementation return, parent inspection confirmed only the three assigned unstaged test files, unchanged HEAD/index/eight staged paths,769nonassigned source and5414sealed records. Parent rehashes895implementation references and final135/348/335line source hashes without drift/environment mismatch/surviving owned identity.266controls and4288Node counts are independently parsed from closed source-bound logs, not added together. Initial255of258control result/three failures, corrected258then266, and external parser failures/corrections remain saved. Parent optional missing SUMMARY.json lookup is disclosed; GATES/manifest/publication are the actual records. No old proof is promoted.
+
+Both completed reviews inspect all three code files, five report updates and accumulated original C51 integration. Parent review audit rehashes6review references and verifies all772source/5414sealed records, HEAD/index/eight staged/eight unstaged paths against the review cutoff. Review-a's optional rows-versus-matrix inspection error and review-b's optional Node syntax check on JSON remain preserved with corrected helper/jq checks; no test rerun follows. No blocking/advisory findings require verification/remediation. This is not the three final whole-G1 complete-diff reviews.
+
+The owner authorizes a local diagnostic checkpoint after these passed gates, not browser acceptance. Its separate actual Git record is (local record); no push follows. Next browser case requires separate approval and a new source-bound evidence root/marker. It must observe actual diagnostic output and complete the unchanged original upgrade/reopen/normal-Stop contract; no blind retry or reader change is authorized.
+
+## Latest failed browser C51R1 continuation
+
+This section records the preserved R1 state before C51D1, including its then-current Git and next-action state.
+
+[C51R1 upgrade/reopen continuation](C3B_UPGRADE_DISPLAY_PARITY.md) remains FAILED/verification_failure. The owner approved staging the eight existing C51 paths and one fresh case. The clean staged baseline has HEAD6f9ac9f0273c7d9bb6c97c81037fddf039341b33/indexc4f0baa9faa85f9f608330882b174c7080cbcf4b10717d96b15ce4b256b338bf,772source/5365sealed records, no later owner drift. The implementation changes no repository file.194controls/823focused/4216default-scheduling Node/syntax/typecheck/assets/static/84in29collection and six Linux native gates were rebound and reused, not replayed. Fresh preflight and final preservation pass; neither is product acceptance.
+
+The exclusive C51R1.once.json marker is consumed. The fresh browser case exits1 after21150ms at upgrade/connect with timeout, exact boundary `web/e2e/upgrade-display-parity.spec.mjs:67-71`. Observer startup, read-only Select/Sample, one fresh context and empty-page checks complete. Only the initial work sample is zero; no through-Stop measurement exists. The diagnostic does not distinguish original Latest completion, token clearing, streaming status or SSE200. No original Latest/SSE status, post-open schema3 preservation, B/older-A DOM, second observer/browser or warm-reopen proof completed. Test instrumentation reads no original Latest body. No helper HTTP executes. Normal Stop proof remains unverified; failure cleanup closes first context, reaps the observer with fallback SIGKILL, removes the owned root and closes6/6Node handles. No migration success/failure, reader timeout cause or C15 relationship is inferred.
+
+Both implementation roles remain FAILED and both reviews NOT RUN. Total attempts2/failed2/completed0; no retry. Parent rehashes866fresh evidence paths and772source records with no drift/environment mismatch/surviving recorded owned identity. All769nonassigned source and5365sealed records match after delegate return; index/HEAD/eight staged paths stay unchanged. New five-file failure documentation remains unstaged and uncommitted; no new checkpoint or push occurred. All40rows remain PARTIAL/acceptedfalse.
+
+Next action: owner-directed focused Connect-timeout investigation with finite separate Latest/token/status/SSE diagnostics before any new browser attempt. Keep the reader/SDK/browser/timeouts/assertions and C15/active1 deferrals unchanged. Preserve both markers/reports. No reviews, commit or broader matrix increment advances automatically.
+
+## Original failed C51 attempt, before C51R1
+
+The following C51 paragraphs preserve the original attempt's state and next action before the later owner approval. The current result and next action are above.
+
+[C51 legacy schema2 upgrade/reopen](C3B_UPGRADE_DISPLAY_PARITY.md) has a FAILED implementation role, reason verification_failure. Its sole Chromium attempt exited1 during observer startup before any browser context, original Latest/SSE or independent helper HTTP. Fixture-only inspection found0755managed directories/0644databases rejected by native private-mode checks. The seeder now creates0700/0600 with six additional actual mode controls. Repaired194new/823focused/4216unfiltered Node/syntax/typecheck/static/eightassets/84in29no-body collection pass. No repaired Chromium run occurred; native gates are unchanged source-bound reuse. Both reviews are NOT RUN. Failure cleanup is not normal Stop/drain success.
+
+Parent source/evidence inspection confirms only the three assigned new test files, unchanged768nonassigned records/5243sealed records/HEAD/index and902rehashed evidence references without drift or environment mismatch. All40rows remain PARTIAL/acceptedfalse. The prior accumulated C50 checkpoint was committed with owner authority as6f9ac9f0273c7d9bb6c97c81037fddf039341b33; nothing was pushed. C51 code and this failure reconciliation remain unstaged/uncommitted because required verification did not pass.
+
+Next action: owner-directed fresh C51 implementation continuation with a new evidence root/marker and one repaired-source browser run after current binding preflight. Preserve the FAILED role and consumed C51.once.json. If passing, complete both reviews/finding gates, update actual evidence, then make the owner-requested checkpoint commit. No broader next increment follows. C15/active1/application reader/default-SSE deferrals and ledger remain unchanged.
+
+## Latest completed scoped C50 result
 
 [C50 same-H interrupted-task parity](C3B_INTERRUPTED_DISPLAY_PARITY.md) is COMPLETED_SCOPED_REVIEWED. One new Chromium case passed15.9s; review-a and review-b both completed PASS with no findings. One actual A Task/rich H23, A-close without Cancel, owned producer SIGKILL/reap and distinct same-root observer lead to B's original Latest recovery at H24 before helper reads. B remains connected while independently fresh C Connects. Both original Latest/SSE handshakes, exact independently constrained DTO/DOM parity and preserved rich bytes pass. Browser POSTs2/0/0, all observer native counters0, stable H24 through final public observations and post-Stop manifest-head read, normal drain/exit0/empty native stderr/handle/context/PID/root absence and no fallback pass. Independent helper HTTP is not original browser-byte/Fetch-consumption proof; the SQLite head check does not repeat C46's prefix/interruption-once audit.
 

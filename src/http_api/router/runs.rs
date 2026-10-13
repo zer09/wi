@@ -6,7 +6,7 @@ use crate::{
     },
     http_api::{
         ApiSettings,
-        dto::{ApiError, ErrorView, NoticeView, TaskAcceptedView},
+        dto::{ApiError, ErrorView, NoticeView, TaskAcceptedView, TaskReconciliationView},
     },
     run::RunRequest,
     service::{RunCompletion, RunHostError},
@@ -99,6 +99,33 @@ async fn raw_receipt(
         return Err(ErrorView::command_conflict().into());
     }
     Ok(Some(receipt))
+}
+
+pub(super) async fn reconcile_task(
+    state: &ApiState,
+    sid: ApplicationSessionId,
+    command: input::Task,
+) -> Result<TaskReconciliationView, Box<ErrorView>> {
+    let session = state
+        .host
+        .storage()
+        .open_session(sid)
+        .await
+        .map_err(|error| ErrorView::storage(&error))?;
+    let Some(receipt) = raw_receipt(&session, &command).await? else {
+        // This absence says nothing about a competing or previously uncertain write.
+        return Ok(TaskReconciliationView::not_found());
+    };
+    // State can advance after proof; this is an addressed read, not a frozen snapshot.
+    let run = session
+        .run_record(command.run_id.clone())
+        .await
+        .map_err(|error| ErrorView::storage(&error))?
+        .ok_or_else(ErrorView::integrity)?;
+    if run.run_id() != &command.run_id || run.accepted_sequence() != receipt.first_sequence() {
+        return Err(ErrorView::integrity().into());
+    }
+    Ok(TaskReconciliationView::accepted(&receipt, &run))
 }
 
 pub(super) async fn submit(

@@ -20,7 +20,9 @@ const spec = ts.createSourceFile('fixed-head.js',readFileSync(specUrl,'utf8'),ts
 const cases = spec.statements.filter(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
   && node.expression.expression.getText(spec) === 'test');
 assert.equal(cases.length,1);
-const callbackSource = `(${cases[0].expression.arguments[1].getText(spec)})`.replaceAll('import.meta.url',JSON.stringify(specUrl.href));
+const failureKind = spec.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'failureKind');
+assert.ok(failureKind);
+const callbackSource = `${failureKind.getText(spec)}\n(${cases[0].expression.arguments[1].getText(spec)})`.replaceAll('import.meta.url',JSON.stringify(specUrl.href));
 const key = 'PLAYWRIGHT_NO_COPY_PROMPT';
 const secret = 'synthetic-private-snapshot-not-for-artifacts';
 
@@ -69,7 +71,7 @@ for (const failClose of [[],[0],[1],[0,1]]) {
           context.open=false;
         };
       }
-      const callback=runInNewContext(callbackSource,{process:{env},executable:'synthetic-executable',
+      const callback=runInNewContext(callbackSource,{process:{env},Buffer,executable:'synthetic-executable',
         startFixture:async () => ({owner:'synthetic-owner',stop:async () => {stopGuard=env[key];}}),
         console:{log:message => {output.push(message);}},
       },{timeout:1000});

@@ -1,0 +1,146 @@
+use crate::{
+    SessionOptions,
+    conversation::{
+        BlockView, EntryId, EntryKind, EntryView, FieldFragment, FieldKind, OutcomeView,
+        RecordedState, SummaryView,
+        wire::{DisplayJson, PAGE_BYTES},
+    },
+    run::{RunOutcome, RunRequest, RunResult, RunSummary},
+    storage::{
+        AppendRunRecord, CreateSession, OperationId, RecordedRunInput, RecordedRunState, RunId,
+        SessionStore, filesystem,
+    },
+};
+use sqlx::{ConnectOptions, Connection, sqlite::SqliteConnectOptions};
+
+#[tokio::test]
+async fn a5b_canonical_summary_scalar_exceeds_required_block_wire_budget() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("synthetic-store");
+    let store = SessionStore::open(root.clone()).await.unwrap();
+    let created = store
+        .create_session(CreateSession::new(OperationId::new(), "synthetic".into(), None).unwrap())
+        .await
+        .unwrap();
+    let session = store
+        .open_session(created.session_id().clone())
+        .await
+        .unwrap();
+    let run = RunId::new();
+    let input = RecordedRunInput::new(
+        "x".into(),
+        RunRequest {
+            provider_id: "synthetic".into(),
+            options: SessionOptions::new("synthetic"),
+            prompt: "x".into(),
+        },
+        vec![],
+        vec![],
+        vec![],
+        None,
+    )
+    .unwrap();
+    session
+        .accept_run(OperationId::new(), run.clone(), input)
+        .await
+        .unwrap();
+    let summary = RunSummary {
+        last_request_id: Some("x".repeat(PAGE_BYTES + 1)),
+        ..RunSummary::default()
+    };
+    let outcome = RunOutcome::Failed {
+        code: "event_sink".into(),
+    };
+    session
+        .append_run_records(
+            OperationId::new(),
+            run.clone(),
+            vec![AppendRunRecord::Result(RunResult {
+                run_id: run.as_str().into(),
+                session_id: None,
+                outcome: outcome.clone(),
+                summary: summary.clone(),
+                last_response: None,
+                events_complete: false,
+                sink_error: None,
+            })],
+        )
+        .await
+        .unwrap();
+
+    // This is canonical-valid producer input, not corruption inserted by a test.
+    assert_eq!(session.manifest().await.unwrap().head_sequence(), 3);
+    let path = filesystem::session_path(&root, session.session_id(), false).unwrap();
+    let mut sql = SqliteConnectOptions::new()
+        .filename(path)
+        .read_only(true)
+        .disable_statement_logging()
+        .connect()
+        .await
+        .unwrap();
+    let header: String =
+        sqlx::query_scalar("SELECT header_json FROM conversation_blocks WHERE run_id=?")
+            .bind(run.as_str())
+            .fetch_one(&mut sql)
+            .await
+            .unwrap();
+    let header: serde_json::Value = serde_json::from_str(&header).unwrap();
+    assert_eq!(
+        header["summary"]["last_request_id"].as_str(),
+        summary.last_request_id.as_deref()
+    );
+    let id: EntryId = header["human"].as_str().unwrap().parse().unwrap();
+    let human = EntryView::new(
+        run.clone(),
+        id,
+        2,
+        2,
+        EntryKind::Human,
+        RecordedState::Accepted,
+        false,
+        None,
+        None,
+        None,
+        None,
+        vec![
+            FieldFragment::new(
+                "text".into(),
+                "0".into(),
+                FieldKind::Text,
+                2,
+                1,
+                0,
+                1,
+                "x".into(),
+            )
+            .unwrap(),
+        ],
+        None,
+        true,
+    )
+    .unwrap();
+    let block = BlockView::new(
+        run,
+        2,
+        3,
+        RecordedRunState::Failed,
+        true,
+        Some(OutcomeView::from(&outcome)),
+        Some(SummaryView::from(&summary)),
+        Some(false),
+        None,
+        human,
+    )
+    .unwrap();
+    assert!(DisplayJson::Entry(block.human()).json_size().is_ok());
+    assert!(DisplayJson::Block(&block).json_size().is_err());
+    assert!(DisplayJson::Block(&block).encode().is_err());
+    println!(
+        "canonical_head=3; last_request_id_bytes={}; page_budget={}; compact_human_bytes={}; block_encoding=oversize",
+        summary.last_request_id.as_ref().unwrap().len(),
+        PAGE_BYTES,
+        DisplayJson::Entry(block.human()).json_size().unwrap()
+    );
+    sql.close().await.unwrap();
+    store.close().await.unwrap();
+}

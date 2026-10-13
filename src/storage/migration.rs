@@ -56,6 +56,104 @@ pub(super) async fn migrate(inner: &StoreInner, provenance: &CreationProvenance)
     Ok(())
 }
 
+// Schema2 stays intact until the additive projection and both markers commit together.
+pub(super) async fn project(inner: &StoreInner, provenance: &CreationProvenance) -> Result<()> {
+    let path = filesystem::session_path(&inner.root, &provenance.session_id, false)?;
+    let mut connection = database::open(&path, false, &inner.lifecycle).await?;
+    let result = async {
+        let mut transaction = connection
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| database::error(error).not_committed())?;
+        let result = backfill(&mut transaction, provenance).await;
+        database::finish_transaction(transaction, result).await
+    }
+    .await;
+    #[cfg(test)]
+    let result = match result {
+        Ok(()) => test_hooks::hit(test_hooks::Point::ProjectionCommitted)
+            .await
+            .map_err(StorageError::unknown),
+        Err(error) => Err(error),
+    };
+    // No setting is relaxed for this additive migration. Check settings before retirement.
+    let settings = database::check_settings(&mut connection, true).await;
+    let result = match result {
+        Ok(()) => settings.map_err(StorageError::unknown),
+        Err(error) => Err(error),
+    };
+    let ((), warning) = database::finish_write(
+        connection,
+        &inner.lifecycle,
+        result,
+        #[cfg(test)]
+        false,
+    )
+    .await?;
+    if warning.is_some() {
+        return Err(StorageError::new(StorageErrorKind::Io).unknown());
+    }
+    Ok(())
+}
+
+async fn backfill(
+    connection: &mut SqliteConnection,
+    provenance: &CreationProvenance,
+) -> Result<()> {
+    let id = &provenance.session_id;
+    let manifest = session_schema::validate(connection, id, Some(provenance)).await?;
+    if session_schema::version(connection).await? != 2 {
+        return Err(integrity());
+    }
+    sqlx::raw_sql(conversation::SCHEMA)
+        .execute(&mut *connection)
+        .await
+        .map_err(database::error)?;
+    #[cfg(test)]
+    test_hooks::hit(test_hooks::Point::ProjectionCreated).await?;
+    let mut after = 0u64;
+    while after < manifest.head_sequence() {
+        let rows = sqlx::query(
+            "SELECT * FROM events WHERE sequence>? AND sequence<=? ORDER BY sequence LIMIT 256",
+        )
+        .bind(after as i64)
+        .bind(manifest.head_sequence() as i64)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(database::error)?;
+        if rows.is_empty() {
+            return Err(integrity());
+        }
+        #[cfg(test)]
+        test_hooks::projection_page(rows.len());
+        for row in &rows {
+            let event = history::decode(row, id)?;
+            if after.checked_add(1) != Some(event.sequence()) {
+                return Err(integrity());
+            }
+            conversation::projector::apply(
+                connection,
+                conversation::projector::Event::try_from(&event)?,
+            )
+            .await?;
+            after = event.sequence();
+        }
+        #[cfg(test)]
+        test_hooks::hit(test_hooks::Point::ProjectionCopied).await?;
+    }
+    sqlx::raw_sql("UPDATE manifest SET schema_version=3 WHERE singleton=1; PRAGMA user_version=3;")
+        .execute(&mut *connection)
+        .await
+        .map_err(database::error)?;
+    let migrated = session_schema::validate(connection, id, Some(provenance)).await?;
+    if migrated != manifest {
+        return Err(integrity());
+    }
+    #[cfg(test)]
+    test_hooks::hit(test_hooks::Point::ProjectionPrecommit).await?;
+    Ok(())
+}
+
 async fn rebuild(connection: &mut SqliteConnection, provenance: &CreationProvenance) -> Result<()> {
     let id = &provenance.session_id;
     let manifest = session_schema::validate(connection, id, Some(provenance)).await?;

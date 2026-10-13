@@ -164,7 +164,7 @@ async fn typed_evidence_rejects_forged_method_range_and_missing_projections() {
         };
         // This missing event leaves an intentional dangling command reference. SQLite only
         // changes foreign-key enforcement outside a transaction on this fixture connection.
-        if corruption == "selection" {
+        if matches!(corruption, "selection" | "run") {
             sqlx::query("PRAGMA foreign_keys=OFF")
                 .execute(&mut db)
                 .await

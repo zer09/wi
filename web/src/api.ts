@@ -22,7 +22,7 @@ function record(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function object<S extends Shape>(fields: S): Validator<Fields<S>> {
+export function object<S extends Shape>(fields: S): Validator<Fields<S>> {
   return value => {
     const input = record(value);
     const keys = Object.keys(fields);
@@ -33,43 +33,43 @@ function object<S extends Shape>(fields: S): Validator<Fields<S>> {
   };
 }
 
-function text(value: unknown): string {
+export function text(value: unknown): string {
   if (typeof value !== 'string') throw new ProtocolError('invalid_schema');
   return value;
 }
-function boolean(value: unknown): boolean {
+export function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new ProtocolError('invalid_schema');
   return value;
 }
-function literal<const T extends string | number>(expected: T): Validator<T> {
+export function literal<const T extends string | number | null>(expected: T): Validator<T> {
   return value => {
     if (value !== expected) throw new ProtocolError('invalid_schema');
     return expected;
   };
 }
-function enumeration<const T extends readonly string[]>(...values: T): Validator<T[number]> {
+export function enumeration<const T extends readonly string[]>(...values: T): Validator<T[number]> {
   return value => {
     if (typeof value !== 'string' || !values.includes(value)) throw new ProtocolError('invalid_schema');
     return value;
   };
 }
-function nullable<T>(validate: Validator<T>): Validator<T | null> {
+export function nullable<T>(validate: Validator<T>): Validator<T | null> {
   return value => value === null ? null : validate(value);
 }
-function array<T>(validate: Validator<T>): Validator<readonly T[]> {
+export function array<T>(validate: Validator<T>): Validator<readonly T[]> {
   return value => {
     if (!Array.isArray(value)) throw new ProtocolError('invalid_schema');
     return Array.from(value, validate);
   };
 }
-function tagged<S extends Record<string, Validator<unknown>>>(tag: string, variants: S): Validator<ReturnType<S[keyof S]>> {
+export function tagged<S extends Record<string, Validator<unknown>>>(tag: string, variants: S): Validator<ReturnType<S[keyof S]>> {
   return value => {
     const key = record(value)[tag];
     if (typeof key !== 'string' || !Object.hasOwn(variants, key)) throw new ProtocolError('invalid_schema');
     return variants[key](value) as ReturnType<S[keyof S]>;
   };
 }
-function version(value: unknown): 1 {
+export function version(value: unknown): 1 {
   if (value !== 1) throw new ProtocolError('unsupported_version');
   return 1;
 }
@@ -87,6 +87,14 @@ function decimal(value: unknown, max: bigint): string {
 }
 export function validateI64(value: unknown): string { return decimal(value, I64_MAX); }
 export function validateU64(value: unknown): string { return decimal(value, U64_MAX); }
+export function validateTimestamp(value: unknown): string {
+  if (typeof value === 'string' && value.startsWith('-')) {
+    const magnitude = decimal(value.slice(1), I64_MAX + 1n);
+    if (magnitude !== '0') return value;
+    throw new ProtocolError('invalid_decimal');
+  }
+  return validateI64(value);
+}
 function positiveSequence(value: unknown): string {
   const sequence = validateI64(value);
   if (sequence === '0') throw new ProtocolError('invalid_decimal');
@@ -144,12 +152,13 @@ const errorCode = enumeration(...gatewayCodes, ...storageCodes,
   'api.unauthorized', 'api.origin_forbidden', 'api.workspace_forbidden', 'api.authority_invalid',
   'api.invalid_request', 'api.cursor_invalid', 'api.body_too_large', 'api.unsupported_media',
   'api.not_found', 'api.method_not_allowed', 'api.worker_lost', 'api.closed',
+  'api.conversation_cursor_invalid', 'api.conversation_cursor_stale', 'api.conversation_display_unavailable',
   'context.invalid_root', 'context.read_failed', 'context.invalid_frontmatter', 'context.duplicate_skill',
   'context.invalid_skill_id', 'context.unknown_skill', 'context.context_changed', 'context.invalid_body',
   'context.invalid_request', 'context.input_too_large');
 const cleanupWarning = literal('storage.connection_cleanup_failed');
-const taskWarning = enumeration('storage.connection_cleanup_failed', ...gatewayCodes, ...storageCodes);
-const runState = enumeration('accepted', 'running', 'completed', 'failed', 'cancelled_locally', 'interrupted');
+export const taskWarning = enumeration('storage.connection_cleanup_failed', ...gatewayCodes, ...storageCodes);
+export const runState = enumeration('accepted', 'running', 'completed', 'failed', 'cancelled_locally', 'interrupted');
 const upstreamOutcome = enumeration('not_submitted', 'unknown', 'terminal_received');
 const responseStatus = enumeration('queued', 'in_progress', 'completed', 'incomplete', 'failed', 'cancelled', 'unknown');
 const deltaKind = enumeration('text', 'refusal', 'reasoning_summary', 'reasoning_text', 'function_arguments', 'custom_tool_input');
@@ -240,10 +249,14 @@ export const validateCancelView = object({
 export type CancelView = ReturnType<typeof validateCancelView>;
 
 const sessionFields = {
-  session_id: validateUuid, title: text, workspace: nullable(text), created_at_ms: validateI64, updated_at_ms: validateI64,
+  session_id: validateUuid, title: text, workspace: nullable(text), created_at_ms: validateTimestamp, updated_at_ms: validateTimestamp,
 };
 export const validateSessionView = object({
-  api_version: version, ...sessionFields, head_sequence: positiveSequence, view: literal('canonical'),
+  api_version: version, ...sessionFields, head_sequence: (value: unknown) => {
+    const head = validateU64(value);
+    if (head === '0') throw new ProtocolError('invalid_decimal');
+    return head;
+  }, view: literal('canonical'),
 });
 export type SessionView = ReturnType<typeof validateSessionView>;
 // CatalogEntryView is flat, but has neither api_version nor a canonical head_sequence.

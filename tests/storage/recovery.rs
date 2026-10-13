@@ -119,7 +119,7 @@ async fn p1a17_restart_interrupts_once_preserves_partial_results_and_old_receipt
                         },
                     )),
                     AppendRunRecord::ToolResult {
-                        request_id: Some("original request".into()),
+                        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                         call_id: "saved".into(),
                         output: "exact\n雪".into(),
                         is_error: false,
@@ -553,6 +553,11 @@ async fn p1a24_lost_catalog_rejects_missing_run_projection_without_changing_hist
     .fetch_all(&mut sql)
     .await
     .unwrap();
+    // Deliberately leave dangling display references to test repair rejection.
+    sqlx::query("PRAGMA foreign_keys=OFF")
+        .execute(&mut sql)
+        .await
+        .unwrap();
     assert_eq!(
         sqlx::query("DELETE FROM runs")
             .execute(&mut sql)

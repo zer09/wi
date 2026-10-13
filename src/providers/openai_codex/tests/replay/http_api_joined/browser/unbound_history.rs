@@ -17,6 +17,7 @@ use sqlx::{Column, TypeInfo, ValueRef, sqlite::SqliteRow};
 
 const TITLE: &str = "Legacy completed conversation";
 const HEAD: usize = 9;
+const LOCAL_SESSION: &str = "cccccccc-cccc-1ccc-8ccc-cccccccccccc";
 
 fn checked<T, E>(value: std::result::Result<T, E>) -> T {
     value.unwrap_or_else(|_| panic!("unbound-history evidence rejected"))
@@ -52,7 +53,7 @@ impl SessionControl for ScriptControl {
         assert!(self.counts.requests.fetch_add(1, Ordering::SeqCst) == 0);
         checked(self.ready.send(()).await);
         Ok(RequestReceipt {
-            request_id: "legacy-request".into(),
+            request_id: "00000000-0000-4000-8000-000000000001".into(),
         })
     }
     fn close(&self) {
@@ -103,7 +104,7 @@ impl Provider for Script {
         assert!(self.0.opens.fetch_add(1, Ordering::SeqCst) == 0);
         let (ready, mut received) = mpsc::channel(1);
         Ok(ProviderSession {
-            id: "legacy-session".into(),
+            id: LOCAL_SESSION.into(),
             control: Arc::new(ScriptControl {
                 counts: self.0.clone(),
                 ready,
@@ -115,8 +116,8 @@ impl Provider for Script {
                     ProviderEvent::ResponseFinished { response: response() },
                 ].into_iter().enumerate() {
                     yield EventEnvelope { schema_version: 1, sequence: (index + 1) as u64,
-                        event_id: format!("legacy-event-{index}"), session_id: "legacy-session".into(),
-                        request_id: Some("legacy-request".into()), provider: PROVIDER_ID.into(), provider_sequence: None, event };
+                        event_id: format!("{LOCAL_SESSION}:{}", index + 1), session_id: LOCAL_SESSION.into(),
+                        request_id: Some("00000000-0000-4000-8000-000000000001".into()), provider: PROVIDER_ID.into(), provider_sequence: None, event };
                 }
             }),
         })
@@ -396,7 +397,7 @@ fn audit(state: &Snapshot, records: &[StoredEvent]) {
     );
     assert!(
         result.run_id == run.as_str()
-            && result.session_id.as_deref() == Some("legacy-session")
+            && result.session_id.as_deref() == Some(LOCAL_SESSION)
             && result.outcome == RunOutcome::Completed
             && result.events_complete
             && result.sink_error.is_none()
@@ -428,7 +429,7 @@ fn audit(state: &Snapshot, records: &[StoredEvent]) {
                 summary.tool_results_prepared,
                 summary.reused_results
             ] == [0; 3]
-            && summary.last_request_id.as_deref() == Some("legacy-request")
+            && summary.last_request_id.as_deref() == Some("00000000-0000-4000-8000-000000000001")
             && summary.last_upstream_outcome == Some(crate::UpstreamOutcome::TerminalReceived)
             && matches!(&finished.event, RunEvent::RunFinished { outcome, summary: s } if *outcome == RunOutcome::Completed && value(s) == value(summary)),
         "unbound-history exchange rejected"
@@ -475,7 +476,7 @@ fn audit(state: &Snapshot, records: &[StoredEvent]) {
             && saved["terminal_sequence"] == 8
             && saved["result_sequence"] == 9
             && saved["last_runtime_sequence"] == 6
-            && saved["provider_session_id"] == "legacy-session"
+            && saved["provider_session_id"] == LOCAL_SESSION
             && checked(serde_json::from_str::<Value>(
                 saved["terminal_json"].as_str().unwrap()
             )) == value(finished)

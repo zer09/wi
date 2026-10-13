@@ -13,7 +13,7 @@ function record(value) {
     }
     return value;
 }
-function object(fields) {
+export function object(fields) {
     return value => {
         const input = record(value);
         const keys = Object.keys(fields);
@@ -23,41 +23,41 @@ function object(fields) {
         return Object.fromEntries(keys.map(key => [key, fields[key](input[key])]));
     };
 }
-function text(value) {
+export function text(value) {
     if (typeof value !== 'string')
         throw new ProtocolError('invalid_schema');
     return value;
 }
-function boolean(value) {
+export function boolean(value) {
     if (typeof value !== 'boolean')
         throw new ProtocolError('invalid_schema');
     return value;
 }
-function literal(expected) {
+export function literal(expected) {
     return value => {
         if (value !== expected)
             throw new ProtocolError('invalid_schema');
         return expected;
     };
 }
-function enumeration(...values) {
+export function enumeration(...values) {
     return value => {
         if (typeof value !== 'string' || !values.includes(value))
             throw new ProtocolError('invalid_schema');
         return value;
     };
 }
-function nullable(validate) {
+export function nullable(validate) {
     return value => value === null ? null : validate(value);
 }
-function array(validate) {
+export function array(validate) {
     return value => {
         if (!Array.isArray(value))
             throw new ProtocolError('invalid_schema');
         return Array.from(value, validate);
     };
 }
-function tagged(tag, variants) {
+export function tagged(tag, variants) {
     return value => {
         const key = record(value)[tag];
         if (typeof key !== 'string' || !Object.hasOwn(variants, key))
@@ -65,7 +65,7 @@ function tagged(tag, variants) {
         return variants[key](value);
     };
 }
-function version(value) {
+export function version(value) {
     if (value !== 1)
         throw new ProtocolError('unsupported_version');
     return 1;
@@ -82,6 +82,15 @@ function decimal(value, max) {
 }
 export function validateI64(value) { return decimal(value, I64_MAX); }
 export function validateU64(value) { return decimal(value, U64_MAX); }
+export function validateTimestamp(value) {
+    if (typeof value === 'string' && value.startsWith('-')) {
+        const magnitude = decimal(value.slice(1), I64_MAX + 1n);
+        if (magnitude !== '0')
+            return value;
+        throw new ProtocolError('invalid_decimal');
+    }
+    return validateI64(value);
+}
 function positiveSequence(value) {
     const sequence = validateI64(value);
     if (sequence === '0')
@@ -136,10 +145,10 @@ const storageCodes = [
     'storage.active_run_exists', 'storage.stale_history', 'storage.catalog_repair_required',
     'storage.creation_incomplete', 'storage.io', 'storage.commit_unknown',
 ];
-const errorCode = enumeration(...gatewayCodes, ...storageCodes, 'api.unauthorized', 'api.origin_forbidden', 'api.workspace_forbidden', 'api.authority_invalid', 'api.invalid_request', 'api.cursor_invalid', 'api.body_too_large', 'api.unsupported_media', 'api.not_found', 'api.method_not_allowed', 'api.worker_lost', 'api.closed', 'context.invalid_root', 'context.read_failed', 'context.invalid_frontmatter', 'context.duplicate_skill', 'context.invalid_skill_id', 'context.unknown_skill', 'context.context_changed', 'context.invalid_body', 'context.invalid_request', 'context.input_too_large');
+const errorCode = enumeration(...gatewayCodes, ...storageCodes, 'api.unauthorized', 'api.origin_forbidden', 'api.workspace_forbidden', 'api.authority_invalid', 'api.invalid_request', 'api.cursor_invalid', 'api.body_too_large', 'api.unsupported_media', 'api.not_found', 'api.method_not_allowed', 'api.worker_lost', 'api.closed', 'api.conversation_cursor_invalid', 'api.conversation_cursor_stale', 'api.conversation_display_unavailable', 'context.invalid_root', 'context.read_failed', 'context.invalid_frontmatter', 'context.duplicate_skill', 'context.invalid_skill_id', 'context.unknown_skill', 'context.context_changed', 'context.invalid_body', 'context.invalid_request', 'context.input_too_large');
 const cleanupWarning = literal('storage.connection_cleanup_failed');
-const taskWarning = enumeration('storage.connection_cleanup_failed', ...gatewayCodes, ...storageCodes);
-const runState = enumeration('accepted', 'running', 'completed', 'failed', 'cancelled_locally', 'interrupted');
+export const taskWarning = enumeration('storage.connection_cleanup_failed', ...gatewayCodes, ...storageCodes);
+export const runState = enumeration('accepted', 'running', 'completed', 'failed', 'cancelled_locally', 'interrupted');
 const upstreamOutcome = enumeration('not_submitted', 'unknown', 'terminal_received');
 const responseStatus = enumeration('queued', 'in_progress', 'completed', 'incomplete', 'failed', 'cancelled', 'unknown');
 const deltaKind = enumeration('text', 'refusal', 'reasoning_summary', 'reasoning_text', 'function_arguments', 'custom_tool_input');
@@ -214,10 +223,15 @@ export const validateCancelView = object({
     api_version: version, session_id: validateUuid, run_id: validateUuid, disposition: enumeration('requested', 'not_tracked'),
 });
 const sessionFields = {
-    session_id: validateUuid, title: text, workspace: nullable(text), created_at_ms: validateI64, updated_at_ms: validateI64,
+    session_id: validateUuid, title: text, workspace: nullable(text), created_at_ms: validateTimestamp, updated_at_ms: validateTimestamp,
 };
 export const validateSessionView = object({
-    api_version: version, ...sessionFields, head_sequence: positiveSequence, view: literal('canonical'),
+    api_version: version, ...sessionFields, head_sequence: (value) => {
+        const head = validateU64(value);
+        if (head === '0')
+            throw new ProtocolError('invalid_decimal');
+        return head;
+    }, view: literal('canonical'),
 });
 // CatalogEntryView is flat, but has neither api_version nor a canonical head_sequence.
 const catalogShape = object({

@@ -22,6 +22,8 @@ struct Records {
     opens: AtomicUsize,
     closes: AtomicUsize,
     calls: AtomicUsize,
+    polls: AtomicUsize,
+    receipts: Mutex<VecDeque<String>>,
     inputs: Mutex<Vec<Vec<InputItem>>>,
     events: Mutex<Vec<EventEnvelope>>,
 }
@@ -55,6 +57,7 @@ impl Provider for Script {
     async fn open_session(&self, _: SessionOptions) -> crate::Result<ProviderSession> {
         self.records.opens.fetch_add(1, Ordering::SeqCst);
         let (sender, mut receiver) = mpsc::unbounded_channel();
+        let records = self.records.clone();
         Ok(ProviderSession {
             id: "provider-session".into(),
             control: Arc::new(Control {
@@ -62,9 +65,10 @@ impl Provider for Script {
                 responses: Mutex::new(std::mem::take(&mut *self.responses.lock().unwrap())),
                 sender,
             }),
-            events: Box::pin(async_stream::stream! {
-                while let Some(event) = receiver.recv().await { yield event; }
-            }),
+            events: Box::pin(futures_util::stream::poll_fn(move |cx| {
+                records.polls.fetch_add(1, Ordering::SeqCst);
+                receiver.poll_recv(cx)
+            })),
         })
     }
 }
@@ -74,7 +78,12 @@ impl SessionControl for Control {
         let request_id = {
             let mut inputs = self.records.inputs.lock().unwrap();
             inputs.push(input);
-            format!("q{}", inputs.len())
+            self.records
+                .receipts
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| format!("00000000-0000-4000-8000-{:012x}", inputs.len()))
         };
         let response = self
             .responses
@@ -383,7 +392,7 @@ async fn supplied_id_send_engine_preserves_exact_provider_events_and_result_corr
     assert_eq!(result_positions.len(), 1);
     let (index, item) = result_positions[0];
     assert!(
-        matches!(item, Observed::Result { request_id, call_id, output, is_error } if request_id == "q1" && call_id == "one" && output == "{\"sum\":42}" && !is_error)
+        matches!(item, Observed::Result { request_id, call_id, output, is_error } if request_id == "00000000-0000-4000-8000-000000000001" && call_id == "one" && output == "{\"sum\":42}" && !is_error)
     );
     assert!(
         matches!(&observed[index - 1], Observed::Event(event) if matches!(event.event, RunEvent::ToolEvent { event: ToolExecutionEvent::ToolExecutionStarted { .. } }))
@@ -391,17 +400,14 @@ async fn supplied_id_send_engine_preserves_exact_provider_events_and_result_corr
     assert!(
         matches!(&observed[index + 1], Observed::Event(event) if matches!(event.event, RunEvent::ToolEvent { event: ToolExecutionEvent::ToolExecutionFinished { is_error: false, .. } }))
     );
-    assert!(
-        events
-            .iter()
-            .any(|event| event.request_id.as_deref() == Some("q2")
-                && matches!(
-                    event.event,
-                    RunEvent::ToolEvent {
-                        event: ToolExecutionEvent::ToolResultReused { .. }
-                    }
-                ))
-    );
+    assert!(events.iter().any(|event| event.request_id.as_deref()
+        == Some("00000000-0000-4000-8000-000000000002")
+        && matches!(
+            event.event,
+            RunEvent::ToolEvent {
+                event: ToolExecutionEvent::ToolResultReused { .. }
+            }
+        )));
 }
 
 #[test]
@@ -572,6 +578,140 @@ async fn observer_failure_is_sticky_for_events_and_completed_results() {
             assert!(matches!(observed.last(), Some(Observed::Result { .. })));
         }
     }
+}
+
+#[tokio::test]
+async fn malformed_receipts_stop_before_polling_and_preserve_prior_identity() {
+    let valid = "01234567-89ab-1cde-8fab-0123456789ab";
+    for malformed in crate::identifiers::invalid_uuid_spellings() {
+        for later in [false, true] {
+            let responses = if later {
+                vec![
+                    response("prior", &["one"]),
+                    response("rejected", &["forbidden"]),
+                ]
+            } else {
+                vec![response("rejected", &["forbidden"])]
+            };
+            let (gateway, records, tools) = setup(responses);
+            if later {
+                records.receipts.lock().unwrap().push_back(valid.into());
+            }
+            records
+                .receipts
+                .lock()
+                .unwrap()
+                .push_back(malformed.clone());
+            let mut events = Vec::new();
+            let result = run(
+                &gateway,
+                request(),
+                &tools,
+                CancellationToken::new(),
+                |event| {
+                    if matches!(event.event, RunEvent::RunFinished { .. }) {
+                        assert_eq!(records.closes.load(Ordering::SeqCst), 1);
+                    }
+                    events.push(event.clone());
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+            let admitted = u64::from(later);
+            assert_eq!(result.outcome, failed("provider_correlation"));
+            assert!(result.events_complete);
+            assert!(result.sink_error.is_none());
+            assert_eq!(result.summary.model_requests_attempted, admitted + 1);
+            assert_eq!(result.summary.model_requests_admitted, admitted);
+            assert_eq!(result.summary.turns_started, admitted + 1);
+            assert_eq!(result.summary.turns_finished, admitted + 1);
+            assert_eq!(result.summary.new_tool_dispatches, admitted);
+            assert_eq!(result.summary.tool_results_prepared, admitted);
+            assert_eq!(result.summary.reused_results, 0);
+            assert_eq!(
+                result.summary.last_upstream_outcome,
+                Some(UpstreamOutcome::Unknown)
+            );
+            assert_eq!(
+                result.summary.last_request_id.as_deref(),
+                later.then_some(valid)
+            );
+            assert_eq!(
+                result.last_response.as_ref().map(|v| v.id.as_str()),
+                later.then_some("prior")
+            );
+            assert_eq!(records.inputs.lock().unwrap().len(), admitted as usize + 1);
+            assert_eq!(records.polls.load(Ordering::SeqCst), admitted as usize * 2);
+            assert_eq!(records.calls.load(Ordering::SeqCst), admitted as usize);
+            assert_eq!(records.opens.load(Ordering::SeqCst), 1);
+            assert_eq!(records.closes.load(Ordering::SeqCst), 1);
+            let final_turn = &events[events.len() - 2];
+            assert!(matches!(&final_turn.event, RunEvent::TurnFinished {
+                response_id: None, outcome: TurnOutcome::Stopped { reason },
+                upstream_outcome: Some(UpstreamOutcome::Unknown), ..
+            } if reason == &failed("provider_correlation")));
+            assert!(final_turn.request_id.is_none());
+            let final_event = events.last().unwrap();
+            assert!(final_event.turn_id.is_none());
+            assert!(final_event.request_id.is_none());
+            assert!(
+                matches!(&final_event.event, RunEvent::RunFinished { outcome, summary }
+                if outcome == &result.outcome && serde_json::to_value(summary).unwrap() == serde_json::to_value(&result.summary).unwrap())
+            );
+            for event in &events {
+                assert!(crate::identifiers::is_canonical_uuid(&event.event_id));
+                assert_eq!(event.run_id, result.run_id);
+                assert!(
+                    event
+                        .turn_id
+                        .as_deref()
+                        .is_none_or(crate::identifiers::is_canonical_uuid)
+                );
+                assert!(event.request_id.as_deref().is_none_or(|id| id == valid));
+            }
+            assert!(crate::identifiers::is_canonical_uuid(&result.run_id));
+            let wire = serde_json::to_string(&events).unwrap();
+            let result_wire = serde_json::to_string(&result).unwrap();
+            if !malformed.is_empty() {
+                let escaped = serde_json::to_string(&malformed).unwrap();
+                assert!(!wire.contains(&escaped));
+                assert!(!result_wire.contains(&escaped));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn canonical_non_v4_receipt_passes_through_unchanged() {
+    let valid = "01234567-89ab-5cde-8fab-0123456789ab";
+    let (gateway, records, tools) = setup(vec![response("native-response", &[])]);
+    records.receipts.lock().unwrap().push_back(valid.into());
+    let mut events = Vec::new();
+    let result = run(
+        &gateway,
+        request(),
+        &tools,
+        CancellationToken::new(),
+        |event| {
+            events.push(event.clone());
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.outcome, RunOutcome::Completed);
+    assert_eq!(result.summary.model_requests_attempted, 1);
+    assert_eq!(result.summary.model_requests_admitted, 1);
+    assert_eq!(result.summary.last_request_id.as_deref(), Some(valid));
+    assert!(
+        events
+            .iter()
+            .filter_map(|event| event.request_id.as_deref())
+            .all(|id| id == valid)
+    );
+    assert_eq!(records.polls.load(Ordering::SeqCst), 2);
+    assert_eq!(records.closes.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

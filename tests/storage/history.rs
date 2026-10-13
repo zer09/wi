@@ -44,7 +44,7 @@ pub(super) fn provider(event: ProviderEvent, sequence: u64) -> RunEvent {
             sequence,
             event_id: format!("provider {sequence}"),
             session_id: "opaque provider session".into(),
-            request_id: Some("original request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             provider: "synthetic-unregistered-provider".into(),
             provider_sequence: Some(999 + sequence),
             event,
@@ -119,7 +119,7 @@ async fn p1a13_partial_native_response_and_unknown_extension_exact_roundtrip() {
         turns_finished: 1,
         model_requests_attempted: 1,
         model_requests_admitted: 1,
-        last_request_id: Some("original request".into()),
+        last_request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         last_upstream_outcome: Some(UpstreamOutcome::Unknown),
         ..RunSummary::default()
     };

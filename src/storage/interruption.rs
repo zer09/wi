@@ -33,6 +33,9 @@ pub(super) async fn reconcile(
             .bind(sequence).bind(payload).bind(run_id.as_str()).execute(&mut *transaction).await.map_err(database::error)?;
         sqlx::query("UPDATE manifest SET head_sequence=?, updated_at_ms=? WHERE singleton=1")
             .bind(sequence).bind(timestamp).execute(&mut *transaction).await.map_err(database::error)?;
+        conversation::projector::apply(&mut transaction, conversation::projector::Event {
+            sequence: sequence as u64, run: Some(&run_id), input: conversation::projector::Input::Interrupted,
+        }).await?;
         Ok(())
     }.await;
     database::finish_transaction(transaction, result).await

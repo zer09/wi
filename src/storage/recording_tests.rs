@@ -34,7 +34,7 @@ fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> AppendRunRecord {
         turn_id: if matches!(event, RunEvent::RunStarted) {
             None
         } else {
-            Some("turn".into())
+            Some("00000000-0000-4000-8000-000000000002".into())
         },
         session_id: if matches!(event, RunEvent::RunStarted) {
             None
@@ -42,7 +42,7 @@ fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> AppendRunRecord {
             Some("session".into())
         },
         request_id: if matches!(event, RunEvent::ToolEvent { .. }) {
-            Some("request".into())
+            Some("00000000-0000-4000-8000-000000000001".into())
         } else {
             None
         },

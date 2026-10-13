@@ -88,3 +88,9 @@ Root README's links continue through the current documentation index. Its accept
 - No forged accepted=true, review identity, source equivalence or platform evidence.
 
 Genuine blockers require exact producer/consumer evidence and a scoped correction. The local implementor executes this specification; it is not asked to invent a second architecture plan.
+
+## 7. Prospective delegate execution policy
+
+For NEW wi assignments issued from October 11, 2026, after owner approval, follow [Delegate execution policy](../../DELEGATE_EXECUTION.md). It supersedes older all-command literal-prefix and permanently fatal harmless-diagnostic rules prospectively only. Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged. Explicit acceptance requirements and explicitly terminal rules remain mandatory.
+
+Sections 1 through 6 retain their historical source/design observations. This prospective addition does not pass a G11 row, change accepted=false or authorize product verification. Use the canonical JSON-bound launcher or an existing recorder that verifies and inherits the same JSON. Record pre-execution rejections and corrections without relabeling required failed/invalid checks. Standard delegation gates remain unchanged.

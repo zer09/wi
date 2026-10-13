@@ -25,6 +25,7 @@ pub enum ConversationError {
     Storage(StorageError),
     CursorInvalid,
     CursorStale,
+    DisplayUnavailable,
 }
 
 impl SessionHandle {
@@ -61,7 +62,7 @@ Each method uses StoreInner::operation(false,...) and existing session connectio
 
 The canonical projector is crate-private. Implement it as typed transforms plus affected-row reads/writes inside existing transactions. Methods above cannot mutate an already-ready projection. Explicit session open performs the one-time schema migration; normal reads never repair or backfill a declared3 store.
 
-For HTTP, map ConversationError::Storage through existing ErrorView::storage; CursorInvalid and CursorStale use the two API codes in CLIENT_PROTOCOL. Preserve source stage/commit certainty rather than report generic success/empty history. Debug/Display of new errors and cursor types must not reveal secret paths or content.
+For HTTP, map ConversationError::Storage through existing ErrorView::storage; CursorInvalid and CursorStale use the two API codes in CLIENT_PROTOCOL. Preserve source stage/commit certainty rather than report generic success/empty history. DisplayUnavailable is the owner-approved error for an otherwise readable legacy block whose mandatory header cannot fit the fixed response budget after compact fragments are reduced with required progress. Map it to api.conversation_display_unavailable/422 with the existing flat error shape and a static diagnostic. Do not classify it as storage.integrity or mutate raw history/execution state. Other representable blocks remain readable. Debug/Display of new errors and cursor types must not reveal secret paths or content.
 
 ## Explicit source-level adaptations
 
@@ -73,4 +74,4 @@ Encoded HTTP byte bounds and generic Rust views must use the same field-size cal
 
 ## Deliberately unchanged surfaces
 
-Do not change raw SessionHandle::history_page, provider-native replay, RunRequest, accepted receipt shapes, RunEventEnvelope, ProviderEventEnvelope, ToolRegistry execution, provider account identity, or context preparation to accommodate display. Existing public HTTP raw routes keep their meaning. No new session store engine, write queue, pool, repair API, generic background projector or callback into JavaScript is introduced.
+Do not change raw SessionHandle::history_page, provider-native replay, RunRequest, accepted receipt shapes, RunEventEnvelope, ProviderEventEnvelope, ToolRegistry execution, provider account identity, or context preparation to accommodate display. Existing public HTTP raw routes keep their meaning. The owner amended identifier admission on October 1: retain the public String fields and shapes, but reject malformed new Wi request IDs at producer and storage boundaries, including both summary paths and direct Rust construction. Separate strict admission from historical decoding; old raw reads retain exact stored values. See IDENTIFIERS.md for supported local identity formats, boundary-specific native rules and open compatibility decisions. No new session store engine, write queue, pool, repair API, generic background projector or callback into JavaScript is introduced.

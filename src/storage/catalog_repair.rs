@@ -232,7 +232,7 @@ pub(super) async fn validate_history(
             StoredEventPayload::SessionCreated(_) => return Err(integrity()),
             StoredEventPayload::SessionRenamed { title: renamed } => title = Some(renamed.clone()),
             StoredEventPayload::RunHistorySelected(payload) => {
-                if summary.schema_version() != 2 {
+                if summary.schema_version() < 2 {
                     return Err(integrity());
                 }
                 checkpoints.push((
@@ -240,7 +240,7 @@ pub(super) async fn validate_history(
                     payload.selection().history_digest().to_owned(),
                 ));
             }
-            StoredEventPayload::RunProviderBound(_) if summary.schema_version() != 2 => {
+            StoredEventPayload::RunProviderBound(_) if summary.schema_version() < 2 => {
                 return Err(integrity());
             }
             _ => {}

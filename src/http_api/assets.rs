@@ -30,20 +30,24 @@ pub(super) fn response(request: &Request) -> Option<Result<Response, ApiError>> 
             include_bytes!("../../web/dist/app.js"),
             "text/javascript; charset=utf-8",
         ),
-        "/assets/client.js" => (
-            include_bytes!("../../web/dist/client.js"),
+        "/assets/display-api.js" => (
+            include_bytes!("../../web/dist/display-api.js"),
+            "text/javascript; charset=utf-8",
+        ),
+        "/assets/display-client.js" => (
+            include_bytes!("../../web/dist/display-client.js"),
+            "text/javascript; charset=utf-8",
+        ),
+        "/assets/display-store.js" => (
+            include_bytes!("../../web/dist/display-store.js"),
+            "text/javascript; charset=utf-8",
+        ),
+        "/assets/display-view.js" => (
+            include_bytes!("../../web/dist/display-view.js"),
             "text/javascript; charset=utf-8",
         ),
         "/assets/sse.js" => (
             include_bytes!("../../web/dist/sse.js"),
-            "text/javascript; charset=utf-8",
-        ),
-        "/assets/state.js" => (
-            include_bytes!("../../web/dist/state.js"),
-            "text/javascript; charset=utf-8",
-        ),
-        "/assets/view.js" => (
-            include_bytes!("../../web/dist/view.js"),
             "text/javascript; charset=utf-8",
         ),
         _ => return None,

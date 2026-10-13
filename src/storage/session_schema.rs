@@ -1,13 +1,16 @@
 use sqlx::{Connection, Row, SqliteConnection};
 
 use super::{
-    ApplicationSessionId, SessionManifest, StorageError, StorageErrorKind, catalog, database,
+    ApplicationSessionId, SessionManifest, StorageError, StorageErrorKind, catalog, conversation,
+    conversation::projector::{self, Event, Input},
+    database,
     dto::{self, CreatedPayload, CreationProvenance, RenamedPayload},
 };
 
 type Result<T> = std::result::Result<T, StorageError>;
 pub(super) const V1: &str = include_str!("session_v1.sql");
 pub(super) const V2: &str = include_str!("session_v2.sql");
+pub(super) const LATEST_METADATA_EVENT: &str = "SELECT sequence,event_type,run_id FROM events WHERE run_id IS NULL AND sequence<=? ORDER BY sequence DESC LIMIT 1";
 
 pub(super) async fn version(connection: &mut SqliteConnection) -> Result<u64> {
     let value: i64 = sqlx::query("PRAGMA user_version")
@@ -17,7 +20,7 @@ pub(super) async fn version(connection: &mut SqliteConnection) -> Result<u64> {
         .try_get(0)
         .map_err(database::error)?;
     match value {
-        1 | 2 => Ok(value as u64),
+        1..=3 => Ok(value as u64),
         _ => Err(StorageError::new(StorageErrorKind::UnsupportedVersion)),
     }
 }
@@ -51,6 +54,8 @@ pub(super) async fn initialize(
         // under the write lock so an existing history can never be initialized over.
         if !empty(&mut transaction).await? { return Err(integrity()); }
         sqlx::raw_sql(V2).execute(&mut *transaction).await.map_err(database::error)?;
+        sqlx::raw_sql(conversation::SCHEMA).execute(&mut *transaction).await.map_err(database::error)?;
+        sqlx::query("PRAGMA user_version=3").execute(&mut *transaction).await.map_err(database::error)?;
         #[cfg(test)]
         if fail_after_ddl { return Err(StorageError::new(StorageErrorKind::Io)); }
         #[cfg(test)]
@@ -58,13 +63,14 @@ pub(super) async fn initialize(
         let input = provenance.request()?;
         let payload = CreatedPayload { title: input.title().to_owned(), workspace: input.workspace().map(str::to_owned), creation_provenance: provenance.clone() };
         let workspace = input.workspace().map(|value| dto::canonical_json(&value)).transpose()?;
-        sqlx::query("INSERT INTO manifest (singleton, session_id, schema_version, format_version, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, creation_provenance_json) VALUES (1, ?, 2, 1, ?, ?, ?, ?, 1, ?)")
+        sqlx::query("INSERT INTO manifest (singleton, session_id, schema_version, format_version, title, workspace_json, created_at_ms, updated_at_ms, head_sequence, creation_provenance_json) VALUES (1, ?, 3, 1, ?, ?, ?, ?, 1, ?)")
             .bind(provenance.session_id.as_str()).bind(input.title()).bind(workspace)
             .bind(provenance.created_at_ms).bind(provenance.created_at_ms).bind(dto::canonical_json(provenance)?)
             .execute(&mut *transaction).await.map_err(database::error)?;
         sqlx::query("INSERT INTO events (sequence, event_id, event_type, event_version, created_at_ms, payload_json) VALUES (1, ?, 'session.created', 1, ?, ?)")
             .bind(provenance.creation_event_id.as_str()).bind(provenance.created_at_ms).bind(dto::canonical_json(&payload)?)
             .execute(&mut *transaction).await.map_err(database::error)?;
+        projector::apply(&mut transaction, Event { sequence: 1, run: None, input: Input::Created }).await?;
         validate(&mut transaction, &provenance.session_id, Some(provenance)).await
     }.await;
     database::finish_transaction(transaction, result).await
@@ -153,11 +159,10 @@ pub(super) async fn validate(
         .await
         .map_err(database::error)?
         .ok_or_else(integrity)?;
-    let payload: CreatedPayload = dto::decode(
-        &event
-            .try_get::<String, _>("payload_json")
-            .map_err(database::error)?,
-    )?;
+    let creation_payload: String = event.try_get("payload_json").map_err(database::error)?;
+    #[cfg(test)]
+    super::test_hooks::validation_payload(creation_payload.len());
+    let payload: CreatedPayload = dto::decode(&creation_payload)?;
     if event
         .try_get::<String, _>("event_id")
         .map_err(database::error)?
@@ -192,8 +197,12 @@ pub(super) async fn validate(
     {
         return Err(integrity());
     }
-    let last = sqlx::query("SELECT event_type, event_version, created_at_ms, payload_json FROM events WHERE sequence=?")
-        .bind(head).fetch_one(&mut *connection).await.map_err(database::error)?;
+    let last =
+        sqlx::query("SELECT event_type, event_version, created_at_ms FROM events WHERE sequence=?")
+            .bind(head)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(database::error)?;
     if last
         .try_get::<i64, _>("created_at_ms")
         .map_err(database::error)?
@@ -210,14 +219,22 @@ pub(super) async fn validate(
         return Err(integrity());
     }
     if kind == "session.renamed" {
-        let renamed: RenamedPayload = dto::decode(
-            &last
-                .try_get::<String, _>("payload_json")
-                .map_err(database::error)?,
-        )?;
+        let payload: String = sqlx::query("SELECT payload_json FROM events WHERE sequence=?")
+            .bind(head)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(database::error)?
+            .try_get(0)
+            .map_err(database::error)?;
+        #[cfg(test)]
+        super::test_hooks::validation_payload(payload.len());
+        let renamed: RenamedPayload = dto::decode(&payload)?;
         if renamed.title != manifest.title {
             return Err(integrity());
         }
+    }
+    if version == 3 {
+        projection(connection, head).await?;
     }
     Ok(manifest)
 }
@@ -341,7 +358,7 @@ async fn structure(connection: &mut SqliteConnection, version: i64) -> Result<()
     }
     // Compare the fixed partial predicates and trigger bodies, not just object names.
     let objects = sqlx::query("SELECT type, name, sql FROM sqlite_schema WHERE type IN ('index','trigger') AND sql IS NOT NULL")
-        .fetch_all(connection).await.map_err(database::error)?;
+        .fetch_all(&mut *connection).await.map_err(database::error)?;
     for required in [
         "CREATE UNIQUE INDEX events_source_id ON events(source_event_id) WHERE source_event_id IS NOT NULL",
         "CREATE UNIQUE INDEX events_source_sequence ON events(run_id, source_sequence) WHERE source_sequence IS NOT NULL",
@@ -388,6 +405,123 @@ async fn structure(connection: &mut SqliteConnection, version: i64) -> Result<()
         }) {
             return Err(integrity());
         }
+    }
+    if version == 3 {
+        for table in [
+            "conversation_projection",
+            "conversation_blocks",
+            "conversation_entries",
+            "conversation_fields",
+            "conversation_chunks",
+        ] {
+            let actual: String =
+                sqlx::query("SELECT sql FROM sqlite_schema WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_optional(&mut *connection)
+                    .await
+                    .map_err(database::error)?
+                    .ok_or_else(integrity)?
+                    .try_get(0)
+                    .map_err(database::error)?;
+            let expected = table_ddl(conversation::SCHEMA, table)?;
+            if normalized(&actual) != normalized(expected) {
+                return Err(integrity());
+            }
+        }
+        for (name, required) in [
+            (
+                "conversation_blocks_changed",
+                "CREATE INDEX conversation_blocks_changed ON conversation_blocks(changed_sequence,run_id)",
+            ),
+            (
+                "conversation_entries_order",
+                "CREATE INDEX conversation_entries_order ON conversation_entries(run_id,first_sequence,position_slot)",
+            ),
+            (
+                "conversation_entries_changed",
+                "CREATE INDEX conversation_entries_changed ON conversation_entries(changed_sequence,run_id,entry_id)",
+            ),
+        ] {
+            if !objects.iter().any(|row| {
+                row.try_get::<String, _>("name").ok().as_deref() == Some(name)
+                    && row
+                        .try_get::<String, _>("sql")
+                        .is_ok_and(|sql| normalized(&sql) == normalized(required))
+            }) {
+                return Err(integrity());
+            }
+        }
+        for (table, columns) in [
+            ("conversation_blocks", &["run_id"][..]),
+            ("conversation_blocks", &["accepted_sequence"][..]),
+            ("conversation_entries", &["run_id", "entry_id"][..]),
+            ("conversation_entries", &["run_id", "source_key"][..]),
+            (
+                "conversation_entries",
+                &["run_id", "first_sequence", "position_slot"][..],
+            ),
+            (
+                "conversation_fields",
+                &["run_id", "entry_id", "field_id"][..],
+            ),
+            (
+                "conversation_fields",
+                &["run_id", "entry_id", "order_key"][..],
+            ),
+            (
+                "conversation_chunks",
+                &["run_id", "entry_id", "field_id", "start_byte"][..],
+            ),
+        ] {
+            catalog::require_index(connection, table, columns, true).await?;
+        }
+    }
+    Ok(())
+}
+
+// Ready access checks the head and latest metadata reference, not historical text or every entry.
+async fn projection(connection: &mut SqliteConnection, head: i64) -> Result<()> {
+    let rows = sqlx::query("SELECT singleton,format_version,applied_sequence,metadata_sequence FROM conversation_projection LIMIT 2")
+        .fetch_all(&mut *connection).await.map_err(database::error)?;
+    if rows.len() != 1 {
+        return Err(integrity());
+    }
+    let row = &rows[0];
+    let metadata: i64 = row.try_get("metadata_sequence").map_err(database::error)?;
+    if row
+        .try_get::<i64, _>("singleton")
+        .map_err(database::error)?
+        != 1
+        || row
+            .try_get::<i64, _>("format_version")
+            .map_err(database::error)?
+            != 1
+        || row
+            .try_get::<i64, _>("applied_sequence")
+            .map_err(database::error)?
+            != head
+        || metadata < 1
+        || metadata > head
+    {
+        return Err(integrity());
+    }
+    // The run/sequence index skips run events. Do not hide unexpected runless event types.
+    let row = sqlx::query(LATEST_METADATA_EVENT)
+        .bind(head)
+        .fetch_optional(connection)
+        .await
+        .map_err(database::error)?
+        .ok_or_else(integrity)?;
+    let kind: String = row.try_get("event_type").map_err(database::error)?;
+    if row.try_get::<i64, _>("sequence").map_err(database::error)? != metadata
+        || (metadata == 1 && kind != "session.created")
+        || (metadata > 1 && kind != "session.renamed")
+        || row
+            .try_get::<Option<String>, _>("run_id")
+            .map_err(database::error)?
+            .is_some()
+    {
+        return Err(integrity());
     }
     Ok(())
 }

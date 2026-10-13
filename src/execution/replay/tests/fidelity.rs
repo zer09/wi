@@ -122,7 +122,10 @@ async fn p1b2_10_12_13_actual_multicall_reuse_and_run_scoped_results() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(original.request_id(), Some("request-0"));
+    assert_eq!(
+        original.request_id(),
+        Some("00000000-0000-4000-8000-000000000000")
+    );
     let (b, _) = rig
         .record(Plan::new(
             rig.input("prepared B"),
@@ -147,7 +150,7 @@ async fn p1b2_10_12_13_actual_multicall_reuse_and_run_scoped_results() {
             .unwrap()
             .unwrap()
             .request_id(),
-        Some("request-0")
+        Some("00000000-0000-4000-8000-000000000000")
     );
     rig.store.close().await.unwrap();
 }

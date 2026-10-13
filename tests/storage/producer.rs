@@ -50,7 +50,7 @@ impl SessionControl for Control {
             return Err(GatewayError::ProviderFailed);
         }
         assert!(turn <= 3);
-        let request_id = format!("request-{turn}");
+        let request_id = format!("00000000-0000-4000-8000-{turn:012x}");
         let response = if turn < 3 {
             call_response("call")
         } else {
@@ -180,12 +180,18 @@ async fn p1a14_correlation_public_run_complete_and_failure_traces_roundtrip() {
         assert!(last.turn_id.is_none());
         if matches!(script, Script::RejectSecond) {
             assert_eq!(last.request_id, None);
-            assert_eq!(result.summary.last_request_id.as_deref(), Some("request-1"));
+            assert_eq!(
+                result.summary.last_request_id.as_deref(),
+                Some("00000000-0000-4000-8000-000000000001")
+            );
         }
         if matches!(script, Script::Complete) {
             assert_eq!(result.summary.turns_started, 3);
             assert_eq!(result.summary.turns_finished, 3);
-            assert_eq!(last.request_id.as_deref(), Some("request-3"));
+            assert_eq!(
+                last.request_id.as_deref(),
+                Some("00000000-0000-4000-8000-000000000003")
+            );
             assert_eq!(
                 events
                     .iter()
@@ -277,7 +283,10 @@ async fn p1a14_correlation_public_run_complete_and_failure_traces_roundtrip() {
                     .await
                     .unwrap()
                     .unwrap();
-                assert_eq!(saved.request_id(), Some("request-1"));
+                assert_eq!(
+                    saved.request_id(),
+                    Some("00000000-0000-4000-8000-000000000001")
+                );
                 let InputItem::ToolResult { output, .. } = &inputs[1][0] else {
                     unreachable!()
                 };

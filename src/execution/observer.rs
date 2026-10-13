@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod conversation_reads_tests;
+
 use super::{PersistentRunFailure, PersistentRunStage, check_commit};
 use crate::{
     ReplayIdentity,

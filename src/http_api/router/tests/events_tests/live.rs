@@ -78,7 +78,7 @@ fn envelope(sequence: u64, event: ProviderEvent) -> EventEnvelope {
         sequence,
         event_id: format!("provider-event-{sequence}"),
         session_id: "private-provider-session-canary".into(),
-        request_id: Some("request".into()),
+        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         provider: "http-test".into(),
         provider_sequence: None,
         event,
@@ -103,7 +103,7 @@ impl SessionControl for Partial {
     async fn generate(&self, _: Vec<InputItem>) -> crate::Result<RequestReceipt> {
         self.generated.notify_one();
         Ok(RequestReceipt {
-            request_id: "request".into(),
+            request_id: "00000000-0000-4000-8000-000000000001".into(),
         })
     }
     fn close(&self) {

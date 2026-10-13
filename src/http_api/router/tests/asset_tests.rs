@@ -18,8 +18,23 @@ const ASSETS: &[(&str, &str, &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
-        "/assets/client.js",
-        "web/dist/client.js",
+        "/assets/display-api.js",
+        "web/dist/display-api.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "/assets/display-client.js",
+        "web/dist/display-client.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "/assets/display-store.js",
+        "web/dist/display-store.js",
+        "text/javascript; charset=utf-8",
+    ),
+    (
+        "/assets/display-view.js",
+        "web/dist/display-view.js",
         "text/javascript; charset=utf-8",
     ),
     (
@@ -27,17 +42,8 @@ const ASSETS: &[(&str, &str, &str)] = &[
         "web/dist/sse.js",
         "text/javascript; charset=utf-8",
     ),
-    (
-        "/assets/state.js",
-        "web/dist/state.js",
-        "text/javascript; charset=utf-8",
-    ),
-    (
-        "/assets/view.js",
-        "web/dist/view.js",
-        "text/javascript; charset=utf-8",
-    ),
 ];
+const RETIRED_ASSETS: &[&str] = &["/assets/client.js", "/assets/state.js", "/assets/view.js"];
 const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
 async fn exchange(server: &Server, request: String) -> (u16, HeaderMap, Vec<u8>) {
@@ -100,10 +106,16 @@ async fn public_get_and_head_equal_checked_in_bytes_and_security_headers() {
             "api.js",
             "app.js",
             "client.js",
-            "sse.js",
-            "state.js",
-            "view.js"
+            "display-api.js",
+            "display-client.js",
+            "display-store.js",
+            "display-view.js",
+            "sse.js"
         ]
+    );
+    assert_eq!(
+        std::fs::read(root.join("web/dist/client.js")).unwrap(),
+        b"export {};\n"
     );
     for &(path, file, mime) in ASSETS {
         let expected = std::fs::read(root.join(file)).unwrap();
@@ -383,6 +395,30 @@ async fn unknown_encoded_traversal_source_and_method_paths_stay_protected() {
         "/assets/state.js.map",
         "/assets/sse.js.map",
         "/assets/client.js.map",
+        "/assets/display-api.js.map",
+        "/assets/display-client.js.map",
+        "/assets/display-client.ts",
+        "/assets/display-client.js/extra",
+        "/assets/%64isplay-client.js",
+        "/assets%2fdisplay-client.js",
+        "/assets/../display-client.js",
+        "/web/dist/display-client.js",
+        "/assets/display-view.js.map",
+        "/assets/display-view.ts",
+        "/assets/display-view.js/extra",
+        "/assets/%64isplay-view.js",
+        "/assets%2fdisplay-view.js",
+        "/assets/../display-view.js",
+        "/web/dist/display-view.js",
+        "/assets/display-store.js.map",
+        "/assets/display-api.ts",
+        "/assets/display-store.ts",
+        "/assets/display-api.js/extra",
+        "/assets/display-store.js/extra",
+        "/assets/%64isplay-api.js",
+        "/assets%2fdisplay-store.js",
+        "/assets/../display-api.js",
+        "/web/dist/display-store.js",
         "/assets/client.ts",
         "/assets/client.js/extra",
         "/assets/view.js.map",
@@ -413,7 +449,10 @@ async fn unknown_encoded_traversal_source_and_method_paths_stay_protected() {
         "/assets/app.js;extra",
         "/v1",
         "/v1/assets/app.js",
-    ] {
+    ]
+    .into_iter()
+    .chain(RETIRED_ASSETS.iter().copied())
+    {
         for method in ["GET", "HEAD"] {
             for (auth, status, code) in [
                 (String::new(), 401, "api.unauthorized"),
@@ -435,7 +474,11 @@ async fn unknown_encoded_traversal_source_and_method_paths_stay_protected() {
             }
         }
     }
-    for &(path, _, _) in ASSETS {
+    for path in ASSETS
+        .iter()
+        .map(|&(path, _, _)| path)
+        .chain(RETIRED_ASSETS.iter().copied())
+    {
         for method in ["POST", "PUT", "PATCH", "DELETE", "TRACE"] {
             for (auth, status, code) in [
                 (String::new(), 401, "api.unauthorized"),
@@ -490,7 +533,11 @@ async fn public_page_does_not_authorize_api_routes_or_extend_preflight() {
             "{method} {path} HTTP/1.1\r\nHost: {}\r\nOrigin: {ORIGIN}\r\nContent-Length: 100\r\nConnection: close\r\n\r\n", server.address,
         )).await, 401, "api.unauthorized", method);
     }
-    for &(path, _, _) in ASSETS {
+    for path in ASSETS
+        .iter()
+        .map(|&(path, _, _)| path)
+        .chain(RETIRED_ASSETS.iter().copied())
+    {
         rejected(exchange(&server, format!(
             "OPTIONS {path} HTTP/1.1\r\nHost: {}\r\nOrigin: {ORIGIN}\r\nAccess-Control-Request-Method: GET\r\nConnection: close\r\n\r\n", server.address,
         )).await, 404, "api.not_found", "OPTIONS");

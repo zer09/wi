@@ -3,10 +3,14 @@
 #![forbid(unsafe_code)]
 
 pub mod context;
+pub mod conversation;
+#[cfg(test)]
+mod conversation_construction_tests;
 pub mod error;
 pub mod execution;
 pub mod gateway;
 pub mod http_api;
+mod identifiers;
 pub mod provider;
 pub mod providers;
 pub mod run;

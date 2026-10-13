@@ -70,24 +70,24 @@ async fn complete(store: &SessionStore, db: &Database, receipt: &CommitReceipt) 
             turn_id: if matches!(event, RunEvent::RunStarted | RunEvent::RunFinished { .. }) {
                 None
             } else {
-                Some("private-turn-canary".into())
+                Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into())
             },
             session_id: if matches!(event, RunEvent::RunStarted) {
                 None
             } else {
-                Some("private-provider-session-canary".into())
+                Some("cccccccc-cccc-1ccc-8ccc-cccccccccccc".into())
             },
             request_id: if matches!(event, RunEvent::RunStarted | RunEvent::TurnStarted { .. }) {
                 None
             } else {
-                Some("private-request-canary".into())
+                Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".into())
             },
             event,
         })
     };
     let binding = RecordedProviderBinding::new(
         run.clone(),
-        "private-provider-session-canary".into(),
+        "cccccccc-cccc-1ccc-8ccc-cccccccccccc".into(),
         MODEL.into(),
         crate::ReplayIdentity::new(PROVIDER_ID.into(), "native-v1".into(), "a".repeat(64)).unwrap(),
     )
@@ -97,7 +97,7 @@ async fn complete(store: &SessionStore, db: &Database, receipt: &CommitReceipt) 
         turns_finished: 1,
         new_tool_dispatches: 1,
         tool_results_prepared: 1,
-        last_request_id: Some("private-request-canary".into()),
+        last_request_id: Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".into()),
         ..RunSummary::default()
     };
     // Actual storage appends supply all four record types and multi-record batch timestamps.
@@ -120,7 +120,7 @@ async fn complete(store: &SessionStore, db: &Database, receipt: &CommitReceipt) 
         ],
         vec![
             AppendRunRecord::ToolResult {
-                request_id: Some("private-request-canary".into()),
+                request_id: Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".into()),
                 call_id: "private-call-canary".into(),
                 output: OUTPUTS[0].into(),
                 is_error: false,
@@ -174,7 +174,7 @@ async fn complete(store: &SessionStore, db: &Database, receipt: &CommitReceipt) 
             run.clone(),
             vec![AppendRunRecord::Result(RunResult {
                 run_id: run.to_string(),
-                session_id: Some("private-provider-session-canary".into()),
+                session_id: Some("cccccccc-cccc-1ccc-8ccc-cccccccccccc".into()),
                 outcome: RunOutcome::Completed,
                 summary,
                 last_response: None,
@@ -194,6 +194,9 @@ async fn complete(store: &SessionStore, db: &Database, receipt: &CommitReceipt) 
     assert!(bytes.len() < LIMIT as usize);
     for private in [
         "private-",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "cccccccc-cccc-1ccc-8ccc-cccccccccccc",
         "terminal_json",
         "payload_hash",
         "source_event_id",

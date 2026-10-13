@@ -224,7 +224,7 @@ impl SessionControl for Control {
         let turn = state.0;
         exact(&input, &self.plan.inputs[turn]);
         let response = self.plan.responses[turn].clone();
-        let request_id = format!("{}-request-{turn}", self.plan.label);
+        let request_id = uuid::Uuid::new_v4().to_string();
         let held = turn + 1 == self.plan.responses.len();
         for (index, event) in [
             ProviderEvent::ResponseStarted {

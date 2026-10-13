@@ -35,13 +35,34 @@ function oneSession(proof, count) {
   return entry;
 }
 
-// Own the context so failed assertions cannot attach a token-bearing page snapshot.
+// Guard the installed failure recorder through owned context close, including failed close.
 test('rename reply loss preserves one immutable command, retries its receipt, then commits one changed rename', async ({ browser }) => {
+  const previousNoCopyPrompt = process.env.PLAYWRIGHT_NO_COPY_PROMPT;
   let fixture;
   let context;
   let loss;
   let failure;
   let stage = 'startup';
+  const retry = { reply_acquired: false, reply_status: null, manifest_acquired: false, manifest_status: null,
+    statuses: 'unavailable', manifest_finish: 'unavailable', manifest_null: 'unavailable', accepted_dom: 'unavailable',
+    native_inspection: 'unavailable', native_equality: 'unavailable', no_work: 'unavailable',
+    manifest_requestfinished: null, manifest_requestfailed: null, finish_settlement: 'unavailable' };
+  let retryPage;
+  let manifestRequest;
+  const finishedRequests = new WeakSet();
+  const failedRequests = new WeakSet();
+  // SDK events can precede the matched response continuation. Keep identity only, never request data.
+  const onManifestFinished = request => {
+    finishedRequests.add(request);
+    if (request === manifestRequest) retry.manifest_requestfinished = true;
+  };
+  const onManifestFailed = request => {
+    failedRequests.add(request);
+    if (request === manifestRequest) retry.manifest_requestfailed = true;
+  };
+  const snapshots = { catch: null, before_context_close: null, through_owned_close_removal: null };
+  const listenerCleanup = { requestfinished: 'unavailable', requestfailed: 'unavailable' };
+  const cleanup = { interceptor: 'unavailable', browser: 'unavailable', fixture: 'unavailable' };
   let renameUrl;
   let renamePath;
   let refreshPath;
@@ -49,6 +70,8 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
   let expectedNetworkErrors = 0;
   const faults = { external: 0, console: 0, page: 0, secret: 0, asset: 0, response: 0 };
   const requests = [];
+  const displayReads = [];
+  let snapshotHead = '1';
   const posts = path => requests.filter(request => request.method === 'POST' && request.path === path).length;
   try {
     fixture = await startFixture(executable, { transport: 'websocket', recovered: false, mime: true, mutations: true });
@@ -58,6 +81,7 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
       'private-native', 'private-skills', 'private-data', 'private-config-canary',
       'principal_digest', 'encrypted_content', 'opaque_response', 'provider_session_id', 'prepared_request'];
     const leaked = text => secrets.some(secret => text.includes(secret));
+    process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
     context = await browser.newContext({ serviceWorkers: 'block' });
     await context.route('**/*', async route => {
       if (new URL(route.request().url()).origin !== fixture.origin) { faults.external++; await route.abort(); }
@@ -69,14 +93,22 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
       if (leaked(request.url())) faults.secret++;
       // Keep only method/path, never headers, bodies, query strings or Request objects.
       requests.push({ method: request.method(), path: url.pathname });
+      if (request.method() === 'GET' && url.pathname.endsWith('/conversation/events')) {
+        const sid = url.pathname.split('/')[3];
+        const after = `g11l.${Buffer.from(JSON.stringify([1, sid, snapshotHead, '3', '', ''])).toString('base64url')}`;
+        displayReads.push({ kind: 'events', path: url.pathname, matching_head: url.searchParams.get('after') === after });
+      }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     const reads = [];
     context.on('response', response => {
       if (response.status() >= 300) faults.response++;
       const path = new URL(response.url()).pathname;
+      if (response.request().method() === 'GET' && path.endsWith('/conversation')) {
+        displayReads.push({ kind: 'latest', path, status: response.status() });
+      }
       const file = files.get(path);
       if (file === undefined) return;
       reads.push((async () => {
@@ -124,17 +156,18 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
       expect([posts('/v1/sessions'), posts(renamePath), posts(refreshPath)]).toEqual([createCount, renameCount, refreshCount]);
       expect(requests.filter(request => request.method === 'POST').length).toBe(createCount + renameCount + refreshCount);
     }
-    const outcome = page.locator('.commands > section > pre');
-    const pending = page.locator('.command');
+    const pending = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^rename:/ }) });
     const canonical = page.getByRole('heading', { name: 'Canonical session title', exact: true });
-    const cursor = page.locator('.conversation > div > .metadata').first();
+    const observation = page.locator('.conversation > div > .metadata').first();
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     async function accepted(kind, receipt, duplicate, refresh = null) {
-      let text = `${kind} command\n\nAccepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${receipt.session_id}\nRun: none\nSequences: ${receipt.first_sequence} to ${receipt.last_sequence}\n\nDuplicate receipt: ${duplicate}`;
-      if (refresh !== null) text += `\nIndependent catalog refresh: ${refresh}`;
-      await exact(outcome, text);
-      await expect(pending).toHaveCount(0);
+      const row = page.locator('.command').filter({ has: page.locator('.metadata', { hasText: receipt.operation_id }) });
+      await exact(row.locator('h3'), `${kind}: accepted`);
+      let text = `Accepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${receipt.session_id}\nRun: none\nSequences: ${receipt.first_sequence} to ${receipt.last_sequence}\n\nWarning: none; duplicate: ${duplicate}`;
+      if (refresh !== null) text += `\n\nIndependent catalog refresh: ${refresh}`;
+      await exact(row.locator(':scope > pre'), `${text}\n\nAccepted is not completed.`);
     }
+    let seedSid;
     async function catalog(title, sid, head) {
       await page.getByRole('button', { name: 'Refresh list', exact: true }).click();
       await expect.poll(async () => {
@@ -142,9 +175,12 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
         return values.length === 2 && values.filter(value => value === title).length === 1
           && values.filter(value => value === 'Fixture barrier seed').length === 1;
       }).toBe(true);
+      if (seedSid !== undefined) expect(await page.locator('.session-list button').allTextContents()).toEqual(sid < seedSid
+        ? [title, 'Fixture barrier seed'] : ['Fixture barrier seed', title]);
       const selected = page.locator('.session-list li').filter({ has: page.locator('button[aria-current="true"]') });
       await exact(selected.locator('button'), title);
-      await exact(selected.locator('.metadata'), `Session: ${sid}\nObserved head: ${head}\nAvailability: ready\nObserved run: none`);
+      await exact(selected.locator('.metadata'), `Observed head: ${head}\nAvailability: ready\nObserved run: none\nCode: none`);
+      expect(new URL(page.url()).hash === `#session=${sid}`).toBe(true);
     }
 
     stage = 'authenticated browser creation';
@@ -180,7 +216,11 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
     await exact(canonical, titles[0]);
     await exact(page.locator('.conversation > .metadata'), `Workspace: ${workspaces[0]}\nSession: ${sid}`);
-    await exact(cursor, `Applied cursor: ${sid}:1\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
+    expect(displayReads).toEqual([
+      { kind: 'latest', path: `/v1/sessions/${sid}/conversation`, status: 200 },
+      { kind: 'events', path: `/v1/sessions/${sid}/conversation/events`, matching_head: true },
+    ]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
     await exact(transcript, 'No messages yet.');
     expect(new URL(page.url()).hash === `#session=${sid}`).toBe(true);
@@ -200,9 +240,12 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     await expect(pending).toHaveCount(1);
     await exact(pending.locator('h3'), 'rename: sending');
     await exact(pending.locator('.metadata'), `Operation: ${first.operation_id}\nSession: ${sid}`);
+    await exact(pending.locator(':scope > pre'), '');
+    await expect(pending.getByRole('button', { name: 'Open receipt session', exact: true })).toBeHidden();
     // SSE can expose the committed title even though the mutation receipt is still withheld.
     await exact(canonical, renames[0]);
-    await exact(cursor, `Applied cursor: ${sid}:2\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
+    expect(displayReads).toHaveLength(2);
     await exact(page.locator('.session-list button[aria-current="true"]'), titles[0]);
     await noWork(1, 1, 0, '2');
 
@@ -212,10 +255,10 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     await exact(pending.locator('h3'), 'rename: uncertain');
     await pending.locator('summary').click();
     await exact(pending.locator('details pre'), renames[0]);
-    await exact(pending.locator(':scope > pre'), 'Network reply unavailable. This does not establish whether a command was accepted.\n\nAcceptance is uncertain. A missing reply or receipt does not prove rollback.');
+    await exact(pending.locator(':scope > pre'), 'Network read or reply failed. This does not prove rollback.\n\nAcceptance is uncertain. No automatic retry.');
     await exact(pending.locator('.metadata'), `Operation: ${first.operation_id}\nSession: ${sid}`);
-    expect((await outcome.textContent()).startsWith('create command\n')).toBe(true);
-    expect((await outcome.textContent()).includes(first.operation_id)).toBe(false);
+    await accepted('create', created.receipt, false);
+    await expect(pending.getByRole('button', { name: 'Open receipt session', exact: true })).toBeHidden();
     await expect(pending.getByRole('button', { name: 'Retry identical command', exact: true })).toBeEnabled();
     // Editing the form must not change the already captured command used by Retry.
     await page.getByLabel('Exact new title', { exact: true }).fill(renames[1]);
@@ -228,20 +271,60 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     await noWork(1, 1, 0, '2');
     await privateBoundary();
 
-    stage = 'explicit identical retry consumes the real duplicate receipt and unchanged catalog result';
+    retryPage = page;
+    page.on('requestfinished', onManifestFinished);
+    page.on('requestfailed', onManifestFailed);
+    stage = 'explicit identical retry response acquisition';
     const manifestPath = `/v1/sessions/${sid}`;
     const [retryReply, retryManifest] = await Promise.all([
-      page.waitForResponse(response => response.url() === renameUrl && response.request().method() === 'POST'),
-      page.waitForResponse(response => response.url() === `${fixture.origin}${manifestPath}` && response.request().method() === 'GET'),
+      page.waitForResponse(response => response.url() === renameUrl && response.request().method() === 'POST').then(response => {
+        retry.reply_acquired = true; retry.reply_status = response.status(); return response;
+      }),
+      page.waitForResponse(response => response.url() === `${fixture.origin}${manifestPath}` && response.request().method() === 'GET').then(response => {
+        retry.manifest_acquired = true; retry.manifest_status = response.status();
+        manifestRequest = response.request();
+        retry.manifest_requestfinished = finishedRequests.has(manifestRequest);
+        retry.manifest_requestfailed = failedRequests.has(manifestRequest);
+        return response;
+      }),
       pending.getByRole('button', { name: 'Retry identical command', exact: true }).click(),
     ]);
+    stage = 'explicit identical retry status validation';
+    retry.statuses = 'attempted';
     expect(retryReply.status()).toBe(200);
     expect(retryManifest.status()).toBe(200);
-    expect(await retryManifest.finished()).toBe(null);
+    retry.statuses = 'succeeded';
+    stage = 'explicit identical retry manifest finish';
+    retry.manifest_finish = 'attempted';
+    retry.finish_settlement = 'pending';
+    const finish = await retryManifest.finished().then(value => {
+      retry.finish_settlement = value === null ? 'returned_null' : 'returned_other';
+      return value;
+    }, reason => {
+      retry.finish_settlement = 'rejected';
+      throw reason;
+    });
+    stage = 'explicit identical retry manifest null assertion';
+    retry.manifest_null = 'attempted';
+    expect(finish).toBe(null);
+    retry.manifest_null = 'succeeded';
+    retry.manifest_finish = 'succeeded';
+    stage = 'explicit identical retry accepted DOM';
+    retry.accepted_dom = 'attempted';
     await accepted('rename', first, true, 'unchanged');
+    retry.accepted_dom = 'succeeded';
+    stage = 'explicit identical retry native mutation inspection';
+    retry.native_inspection = 'attempted';
     const retried = oneSession(await fixture.inspectMutations(), 1);
+    retry.native_inspection = 'succeeded';
+    stage = 'explicit identical retry native mutation equality';
+    retry.native_equality = 'attempted';
     expect(JSON.stringify(retried) === JSON.stringify(committed)).toBe(true);
+    retry.native_equality = 'succeeded';
+    stage = 'explicit identical retry no-work checks';
+    retry.no_work = 'attempted';
     await noWork(1, 2, 0, '2');
+    retry.no_work = 'succeeded';
 
     stage = 'select stable seed through the catalog before opening the rename receipt';
     // The current receipt hash would no-op, so leave it through the real catalog control first.
@@ -249,39 +332,52 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
       has: page.getByRole('button', { name: 'Fixture barrier seed', exact: true }),
     });
     await expect(seed).toHaveCount(1);
-    const seedSid = (await seed.locator('.metadata').textContent()).split('\n')[0].slice('Session: '.length);
-    expect(seedSid !== sid).toBe(true);
-    await exact(seed.locator('.metadata'), `Session: ${seedSid}\nObserved head: 1\nAvailability: ready\nObserved run: none`);
+    await exact(seed.locator('.metadata'), 'Observed head: 1\nAvailability: ready\nObserved run: none\nCode: none');
     await seed.getByRole('button', { name: 'Fixture barrier seed', exact: true }).click();
     await exact(page.locator('.session-list button[aria-current="true"]'), 'Fixture barrier seed');
-    expect(new URL(page.url()).hash === `#session=${seedSid}`).toBe(true);
     await exact(canonical, 'Fixture barrier seed');
+    // The catalog button carries identity; visible catalog metadata does not.
+    seedSid = new URL(page.url()).hash.slice('#session='.length);
+    expect(seedSid).toMatch(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+    expect(seedSid !== sid).toBe(true);
     await exact(page.locator('.conversation > .metadata'), `Workspace: not supplied\nSession: ${seedSid}`);
-    await exact(cursor, `Applied cursor: ${seedSid}:1\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
+    expect(displayReads.slice(2)).toEqual([
+      { kind: 'latest', path: `/v1/sessions/${seedSid}/conversation`, status: 200 },
+      { kind: 'events', path: `/v1/sessions/${seedSid}/conversation/events`, matching_head: true },
+    ]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
     await exact(transcript, 'No messages yet.');
     await accepted('rename', first, true, 'unchanged');
 
-    const historyPath = `/v1/sessions/${sid}/history`;
-    const targetReads = () => [manifestPath, historyPath].map(path =>
+    const conversationPath = `/v1/sessions/${sid}/conversation`;
+    const targetReads = () => [conversationPath, `${conversationPath}/events`].map(path =>
       requests.filter(request => request.method === 'GET' && request.path === path).length);
     const postCounts = () => [posts('/v1/sessions'), posts(renamePath), posts(refreshPath),
       requests.filter(request => request.method === 'POST').length];
-    // Each load reads one manifest and one page because this history has only two metadata events.
-    for (const action of ['Open receipt session', 'Reload history']) {
+    // Latest captures H; only its matching display stream may attach afterward.
+    snapshotHead = '2';
+    for (const action of ['Open receipt session', 'Reconnect latest']) {
       stage = `explicit ${action} reads canonical receipt session without mutations`;
+      const displayBaseline = displayReads.length;
       const readBaseline = targetReads();
       const postBaseline = postCounts();
       expect(postBaseline).toEqual([1, 2, 0, 3]);
       const auditBaseline = oneSession(await fixture.inspectMutations(), 1);
       expect(JSON.stringify(auditBaseline) === JSON.stringify(committed)).toBe(true);
-      await page.getByRole('button', { name: action, exact: true }).click();
+      let control = page.getByRole('button', { name: action, exact: true });
+      if (action === 'Open receipt session') control = pending.getByRole('button', { name: action, exact: true });
+      await control.click();
       await expect.poll(targetReads).toEqual(readBaseline.map(count => count + 1));
       await exact(page.locator('.session-list button[aria-current="true"]'), titles[0]);
       expect(new URL(page.url()).hash === `#session=${sid}`).toBe(true);
       await exact(canonical, renames[0]);
       await exact(page.locator('.conversation > .metadata'), `Workspace: ${workspaces[0]}\nSession: ${sid}`);
-      await exact(cursor, `Applied cursor: ${sid}:2\nSnapshot head: 2`);
+      await exact(observation, 'Observation: streaming');
+      expect(displayReads.slice(displayBaseline)).toEqual([
+        { kind: 'latest', path: conversationPath, status: 200 },
+        { kind: 'events', path: `${conversationPath}/events`, matching_head: true },
+      ]);
       await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
       await exact(transcript, 'No messages yet.');
       expect(targetReads()).toEqual(readBaseline.map(count => count + 1));
@@ -297,11 +393,13 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
       page.getByRole('button', { name: 'Refresh selected catalog entry', exact: true }).click(),
     ]);
     expect(refreshReply.status()).toBe(200);
-    await exact(outcome, 'refresh command\n\nCatalog refresh: unchanged');
-    await expect(pending).toHaveCount(0);
+    const refreshed = page.locator('.command').filter({ has: page.getByRole('heading', { name: 'refresh: accepted', exact: true }) });
+    await exact(refreshed.locator(':scope > pre'), 'Catalog refresh: unchanged\n\nAccepted is not completed.');
+    await accepted('rename', first, true, 'unchanged');
+    await expect(page.locator('.command')).toHaveCount(3);
     await page.waitForTimeout(300);
     await exact(canonical, renames[0]);
-    await exact(cursor, `Applied cursor: ${sid}:2\nSnapshot head: 2`);
+    await exact(observation, 'Observation: streaming');
     expect(new URL(page.url()).hash === `#session=${sid}`).toBe(true);
     expect(JSON.stringify(oneSession(await fixture.inspectMutations(), 1)) === JSON.stringify(committed)).toBe(true);
     await noWork(1, 2, 1, '2');
@@ -321,7 +419,10 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     expect(second.operation_id !== first.operation_id && second.session_id === first.session_id).toBe(true);
     await accepted('rename', second, false, 'updated');
     await exact(canonical, renames[1]);
-    await exact(cursor, `Applied cursor: ${sid}:3\nSnapshot head: 2`);
+    await exact(observation, 'Observation: streaming');
+    expect(displayReads).toHaveLength(8);
+    await accepted('rename', first, true, 'unchanged');
+    await expect(page.locator('.command')).toHaveCount(4);
     await exact(transcript, 'No messages yet.');
     await expect(transcript.locator('.run')).toHaveCount(0);
     await catalog(renames[1], sid, '3');
@@ -332,6 +433,9 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     stage = 'public asset and private-boundary proof, then disconnect without work';
     await expect.poll(() => assets.size).toBe(files.size);
     await Promise.all(reads);
+    expect([...assets].sort()).toEqual([...files.keys()].sort());
+    expect(requests.some(request => /\/(history|events)$/.test(request.path) && !request.path.endsWith('/conversation/events'))).toBe(false);
+    expect(requests.some(request => /^\/assets\/(client|state|view)\.js$/.test(request.path))).toBe(false);
     expect(Object.values(faults)).toEqual(Array(6).fill(0));
     expect(expectedNetworkErrors).toBe(1);
     expect(await page.locator('.error').evaluateAll(nodes => nodes.every(node => node.textContent === ''))).toBe(true);
@@ -341,12 +445,39 @@ test('rename reply loss preserves one immutable command, retries its receipt, th
     await noWork(1, 3, 1, '3');
     console.log('Rename recovery: browser_sessions=1 metadata_seeds=1 create_posts=1 rename_posts=3 rename_events=2 duplicate_receipts=1 refresh_posts=1 final_head=3 task_posts=0 cancel_posts=0 provider_requests=0 auth_loads=0');
   } catch {
+    // A started proof that threw failed; later proofs stay unavailable.
+    for (const field of ['statuses', 'manifest_finish', 'manifest_null', 'accepted_dom', 'native_inspection', 'native_equality', 'no_work']) {
+      if (retry[field] === 'attempted') retry[field] = 'failed';
+    }
+    snapshots.catch = { ...retry };
     // Never forward raw Playwright arguments, DOM excerpts, errors or fixture payloads.
-    failure = new Error(`Rename recovery failed: ${stage}; counts=${JSON.stringify(faults)}; rename_posts=${posts(renamePath)}`);
+    failure = new Error(`Rename recovery failed: ${stage}; counts=${JSON.stringify(faults)}; rename_posts=${posts(renamePath)}; retry=${JSON.stringify(retry)}`);
   } finally {
-    try { await loss?.stop(); } catch { failure ??= new Error('Rename recovery interceptor cleanup failed'); }
-    try { await context?.close(); } catch { failure ??= new Error('Rename recovery browser cleanup failed'); }
-    try { await fixture?.stop(); } catch { failure ??= new Error('Rename recovery fixture cleanup failed'); }
+    try {
+      if (loss) { cleanup.interceptor = 'attempted'; await loss.stop(); cleanup.interceptor = 'succeeded'; }
+    } catch { cleanup.interceptor = 'failed'; failure ??= new Error('Rename recovery interceptor cleanup failed'); }
+    try {
+      if (context) {
+        snapshots.before_context_close = { ...retry };
+        cleanup.browser = 'attempted'; await context.close(); cleanup.browser = 'succeeded';
+        // Failed close leaves the guard enabled for Playwright's later fixture cleanup.
+        if (previousNoCopyPrompt === undefined) delete process.env.PLAYWRIGHT_NO_COPY_PROMPT;
+        else process.env.PLAYWRIGHT_NO_COPY_PROMPT = previousNoCopyPrompt;
+      }
+    } catch { cleanup.browser = 'failed'; failure ??= new Error('Rename recovery browser cleanup failed'); }
+    // Observe through owned close, then remove only our callbacks even if close or removal fails.
+    try {
+      if (retryPage) { listenerCleanup.requestfinished = 'attempted'; retryPage.off('requestfinished', onManifestFinished); listenerCleanup.requestfinished = 'succeeded'; }
+    } catch { listenerCleanup.requestfinished = 'failed'; failure ??= new Error('Rename recovery listener cleanup failed'); }
+    try {
+      if (retryPage) { listenerCleanup.requestfailed = 'attempted'; retryPage.off('requestfailed', onManifestFailed); listenerCleanup.requestfailed = 'succeeded'; }
+    } catch { listenerCleanup.requestfailed = 'failed'; failure ??= new Error('Rename recovery listener cleanup failed'); }
+    snapshots.through_owned_close_removal = { ...retry };
+    try {
+      if (fixture) { cleanup.fixture = 'attempted'; await fixture.stop(); cleanup.fixture = 'succeeded'; }
+    } catch { cleanup.fixture = 'failed'; failure ??= new Error('Rename recovery fixture cleanup failed'); }
   }
+  // Closed Stop facts are independent of receipt/DOM proof and of resource absence.
+  console.log(`Rename recovery evidence: ${JSON.stringify({ retry, snapshots, listener_cleanup: listenerCleanup, cleanup, lifecycle: fixture?.evidence() ?? null })}`);
   if (failure) throw failure;
 });

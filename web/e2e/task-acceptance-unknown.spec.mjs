@@ -3,8 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { discoverFixture, startFixture } from '../test-support/fixture.mjs';
 import { exact } from '../test-support/joined.mjs';
-import { checkEmbeddedAssets } from '../test-support/stale-history.mjs';
-import { installAcceptanceUnknownObserver } from '../test-support/acceptance-unknown.mjs';
+import { decodeJson, validateErrorView } from '../dist/api.js';
 
 const { titles } = JSON.parse(await readFile(new URL('../test-support/mutations.json', import.meta.url), 'utf8'));
 const TASK = '  Unknown acceptance 雪\n<em>task & inert</em>\n  ';
@@ -23,8 +22,9 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
   let failure;
   let sid;
   let taskPath;
-  let observed = null;
-  let memory = null;
+  const observed = { count: 0, reply: { status: null, decoded: false, validated: false, exact: false }, failures: [] };
+  const displayReads = [];
+  const reads = [];
   let assetEvidence = null;
   let stage = 'startup';
   let resourceErrors = 0;
@@ -51,19 +51,31 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
       const url = new URL(request.url());
       if (url.origin !== fixture.origin) faults.external++;
       if (leaked(request.url())) faults.secret++;
-      if (url.pathname.startsWith('/v1/') && request.headers().authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      const headers = request.headers();
+      if (headers.cookie !== undefined || (headers.origin !== undefined && headers.origin !== fixture.origin)) faults.request++;
+      if (url.pathname.startsWith('/v1/') && headers.authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      if (/\/(history|events|operations)(\/|$)/.test(url.pathname) && !url.pathname.endsWith('/conversation/events')) faults.request++;
+      if (['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(url.pathname)) faults.request++;
       if (request.method() !== 'POST') {
         if (request.method() !== 'GET') faults.request++;
         if (/\/(operations|runs)\//.test(url.pathname)) faults.reconcile++;
+        if (url.pathname.endsWith('/conversation/events')) {
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          displayReads.push({ kind: 'events', matching_head: url.pathname === `/v1/sessions/${sid}/conversation/events`
+            && url.searchParams.size === 1 && url.searchParams.get('after') === after });
+        }
         return;
       }
+      if (headers.origin !== fixture.origin || url.search !== '') faults.request++;
       let kind;
       if (url.pathname === '/v1/sessions') kind = 'create';
       else if (url.pathname === taskPath) kind = 'task';
       else { posts.other++; return; }
       posts[kind]++;
       try {
-        const raw = request.postDataBuffer().toString('utf8');
+        const bytes = request.postDataBuffer();
+        if (bytes === null || bytes.byteLength > 4096) { faults.request++; return; }
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         const body = JSON.parse(raw);
         const fields = kind === 'task' ? 'operation_id,run_id,text' : 'operation_id,title,workspace';
         if (wire[kind] !== null || Object.keys(body).sort().join(',') !== fields || !uuid(body.operation_id)
@@ -75,15 +87,43 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
       } catch { faults.request++; }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     context.on('response', response => {
-      const path = new URL(response.url()).pathname;
-      if (response.status() >= 300 && !(path === taskPath && response.request().method() === 'POST' && response.status() === 503)) faults.response++;
-      if (files.has(path)) assets.add(path);
+      const url = new URL(response.url()), path = url.pathname;
+      const taskReply = path === taskPath && response.request().method() === 'POST';
+      if (response.status() >= 300 && !(taskReply && response.status() === 503)) faults.response++;
+      if (path.endsWith('/conversation')) displayReads.push({ kind: 'latest', status: response.status(),
+        exact: path === `/v1/sessions/${sid}/conversation` && url.search === '' });
+      const file = files.get(path);
+      if (file !== undefined) reads.push((async () => {
+        const body = await response.body();
+        if (response.status() !== 200 || !body.equals(await readFile(new URL(`../${file}`, import.meta.url)))) faults.response++;
+        if (leaked(body.toString('utf8'))) faults.secret++;
+        assets.add(path);
+      })().catch(() => { faults.response++; }));
+      if (!taskReply) return;
+      observed.count++;
+      reads.push((async () => {
+        let step = 'status';
+        try {
+          observed.reply.status = response.status();
+          if (response.status() !== 503 || observed.count !== 1) throw Error();
+          step = 'body';
+          const bytes = await response.body();
+          if (bytes.byteLength > 4096) throw Error();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) { faults.secret++; throw Error(); }
+          const value = JSON.parse(raw); observed.reply.decoded = true;
+          step = 'schema'; decodeJson(raw, response.headers()['content-type'], validateErrorView); observed.reply.validated = true;
+          step = 'exact';
+          observed.reply.exact = raw.replace(/"(?:\\.|[^"\\])*"/g, '""').split(':').length === 7
+            && value.api_version === 1 && value.code === 'storage.commit_unknown' && value.stage === 'acceptance'
+            && value.certainty === 'unknown' && value.acceptance === null && value.notices.length === 0;
+          if (!observed.reply.exact) throw Error();
+        } catch { observed.failures.push(`task:${step}`); }
+      })());
     });
-    // The clone is installed before app requests. No DevTools response body reads or replacements.
-    await context.addInitScript(installAcceptanceUnknownObserver, { secrets });
     page = await context.newPage();
     page.on('console', message => {
       const text = message.text();
@@ -123,6 +163,7 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
         && entry.receipt.session_id === sid && entry.receipt.operation_id === wire.create.operation_id).toBe(true);
       expect(posts).toEqual({ create: 1, task: tasks, other: 0 });
       expect(faults.reconcile).toBe(0);
+      expect(displayReads).toEqual([{ kind: 'latest', status: 200, exact: true }, { kind: 'events', matching_head: true }]);
     }
     async function preserved(locator, expected, input = false) {
       expect(await locator.evaluate((node, { expected, input }) => {
@@ -131,13 +172,17 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
       }, { expected, input })).toBe(true);
     }
     async function retained(draft) {
-      memory = await page.evaluate(expected => globalThis.acceptanceUnknownCapture.memory(expected),
-        { operation: wire.task.operation_id, run: wire.task.run_id, text: TASK, draft });
-      expect(Object.values(memory)).toEqual(Array(7).fill(true));
+      await preserved(task, draft, true);
+      await preserved(command.locator('details pre'), TASK);
+      await exact(command.locator('.metadata'), `Operation: ${wire.task.operation_id}\nSession: ${sid}`);
+      await exact(command.locator(':scope > pre'), 'HTTP 503\nCode: storage.commit_unknown\nStage: acceptance\nCertainty: unknown\n\nAcceptance is uncertain. No automatic retry.');
+      await exact(createCommand.locator(':scope > pre'), creationOutcome);
+      expect(await createCommand.evaluate(node => node.outerHTML) === creationArticle).toBe(true);
     }
     const task = page.getByLabel('Task', { exact: true });
-    const command = page.locator('.command');
-    const outcome = page.locator('.commands > section > pre');
+    const command = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const outcome = createCommand.locator(':scope > pre');
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     const title = page.getByRole('heading', { name: 'Canonical session title', exact: true });
 
@@ -153,13 +198,14 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
     const audit = await fixture.inspectMutations();
     sid = audit.creations[0].receipt.session_id;
     taskPath = `/v1/sessions/${sid}/runs`;
-    await page.evaluate(sid => globalThis.acceptanceUnknownCapture.select(sid), sid);
     await fixture.request({ command: 'select', session_id: sid });
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    await createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click();
     await exact(transcript, 'No messages yet.');
     await exact(title, titles[0]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
+    await exact(createCommand.locator('h3'), 'create: accepted');
     const creationOutcome = await outcome.textContent();
+    const creationArticle = await createCommand.evaluate(node => node.outerHTML);
     await noWork(0);
     await privateBoundary();
 
@@ -169,10 +215,9 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
     await preserved(task, TASK, true);
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await exact(command.locator('h3'), 'task: uncertain');
-    await page.evaluate(() => globalThis.acceptanceUnknownCapture.drain());
-    observed = await page.evaluate(() => globalThis.acceptanceUnknownCapture.summary());
+    await Promise.all(reads);
     expect(observed).toEqual({ count: 1, reply: { status: 503, decoded: true, validated: true, exact: true }, failures: [] });
-    await exact(command.locator(':scope > pre'), 'HTTP 503\nCode: storage.commit_unknown\nStage: acceptance\nCertainty: unknown\n\nAcceptance is uncertain. A missing reply or receipt does not prove rollback.');
+    await exact(command.locator(':scope > pre'), 'HTTP 503\nCode: storage.commit_unknown\nStage: acceptance\nCertainty: unknown\n\nAcceptance is uncertain. No automatic retry.');
     await command.locator('summary').click();
     await preserved(task, TASK, true);
     await preserved(command.locator('details pre'), TASK);
@@ -180,7 +225,8 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
     await expect(command.getByRole('button', { name: 'Retry identical command', exact: true })).toBeVisible();
     await expect(command.getByRole('button', { name: 'Retry identical command', exact: true })).toBeEnabled();
     await expect(command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toBeVisible();
-    expect(wire.task.operation_id !== wire.create.operation_id && wire.task.run_id !== wire.task.operation_id).toBe(true);
+    await expect(command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toBeEnabled();
+    expect(uuid(sid) && new Set([sid, wire.create.operation_id, wire.task.operation_id, wire.task.run_id]).size === 4).toBe(true);
     await retained(TASK);
     await exact(outcome, creationOutcome);
     await exact(transcript, 'No messages yet.');
@@ -205,15 +251,15 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
 
     stage = 'embedded asset integrity and Disconnect clearing';
     await expect.poll(() => assets.size).toBe(files.size);
-    assetEvidence = await page.evaluate(checkEmbeddedAssets, { secrets,
-      files: await Promise.all([...files].map(async ([path, file]) => [path, [...await readFile(new URL(`../${file}`, import.meta.url))]])) });
-    expect(assetEvidence).toEqual({ checked: files.size, failures: [] });
+    await Promise.all(reads);
+    assetEvidence = { checked: assets.size, exact: faults.response === 0 };
+    expect(assetEvidence).toEqual({ checked: files.size, exact: true });
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await exact(page.locator('.topbar [role="status"]'), 'disconnected');
     await expect(page.locator('.command,.run,.session-list li')).toHaveCount(0);
-    await exact(outcome, '');
     await exact(page.locator('.transcript'), '');
-    expect(await page.evaluate(() => globalThis.acceptanceUnknownCapture.cleared())).toBe(true);
+    await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    expect(await page.getByLabel('Workspace', { exact: true }).locator('option').count()).toBe(0);
     expect(await page.evaluate(canaries => {
       const nodes = Array.from(document.querySelectorAll('input,textarea,select'));
       const values = [document.documentElement.outerHTML, ...nodes.map(node => node.value)];
@@ -224,10 +270,11 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
     await noWork(1);
     expect(resourceErrors).toBe(1);
     expect(Object.values(faults)).toEqual(Array(7).fill(0));
-    expect(await page.evaluate(() => globalThis.acceptanceUnknownCapture.summary())).toEqual(observed);
+    await Promise.all(reads);
+    expect(observed).toEqual({ count: 1, reply: { status: 503, decoded: true, validated: true, exact: true }, failures: [] });
   } catch (cause) {
     const kind = ['Error', 'TypeError', 'SyntaxError', 'TimeoutError', 'ProtocolError'].includes(cause?.name) ? cause.name : 'other';
-    failure = new Error(`Acceptance unknown failed: ${stage}; kind=${kind}; capture=${JSON.stringify(observed)}; memory=${JSON.stringify(memory)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}`);
+    failure = new Error(`Acceptance unknown failed: ${stage}; kind=${kind}; capture=${JSON.stringify(observed)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}`);
   } finally {
     try {
       await context?.close(); cleanup.browser = context !== undefined;
@@ -244,5 +291,5 @@ test('one Send keeps an acceptance commit unknown before COMMIT uncertain withou
   if (failure) throw failure;
   expect(Object.values(faults)).toEqual(Array(7).fill(0));
   expect(resourceErrors).toBe(1);
-  console.log(`Acceptance unknown evidence: HTTP=503 flat_error_exact=${observed.reply.exact} captures=${observed.count} assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} other_posts=${posts.other}; task_bytes=${Buffer.byteLength(TASK)} immutable_command_exact=${memory.commandExact} last_mutation_unchanged=${memory.lastMutationUnchanged}; sessions=2 browser_sequence=1 seed_sequence=1 task_commands=0 task_receipts=0 runs=0 checkpoints=0 runtime=0 results=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 reconcile=0 observation_ms=500 disconnect_cleared=true`);
+  console.log(`Acceptance unknown evidence: HTTP=503 flat_error_exact=${observed.reply.exact} captures=${observed.count} assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} other_posts=${posts.other}; task_bytes=${Buffer.byteLength(TASK)} command_dom_original=true create_article_unchanged=true; sessions=2 browser_sequence=1 seed_sequence=1 task_commands=0 task_receipts=0 runs=0 checkpoints=0 runtime=0 results=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 reconcile=0 observation_ms=500 disconnect_cleared=true`);
 });

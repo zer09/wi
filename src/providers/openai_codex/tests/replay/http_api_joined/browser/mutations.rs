@@ -280,7 +280,7 @@ impl Audit {
             assert!(
                 row.get::<&str, _>("title") == observed_title
                     && row.get::<i64, _>("updated_at_ms") == observed_timestamp
-                    && row.get::<i64, _>("schema_version") == 2
+                    && row.get::<i64, _>("schema_version") == 3
                     && row.get::<&str, _>("availability") == "ready"
                     && row.get::<Option<String>, _>("fault_code").is_none()
                     && row.get::<Option<String>, _>("last_run_id").is_none()

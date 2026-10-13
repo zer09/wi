@@ -428,6 +428,40 @@ impl From<&RecordedRun> for RunView {
         }
     }
 }
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TaskReconciliationState {
+    Accepted,
+    NotFound,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TaskReconciliationView {
+    api_version: ApiVersion,
+    state: TaskReconciliationState,
+    acceptance: Option<ReceiptView>,
+    run: Option<RunView>,
+}
+impl TaskReconciliationView {
+    pub(in crate::http_api) fn accepted(receipt: &CommitReceipt, run: &RecordedRun) -> Self {
+        Self {
+            api_version: ApiVersion,
+            state: TaskReconciliationState::Accepted,
+            acceptance: Some(receipt.into()),
+            run: Some(run.into()),
+        }
+    }
+
+    pub(in crate::http_api) fn not_found() -> Self {
+        Self {
+            api_version: ApiVersion,
+            state: TaskReconciliationState::NotFound,
+            acceptance: None,
+            run: None,
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub struct HistoryView {
     api_version: ApiVersion,

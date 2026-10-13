@@ -166,7 +166,7 @@ async fn p1a14_real_registry_success_failure_limit_and_both_recording_orders() {
             assert_eq!(started.is_error(), None);
             let finish = tool_event(&run, 4, events[1].clone());
             let actual_output = AppendRunRecord::ToolResult {
-                request_id: Some("original request".into()),
+                request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                 call_id: "call".into(),
                 output: output.clone(),
                 is_error,
@@ -249,13 +249,13 @@ async fn p1a14_mismatch_duplicate_missing_output_and_completed_guard() {
         .await;
         for bad in [
             AppendRunRecord::ToolResult {
-                request_id: Some("wrong".into()),
+                request_id: Some("00000000-0000-4000-8000-000000000099".into()),
                 call_id: "call".into(),
                 output: "exact".into(),
                 is_error: false,
             },
             AppendRunRecord::ToolResult {
-                request_id: Some("original request".into()),
+                request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                 call_id: "unknown".into(),
                 output: "exact".into(),
                 is_error: false,
@@ -323,7 +323,7 @@ async fn p1a14_mismatch_duplicate_missing_output_and_completed_guard() {
                     OperationId::new(),
                     run.clone(),
                     vec![AppendRunRecord::ToolResult {
-                        request_id: Some("original request".into()),
+                        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                         call_id: "call".into(),
                         output: "exact opaque\n雪\0".into(),
                         is_error: false
@@ -402,7 +402,7 @@ async fn p1a15_saved_reuse_scoped_call_ids_exact_bytes_and_zero_storage_executio
             .unwrap();
         let (events, output, is_error) = execute(&mut tools, "same-call").await;
         let output_record = AppendRunRecord::ToolResult {
-            request_id: Some("original request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             call_id: "same-call".into(),
             output,
             is_error,
@@ -479,8 +479,8 @@ async fn p1a15_saved_reuse_scoped_call_ids_exact_bytes_and_zero_storage_executio
                 event: reuse_events.remove(0),
             },
         );
-        event.turn_id = Some("turn-2".into());
-        event.request_id = Some("subsequent reuse request".into());
+        event.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
+        event.request_id = Some("00000000-0000-4000-8000-000000000002".into());
         let operation = OperationId::new();
         let records = vec![AppendRunRecord::Runtime(event.clone())];
         let receipt = handle

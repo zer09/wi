@@ -91,7 +91,7 @@ fn runtime(
         .register(Arc::new(Script {
             source: SourceIds {
                 session: "provider-session",
-                request_prefix: "q",
+                request_prefix: "00000000-0000-4000-8000-",
                 event_prefix: "source-",
             },
             binding,

@@ -271,7 +271,10 @@ impl SessionControl for Control {
     }
     async fn generate(&self, input: Vec<InputItem>) -> crate::Result<RequestReceipt> {
         self.counters.inputs.lock().unwrap().push(input);
-        let request_id = format!("request-{}", self.request.fetch_add(1, Ordering::SeqCst));
+        let request_id = format!(
+            "00000000-0000-4000-8000-{:012x}",
+            self.request.fetch_add(1, Ordering::SeqCst)
+        );
         match self
             .steps
             .lock()

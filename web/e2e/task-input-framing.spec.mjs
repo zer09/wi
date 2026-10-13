@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
-import { validateErrorView } from '../dist/api.js';
+import { decodeJson, validateErrorView } from '../dist/api.js';
+import { validateConversationPage } from '../dist/display-api.js';
 import { discoverFixture, startFixture } from '../test-support/fixture.mjs';
 import { exact } from '../test-support/joined.mjs';
 
@@ -17,8 +18,14 @@ test.beforeAll(async () => { test.setTimeout(150_000); executable = await discov
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 test('one in-bound task rejects only after real context framing exceeds the provider-input limit', async ({ browser }) => {
+  const previousNoCopyPrompt = process.env.PLAYWRIGHT_NO_COPY_PROMPT;
   let fixture;
   let context;
+  let sid;
+  let createBody;
+  let taskIdentity;
+  let creationArticle;
+  const displayReads = [];
   let failure;
   let taskPath;
   let stage = 'startup';
@@ -40,7 +47,8 @@ test('one in-bound task rejects only after real context framing exceeds the prov
       'private-native', 'private-skills', 'private-data', 'private-config-canary',
       'principal_digest', 'encrypted_content', 'opaque_response', 'provider_session_id', 'prepared_request'];
     const leaked = text => secrets.some(secret => text.includes(secret));
-    // No recordHar or recordVideo; the manually owned context has no trace or failure snapshot.
+    // Keep the failure-snapshot guard through failed creation or close.
+    process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
     context = await browser.newContext({ serviceWorkers: 'block' });
     await context.route('**/*', async route => {
       if (new URL(route.request().url()).origin !== fixture.origin) { faults.external++; await route.abort(); }
@@ -50,9 +58,32 @@ test('one in-bound task rejects only after real context framing exceeds the prov
       const url = new URL(request.url());
       if (url.origin !== fixture.origin) faults.external++;
       if (leaked(request.url())) faults.secret++;
-      if (url.pathname.startsWith('/v1/') && request.headers().authorization !== `Bearer ${fixture.owner}`) faults.request++;
-      if (request.method() !== 'POST') return;
-      if (url.pathname === '/v1/sessions') { posts.create++; return; }
+      const headers = request.headers();
+      if (headers.cookie !== undefined || (headers.origin !== undefined && headers.origin !== fixture.origin)) faults.request++;
+      if (url.pathname.startsWith('/v1/') && headers.authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      if (/\/(history|events|operations)(\/|$)/.test(url.pathname) && !url.pathname.endsWith('/conversation/events')) faults.request++;
+      if (['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(url.pathname)) faults.request++;
+      if (request.method() !== 'POST') {
+        if (request.method() !== 'GET' || /\/(operations|runs)\//.test(url.pathname)) faults.request++;
+        if (url.pathname.endsWith('/conversation/events')) {
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          displayReads.push({ kind: 'events', matching_head: url.pathname === `/v1/sessions/${sid}/conversation/events`
+            && url.searchParams.size === 1 && url.searchParams.get('after') === after });
+        }
+        return;
+      }
+      if (headers.origin !== fixture.origin || url.search !== '') faults.request++;
+      if (url.pathname === '/v1/sessions') {
+        posts.create++;
+        try {
+          const raw = request.postDataBuffer().toString('utf8');
+          const body = JSON.parse(raw);
+          if (createBody !== undefined || Object.keys(body).sort().join(',') !== 'operation_id,title,workspace'
+            || body.title !== titles[0] || typeof body.workspace !== 'string' || leaked(raw)) faults.request++;
+          createBody = body;
+        } catch { faults.request++; }
+        return;
+      }
       if (url.pathname !== taskPath) { posts.other++; return; }
       posts.task++;
       try {
@@ -65,18 +96,33 @@ test('one in-bound task rejects only after real context framing exceeds the prov
         if (Object.keys(body).sort().join(',') !== 'operation_id,run_id,text' || !idsValid
           || typeof body.text !== 'string' || captured !== undefined) { faults.request++; return; }
         if (leaked(raw.toString('utf8'))) faults.secret++;
+        taskIdentity = { operation_id: body.operation_id, run_id: body.run_id };
         captured = { body_bytes: raw.length, text_bytes: Buffer.byteLength(body.text, 'utf8'),
           unframed_bytes: Buffer.byteLength(JSON.stringify([{ kind: 'user', text: body.text }]), 'utf8'),
           start: body.text.slice(0, 64), end: body.text.slice(-64), exact: body.text === taskText(sizes.task_bytes) };
       } catch { faults.request++; }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     const reads = [];
     context.on('response', response => {
-      const path = new URL(response.url()).pathname;
+      const url = new URL(response.url()), path = url.pathname;
       if (response.status() >= 300 && !(path === taskPath && response.status() === 413)) faults.response++;
+      if (path.endsWith('/conversation')) {
+        displayReads.push({ kind: 'latest', status: response.status(), exact: path === `/v1/sessions/${sid}/conversation` && url.search === '' });
+        reads.push((async () => {
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const value = decodeJson(raw, response.headers()['content-type'], validateConversationPage);
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          if (value.session_id !== sid || value.session.session_id !== sid || value.snapshot_head !== '1'
+            || value.session.head_sequence !== '1' || value.session.title !== titles[0] || value.session.workspace !== createBody.workspace
+            || value.block !== null || value.entries.length !== 0 || value.previous_block !== null
+            || value.earlier_activity !== null || value.live_after !== after) faults.response++;
+        })().catch(() => { faults.response++; }));
+      }
       const file = files.get(path);
       if (file === undefined) return;
       reads.push((async () => {
@@ -124,8 +170,10 @@ test('one in-bound task rejects only after real context framing exceeds the prov
       expect(entry.exact && entry.catalog_current && entry.sequence_count === '1' && entry.catalog_head_sequence === '1'
         && entry.rename_events === 0 && entry.renames.length === 0 && entry.rename_event_ids.length === 0
         && entry.receipt.first_sequence === '1' && entry.receipt.last_sequence === '1' && entry.receipt.run_id === null
+        && entry.receipt.session_id === sid && entry.receipt.operation_id === createBody.operation_id
         && taskPath === `/v1/sessions/${entry.receipt.session_id}/runs`).toBe(true);
       expect(posts).toEqual({ create: 1, task: tasks, other: 0 });
+      expect(displayReads).toEqual([{ kind: 'latest', status: 200, exact: true }, { kind: 'events', matching_head: true }]);
     }
     async function preserved(locator, edited = false) {
       const evidence = await locator.evaluate((node, { parts, bytes, edit }) => {
@@ -139,8 +187,9 @@ test('one in-bound task rejects only after real context framing exceeds the prov
       expect(evidence.bytes).toBe(edited ? Buffer.byteLength(EDIT, 'utf8') : sizes.task_bytes);
     }
     const task = page.getByLabel('Task', { exact: true });
-    const command = page.locator('.command');
-    const outcome = page.locator('.commands > section > pre');
+    const command = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const outcome = createCommand.locator(':scope > pre');
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
 
     stage = 'real browser creation and selection';
@@ -150,21 +199,23 @@ test('one in-bound task rejects only after real context framing exceeds the prov
     await exact(page.locator('.topbar [role="status"]'), 'connected');
     expect(await page.getByLabel('Owner token', { exact: true }).inputValue() === '').toBe(true);
     await page.getByLabel('Title', { exact: true }).fill(titles[0]);
-    const creationRead = page.waitForResponse(response => response.request().method() === 'GET'
-      && /^\/v1\/sessions\/[0-9a-f-]{36}$/.test(new URL(response.url()).pathname)).then(response => response.finished());
     await page.getByRole('button', { name: 'Create session', exact: true }).click();
     await expect.poll(async () => (await outcome.textContent()).includes('Accepted receipt (not completion)')).toBe(true);
-    await creationRead;
-    {
-      const audit = await fixture.inspectMutations();
-      expect([audit.session_count, audit.seed_sessions, audit.creations.length]).toEqual([2, 1, 1]);
-      const sid = audit.creations[0].receipt.session_id;
-      taskPath = `/v1/sessions/${sid}/runs`;
-      await fixture.request({ command: 'select', session_id: sid });
-    }
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    const audit = await fixture.inspectMutations();
+    expect([audit.session_count, audit.seed_sessions, audit.creations.length]).toEqual([2, 1, 1]);
+    const receipt = audit.creations[0].receipt;
+    sid = receipt.session_id;
+    taskPath = `/v1/sessions/${sid}/runs`;
+    await exact(createCommand.locator('h3'), 'create: accepted');
+    await exact(outcome, `Accepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${sid}\nRun: none\nSequences: 1 to 1\n\nWarning: none; duplicate: false\n\nAccepted is not completed.`);
+    creationArticle = await createCommand.evaluate(node => node.outerHTML);
+    await fixture.request({ command: 'select', session_id: sid });
+    await createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click();
     await exact(transcript, 'No messages yet.');
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
+    await exact(page.getByRole('heading', { name: 'Canonical session title', exact: true }), titles[0]);
+    expect(await page.evaluate(selected => location.hash === `#session=${selected}`, sid)).toBe(true);
+    await Promise.all(reads);
     await noWork(0);
     await privateBoundary();
 
@@ -175,9 +226,12 @@ test('one in-bound task rejects only after real context framing exceeds the prov
       page.waitForResponse(response => new URL(response.url()).pathname === taskPath && response.request().method() === 'POST')
         .then(async response => {
           reply.status = response.status();
-          const value = await response.json();
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const value = JSON.parse(raw);
           reply.decoded = true;
-          validateErrorView(value);
+          decodeJson(raw, response.headers()['content-type'], validateErrorView);
           reply.validated = true;
           reply.exact = isDeepStrictEqual(value, ERROR);
         }),
@@ -186,9 +240,12 @@ test('one in-bound task rejects only after real context framing exceeds the prov
     expect(reply).toEqual({ status: 413, decoded: true, validated: true, exact: true });
     expect(captured?.exact === true && captured.text_bytes === sizes.task_bytes
       && captured.unframed_bytes === sizes.unframed_bytes && captured.unframed_bytes <= sizes.max_input_bytes
-      && captured.body_bytes <= sizes.max_input_bytes).toBe(true);
+      && captured.body_bytes <= sizes.max_input_bytes && sizes.framed_bytes > sizes.max_input_bytes
+      && sizes.framed_bytes > sizes.unframed_bytes && sizes.project_bytes > 0 && sizes.skill_bytes > 0).toBe(true);
+    expect(new Set([sid, createBody.operation_id, taskIdentity.operation_id, taskIdentity.run_id]).size).toBe(4);
     await expect(command).toHaveCount(1);
     await exact(command.locator('h3'), 'task: rejected');
+    await exact(command.locator('.metadata'), `Operation: ${taskIdentity.operation_id}\nSession: ${sid}`);
     await exact(command.locator(':scope > pre'), 'HTTP 413\nCode: context.input_too_large\nStage: none\nCertainty: not_applicable');
     await command.locator('summary').click();
     await preserved(command.locator('details pre'));
@@ -221,6 +278,9 @@ test('one in-bound task rejects only after real context framing exceeds the prov
     identityChanged = await identityWatch.evaluate(watch => watch.stop());
     await identityWatch.dispose();
     expect(identityChanged).toBe(false);
+    expect(await createCommand.evaluate(node => node.outerHTML) === creationArticle).toBe(true);
+    await exact(transcript, 'No messages yet.');
+    await expect(page.getByRole('button', { name: 'Cancel current run', exact: true })).toBeDisabled();
     await noWork(1);
     await privateBoundary();
 
@@ -230,7 +290,6 @@ test('one in-bound task rejects only after real context framing exceeds the prov
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await exact(page.locator('.topbar [role="status"]'), 'disconnected');
     await expect(page.locator('.command,.run,.session-list li')).toHaveCount(0);
-    await exact(outcome, '');
     await exact(page.locator('.transcript'), '');
     expect(await page.evaluate(canaries => {
       const nodes = Array.from(document.querySelectorAll('input,textarea,select'));
@@ -247,8 +306,13 @@ test('one in-bound task rejects only after real context framing exceeds the prov
     const line = /task-input-framing\.spec\.mjs:(\d+):/.exec(cause?.stack ?? '')?.[1] ?? 'none';
     failure = new Error(`Task framing failed: ${stage}; kind=${kind} line=${line}; reply=${JSON.stringify(reply)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}`);
   } finally {
-    try { await context?.close(); cleanup.browser = context !== undefined; }
-    catch { failure ??= new Error('Task framing browser cleanup failed'); }
+    try {
+      await context?.close(); cleanup.browser = context !== undefined;
+      if (cleanup.browser) {
+        if (previousNoCopyPrompt === undefined) delete process.env.PLAYWRIGHT_NO_COPY_PROMPT;
+        else process.env.PLAYWRIGHT_NO_COPY_PROMPT = previousNoCopyPrompt;
+      }
+    } catch { failure ??= new Error('Task framing browser cleanup failed'); }
     try { await fixture?.stop(); cleanup.fixture = fixture !== undefined; }
     catch { failure ??= new Error('Task framing fixture cleanup failed'); }
   }

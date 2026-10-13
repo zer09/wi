@@ -793,7 +793,11 @@ fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> AppendRunRecord {
         sequence,
         event_id: uuid::Uuid::new_v4().to_string(),
         run_id: run.as_str().into(),
-        turn_id: if started { None } else { Some("turn".into()) },
+        turn_id: if started {
+            None
+        } else {
+            Some("00000000-0000-4000-8000-000000000002".into())
+        },
         session_id: if started {
             None
         } else {
@@ -802,7 +806,7 @@ fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> AppendRunRecord {
         request_id: if started || matches!(event, RunEvent::TurnStarted { .. }) {
             None
         } else {
-            Some("request".into())
+            Some("00000000-0000-4000-8000-000000000001".into())
         },
         event,
     })
@@ -835,7 +839,7 @@ async fn p1a17_process_lazy_interruption_retains_partial_text_tool_and_receipt()
         sequence: 1,
         event_id: "provider-event".into(),
         session_id: "provider-session".into(),
-        request_id: Some("request".into()),
+        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         provider: "offline".into(),
         provider_sequence: None,
         event: crate::ProviderEvent::OutputItemUpdated {
@@ -873,7 +877,7 @@ async fn p1a17_process_lazy_interruption_retains_partial_text_tool_and_receipt()
                     },
                 ),
                 AppendRunRecord::ToolResult {
-                    request_id: Some("request".into()),
+                    request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                     call_id: "call".into(),
                     output: "result-canary\n雪\0".into(),
                     is_error: false,

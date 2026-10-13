@@ -387,7 +387,7 @@ impl SessionControl for ReplayControl {
     async fn generate(&self, input: Vec<InputItem>) -> crate::Result<RequestReceipt> {
         assert_eq!(self.observed.installed.lock().unwrap().len(), 1);
         let number = self.observed.records.inputs.lock().unwrap().len() + 1;
-        let request_id = format!("{}-q{number}", self.binding.run_id);
+        let request_id = format!("{}-{number:012x}", &self.binding.run_id.as_str()[..23]);
         if number == 1 {
             let run = self
                 .binding

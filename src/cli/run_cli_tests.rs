@@ -15,6 +15,8 @@ use std::{
 };
 use wi::*;
 
+const LOCAL_SESSION: &str = "cccccccc-cccc-1ccc-8ccc-cccccccccccc";
+
 #[derive(Default)]
 struct Records {
     opens: AtomicUsize,
@@ -41,7 +43,7 @@ impl SessionControl for Control {
         self.records.generates.fetch_add(1, Ordering::SeqCst);
         self.records.entered.notify_one();
         Ok(RequestReceipt {
-            request_id: "q".into(),
+            request_id: "00000000-0000-4000-8000-000000000001".into(),
         })
     }
     fn close(&self) {
@@ -82,11 +84,11 @@ impl Provider for Fake {
             if wait { pending::<()>().await; }
             for (i, event) in events.into_iter().enumerate() {
                 records.provider_events.fetch_add(1, Ordering::SeqCst);
-                yield EventEnvelope { schema_version: 1, sequence: i as u64 + 1, event_id: format!("e{i}"), session_id: "s".into(), request_id: Some("q".into()), provider: PROVIDER_ID.into(), provider_sequence: None, event };
+                yield EventEnvelope { schema_version: 1, sequence: i as u64 + 1, event_id: format!("{LOCAL_SESSION}:{}", i + 1), session_id: LOCAL_SESSION.into(), request_id: Some("00000000-0000-4000-8000-000000000001".into()), provider: PROVIDER_ID.into(), provider_sequence: None, event };
             }
         });
         Ok(ProviderSession {
-            id: "s".into(),
+            id: LOCAL_SESSION.into(),
             control: Arc::new(Control {
                 records: self.records.clone(),
             }),

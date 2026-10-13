@@ -143,7 +143,7 @@ impl SessionControl for Control {
         );
         self.sender.send(turn).unwrap();
         Ok(RequestReceipt {
-            request_id: format!("request-{turn}"),
+            request_id: format!("00000000-0000-4000-8000-{turn:012x}"),
         })
     }
     fn close(&self) {
@@ -199,7 +199,7 @@ impl Provider for OfflineProvider {
             events: Box::pin(async_stream::stream! {
                 assert_eq!(receiver.recv().await, Some(1));
                 for (sequence, delta, label) in [(1, "Adding ", "partial_1_ack"), (2, "17 and 25.", "partial_2_ack")] {
-                    let event = script.event(sequence, "request-1", ProviderEvent::OutputItemUpdated {
+                    let event = script.event(sequence, "00000000-0000-4000-8000-000000000001", ProviderEvent::OutputItemUpdated {
                         response_id: "response-1".into(), item_id: "partial-message".into(),
                         output_index: 0, content_index: Some(0), summary_index: None,
                         kind: DeltaKind::Text, delta: delta.into(),
@@ -212,12 +212,12 @@ impl Provider for OfflineProvider {
                 script.partial.reached.notify_one();
                 script.partial.release.notified().await;
                 let start = Instant::now();
-                yield script.event(3, "request-1", ProviderEvent::ResponseFinished { response: response(true) });
+                yield script.event(3, "00000000-0000-4000-8000-000000000001", ProviderEvent::ResponseFinished { response: response(true) });
                 assert_eq!(receiver.recv().await, Some(2));
                 // A terminal yield resumes only after tools and the next request, not just its commit.
                 // This includes the independent reads at the pre-admission generate barrier.
                 script.sample("tool_cycle_to_continuation", start);
-                yield script.event(4, "request-2", ProviderEvent::ResponseFinished { response: response(false) });
+                yield script.event(4, "00000000-0000-4000-8000-000000000002", ProviderEvent::ResponseFinished { response: response(false) });
             }),
         })
     }
@@ -457,7 +457,10 @@ pub async fn record_trace(f: &Fixture) -> ExampleResult<Saved> {
     assert_eq!(tool.run_id(), &f.run);
     assert_eq!(tool.call_id(), CALL);
     assert_eq!(tool.tool_name(), "add_numbers");
-    assert_eq!(tool.request_id(), Some("request-1"));
+    assert_eq!(
+        tool.request_id(),
+        Some("00000000-0000-4000-8000-000000000001")
+    );
     assert_eq!(tool.started_sequence(), 8);
     assert_eq!(tool.result_sequence(), Some(9));
     assert_eq!(tool.finished_sequence(), Some(10));
@@ -465,7 +468,7 @@ pub async fn record_trace(f: &Fixture) -> ExampleResult<Saved> {
     assert_eq!(tool.output().unwrap().as_bytes(), OUTPUT.as_bytes());
     assert!(
         matches!(continuation.records()[8].payload(), StoredEventPayload::ToolResultRecorded(result)
-        if result.request_id() == Some("request-1") && result.call_id() == CALL && !result.is_error() && result.output().as_bytes() == OUTPUT.as_bytes())
+        if result.request_id() == Some("00000000-0000-4000-8000-000000000001") && result.call_id() == CALL && !result.is_error() && result.output().as_bytes() == OUTPUT.as_bytes())
     );
     assert!(!task.is_finished());
     assert_eq!(f.script.counts.snapshot(), [1, 1, 1, 1, 0]);

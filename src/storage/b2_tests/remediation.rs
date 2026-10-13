@@ -47,7 +47,7 @@ fn activity(run: &RunId) -> Vec<AppendRunRecord> {
                 sequence: 1,
                 event_id: "provider-event".into(),
                 session_id: "session".into(),
-                request_id: Some("request".into()),
+                request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                 provider: "synthetic".into(),
                 provider_sequence: None,
                 event: ProviderEvent::ProviderExtension {
@@ -69,7 +69,7 @@ fn activity(run: &RunId) -> Vec<AppendRunRecord> {
     );
     for record in [&mut provider, &mut tool] {
         if let AppendRunRecord::Runtime(event) = record {
-            event.request_id = Some("request".into());
+            event.request_id = Some("00000000-0000-4000-8000-000000000001".into());
         }
     }
     vec![
@@ -78,7 +78,7 @@ fn activity(run: &RunId) -> Vec<AppendRunRecord> {
         provider,
         tool,
         AppendRunRecord::ToolResult {
-            request_id: Some("request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             call_id: "call".into(),
             output: "actual output".into(),
             is_error: true,
@@ -115,7 +115,7 @@ fn submitted_results(run: &RunId) -> Vec<(&'static str, RunResult)> {
     ] {
         let mut value = json!(result(run));
         value["summary"][field] = match field {
-            "last_request_id" => json!("request"),
+            "last_request_id" => json!("00000000-0000-4000-8000-000000000001"),
             "last_upstream_outcome" => json!("terminal_received"),
             _ => json!(1),
         };
@@ -368,9 +368,15 @@ async fn inject_unbound(sql: &mut SqliteConnection, run: &RunId, record: &Append
         _ => unreachable!(),
     }
     sqlx::query("UPDATE manifest SET head_sequence=5")
-        .execute(sql)
+        .execute(&mut *sql)
         .await
         .unwrap();
+    conversation::projector::apply(
+        sql,
+        conversation::projector::Event::record(5, run, record).unwrap(),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

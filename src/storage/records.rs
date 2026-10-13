@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     InputItem, ToolDefinition,
     context::{PreparedRun, SkillId},
+    identifiers::is_canonical_uuid,
     run::{RunEvent, RunEventEnvelope, RunRequest, RunResult},
-    tools::ToolRegistry,
+    tools::{ToolExecutionEvent, ToolRegistry},
     validate_input,
 };
 
@@ -208,6 +209,82 @@ impl TryFrom<AppendFields> for AppendRunRecord {
 }
 
 impl AppendRunRecord {
+    // Receipt lookup and historical decoding use the old structural rules. Only
+    // a novel append applies these stricter Wi identity and execution bounds.
+    pub(super) fn validate_admission(&self) -> Result<()> {
+        self.validate()?;
+        let optional_uuid = |value: &Option<String>| value.as_deref().is_none_or(is_canonical_uuid);
+        let call_valid = |value: &str| !value.is_empty() && value.len() <= 512;
+        let valid = match self {
+            Self::Runtime(event) => {
+                let nested_valid = match &event.event {
+                    RunEvent::ProviderEvent { event } => optional_uuid(&event.request_id),
+                    RunEvent::RunFinished { summary, .. } => {
+                        optional_uuid(&summary.last_request_id)
+                    }
+                    RunEvent::ToolEvent { event } => {
+                        let (ToolExecutionEvent::ToolExecutionStarted { call_id, .. }
+                        | ToolExecutionEvent::ToolExecutionFinished { call_id, .. }
+                        | ToolExecutionEvent::ToolResultReused { call_id, .. }) = event;
+                        call_valid(call_id)
+                    }
+                    _ => true,
+                };
+                is_canonical_uuid(&event.run_id)
+                    && is_canonical_uuid(&event.event_id)
+                    && optional_uuid(&event.turn_id)
+                    && optional_uuid(&event.request_id)
+                    && nested_valid
+            }
+            Self::ToolResult {
+                request_id,
+                call_id,
+                ..
+            } => optional_uuid(request_id) && call_valid(call_id),
+            Self::Result(result) => {
+                is_canonical_uuid(&result.run_id) && optional_uuid(&result.summary.last_request_id)
+            }
+            Self::ProviderBinding(_) => true,
+        };
+        if !valid {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    // Use the accepted run, not an untrusted nested provider label. Historical
+    // decoding and binding reads deliberately do not call this admission check.
+    pub(super) fn validate_provider_admission(&self, provider: &str) -> Result<()> {
+        if provider != crate::providers::openai_codex::PROVIDER_ID {
+            return Ok(());
+        }
+        let optional_uuid = |value: &Option<String>| value.as_deref().is_none_or(is_canonical_uuid);
+        let valid = match self {
+            Self::Runtime(event) => {
+                if let RunEvent::ProviderEvent { event: nested } = &event.event {
+                    if nested.provider != provider {
+                        return Err(StorageError::new(StorageErrorKind::InvalidTransition));
+                    }
+                    if !crate::identifiers::is_local_event_id(
+                        &nested.event_id,
+                        &nested.session_id,
+                        nested.sequence,
+                    ) {
+                        return Err(invalid());
+                    }
+                }
+                optional_uuid(&event.session_id)
+            }
+            Self::Result(result) => optional_uuid(&result.session_id),
+            Self::ProviderBinding(binding) => is_canonical_uuid(binding.provider_session_id()),
+            Self::ToolResult { .. } => true,
+        };
+        if !valid {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
     pub(super) fn validate(&self) -> Result<()> {
         match self {
             Self::Runtime(event) => validate_runtime(event),

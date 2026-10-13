@@ -7,6 +7,22 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
+**Local G1.1: implemented source, uncommitted and not accepted.** Accepted master
+remains `76bb32f`; historical unaccepted checkpoint `8f45dda` is separate from the
+current schema3/display/browser work on PR #10. All 40 G11 rows remain PARTIAL,
+accepted=false. [Human evidence](docs/slices/g1/VERIFICATION_G1_1.md) and
+[JSON](docs/slices/g1/verification-g1.1.json) retain scoped local checks and failed roles.
+Latest scoped completion: [C50 same-H interrupted parity](docs/slices/g1/C3B_INTERRUPTED_DISPLAY_PARITY.md)
+passed once in15.9s with both scoped reviews PASS. Two independent fresh browsers
+match exact interrupted H24 DTO/DOM after owned producer death, with zero observer POSTs/work.
+C44-C49 retain partial parity, handoff, restart, S2 and completed saved-skill proof.
+See the [current continuation handoff](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md).
+C15 and active-conflict remain owner-deferred; the application reader is unchanged.
+Upgrade/reopen, expanded barriers, qualified browser/server measurements,
+final required gates, exact-head CI and three complete-diff reviews remain open.
+The bounded C50 task is complete; no next increment is authorized.
+No final acceptance, hosted CI or new live-provider result is claimed.
+
 **Native platform policy, September 20, 2026: Linux and macOS.** Native Windows
 support and its CI job have been withdrawn by the owner. Windows-only first-party
 filesystem, signal and test branches are removed; this does not prohibit a Windows
@@ -123,7 +139,8 @@ CLI / library caller / authenticated HTTP service
 
 The deterministic `add_numbers` executor is a separate module. The provider
 never executes files, commands, model-generated JavaScript, or unknown tools.
-V1-B adds a headless HTTP service, not a GUI, sandbox or deployment manager.
+V1-B added the headless HTTP service. Local G1.1 adds browser display over that
+service, not a sandbox or deployment manager.
 The in-process `wi::service::RunHost` owns explicitly submitted work independently of
 HTTP observers, clients and ticket lifetimes. The storage library still does not
 persist ordinary `wi run` invocations.
@@ -151,10 +168,12 @@ The cancellation-aware `wi::run::run` controller supports ordinary tool/result c
   with committed incremental observations and exact serialized tool results.
 - B2 explicit stored-conversation submissions over that shared controller, with
   fixed-head replay preparation, provider/account binding and native WS/SSE history.
-- Session schema 2 with lazy schema-1 migration; catalog schema 1 and unchanged
-  runtime/provider envelope schemas 2/1.
-- Authenticated HTTP session/task commands, closed browser DTOs, fixed-head history
-  pages and reconnectable committed-history SSE through `wi::http_api`.
+- Session schema 3 with explicit-open 1->2 then additive 2->3/backfill; catalog
+  schema 1, stored envelope 1 and runtime/provider envelope schemas 2/1 remain.
+- Ordered display blocks/entries/fields/chunks maintained with canonical writes,
+  typed indexed display reads and a browser identity/revision/range store.
+- Authenticated HTTP session/task commands, closed browser DTOs, fixed-head raw
+  history/SSE, human-block display HTTP/SSE and read-only task reconciliation.
 - No automatic provider retry, provider reconnect, transport fallback, or API-key billing fallback.
 
 **Native steering, async tool calling, programmatic tool execution, and tool search
@@ -441,10 +460,15 @@ open per operation and close before operation ownership ends; idle handles retai
 no SQLite worker. Unix files/directories remain private. Native Windows is unsupported;
 hosted platform results and local Linux observations are separate evidence.
 
-New sessions use database schema 2. Explicit `open_session()` lazily migrates valid
-schema-1 files transactionally, preserving original history bytes, identities and
-receipts. Catalog-only listing and repair do not migrate every session. Catalog schema
-stays 1; stored envelopes stay 1 and runtime/provider envelopes stay 2/1.
+New sessions use database schema 3. Explicit `open_session()` retains the existing
+1->2 migration, then adds 2->3 display tables and one-time backfill in 256-record
+batches. Canonical event/receipt bytes, identities and sequences remain unchanged.
+Declared schema3 projection faults fail safely, not through silent rebuild. Warm
+schema3 reads use indexed display rows, not raw-history replay. Catalog-only listing
+and repair do not migrate every session. Catalog schema stays 1; stored envelopes
+stay 1 and runtime/provider envelopes stay 2/1. Source:
+`src/storage/session_schema.rs:43-77`, `src/storage/session.rs:512-542` and
+`src/storage/migration.rs:59-154`.
 `run.history.selected` records a fixed prefix and digest; `run.provider.bound` records
 the actual opened provider identity. Migration adds neither fact to legacy runs.
 Legacy schema-1 history stays readable after migration but is not natively replayable
@@ -464,10 +488,45 @@ normal use until explicit `repair_catalog()`; corrupt/future files are preserved
 without resubmission or tool replay. Dropped waiters do not cancel admitted database
 transactions; `close()` rejects new work and drains admitted operations.
 
-`cargo run --example storage_offline` demonstrates these APIs with synthetic context,
+Display blocks, ordered entries, fields and UTF-8 chunks live beside canonical events
+in the same SQLite database/transaction. Final output replaces the same assistant
+entry; actual tool output/is_error, result recording and finish recording remain
+separate facts. Display state is not B2 provider context. Public typed reads are:
+
+- `SessionHandle::conversation_page(ConversationQuery::{Latest, Before, Within})`
+- `SessionHandle::conversation_changes(LiveCursor)`
+- `SessionHandle::conversation_entry(RunId, EntryId)`
+- `SessionHandle::conversation_content(ContentCursor)`
+
+See `src/storage/session.rs:94-175` and the [display protocol](docs/slices/g1/CLIENT_PROTOCOL.md).
+Each read captures its own head and retires SQL/locks before return. Backscroll/content
+cursors are distinct from live observation; stable older membership is not cross-page
+time travel. These APIs neither resume old work nor retry model/tool execution.
+
+`cargo run --example storage_offline` demonstrates canonical storage APIs with synthetic context,
 supplied DTO traces and real local registry results. It makes no provider requests.
 The [verification report](docs/slices/p1a/VERIFICATION.md) distinguishes process/fault
 simulation from physical power-loss guarantees and records filesystem trust limits.
+
+### Storage-only conversation display example (G1.1)
+
+The [conversation_view_offline example](examples/conversation_view_offline.rs) uses
+public storage/projector APIs with supplied synthetic records and no provider calls,
+credentials, skills or network. It asserts and prints Latest B before explicitly
+requesting older A. Reopen records interruption once and preserves partial UTF-8,
+IDs/order and text without inventing a terminal result. Another fresh reopen compares
+the complete representation at the same H; repeated warm Latest/Before/entry reads
+also preserve that H. Source: `examples/conversation_view_offline.rs:192-496`.
+
+```bash
+cargo run --locked --offline --example conversation_view_offline
+```
+
+[Prior local evidence](docs/slices/g1/C3B_OFFLINE_DISPLAY.md) records the main/regression
+and a separate native Before regression with no-replay counters
+(`src/storage/conversation/reads/pages/tests/scale.rs:319-357`). Equality or timing
+alone is not counter proof; this specific prior Before pass is not a universal
+Latest/content/stream cost claim, browser proof or process-kill acceptance.
 
 ## Incremental supplied-input capture (P1-B1)
 
@@ -569,7 +628,8 @@ application session and run, and orderly shutdown cancels and drains tracked job
 closing storage. Reopening creates an empty host and never resumes old work automatically.
 
 V1-B layers authenticated network commands and committed-history observations over
-this host. GUI and ordinary `wi run` persistence remain unimplemented.
+this host. Local G1.1 adds the browser display described below; ordinary `wi run`
+persistence remains unimplemented.
 `ProviderSession` is an in-memory provider transport handle, not the persistent
 application session. See [V1-A verification](docs/slices/v1a/VERIFICATION.md),
 [`host_offline`](examples/host_offline.rs), and
@@ -588,10 +648,11 @@ not permission to make a live request.
 - One shared owner bearer token authorizes all service sessions. It is separate
   from provider OAuth. Rotation requires changing the token file and restarting;
   no per-device revocation, cookie login or token persistence is supplied.
-- Bind only literal loopback. Remote access requires a trusted same-host HTTPS
-  proxy with valid TLS, preserved Authorization/Origin, an allowed Host, and SSE
+- Bind only literal loopback. Normal literal-loopback HTTP needs no HTTPS or proxy.
+  Separately chosen remote access still requires a trusted same-host HTTPS proxy
+  with valid TLS, preserved Authorization/Origin, an allowed Host, and SSE
   buffering/caching disabled. Configured HTTPS origin alone does not prove TLS.
-  Browser clients need authenticated fetch plus an SSE parser, not token URLs.
+  Browser clients use authenticated fetch plus an SSE parser, not token URLs.
 - HTTP 202 for a task contains the actual durable acceptance receipt, not a task
   success result. Matching raw-command retries return that receipt before new
   context work. Client/SSE loss does not cancel host-owned execution.
@@ -607,8 +668,9 @@ not permission to make a live request.
   shutdown exits 1. Help exits 0; malformed `serve` arguments exit 2 with static
   diagnostics. No browser launches. Restart/reconnect never resumes an old task.
 
-No GUI, native TLS, device auth, deployment, new agent loop, task queue, automatic
-retry/failover or lifetime history cap is included. The [API](docs/slices/v1b/API.md)
+V1-B's original scope did not include a GUI; the current local G1.1 browser is
+separate unaccepted work. No native TLS, device auth, deployment, new agent loop,
+task queue, automatic retry/failover or lifetime history cap is included. The [API](docs/slices/v1b/API.md)
 and [security boundary](docs/slices/v1b/SECURITY.md) define the wire and operator limits.
 Local Linux observations do not establish macOS live-provider behavior or security certification;
 retained-platform hosted checks and the native Windows withdrawal are recorded separately.
@@ -629,6 +691,56 @@ four readers and 64 rejects/polls, not a runtime quota. See
 [original V1-B evidence](docs/slices/v1b/VERIFICATION.md), its
 [machine report](docs/slices/v1b/verification.json), and the separate
 [platform/merge follow-up](docs/slices/v1b/PLATFORM_FOLLOWUP.md).
+
+### Local conversation display (G1.1)
+
+Open the configured literal-loopback origin after starting the service. The root
+page and exact static assets are public after Host/Origin checks; API reads, commands
+and streams retain the existing bearer check. The page uses memory-only Connect:
+the input clears after reading, the token stays in page memory and a full refresh
+requires Connect again. No token URL, cookie/device login or browser token-storage
+mode is added. This service access is separate from unchanged provider OAuth.
+
+The root serves seven active JavaScript modules: api, app, display-api, display-client,
+display-store, display-view and sse. Legacy client/state/view asset paths are no longer
+served; the empty compiler client.js type artifact is not active runtime or served.
+See `src/http_api/assets.rs:12-54` and [retirement evidence](docs/slices/g1/C3B_RAW_RUNTIME_RETIREMENT.md).
+
+Display responses use API1 and conversation_version:1. Routes are:
+
+| Read | Method/path |
+|---|---|
+| Latest human block | `GET /v1/sessions/{sid}/conversation` |
+| Previous block | `GET /v1/sessions/{sid}/conversation?before={cursor}` |
+| Earlier activity in the same block | `GET /v1/sessions/{sid}/conversation?within={cursor}` |
+| Current entry | `GET /v1/sessions/{sid}/conversation/entries/{run_id}/{entry_id}` |
+| Earlier entry content/fields | `GET /v1/sessions/{sid}/conversation/content?cursor={cursor}` |
+| Changed display state | `GET /v1/sessions/{sid}/conversation/events?after={live_cursor}` |
+
+Treat returned cursors as distinct opaque tokens; URL-encode path/query components.
+Latest returns only newest human block B, not a giant unbounded interaction row.
+Activity/content are bounded with separate within-block, content and previous-block
+continuations. B renders before A; initial viewport filling requests one earlier unit
+at a time until filled/end. Later reads require upward intent or Load older.
+The browser uses server display decisions and chronological order, not raw event
+reconstruction or category regrouping. User/model/tool strings render as inert text;
+private config, prepared instructions, native objects and credentials are not DTOs.
+
+Matching snapshot H installs before live observation after H. Display SSE supplies
+self-contained upserts, not every raw delta. Reconnect latest explicitly obtains a
+fresh snapshot; failure retains stale content. No raw zero-prefix replay, work
+resubmission or automatic retry occurs. Old mutation/raw /history-/events/B2 semantics
+remain unchanged. See [protocol](docs/slices/g1/CLIENT_PROTOCOL.md) and
+`src/http_api/router.rs:136-203`, `web/src/display-client.ts:255-335`.
+
+Reconcile receipt uses read-only `POST /v1/sessions/{sid}/runs/reconcile` with the
+captured exact original operation_id, run_id and text. Server raw_receipt proof
+returns acceptance/run state or point-in-time not_found, not proof of rollback.
+This is neither another Task submission nor Read run-status, which uses the separate
+GET /v1/sessions/{sid}/runs/{rid}. Reconciliation never dispatches work; explicit
+session open can still migrate/record interruption. Source: `src/http_api/router/runs.rs:29-128`.
+An unrepresentable legacy mandatory header returns api.conversation_display_unavailable/422,
+not corruption, quota or task rejection; canonical/raw history stays unchanged.
 
 ## Experimental Wi browser login
 

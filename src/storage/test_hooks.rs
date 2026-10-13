@@ -12,6 +12,8 @@ use std::{
 };
 use tokio::sync::Notify;
 
+pub(crate) mod latency;
+
 tokio::task_local! {
     static ACTIVE: Arc<Hooks>;
     static RECORD: RefCell<Option<(Record, OperationId)>>;
@@ -34,6 +36,14 @@ pub(crate) enum Record {
 
 pub(super) fn select_record(operation: &OperationId, mutation: &Mutation) {
     RECORDING.with(|recording| recording.set(true));
+    // Match only B's final-answer text, not rich fields or A's deltas.
+    if matches!(mutation, Mutation::Append { records } if matches!(records.as_slice(),
+        [AppendRunRecord::Runtime(event)] if matches!(&event.event, RunEvent::ProviderEvent { event }
+            if matches!(&event.event, ProviderEvent::OutputItemUpdated { response_id, kind: crate::DeltaKind::Text, .. }
+                if response_id == "task-1-final"))))
+    {
+        latency::final_delta();
+    }
     FINAL_ATTEMPT.with(|attempt| {
         *attempt.borrow_mut() = match mutation {
             Mutation::Append { records } => match records.as_slice() {
@@ -89,6 +99,12 @@ pub(crate) enum Point {
     MigrationRebuilt,
     MigrationPrecommit,
     MigrationCommitted,
+    ProjectionCreated,
+    ProjectionCopied,
+    ProjectionPrecommit,
+    ProjectionCommitted,
+    CanonicalInserted,
+    DisplayApplied,
     Materialized,
     CatalogAccepted,
     BeforeCommit,
@@ -102,6 +118,7 @@ pub(crate) enum Point {
     FinalResultCleanup,
     HistorySelection,
     ReplayHeadCaptured,
+    ConversationHeadCaptured,
 }
 
 pub(crate) enum Action {
@@ -127,15 +144,30 @@ pub(crate) struct Measurements {
     pub recording_commits: usize,
     pub other_commits: usize,
     pub read_transactions: usize,
+    pub projection_pages: usize,
+    pub projection_max_page: usize,
+    pub validation_payload_bytes: usize,
+    pub conversation_descriptors: usize,
+    pub conversation_chunks: usize,
+    pub conversation_bytes: usize,
 }
 
 #[derive(Default)]
 pub(crate) struct Hooks(
     Mutex<Option<(Option<Record>, Point, Action)>>,
     Mutex<Measurements>,
+    std::sync::OnceLock<Arc<latency::Collector>>,
 );
 
 impl Hooks {
+    pub(crate) fn enable_latency(&self) -> Arc<latency::Collector> {
+        self.2.get_or_init(latency::Collector::new).clone()
+    }
+
+    pub(crate) fn latency(&self) -> Option<&Arc<latency::Collector>> {
+        self.2.get()
+    }
+
     pub fn measurements(&self) -> Measurements {
         *self.1.lock().unwrap()
     }
@@ -183,6 +215,27 @@ impl Hooks {
             )
             .await
     }
+}
+
+pub(super) fn projection_page(rows: usize) {
+    let _ = ACTIVE.try_with(|hooks| {
+        let mut measurements = hooks.1.lock().unwrap();
+        measurements.projection_pages += 1;
+        measurements.projection_max_page = measurements.projection_max_page.max(rows);
+    });
+}
+
+pub(super) fn conversation_read(descriptors: usize, chunks: usize, bytes: usize) {
+    let _ = ACTIVE.try_with(|hooks| {
+        let mut measurements = hooks.1.lock().unwrap();
+        measurements.conversation_descriptors += descriptors;
+        measurements.conversation_chunks += chunks;
+        measurements.conversation_bytes += bytes;
+    });
+}
+
+pub(super) fn validation_payload(bytes: usize) {
+    let _ = ACTIVE.try_with(|hooks| hooks.1.lock().unwrap().validation_payload_bytes += bytes);
 }
 
 // Count explicit read snapshots, not SQLite's implicit per-statement transactions.

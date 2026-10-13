@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { discoverFixture, startFixture } from '../test-support/fixture.mjs';
 import { exact } from '../test-support/joined.mjs';
 import { checkEmbeddedAssets } from '../test-support/stale-history.mjs';
-import { installIncompleteHistoryObserver } from '../test-support/incomplete-history.mjs';
+import { decodeJson, validateCreateView, validateErrorView } from '../dist/api.js';
+import { validateConversationPage, validateDisplayTaskAccepted } from '../dist/display-api.js';
 
 const { titles } = JSON.parse(await readFile(new URL('../test-support/mutations.json', import.meta.url), 'utf8'));
 // Exact fixture TASKS keep the independent closed SQLite audit and provider canary unchanged.
@@ -26,8 +27,15 @@ test('a second Send rejects incomplete stored history without changing the accep
   let taskPath;
   let durable;
   let stableProof;
-  let observed = null;
-  let memory = null;
+  const replyFacts = () => ({ acquired: false, status: null, body_attempted: false, body_returned: false,
+    body_bounded: false, decoded: false, validated: false, exact: false });
+  const observed = { create: replyFacts(), latest: replyFacts(), tasks: [replyFacts(), replyFacts()] };
+  const replies = [];
+  const displayReads = [];
+  let creationArticle;
+  let acceptedArticle;
+  let humanArticle;
+  let rejectedArticle;
   let assetEvidence = null;
   let stage = 'startup';
   let resourceErrors = 0;
@@ -42,7 +50,31 @@ test('a second Send rejects incomplete stored history without changing the accep
       'private-operator-instructions', 'private-project-browser', 'private-skill-browser', 'private-support-',
       'private-native', 'private-skills', 'private-data', 'private-config-canary',
       'principal_digest', 'encrypted_content', 'opaque_response', 'provider_session_id', 'prepared_request'];
-    const leaked = text => secrets.some(secret => text.includes(secret));
+    const leaked = text => /[0-9a-f]{64}/i.test(text) || secrets.some(secret => text.includes(secret));
+    async function readReply(promise, facts, validator, check) {
+      const response = await promise;
+      facts.acquired = true;
+      const status = response.status();
+      facts.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+      facts.body_attempted = true;
+      const bytes = await response.body();
+      facts.body_returned = true;
+      expect(bytes.byteLength <= 4096).toBe(true);
+      facts.body_bounded = true;
+      const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      if (leaked(raw)) faults.secret++;
+      const value = decodeJson(raw, response.headers()['content-type'], parsed => {
+        // Parsing succeeded here; the closed decoder can still reject the DTO.
+        facts.decoded = true;
+        return validator(parsed);
+      });
+      facts.validated = true;
+      // Count separators outside strings so duplicate keys cannot hide in JSON.parse.
+      const fields = raw.replace(/"(?:\\.|[^"\\])*"/g, '""').split(':').length - 1;
+      expect(check(value, status, fields)).toBe(true);
+      facts.exact = true;
+      return value;
+    }
     // The installed recorder can capture DOM on failures even with trace/screenshot/video off.
     process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
     context = await browser.newContext({ serviceWorkers: 'block' });
@@ -54,12 +86,22 @@ test('a second Send rejects incomplete stored history without changing the accep
       const url = new URL(request.url());
       if (url.origin !== fixture.origin) faults.external++;
       if (leaked(request.url())) faults.secret++;
-      if (url.pathname.startsWith('/v1/') && request.headers().authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      const headers = request.headers();
+      if (headers.cookie !== undefined || (headers.origin !== undefined && headers.origin !== fixture.origin)) faults.request++;
+      if (url.pathname.startsWith('/v1/') && headers.authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      if (/\/(history|events|operations)(\/|$)/.test(url.pathname) && !url.pathname.endsWith('/conversation/events')) faults.request++;
+      if (['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(url.pathname)) faults.request++;
       if (request.method() !== 'POST') {
         if (request.method() !== 'GET') faults.request++;
         if (/\/(operations|runs)\//.test(url.pathname)) faults.reconcile++;
+        if (url.pathname.endsWith('/conversation/events')) {
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          displayReads.push({ kind: 'events', matching_head: observed.latest.acquired && url.pathname === `/v1/sessions/${sid}/conversation/events`
+            && url.searchParams.size === 1 && url.searchParams.get('after') === after });
+        }
         return;
       }
+      if (headers.origin !== fixture.origin || url.search !== '') faults.request++;
       let kind;
       if (url.pathname === '/v1/sessions') kind = 'create';
       else if (url.pathname === taskPath) kind = 'task';
@@ -68,7 +110,7 @@ test('a second Send rejects incomplete stored history without changing the accep
       try {
         const bytes = request.postDataBuffer();
         if (bytes === null || bytes.byteLength > 4096) { faults.request++; return; }
-        const raw = bytes.toString('utf8');
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         const body = JSON.parse(raw);
         const fields = kind === 'task' ? 'operation_id,run_id,text' : 'operation_id,title,workspace';
         if (Object.keys(body).sort().join(',') !== fields || !uuid(body.operation_id)
@@ -82,15 +124,15 @@ test('a second Send rejects incomplete stored history without changing the accep
       } catch { faults.request++; }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     context.on('response', response => {
       const path = new URL(response.url()).pathname;
       if (response.status() >= 300 && !(path === taskPath && response.request().method() === 'POST' && response.status() === 422)) faults.response++;
       if (files.has(path)) assets.add(path);
+      if (path.endsWith('/conversation')) displayReads.push({ kind: 'latest', status: response.status(),
+        exact: path === `/v1/sessions/${sid}/conversation` && new URL(response.url()).search === '' });
     });
-    // One in-page observer validates bounded clones. DevTools bodies are not an authority.
-    await context.addInitScript(installIncompleteHistoryObserver, { secrets });
     page = await context.newPage();
     page.on('console', message => {
       const text = message.text();
@@ -103,14 +145,21 @@ test('a second Send rejects incomplete stored history without changing the accep
     });
     page.on('pageerror', () => { faults.page++; });
     async function privateBoundary() {
-      expect(await page.evaluate(async secrets => {
-        const values = [document.documentElement.outerHTML, location.href, JSON.stringify(history.state),
-          ...Array.from(document.querySelectorAll('input,textarea,select'), node => node.value)];
-        return !secrets.some(secret => values.some(value => value?.includes(secret)))
-          && localStorage.length === 0 && sessionStorage.length === 0 && document.cookie === ''
+      const evidence = await page.evaluate(async owner => {
+        const dom = document.documentElement.cloneNode(true);
+        // Only validated public field attributes leave this detached privacy clone.
+        for (const field of dom.querySelectorAll('[data-field]')) {
+          const id = field.getAttribute('data-field');
+          if (!/^(text|[0-9a-f]{64})$/.test(id) || id === owner) return { values: [owner], empty: false };
+          field.removeAttribute('data-field');
+        }
+        return { values: [dom.outerHTML, location.href, JSON.stringify(history.state),
+          ...Array.from(document.querySelectorAll('input,textarea,select'), node => node.value)],
+        empty: localStorage.length === 0 && sessionStorage.length === 0 && document.cookie === ''
           && (await indexedDB.databases()).length === 0 && (await caches.keys()).length === 0
-          && (await navigator.serviceWorker.getRegistrations()).length === 0;
-      }, secrets)).toBe(true);
+          && (await navigator.serviceWorker.getRegistrations()).length === 0 };
+      }, fixture.owner);
+      expect(evidence.empty && !evidence.values.some(value => value && leaked(value))).toBe(true);
       expect((await context.cookies()).length).toBe(0);
       expect(await page.locator('.command em,.command img,.command script,.command a,.run em,.run img,.run script,.run a,.conversation h2 em,img,iframe').count()).toBe(0);
     }
@@ -145,30 +194,46 @@ test('a second Send rejects incomplete stored history without changing the accep
       }
       expect(posts).toEqual({ create: 1, task: tasks, other: 0 });
       expect(faults.reconcile).toBe(0);
+      expect(displayReads).toEqual([{ kind: 'latest', status: 200, exact: true }, { kind: 'events', matching_head: true }]);
     }
     const task = page.getByLabel('Task', { exact: true });
-    const command = page.locator('.command');
-    const outcome = page.locator('.commands > section > pre');
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const commands = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
+    const command = commands.nth(1);
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     const run = page.locator('.run');
     const title = page.getByRole('heading', { name: 'Canonical session title', exact: true });
-    const expectedCommand = index => ({ operation: wire.tasks[index].operation_id, run: wire.tasks[index].run_id, text: TASKS[index] });
     async function acceptedTruth() {
-      await exact(outcome, `task command\n\nAccepted receipt (not completion)\nOperation: ${wire.tasks[0].operation_id}\nSession: ${sid}\nRun: ${wire.tasks[0].run_id}\nSequences: 2 to 3\n\nDuplicate receipt: false\nWarning: storage.connection_cleanup_failed`);
-      await expect(outcome).toBeVisible();
+      const first = commands.nth(0);
+      await exact(first.locator('h3'), 'task: accepted');
+      await exact(first.locator('.metadata'), `Operation: ${wire.tasks[0].operation_id}\nSession: ${sid}`);
+      await exact(first.locator('details pre'), TASKS[0]);
+      await exact(first.locator(':scope > pre'), `Accepted receipt (not completion)\nOperation: ${wire.tasks[0].operation_id}\nSession: ${sid}\nRun: ${wire.tasks[0].run_id}\nSequences: 2 to 3\n\nWarning: storage.connection_cleanup_failed; duplicate: false\n\nAccepted is not completed.`);
+      await expect(first.getByRole('button', { name: 'Retry identical command', exact: true })).toBeHidden();
+      await expect(first.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toBeVisible();
+      expect(await createCommand.evaluate(node => node.outerHTML) === creationArticle).toBe(true);
       await expect(run).toHaveCount(1);
-      await expect(transcript.locator('.user-text')).toHaveCount(1);
-      await exact(run.locator('.user-text'), TASKS[0]);
+      await expect(run).toHaveAttribute('data-run', wire.tasks[0].run_id);
+      await exact(run.locator(':scope > .metadata'), 'Execution: accepted. Final result not recorded.');
+      await expect(run.locator('.entry > h4')).toHaveText(['Human']);
+      const human = run.locator('.entry');
+      await expect(human).toHaveAttribute('data-entry', 'e:2:0');
+      await exact(human.locator('[data-field] pre'), TASKS[0]);
+      await exact(human.locator(':scope > .metadata').first(), 'Recorded state: accepted; Provisional: false');
+      await exact(human.locator('[data-field] > .metadata'), `Recorded bytes: ${Buffer.byteLength(TASKS[0])}; generation: 2`);
+      await exact(run.locator(':scope > details > pre'), `Run: ${wire.tasks[0].run_id}\nAccepted sequence: 2\nOutcome: not recorded\nEvents complete: not recorded\nSink error: none\nSummary not recorded.`);
       expect((await transcript.textContent()).includes(TASKS[1])).toBe(false);
-      await exact(run.locator(':scope > .metadata'), `Run: ${wire.tasks[0].run_id}\nAccepted at sequence: 2`);
-      await exact(run.locator(':scope > p:not(.metadata)'), 'Execution: accepted. Final result not recorded.');
-      await exact(page.locator('p.metadata').filter({ hasText: /^Applied cursor:/ }), `Applied cursor: ${sid}:3\nSnapshot head: 1`);
-      await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming; run: accepted; result not recorded');
-      await expect(page.locator('.run .entry')).toHaveCount(0);
+      await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
+      await exact(page.locator('.conversation > div > .metadata').first(), 'Observation: streaming');
+      // Accepted is not completed; the explicit Cancel control must never be clicked here.
+      await expect(page.getByRole('button', { name: 'Cancel current run', exact: true })).toBeEnabled();
+      if (acceptedArticle !== undefined) expect(await first.evaluate(node => node.outerHTML) === acceptedArticle).toBe(true);
+      if (humanArticle !== undefined) expect(await run.evaluate(node => node.outerHTML) === humanArticle).toBe(true);
     }
     async function rejectedTruth(draft) {
       await acceptedTruth();
-      await expect(command).toHaveCount(1);
+      await expect(page.locator('.command')).toHaveCount(3);
+      await expect(commands).toHaveCount(2);
       await exact(command.locator('h3'), 'task: rejected');
       await exact(command.locator(':scope > pre'), 'HTTP 422\nCode: invalid_request\nStage: history\nCertainty: not_applicable');
       await exact(command.locator('details pre'), TASKS[1]);
@@ -180,9 +245,7 @@ test('a second Send rejects incomplete stored history without changing the accep
         await expect(control).toBeVisible();
         await expect(control).toBeEnabled();
       }
-      memory = await page.evaluate(expected => globalThis.incompleteHistoryCapture.rejected(expected),
-        { first: expectedCommand(0), second: expectedCommand(1), draft });
-      expect(Object.values(memory)).toEqual(Array(11).fill(true));
+      if (rejectedArticle !== undefined) expect(await command.evaluate(node => node.outerHTML) === rejectedArticle).toBe(true);
     }
 
     stage = 'real browser creation and selection';
@@ -192,14 +255,33 @@ test('a second Send rejects incomplete stored history without changing the accep
     await exact(page.locator('.topbar [role="status"]'), 'connected');
     expect(await page.getByLabel('Owner token', { exact: true }).inputValue() === '').toBe(true);
     await page.getByLabel('Title', { exact: true }).fill(titles[0]);
-    await page.getByRole('button', { name: 'Create session', exact: true }).click();
-    await expect.poll(async () => (await outcome.textContent()).includes('Accepted receipt (not completion)')).toBe(true);
+    const [created] = await Promise.all([
+      readReply(page.waitForResponse(response => new URL(response.url()).pathname === '/v1/sessions' && response.request().method() === 'POST'),
+        observed.create, validateCreateView, (value, status, fields) => status === 201 && fields === 10 && uuid(value.session_id)
+          && value.receipt.session_id === value.session_id && value.receipt.operation_id === wire.create.operation_id
+          && value.receipt.run_id === null && value.receipt.first_sequence === '1' && value.receipt.last_sequence === '1'
+          && value.duplicate === false && value.warning_code === null),
+      page.getByRole('button', { name: 'Create session', exact: true }).click(),
+    ]);
+    await exact(createCommand.locator('h3'), 'create: accepted');
     const audit = await fixture.inspectMutations();
     sid = audit.creations[0].receipt.session_id;
+    expect(created.receipt).toEqual(audit.creations[0].receipt);
     taskPath = `/v1/sessions/${sid}/runs`;
-    await page.evaluate(sid => globalThis.incompleteHistoryCapture.select(sid), sid);
+    await createCommand.locator('summary').click();
+    await exact(createCommand.locator('details pre'), titles[0]);
+    await exact(createCommand.locator(':scope > pre'), `Accepted receipt (not completion)\nOperation: ${wire.create.operation_id}\nSession: ${sid}\nRun: none\nSequences: 1 to 1\n\nWarning: none; duplicate: false\n\nAccepted is not completed.`);
+    creationArticle = await createCommand.evaluate(node => node.outerHTML);
     await fixture.request({ command: 'select', session_id: sid });
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    await Promise.all([
+      readReply(page.waitForResponse(response => new URL(response.url()).pathname === `/v1/sessions/${sid}/conversation` && response.request().method() === 'GET'),
+        observed.latest, validateConversationPage, (value, status) => status === 200 && value.session_id === sid
+          && value.session.session_id === sid && value.session.title === titles[0] && value.session.workspace === wire.create.workspace
+          && value.snapshot_head === '1' && value.session.head_sequence === '1' && value.block === null && value.entries.length === 0
+          && value.previous_block === null && value.earlier_activity === null
+          && value.live_after === `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`),
+      createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click(),
+    ]);
     await exact(transcript, 'No messages yet.');
     await exact(title, titles[0]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
@@ -210,32 +292,38 @@ test('a second Send rejects incomplete stored history without changing the accep
     expect((await fixture.request({ command: 'arm_acceptance_warning' })).event === 'acceptance_warning_armed').toBe(true);
     await task.fill(TASKS[0]);
     expect(await task.inputValue() === TASKS[0]).toBe(true);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect.poll(async () => (await outcome.textContent()).includes('Warning: storage.connection_cleanup_failed')).toBe(true);
-    await page.evaluate(() => globalThis.incompleteHistoryCapture.drain());
-    observed = await page.evaluate(() => globalThis.incompleteHistoryCapture.summary());
-    expect(observed).toEqual({ count: 1, replies: [{ status: 202, decoded: true, validated: true, exact: true },
-      { status: null, decoded: false, validated: false, exact: false }], failures: [] });
+    [replies[0]] = await Promise.all([
+      readReply(page.waitForResponse(response => new URL(response.url()).pathname === taskPath && response.request().method() === 'POST'),
+        observed.tasks[0], value => validateDisplayTaskAccepted(value, { ...wire.tasks[0], session_id: sid }),
+        (value, status, fields) => status === 202 && fields === 10 && value.duplicate === false
+          && value.warning_code === 'storage.connection_cleanup_failed' && value.notices.length === 0
+          && value.receipt.first_sequence === '2' && value.receipt.last_sequence === '3'),
+      page.getByRole('button', { name: 'Send', exact: true }).click(),
+    ]);
+    await commands.nth(0).locator('summary').click();
     await acceptedTruth();
-    await expect(command).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Retry identical command', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toHaveCount(0);
+    await expect(page.locator('.command')).toHaveCount(2);
     expect(await task.inputValue() === '').toBe(true);
-    memory = await page.evaluate(expected => globalThis.incompleteHistoryCapture.accepted(expected), expectedCommand(0));
-    expect(Object.values(memory)).toEqual(Array(9).fill(true));
+    acceptedArticle = await commands.nth(0).evaluate(node => node.outerHTML);
+    humanArticle = await run.evaluate(node => node.outerHTML);
     await noWork(1);
+    expect(replies[0].receipt).toEqual(durable.receipt);
     await privateBoundary();
 
     stage = 'second Send rejects incomplete stored history';
     await task.fill(TASKS[1]);
     expect(await task.inputValue() === TASKS[1]).toBe(true);
-    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    [replies[1]] = await Promise.all([
+      readReply(page.waitForResponse(response => new URL(response.url()).pathname === taskPath && response.request().method() === 'POST'),
+        observed.tasks[1], validateErrorView, (value, status, fields) => status === 422 && fields === 6 && value.code === 'invalid_request'
+          && value.stage === 'history' && value.certainty === 'not_applicable' && value.acceptance === null && value.notices.length === 0),
+      page.getByRole('button', { name: 'Send', exact: true }).click(),
+    ]);
     await exact(command.locator('h3'), 'task: rejected');
-    await page.evaluate(() => globalThis.incompleteHistoryCapture.drain());
-    observed = await page.evaluate(() => globalThis.incompleteHistoryCapture.summary());
-    expect(observed).toEqual({ count: 2, replies: [202, 422].map(status => ({ status, decoded: true, validated: true, exact: true })), failures: [] });
     await command.locator('summary').click();
     await rejectedTruth(TASKS[1]);
+    rejectedArticle = await command.evaluate(node => node.outerHTML);
+    expect(new Set([sid, wire.create.operation_id, ...wire.tasks.flatMap(body => [body.operation_id, body.run_id])]).size).toBe(6);
     await noWork(2);
     await privateBoundary();
 
@@ -255,9 +343,9 @@ test('a second Send rejects incomplete stored history without changing the accep
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await exact(page.locator('.topbar [role="status"]'), 'disconnected');
     await expect(page.locator('.command,.run,.session-list li')).toHaveCount(0);
-    await exact(outcome, '');
     await exact(page.locator('.transcript'), '');
-    expect(await page.evaluate(() => globalThis.incompleteHistoryCapture.cleared())).toBe(true);
+    await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    expect(await page.getByLabel('Workspace', { exact: true }).locator('option').count()).toBe(0);
     expect(await page.evaluate(canaries => {
       const nodes = Array.from(document.querySelectorAll('input,textarea,select'));
       const values = [document.documentElement.outerHTML, ...nodes.map(node => node.value)];
@@ -268,10 +356,11 @@ test('a second Send rejects incomplete stored history without changing the accep
     await noWork(2);
     expect(resourceErrors).toBe(1);
     expect(Object.values(faults)).toEqual(Array(7).fill(0));
-    expect(await page.evaluate(() => globalThis.incompleteHistoryCapture.summary())).toEqual(observed);
+    expect(Object.values(observed).flatMap(value => Array.isArray(value) ? value : [value]).every(facts => facts.exact)).toBe(true);
   } catch (cause) {
     const kind = ['Error', 'TypeError', 'SyntaxError', 'TimeoutError', 'ProtocolError'].includes(cause?.name) ? cause.name : 'other';
-    failure = new Error(`Incomplete history failed: ${stage}; kind=${kind}; capture=${JSON.stringify(observed)}; memory=${JSON.stringify(memory)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}; resource_errors=${resourceErrors}`);
+    const line = /task-incomplete-history\.spec\.mjs:(\d+):/.exec(cause?.stack ?? '')?.[1] ?? 'none';
+    failure = new Error(`Incomplete history failed: ${stage}; kind=${kind} line=${line}; capture=${JSON.stringify(observed)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}; resource_errors=${resourceErrors}; display=${JSON.stringify(displayReads)}`);
   } finally {
     try {
       await context?.close(); cleanup.browser = context !== undefined;
@@ -287,5 +376,5 @@ test('a second Send rejects incomplete stored history without changing the accep
   console.log(`Incomplete history cleanup: browser=${cleanup.browser} fixture=${cleanup.fixture}`);
   if (failure) throw failure;
   expect(Object.values(faults)).toEqual(Array(7).fill(0));
-  console.log(`Incomplete history evidence: warning_202_exact=${observed.replies[0].exact} history_422_exact=${observed.replies[1].exact} captures=${observed.count} assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} other_posts=${posts.other}; immutable_commands=${memory.commandsExact} last_mutation_unchanged=${memory.lastMutationUnchanged}; sessions=2 browser_sequence=3 seed_sequence=1 task_commands=1 task_receipts=1 runs_accepted=1 checkpoints=1 runtime=0 bindings=0 results=0 terminals=0 interrupts=0 renames=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 reconcile=0 expected_console_errors=${resourceErrors} observation_ms=500 disconnect_cleared=true`);
+  console.log(`Incomplete history evidence: warning_202_exact=${observed.tasks[0].exact} history_422_exact=${observed.tasks[1].exact} assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} other_posts=${posts.other}; persistent_articles=3 first_warning_unchanged=true human_only=true; sessions=2 browser_sequence=3 seed_sequence=1 task_commands=1 task_receipts=1 runs_accepted=1 checkpoints=1 runtime=0 bindings=0 results=0 terminals=0 interrupts=0 renames=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 reconcile=0 expected_console_errors=${resourceErrors} observation_ms=500 disconnect_ms=300 disconnect_cleared=true; replies=${JSON.stringify(observed)} matching_display_sse=true`);
 });

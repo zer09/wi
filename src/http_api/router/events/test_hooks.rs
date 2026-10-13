@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use crate::storage::{ApplicationSessionId, HistoryPage, test_hooks::Pause};
 
 mod fault;
-pub(crate) use fault::{ControlError, FaultHook, FaultMode, FaultPlan, Phase, Target};
+pub(crate) use fault::{ControlError, FaultHook, FaultMode, Phase, Target};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::http_api::router) struct Read {

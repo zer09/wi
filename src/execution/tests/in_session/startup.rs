@@ -94,7 +94,7 @@ async fn final_result_failure_replays(responses: Vec<ModelResponse>, tool_calls:
                 .unwrap();
             assert_eq!(
                 saved.request_id(),
-                Some(format!("{}-q1", task.run_id).as_str())
+                Some(format!("{}-000000000001", &task.run_id.as_str()[..23]).as_str())
             );
             assert_eq!(saved.output(), Some("{\"sum\":42}"));
             assert_eq!(saved.is_error(), Some(false));

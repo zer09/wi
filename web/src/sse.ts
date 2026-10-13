@@ -3,6 +3,8 @@ import {
   type ClosedView, type ErrorView, type EventView,
 } from './api.js';
 
+import { validateConversationChanges, type ConversationChanges } from './display-api.js';
+
 export type WiSseRecord =
   | { readonly kind: 'event'; readonly id: string; readonly event: EventView }
   | { readonly kind: 'error'; readonly error: ErrorView }
@@ -10,8 +12,7 @@ export type WiSseRecord =
 
 // The callback receives each valid record before parsing continues. A bad suffix cannot
 // hide a good prefix from the caller. Only the later reducer may advance an applied cursor.
-export class WiSseParser {
-  private readonly sessionId: string;
+class SseFrames<R> {
   private readonly decoder = new TextDecoder('utf-8', { fatal: true });
   private line = '';
   private skipLF = false;
@@ -20,9 +21,8 @@ export class WiSseParser {
   private data: string[] = [];
   private ended = false;
 
-  constructor(sessionId: string, private readonly onRecord: (record: WiSseRecord) => void) {
-    this.sessionId = validateUuid(sessionId);
-  }
+  constructor(private readonly onRecord: (record: R) => void,
+    private readonly validateFrame: (event: string | undefined, id: string | undefined, value: unknown) => { record: R; terminal: boolean }) {}
 
   get done(): boolean { return this.ended; }
 
@@ -108,29 +108,8 @@ export class WiSseParser {
     if (event === undefined && id === undefined && data.length === 0) return;
     if (data.length === 0) throw new ProtocolError('invalid_sse');
     const value = parseJson(data.join('\n'));
-    let record: WiSseRecord;
-    switch (event) {
-      case 'wi.event': {
-        const cursor = validateCursor(id, this.sessionId);
-        const view = validateEventView(value);
-        if (view.session_id !== this.sessionId || view.sequence !== cursor.sequence) {
-          throw new ProtocolError('identity_mismatch');
-        }
-        record = { kind: 'event', id: id as string, event: view };
-        break;
-      }
-      case 'wi.error':
-        if (id !== undefined) throw new ProtocolError('invalid_sse');
-        record = { kind: 'error', error: validateErrorView(value) };
-        this.stop();
-        break;
-      case 'wi.closed':
-        if (id !== undefined) throw new ProtocolError('invalid_sse');
-        record = { kind: 'closed', closed: validateClosedView(value) };
-        this.stop();
-        break;
-      default: throw new ProtocolError('invalid_sse');
-    }
+    const { record, terminal } = this.validateFrame(event, id, value);
+    if (terminal) this.stop();
     this.onRecord(record);
   }
 
@@ -140,5 +119,41 @@ export class WiSseParser {
     this.event = undefined;
     this.id = undefined;
     this.data = [];
+  }
+}
+
+function ending(event: string | undefined, id: string | undefined, value: unknown): Exclude<WiSseRecord, { kind: 'event' }> {
+  if (id !== undefined) throw new ProtocolError('invalid_sse');
+  if (event === 'wi.error') return { kind: 'error', error: validateErrorView(value) };
+  if (event === 'wi.closed') return { kind: 'closed', closed: validateClosedView(value) };
+  throw new ProtocolError('invalid_sse');
+}
+
+export class WiSseParser extends SseFrames<WiSseRecord> {
+  constructor(sessionId: string, onRecord: (record: WiSseRecord) => void) {
+    const sid = validateUuid(sessionId);
+    super(onRecord, (event, id, value) => {
+      if (event !== 'wi.event') return { record: ending(event, id, value), terminal: true };
+      const cursor = validateCursor(id, sid), view = validateEventView(value);
+      if (view.session_id !== sid || view.sequence !== cursor.sequence) throw new ProtocolError('identity_mismatch');
+      return { record: { kind: 'event', id: id as string, event: view }, terminal: false };
+    });
+  }
+}
+
+export type ConversationSseRecord =
+  | { readonly kind: 'conversation'; readonly id: string; readonly changes: ConversationChanges }
+  | Exclude<WiSseRecord, { kind: 'event' }>;
+
+export class WiConversationSseParser extends SseFrames<ConversationSseRecord> {
+  constructor(sessionId: string, onRecord: (record: ConversationSseRecord) => void) {
+    const sid = validateUuid(sessionId);
+    super(onRecord, (event, id, value) => {
+      if (event !== 'wi.conversation') return { record: ending(event, id, value), terminal: true };
+      if (id === undefined) throw new ProtocolError('invalid_sse');
+      const changes = validateConversationChanges(value, sid);
+      if (id !== changes.next_after) throw new ProtocolError('identity_mismatch');
+      return { record: { kind: 'conversation', id, changes }, terminal: false };
+    });
   }
 }

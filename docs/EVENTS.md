@@ -1,6 +1,6 @@
 # Wi events, history and display representations
 
-Updated September29,2026. Accepted runtime master76bb32f; unaccepted browser checkpoint8f45dda. G1.1 is a replacement specification, not an implemented event change. Earlier detailed event narrative is preserved at the [checkpoint](https://github.com/zer09/wi/blob/8f45dda2a2c168931735cf798560b8dfd02a1579/docs/EVENTS.md). This current overview removes stale unqualified R1 NOT RUN/status claims while retaining their original evidence.
+Accepted master76bb32f and historical unaccepted checkpoint8f45dda remain distinct from current uncommitted G1.1 work. Local schema3 projection, typed entry/content/page/change reads, display HTTP/SSE, server reconciliation and browser replacement are implemented. All 40 G11 rows remain PARTIAL, accepted=false; scoped source review/local execution is not final acceptance, hosted CI or live evidence. Earlier detailed event narrative is preserved at the [checkpoint](https://github.com/zer09/wi/blob/8f45dda2a2c168931735cf798560b8dfd02a1579/docs/EVENTS.md). This current overview removes stale unqualified R1 NOT RUN/status claims while retaining their original evidence.
 
 ## Implemented layers
 
@@ -9,9 +9,10 @@ Updated September29,2026. Accepted runtime master76bb32f; unaccepted browser che
 | Provider envelope | schema1; source-native and normalized streaming observations |
 | Run envelope | schema2 after C1; run/turn/provider/tool lifecycle and correlation |
 | Stored application envelope | schema1; application-session identity and canonical sequence |
-| Session database | schema2 at accepted/checkpoint runtime |
+| Session database | schema3 in local G1.1 work; schema2 at accepted/checkpoint runtime |
 | Catalog | schema1; session index/observed summary, not live execution authority |
 | HTTP | API1; explicit safe projections, commands, raw history and committed SSE |
+| Conversation display | conversation_version:1; materialized human blocks, ordered entries, bounded fields/content and changed-state SSE |
 
 Provider-session ID is not application-session ID. Provider/run-local sequence is not stored application sequence. Dispatch is not durable acceptance. Observing stream EOF is not run completion. Tool-start is intent, not proof of effect/result. A finished callback contains no actual output; ToolResultRecorded carries exact output/is_error separately.
 
@@ -31,18 +32,34 @@ B2 adds selected-history and opened-account provenance for a NEW explicit task. 
 
 Internal native/binding/prepared configuration objects remain private. Public text/tool strings can themselves contain user-private material and must be rendered as inert text, not executable HTML.
 
-## Planned G1.1 display path
+<a id="native-mapping"></a>
 
-See [schema](slices/g1/SCHEMA.md), [Rust reads](slices/g1/RUST_API.md) and [protocol](slices/g1/CLIENT_PROTOCOL.md). Required, NOT YET VERIFIED:
+## Native mapping and local identifier admission
 
-- Add session schema3 for saved ordered display blocks/entries/fields/chunks. Keep canonical event types/bytes and all envelope versions above.
-- New display responses use conversation_version1 alongside existing API1. Distinct /conversation routes return human-anchored pages and self-contained updates.
-- Every display update commits with its canonical fact. Same projection/encoder supplies live and saved views.
-- Previous-block, within-block and content cursors navigate historical display independently from the changed-display live cursor.
-- Live updates can coalesce intermediate revisions; they are current-state synchronization, not a replacement canonical audit log.
-- Snapshot H and stream afterH close the attachment race. Browser rebase fetches latest state; no raw prefix from0 or provider/tool reducer in JavaScript.
-- Authoritative final output replaces the same assistant entry. Final run result updates status, not another answer. Tool output uses actual bytes/is_error.
+Public display extraction copies only allowlisted text/refusal/reasoning strings and typed function data, not arbitrary native objects. Unknown structures get an unsupported marker. Authoritative effective output, including provider-recovered output, replaces provisional fields in the same assistant entry; normalized-text fallback is a server rule. Native terminal bytes and output provenance remain separate. Upstream response/item IDs retain their existing opaque rules; the request-ID amendment is not a universal native-ID format or a new trimming rule. See `src/conversation/projection.rs:52-214`.
 
-The old Window B CDP experiment is superseded as an acceptance requirement, not relabelled PASS or proof of a production defect. New deterministic apply-before-cursor and actual browser rebase tests are in the [matrix](slices/g1/MATRIX.md). All G11 rows start NOT RUN. Local implementation must update current version statements only after source and evidence actually change.
+The owner's October1 amendment requires canonical 36-character non-nil lowercase hyphenated UUID request IDs for new producer and storage input, not length-only validation or v4-only parsing. Runtime event/turn/run IDs and both RunFinished/RunResult summary paths are checked. Actual tool-execution/result call IDs retain the existing nonempty/512-byte rule; untrusted observed calls retain their separate preflight behavior.
+
+For the supported OpenAI adapter, the locally generated provider-session ID is a UUID and its envelope event ID is exactly that UUID plus a colon and positive decimal local envelope.sequence. This is not the upstream provider_sequence. Checks use the actual selected/accepted provider, not an untrusted label. Generic and upstream identifiers are not UUID-converted.
+
+Strict new admission follows exact historical receipt/conflict resolution. Old raw/B2/migration/binding reads and canonical bytes remain unchanged. No partial-summary marker or paged identifier was added. General external-ID formats remain undefined beyond existing boundary-specific rules. Oversized historical mandatory headers have the approved display-read disposition below. See [identifier audit](slices/g1/IDENTIFIERS.md) and [local evidence](slices/g1/IDENTIFIER_ID2B.md).
+
+## Current local G1.1 display path
+
+See [schema](slices/g1/SCHEMA.md), [Rust reads](slices/g1/RUST_API.md) and [protocol](slices/g1/CLIENT_PROTOCOL.md) for the fixed contract. Current ownership is `src/conversation` for typed interpretation/encoding, `src/storage/conversation` for SQL/projector/reads, `src/http_api` for transport and `web/src/display-store.ts` for display-buffer merging.
+
+- Schema3 saves ordered blocks/entries/fields and scalar-aligned UTF-8 chunks beside immutable canonical events/receipts, in the same transaction. Explicit old-session open retains 1->2 then additive 2->3/backfill; warm indexed reads do not replay raw history.
+- Latest returns newest human block B before older A, not an unbounded whole interaction. Pages/live batches fit 512 KiB encoded JSON, compact entries/anchors 32 KiB, activity segments 64 entries and stored chunks 8 KiB. Separate continuations cover earlier fields/content and earlier activity before the previous block. These read bounds never truncate canonical work or impose task budgets.
+- Previous-block, within-block, content and live cursors are distinct session-qualified opaque tokens. Older membership is stable under newer writes; each page has current values at its own snapshot head, not time travel at the initial H. Append-compatible content boundaries remain stable; replacement can return api.conversation_cursor_stale/409 for the affected entry.
+- Matching snapshot H installs before changed-display SSE after H. Self-contained session/block/entry upserts can coalesce intermediate revisions; private-only canonical writes advance the watermark without exposing payloads. The sequence/rank/identity tie-break prevents advancing past unsent current rows. This is current-state synchronization, not an audit feed of every delta.
+- The browser merges identities/revisions/generations/ranges in chronological order. Final output replaces the same assistant entry; RunResult updates outcome metadata, not another answer. Tool result bytes/is_error, result existence, finish existence and reuse references remain distinct recorded facts.
+- Initial viewport filling requests one earlier content/segment/block at a time until filled/end. Later reads require upward intent or Load older. Live observation does not wait for older loading. Reconnect latest explicitly obtains fresh canonical state before a new stream; failed rebase keeps stale content. EOF/error is not execution completion or permission to retry/cancel work.
+- Read-only POST /v1/sessions/{sid}/runs/reconcile checks captured original operation/run/text with server raw_receipt proof. It returns addressed acceptance/run state or point-in-time not_found, not proof of rollback. It never prepares context or submits work; explicit-open migration/interruption remains possible. Read run-status uses its separate GET route.
+
+Typed read retirement and snapshot capture are in `src/storage/session.rs:94-183` and `src/storage/conversation/reads/pages.rs:21-39`. Display routes are in `src/http_api/router.rs:136-203`; SSE retains bounded frames and retires SQL before delivery (`src/http_api/router/conversation/events.rs:18-139`). Reconciliation uses `src/http_api/router/runs.rs:29-128`. Public static assets require Host/Origin checks; APIs still require the existing bearer and memory-only Connect. Normal literal-loopback HTTP requires no HTTPS/proxy. Provider auth and the remote access boundary are unchanged. All display strings render as inert text; private native/config/credential objects remain excluded.
+
+An otherwise readable legacy mandatory header that cannot fit after progress-preserving fragment reduction returns api.conversation_display_unavailable/422 (ConversationError::DisplayUnavailable). This is a display-read error, not corruption, quota or task rejection. It does not rewrite canonical bytes, skip the block or change raw history/execution state. Other representable blocks remain readable. Mapping: `src/http_api/dto/errors.rs:146-155`.
+
+The old Window B CDP experiment and exclusive raw browser runtime/tests are retired with explicit dispositions, not relabelled PASS or proof of a production defect. [Current human evidence](slices/g1/VERIFICATION_G1_1.md), [JSON](slices/g1/verification-g1.1.json) and [runtime retirement](slices/g1/C3B_RAW_RUNTIME_RETIREMENT.md) preserve old failures and failed roles. C48's [typed S2 display evidence](slices/g1/C3B_S2_SKILL_DISPLAY.md) and C49's [saved-skill browser evidence](slices/g1/C3B_SKILL_SOURCE_FIDELITY.md) prove exact recorded skill/tool values despite changed or deleted current source. C48 changes source before the next Task across six native variants; C49 changes/deletes it after two Tasks complete and checks two fresh browser observers. These are distinct proofs, not an instruction to reread skills for display. C15 and active-conflict remain owner-deferred; the application reader is unchanged. Same-H interrupted parity, upgrade/reopen, qualified browser/server measurements, final required gates, exact-head CI and three fresh complete-diff reviews remain open. See the [matrix](slices/g1/MATRIX.md) and [current handoff](../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) for scope and the next proposed increment.
 
 For completed milestone records and historical CI attempts, use the [slice register](slices/README.md) and each frozen verification report. No live/CI result is created by this documentation update.

@@ -17,8 +17,14 @@ pub(super) async fn connect(path: &Path) -> SqliteConnection {
         .unwrap()
 }
 
-// Independent released DDL and hand-populated rows, not a downgraded v2 initializer.
+mod activation;
+
+// Independent released DDL and hand-populated rows, not a downgraded initializer.
 pub(super) async fn fixture(root: &Path) -> (ApplicationSessionId, PathBuf) {
+    fixture_version(root, 1).await
+}
+
+async fn fixture_version(root: &Path, version: u64) -> (ApplicationSessionId, PathBuf) {
     SessionStore::open(root.to_owned())
         .await
         .unwrap()
@@ -29,18 +35,21 @@ pub(super) async fn fixture(root: &Path) -> (ApplicationSessionId, PathBuf) {
     let path = filesystem::session_path(root, &id, true).unwrap();
     drop(filesystem::open_file(&path, true).unwrap());
     let mut sql = connect(&path).await;
-    sqlx::raw_sql(include_str!("../../../tests/storage/session_v1.sql"))
-        .execute(&mut sql)
-        .await
-        .unwrap();
+    let ddl = if version == 1 {
+        include_str!("../../../tests/storage/session_v1.sql")
+    } else {
+        session_schema::V2
+    };
+    sqlx::raw_sql(ddl).execute(&mut sql).await.unwrap();
     let operation = OperationId::new();
     let event = StoredEventId::new();
     let request = r#"{"method":"create_session","title":"original","workspace":null}"#;
     let hash = ring::digest::digest(&ring::digest::SHA256, request.as_bytes());
     let receipt = json!({"operation_id":operation,"session_id":id,"run_id":null,"first_sequence":1,"last_sequence":1});
     let provenance = json!({"operation_id":operation,"method":"create_session","session_id":id,"creation_event_id":event,"created_at_ms":42,"request_json":request,"payload_hash":hash.as_ref(),"receipt":receipt});
-    sqlx::query("INSERT INTO manifest VALUES (1,?,1,1,'renamed 雪',NULL,42,42,0,?)")
+    sqlx::query("INSERT INTO manifest VALUES (1,?,?,1,'renamed 雪',NULL,42,42,0,?)")
         .bind(id.as_str())
+        .bind(version as i64)
         .bind(provenance.to_string())
         .execute(&mut sql)
         .await
@@ -166,8 +175,8 @@ pub(super) async fn fixture(root: &Path) -> (ApplicationSessionId, PathBuf) {
         .unwrap();
     sql.close().await.unwrap();
     let mut catalog = connect(&root.join("catalog.sqlite3")).await;
-    sqlx::query("INSERT INTO sessions (session_id,relative_path,title,created_at_ms,updated_at_ms,head_sequence,schema_version,availability) VALUES (?,?,'original',42,42,1,1,'ready')")
-        .bind(id.as_str()).bind(filesystem::session_relative_path(&id)).execute(&mut catalog).await.unwrap();
+    sqlx::query("INSERT INTO sessions (session_id,relative_path,title,created_at_ms,updated_at_ms,head_sequence,schema_version,availability) VALUES (?,?,'original',42,42,1,?,'ready')")
+        .bind(id.as_str()).bind(filesystem::session_relative_path(&id)).bind(version as i64).execute(&mut catalog).await.unwrap();
     sqlx::query("INSERT INTO creation_commands VALUES (?,?,?,?,?,42,'accepted',?,NULL)")
         .bind(operation.as_str())
         .bind(hash.as_ref())
@@ -315,7 +324,7 @@ async fn p1b2_02_populated_independent_v1_migration_preserves_bytes_fk_indexes_a
     assert_eq!(store.repair_catalog().await.unwrap().ready_sessions(), 1);
     assert_complete(&path, 1, &before).await;
     let handle = store.open_session(id.clone()).await.unwrap();
-    assert_complete(&path, 2, &before).await;
+    assert_complete(&path, 3, &before).await;
     let mut sql = connect(&path).await;
     assert_eq!(
         history_prefix::digest(&mut sql, head as u64, &[])
@@ -350,7 +359,7 @@ async fn p1b2_02_populated_independent_v1_migration_preserves_bytes_fk_indexes_a
     );
     assert_eq!(
         store.list_sessions(None, 10).await.unwrap().sessions()[0].schema_version(),
-        2
+        3
     );
     let guard = store.inner.lifecycle.admit().unwrap();
     let (mut sql, _) = session::connection(&store.inner, &id, true).await.unwrap();
@@ -363,7 +372,7 @@ async fn p1b2_02_populated_independent_v1_migration_preserves_bytes_fk_indexes_a
 #[tokio::test]
 async fn p1b2_03_invalid_v1_inputs_preserved_before_writable_migration() {
     for mutation in [
-        "PRAGMA user_version=3",
+        "PRAGMA user_version=4",
         "PRAGMA application_id=17",
         "UPDATE manifest SET schema_version=2",
         "CREATE TABLE events_p1b2_new (value TEXT)",
@@ -424,7 +433,7 @@ async fn p1b2_03_injected_migration_failures_reopen_complete_schemas() {
         let store = SessionStore::open(root).await.unwrap();
         store.open_session(id).await.unwrap();
         store.close().await.unwrap();
-        assert_complete(&path, 2, &before).await;
+        assert_complete(&path, 3, &before).await;
     }
 }
 
@@ -494,6 +503,6 @@ async fn p1b2_03_process_exit_mid_copy_precommit_and_postcommit() {
         child(&root, &id, stage);
         assert_complete(&path, if stage == 4 { 2 } else { 1 }, &before).await;
         child(&root, &id, 5);
-        assert_complete(&path, 2, &before).await;
+        assert_complete(&path, 3, &before).await;
     }
 }

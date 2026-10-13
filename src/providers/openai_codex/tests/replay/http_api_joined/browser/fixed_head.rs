@@ -345,7 +345,7 @@ fn audit(
     let title = if head == 66 { TITLE } else { RENAMED };
     assert!(
         manifest["singleton"] == 1
-            && manifest["schema_version"] == 2
+            && manifest["schema_version"] == 3
             && manifest["format_version"] == 1
             && manifest["session_id"] == sid.as_str()
             && manifest["head_sequence"] == head

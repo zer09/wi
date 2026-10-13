@@ -129,28 +129,464 @@ pub(super) fn done(id: &str, items: &[Value]) -> Vec<Value> {
     }).collect()
 }
 
-pub(super) async fn reply(wire: &mut Wire, db: &Database, id: &str, frames: Vec<Value>) {
+// Only C49 opts in. Keep payloads out of this process-local, bounded witness.
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Phase {
+    Send,
+    Sent,
+    Read,
+    ReadDone,
+    Count,
+    Pace,
+    Paced,
+}
+
+pub(super) struct Trace {
+    enabled: bool,
+    pub(super) latency: Option<Arc<crate::storage::test_hooks::latency::Collector>>,
+    pub(super) polling: Option<FinalPolling>,
+    prefix: Mutex<Option<u64>>,
+    state: Mutex<Option<TraceState>>,
+    // Installed only by deterministic controls, never by a running fixture.
+    pub(super) lock_operations: Option<Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+struct TraceState {
+    origin: std::time::Instant,
+    consumed: Option<u64>,
+    expected: usize,
+    frames: usize,
+    counters: [u64; 6],
+    counts: [Option<usize>; 4], // first, last, minimum, maximum
+    changes: u64,
+    gate: [Option<u64>; 3], // set, emission entry, flush completion
+    history: std::collections::VecDeque<(u64, Phase, usize, usize, Option<usize>)>,
+    truncated: bool,
+    failed: bool,
+}
+
+impl Trace {
+    pub(super) fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            latency: None,
+            polling: None,
+            prefix: Mutex::new(None),
+            state: Mutex::new(None),
+            lock_operations: None,
+        }
+    }
+
+    pub(super) fn bind_prefix(&self, records: &[StoredEvent], id: &str) {
+        if self.polling.is_none() {
+            return;
+        }
+        assert!(self.enabled && self.latency.is_some() && id == "task-1-final");
+        assert_eq!(matching_updates(records, id), 0);
+        assert!(
+            records
+                .iter()
+                .enumerate()
+                .all(|(i, r)| r.sequence() == i as u64 + 1)
+        );
+        assert!(
+            self.prefix
+                .lock()
+                .unwrap()
+                .replace(records.last().unwrap().sequence())
+                .is_none()
+        );
+    }
+
+    pub(super) fn cursor(&self, id: &str) -> Option<FinalCursor> {
+        if self.polling != Some(FinalPolling::Incremental) {
+            return None;
+        }
+        assert!(self.enabled && self.latency.is_some() && id == "task-1-final");
+        Some(FinalCursor {
+            sequence: self.prefix.lock().unwrap().unwrap(),
+            committed: 0,
+        })
+    }
+
+    fn lock(&self) -> std::sync::LockResult<std::sync::MutexGuard<'_, Option<TraceState>>> {
+        if let Some(counter) = &self.lock_operations {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }
+        self.state.lock()
+    }
+
+    pub(super) fn admit(&self) {
+        if let Some(collector) = &self.latency {
+            collector.open();
+        }
+        if self.enabled
+            && let Ok(mut state) = self.lock()
+        {
+            *state = Some(TraceState {
+                origin: std::time::Instant::now(),
+                consumed: None,
+                expected: 0,
+                frames: 0,
+                counters: [0; 6],
+                counts: [None; 4],
+                changes: 0,
+                gate: [None; 3],
+                history: Default::default(),
+                truncated: false,
+                failed: false,
+            });
+        }
+    }
+
+    pub(super) fn consumed(&self) {
+        if !self.enabled {
+            return;
+        }
+        if let Ok(mut state) = self.lock()
+            && let Some(s) = state.as_mut()
+        {
+            s.consumed = Some(s.origin.elapsed().as_millis().min(600_000) as u64);
+        }
+    }
+
+    pub(super) fn expected(&self, frames: usize, deltas: usize) {
+        if !self.enabled {
+            return;
+        }
+        if let Ok(mut state) = self.lock()
+            && let Some(s) = state.as_mut()
+        {
+            s.frames = frames;
+            s.expected = deltas;
+            s.failed |= frames > 130 || deltas > 128;
+        }
+    }
+
+    fn mark(&self, phase: Phase, frame: usize, delta: usize, count: Option<usize>) {
+        if !self.enabled {
+            return;
+        }
+        let ms = self
+            .lock()
+            .ok()
+            .and_then(|s| s.as_ref().map(|s| s.origin.elapsed().as_millis()));
+        if let Some(ms) = ms {
+            self.mark_at(ms, phase, frame, delta, count);
+        }
+    }
+
+    pub(super) fn mark_at(
+        &self,
+        ms: u128,
+        phase: Phase,
+        frame: usize,
+        delta: usize,
+        count: Option<usize>,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        if let Ok(mut state) = self.lock()
+            && let Some(s) = state.as_mut()
+        {
+            if ms > 600_000 || frame > 130 || delta > 128 || count.is_some_and(|n| n > 1_000_000) {
+                s.failed = true;
+                return;
+            }
+            let index = match phase {
+                Phase::Send => Some(0),
+                Phase::Sent => Some(1),
+                Phase::Read => Some(2),
+                Phase::ReadDone => Some(3),
+                Phase::Pace => Some(4),
+                Phase::Paced => Some(5),
+                Phase::Count => None,
+            };
+            if let Some(i) = index {
+                if s.counters[i] == 1_000_000 {
+                    s.failed = true;
+                    return;
+                }
+                s.counters[i] += 1;
+            }
+            if let Some(n) = count {
+                if s.counts[1] != Some(n) {
+                    if s.changes == 1_000_000 {
+                        s.failed = true;
+                        return;
+                    }
+                    s.changes += 1;
+                }
+                s.counts[0].get_or_insert(n);
+                s.counts[1] = Some(n);
+                s.counts[2] = Some(s.counts[2].unwrap_or(n).min(n));
+                s.counts[3] = Some(s.counts[3].unwrap_or(n).max(n));
+            }
+            if s.history.len() == 12 {
+                s.history.pop_front();
+                s.truncated = true;
+            }
+            s.history.push_back((ms as u64, phase, frame, delta, count));
+        }
+    }
+
+    pub(super) async fn during<T>(
+        &self,
+        phase: Phase,
+        frame: usize,
+        delta: usize,
+        future: impl std::future::Future<Output = T>,
+    ) -> T {
+        let done = match phase {
+            Phase::Send => Phase::Sent,
+            Phase::Read => Phase::ReadDone,
+            Phase::Pace => Phase::Paced,
+            _ => unreachable!(),
+        };
+        self.mark(phase, frame, delta, None);
+        let value = future.await;
+        self.mark(done, frame, delta, None);
+        value
+    }
+
+    pub(super) fn counted(&self, frame: usize, delta: usize, committed: usize) -> bool {
+        self.mark(Phase::Count, frame, delta, Some(committed));
+        committed == delta
+    }
+
+    pub(super) fn gate(&self, index: usize) {
+        if !self.enabled {
+            return;
+        }
+        if let Ok(mut state) = self.lock()
+            && let Some(s) = state.as_mut()
+        {
+            let ms = s.origin.elapsed().as_millis();
+            s.failed |= ms > 600_000;
+            s.gate[index] = Some(ms.min(600_000) as u64);
+        }
+    }
+
+    pub(super) fn snapshot(&self, id: u32) -> Value {
+        // Freeze timing at the original failure snapshot, not at later page exports.
+        if let Some(collector) = &self.latency {
+            collector.freeze();
+        }
+        let mut value =
+            json!({"id":id,"event":"gate11_diagnostic","state":"disabled","trace":null});
+        if !self.enabled {
+            return value;
+        }
+        let Ok(state) = self.lock() else {
+            value["state"] = json!("capture_failed");
+            return value;
+        };
+        let Some(s) = state.as_ref() else {
+            value["state"] = json!("unavailable");
+            return value;
+        };
+        let ms = s.origin.elapsed().as_millis();
+        if s.failed || ms > 600_000 {
+            value["state"] = json!("capture_failed");
+            return value;
+        }
+        value["state"] = json!("captured");
+        value["trace"] = json!({"admitted_ms":0,"consumed_ms":s.consumed,"snapshot_ms":ms as u64,
+            "expected_deltas":s.expected,"expected_frames":s.frames,"await_counts":s.counters,
+            "committed_counts":s.counts,"count_changes":s.changes,"gate_ms":s.gate,
+            "history":s.history,"truncated":s.truncated});
+        value
+    }
+}
+
+pub(super) fn new_trace(enabled: bool) -> Option<Arc<Trace>> {
+    enabled.then(|| Arc::new(Trace::new(true)))
+}
+
+pub(super) fn gate_trace(trace: Option<&Trace>, gate: usize) -> Option<&Trace> {
+    trace.filter(|t| t.enabled && gate == 10)
+}
+
+pub(super) async fn await_phase<T>(
+    trace: Option<&Trace>,
+    phase: Phase,
+    frame: usize,
+    delta: usize,
+    future: impl std::future::Future<Output = T>,
+) -> T {
+    if let Some(trace) = trace.filter(|t| t.enabled) {
+        trace.during(phase, frame, delta, future).await
+    } else {
+        // No surrogate Trace or diagnostic hook on the original await path.
+        future.await
+    }
+}
+
+pub(super) fn counted(trace: Option<&Trace>, frame: usize, delta: usize, committed: usize) -> bool {
+    if let Some(trace) = trace.filter(|t| t.enabled) {
+        trace.counted(frame, delta, committed)
+    } else {
+        committed == delta
+    }
+}
+
+pub(super) fn matching_updates(records: &[StoredEvent], id: &str) -> usize {
+    records.iter().filter(|record| {
+        matches!(record.payload(), StoredEventPayload::RuntimeObserved(event)
+            if matches!(&event.event, RunEvent::ProviderEvent { event }
+                if matches!(&event.event, ProviderEvent::OutputItemUpdated { response_id, .. } if response_id == id)))
+    }).count()
+}
+
+pub(super) fn ordinary_cursor(
+    gate: usize,
+    records: &[StoredEvent],
+    trace: Option<&Trace>,
+) -> Option<FinalCursor> {
+    // Only Task B's final burst uses this cursor; explicit comparisons keep their oracle.
+    if gate != 10 || trace.is_some_and(|t| t.polling.is_some()) {
+        return None;
+    }
+    Some(FinalCursor::new(records, "task-1-final"))
+}
+
+pub(super) struct FinalCursor {
+    pub(super) sequence: u64,
+    pub(super) committed: usize,
+}
+impl FinalCursor {
+    pub(super) fn new(records: &[StoredEvent], id: &str) -> Self {
+        assert!(!records.is_empty());
+        assert!(
+            records
+                .iter()
+                .enumerate()
+                .all(|(i, r)| r.sequence() == i as u64 + 1)
+        );
+        assert_eq!(matching_updates(records, id), 0);
+        Self {
+            sequence: records.last().unwrap().sequence(),
+            committed: 0,
+        }
+    }
+
+    pub(super) fn observe(&mut self, records: &[StoredEvent], id: &str, sent: usize) -> usize {
+        for record in records {
+            assert_eq!(record.sequence(), self.sequence.checked_add(1).unwrap());
+            // Unrelated immutable rows also advance the cursor, so they are not reread.
+            self.sequence = record.sequence();
+        }
+        self.committed += matching_updates(records, id);
+        assert!(self.committed <= sent, "fixture delta overshoot");
+        self.committed
+    }
+}
+
+pub(super) async fn reply(
+    wire: &mut Wire,
+    db: &Database,
+    id: &str,
+    frames: Vec<Value>,
+    trace: Option<&Trace>,
+    cursor: Option<FinalCursor>,
+) {
+    use crate::storage::test_hooks::latency::{self, Stage};
+    let trace = trace.filter(|t| t.enabled);
+    let latency = trace.and_then(|t| t.latency.as_ref());
+    let mut cursor = cursor.or_else(|| trace.and_then(|t| t.cursor(id)));
+    if let Some(trace) = trace {
+        trace.expected(
+            frames.len(),
+            frames.iter().filter(|f| f.get("delta").is_some()).count(),
+        );
+    }
     let mut deltas = 0;
-    for frame in frames {
+    for (index, frame) in frames.into_iter().enumerate() {
+        let ordinal = index + 1;
         let is_delta = frame.get("delta").is_some();
-        wire.reply(vec![frame], None).await;
+        let delta = deltas + usize::from(is_delta);
+        let timing = latency.map(|c| c.fixture(delta as u64));
+        let _observation_time = if is_delta {
+            timing
+                .as_ref()
+                .and_then(|c| c.span(Stage::DeltaObservation))
+        } else {
+            None
+        };
+        let _send_time = timing.as_ref().and_then(|c| c.marker(latency::SEND));
+        await_phase(
+            trace,
+            Phase::Send,
+            ordinal,
+            delta,
+            wire.reply(vec![frame], None),
+        )
+        .await;
+        drop(_send_time);
         if is_delta {
             deltas += 1;
             // Pace the synthetic burst against real commits, not Chromium consumption.
             // This preserves the adapter's existing queue and slow-consumer guard.
             watch(async {
                 loop {
-                    let committed = db.records().await.iter().filter(|record| {
-                        matches!(record.payload(), StoredEventPayload::RuntimeObserved(event)
-                            if matches!(&event.event, RunEvent::ProviderEvent { event }
-                                if matches!(&event.event, ProviderEvent::OutputItemUpdated { response_id, .. } if response_id == id)))
-                    }).count();
-                    if committed == deltas {
+                    let read = latency.map(|c| c.reader(deltas as u64));
+                    let _read_time = read.as_ref().and_then(|c| c.span(Stage::Reader));
+                    let records = if let Some(cursor) = &cursor {
+                        let poll = await_phase(
+                            trace,
+                            Phase::Read,
+                            ordinal,
+                            deltas,
+                            db.records_after(cursor.sequence),
+                        );
+                        if let Some(read) = &read {
+                            read.scope(poll).await
+                        } else {
+                            poll.await
+                        }
+                    } else if let Some(read) = &read {
+                        read.scope(await_phase(
+                            trace,
+                            Phase::Read,
+                            ordinal,
+                            deltas,
+                            db.records(),
+                        ))
+                        .await
+                    } else {
+                        await_phase(trace, Phase::Read, ordinal, deltas, db.records()).await
+                    };
+                    let _count_time = read.as_ref().and_then(|c| c.marker(latency::COUNT));
+                    let committed = if let Some(cursor) = &mut cursor {
+                        cursor.observe(&records, id, deltas)
+                    } else {
+                        matching_updates(&records, id)
+                    };
+                    if let Some(read) = &read {
+                        read.work(latency::COMPLETED_READS, 1);
+                    }
+                    drop(_count_time);
+                    drop(_read_time);
+                    if counted(trace, ordinal, deltas, committed) {
+                        if let Some(timing) = &timing {
+                            timing.work(latency::BARRIERS, 1);
+                        }
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    let _pace_time = timing.as_ref().and_then(|c| c.marker(latency::PACE));
+                    await_phase(
+                        trace,
+                        Phase::Pace,
+                        ordinal,
+                        deltas,
+                        tokio::time::sleep(Duration::from_millis(10)),
+                    )
+                    .await;
                 }
-            }).await;
+            })
+            .await;
         }
     }
 }

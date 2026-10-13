@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EventEmitter } from 'node:events';
-import { createContext, runInContext } from 'node:vm';
-import { answer, data, labels, measurement, observe, skillOutput } from '../test-support/presentation.mjs';
+import { answer, data, labels, measurement, skillOutput } from '../test-support/presentation.mjs';
 
 const sample = { label: 'short-selected', first_page_ms: 0, durable_acceptance_ms: 1.25, committed_visibility_ms: 2,
   reducer_render_ms: 3, rebuild_ms: 4, stall_ms: 0, first_page_events: 1, history_pages: 4, selected_events: 100,
@@ -23,71 +21,6 @@ test('finite measurement output has exactly three closed labels and numeric fiel
     const missing = { ...sample }; delete missing[key];
     assert.throws(() => measurement(missing), { message: 'measurement rejected' });
   }
-});
-
-test('page measurements keep request order, reset old reads and drain later response bodies', { timeout: 1000 }, async () => {
-  const context = new EventEmitter();
-  context.route = async () => {};
-  const fixture = { origin: 'http://127.0.0.1:1234', owner: 'synthetic-owner' };
-  const queue = [];
-  let nativeCalls = 0;
-  const sandbox = createContext({ URL, Request, location: { href: fixture.origin, origin: fixture.origin },
-    fetch: async () => { nativeCalls++; return queue.shift(); } });
-  context.exposeBinding = async (name, callback) => { sandbox[name] = value => Promise.resolve(callback({}, value)); };
-  context.addInitScript = async callback => { runInContext(`(${callback})()`, sandbox); };
-  context.pages = () => [{ evaluate: async (callback, argument) => {
-    sandbox.argument = argument;
-    return runInContext(`(${callback})(argument)`, sandbox);
-  } }];
-  const observed = await observe(context, fixture);
-  async function response() {
-    let writer;
-    const original = new Response(new ReadableStream({ start(controller) { writer = controller; } }));
-    queue.push(original);
-    assert.equal(await sandbox.fetch(`${fixture.origin}/v1/sessions/fixture/history`), original);
-    return events => { writer.enqueue(new TextEncoder().encode(JSON.stringify({ events }))); writer.close(); };
-  }
-  await observed.beginPage();
-  const old = await response();
-  await observed.beginPage();
-  const first = await response();
-  (await response())([2, 3]);
-  let drained = false;
-  const drain = observed.drain().then(() => { drained = true; });
-  old([0]);
-  const last = await response();
-  first([1]);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(drained, false);
-  last([4]);
-  await drain;
-  assert.equal(nativeCalls, 4);
-  assert.deepEqual(observed.pages.map(page => page.events), [[1], [2, 3], [4]]);
-  assert.equal(observed.firstPage().events, 1);
-  assert.ok(Number.isFinite(observed.firstPage().ms));
-  assert.equal(observed.faults.response, 0);
-  await observed.beginPage();
-  assert.equal(observed.firstPage(), null);
-  assert.deepEqual(observed.pages, []);
-});
-
-test('only the designated observation abort may emit one known network console error', async () => {
-  const context = new EventEmitter();
-  for (const method of ['route', 'exposeBinding', 'addInitScript']) context[method] = async () => {};
-  const fixture = { origin: 'http://127.0.0.1:1234', owner: 'synthetic-owner' };
-  const observed = await observe(context, fixture);
-  const page = new EventEmitter();
-  context.emit('page', page);
-  const url = `${fixture.origin}/v1/sessions/fixture/events?after=fixture:1`;
-  const message = (text, location = url) => ({ type: () => 'error', text: () => text, location: () => ({ url: location }) });
-  observed.expectReadAbort(url);
-  page.emit('console', message('Failed to load resource: net::ERR_FAILED'));
-  assert.equal(observed.faults.console, 0);
-  page.emit('console', message('Failed to load resource: net::ERR_FAILED'));
-  page.emit('console', message('Failed to load resource: net::ERR_FAILED', `${fixture.origin}/other`));
-  page.emit('console', message('synthetic-owner'));
-  assert.equal(observed.faults.console, 3);
-  assert.equal(observed.faults.secret, 1);
 });
 
 test('presentation bytes remain distinct inert canaries and successful skill output remains a string', () => {

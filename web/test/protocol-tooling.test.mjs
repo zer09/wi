@@ -57,10 +57,11 @@ test('compiled protocol and view modules import without DOM, network or browser-
     }
     await import('./dist/api.js');
     await import('./dist/sse.js');
-    await import('./dist/state.js');
-    await import('./dist/view.js');
-    const { createClient } = await import('./dist/client.js');
-    const client = createClient({ crypto: null });
+    await import('./dist/display-api.js');
+    await import('./dist/display-store.js');
+    await import('./dist/display-view.js');
+    const { createDisplayClient } = await import('./dist/display-client.js');
+    const client = createDisplayClient({ crypto: null });
     client.snapshot();
     client.disconnect();
   `], { cwd: fileURLToPath(new URL('../', import.meta.url)), encoding: 'utf8' });

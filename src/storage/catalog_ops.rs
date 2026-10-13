@@ -165,7 +165,7 @@ pub(super) fn summary(row: &SqliteRow) -> Result<SessionSummary> {
         || created < 0
         || updated < 0
         || (availability == SessionAvailability::Ready
-            && (head == 0 || !(1..=2).contains(&version)))
+            && (head == 0 || !(1..=3).contains(&version)))
     {
         return Err(integrity());
     }
@@ -304,7 +304,13 @@ pub(super) async fn validate_creating_reservations(
 }
 
 pub(super) async fn entry(inner: &StoreInner, id: &ApplicationSessionId) -> Result<Entry> {
+    #[cfg(test)]
+    let _wait_time = test_hooks::latency::span(test_hooks::latency::Stage::CatalogWait);
     let _lock = inner.catalog_lock.lock().await;
+    #[cfg(test)]
+    drop(_wait_time);
+    #[cfg(test)]
+    let _work_time = test_hooks::latency::span(test_hooks::latency::Stage::CatalogWork);
     let mut connection = connect(inner, false).await?;
     let result = entry_rows(&mut connection, id).await;
     database::finish_read(connection, &inner.lifecycle, result).await

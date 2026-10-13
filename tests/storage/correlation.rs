@@ -99,6 +99,7 @@ async fn rejected(
         .append_run_records(operation.clone(), run.clone(), records)
         .await
         .expect_err(label);
+    assert_ne!(error.code(), "storage.invalid_input", "{label}");
     assert_eq!(error.certainty(), CommitCertainty::NotCommitted, "{label}");
     assert!(
         handle.lookup_receipt(operation).await.unwrap().is_none(),
@@ -118,10 +119,15 @@ async fn p1a11_correlation_outer_identities_and_batch_rollback() {
     for index in 0..good.len() {
         for field in ["turn_id", "session_id", "request_id"] {
             let original = value(&good[index]);
-            let invalids = if original[field].is_null() {
-                vec![json!("unexpected")]
+            let changed = if field == "session_id" {
+                json!("changed")
             } else {
-                vec![Value::Null, json!("changed")]
+                json!("99999999-9999-4999-8999-999999999999")
+            };
+            let invalids = if original[field].is_null() {
+                vec![changed]
+            } else {
+                vec![Value::Null, changed]
             };
             for invalid in invalids {
                 // TurnStarted establishes these identities; the first provider event admits a request.
@@ -174,7 +180,7 @@ async fn p1a11_correlation_nested_identities_provider_and_sequences() {
     for (field, invalid) in [
         ("session_id", json!("changed")),
         ("request_id", Value::Null),
-        ("request_id", json!("changed")),
+        ("request_id", json!("99999999-9999-4999-8999-999999999999")),
         ("provider", json!("wrong-provider")),
         ("schema_version", json!(2)),
         ("sequence", json!(0)),
@@ -194,8 +200,13 @@ async fn p1a11_correlation_nested_identities_provider_and_sequences() {
     }
     for field in ["session_id", "request_id"] {
         let mut bad = value(&runtime(&run, 4, extension(7)));
-        bad[field] = json!("changed");
-        bad["event"][field] = json!("changed");
+        let changed = if field == "session_id" {
+            json!("changed")
+        } else {
+            json!("99999999-9999-4999-8999-999999999999")
+        };
+        bad[field] = changed.clone();
+        bad["event"][field] = changed;
         rejected(
             &fixture,
             &handle,
@@ -287,9 +298,9 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
         .await;
     }
     let mut changed_request = runtime(&run, 5, extension(1));
-    changed_request.request_id = Some("changed".into());
+    changed_request.request_id = Some("99999999-9999-4999-8999-999999999999".into());
     if let RunEvent::ProviderEvent { event } = &mut changed_request.event {
-        event.request_id = Some("changed".into());
+        event.request_id = Some("99999999-9999-4999-8999-999999999999".into());
     }
     rejected(
         &fixture,
@@ -304,7 +315,7 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
         &run,
         vec![
             AppendRunRecord::ToolResult {
-                request_id: Some("original request".into()),
+                request_id: Some("00000000-0000-4000-8000-000000000001".into()),
                 call_id: "call".into(),
                 output: "exact\0雪".into(),
                 is_error: false,
@@ -374,10 +385,10 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
     }
     append(&handle, &run, vec![AppendRunRecord::Runtime(next)]).await;
     let mut admitted = runtime(&run, 8, extension(10));
-    admitted.turn_id = Some("turn-2".into());
-    admitted.request_id = Some("reuse request".into());
+    admitted.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
+    admitted.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     if let RunEvent::ProviderEvent { event } = &mut admitted.event {
-        event.request_id = Some("reuse request".into());
+        event.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     }
     let mut backwards = admitted.clone();
     if let RunEvent::ProviderEvent { event } = &mut backwards.event {
@@ -402,10 +413,15 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
             },
         },
     );
-    reuse.turn_id = Some("turn-2".into());
-    reuse.request_id = Some("reuse request".into());
+    reuse.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
+    reuse.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     for field in ["turn_id", "session_id", "request_id"] {
-        for invalid in [Value::Null, json!("changed")] {
+        let changed = if field == "session_id" {
+            json!("changed")
+        } else {
+            json!("99999999-9999-4999-8999-999999999999")
+        };
+        for invalid in [Value::Null, changed] {
             let mut bad = value(&reuse);
             bad[field] = invalid;
             rejected(
@@ -421,7 +437,7 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
         }
     }
     let mut old = reuse.clone();
-    old.request_id = Some("original request".into());
+    old.request_id = Some("00000000-0000-4000-8000-000000000001".into());
     rejected(
         &fixture,
         &handle,
@@ -441,8 +457,8 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
         saved
     );
     let mut finished = runtime(&run, 10, turn_finished(2));
-    finished.turn_id = Some("turn-2".into());
-    finished.request_id = Some("reuse request".into());
+    finished.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
+    finished.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     append(&handle, &run, vec![AppendRunRecord::Runtime(finished)]).await;
     let mut stale = good[1].clone();
     stale.sequence = 11;
@@ -456,7 +472,7 @@ async fn p1a14_correlation_active_turn_request_and_reuse_original_request() {
     .await;
     let mut final_event = good[6].clone();
     final_event.sequence = 11;
-    final_event.request_id = Some("reuse request".into());
+    final_event.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     append(&handle, &run, vec![AppendRunRecord::Runtime(final_event)]).await;
     store.close().await.unwrap();
 }
@@ -497,7 +513,7 @@ async fn p1a14_correlation_finish_and_result_keep_start_identity() {
     .await;
     let mut finish = good[4].clone();
     finish.sequence = 8;
-    finish.turn_id = Some("turn-2".into());
+    finish.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
     rejected(
         &fixture,
         &handle,
@@ -507,13 +523,13 @@ async fn p1a14_correlation_finish_and_result_keep_start_identity() {
     )
     .await;
     let mut provider = runtime(&run, 8, extension(1));
-    provider.turn_id = Some("turn-2".into());
-    provider.request_id = Some("next request".into());
+    provider.turn_id = Some("11111111-1111-4111-8111-000000000002".into());
+    provider.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     if let RunEvent::ProviderEvent { event } = &mut provider.event {
-        event.request_id = Some("next request".into());
+        event.request_id = Some("00000000-0000-4000-8000-000000000002".into());
     }
     append(&handle, &run, vec![AppendRunRecord::Runtime(provider)]).await;
-    for request_id in [None, Some("next request".into())] {
+    for request_id in [None, Some("00000000-0000-4000-8000-000000000002".into())] {
         rejected(
             &fixture,
             &handle,
@@ -532,7 +548,7 @@ async fn p1a14_correlation_finish_and_result_keep_start_identity() {
         &handle,
         &run,
         vec![AppendRunRecord::ToolResult {
-            request_id: Some("original request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             call_id: "call".into(),
             output: "saved".into(),
             is_error: false,
@@ -544,7 +560,10 @@ async fn p1a14_correlation_finish_and_result_keep_start_identity() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(saved.request_id(), Some("original request"));
+    assert_eq!(
+        saved.request_id(),
+        Some("00000000-0000-4000-8000-000000000001")
+    );
     assert_eq!(saved.output(), Some("saved"));
     assert!(saved.finished_sequence().is_none());
     store.close().await.unwrap();

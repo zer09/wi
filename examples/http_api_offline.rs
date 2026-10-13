@@ -209,7 +209,7 @@ impl SessionControl for Control {
                 ANSWER,
             )
         };
-        let request_id = format!("request-{turn}");
+        let request_id = format!("00000000-0000-4000-8000-{turn:012x}");
         let response_id = format!("response-{turn}");
         let events = [
             ProviderEvent::ResponseStarted {

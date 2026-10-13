@@ -108,7 +108,7 @@ impl Provider for Script {
                     yield EventEnvelope {
                         schema_version: 1, sequence: sequence as u64 + 1,
                         event_id: format!("event-{sequence}"), session_id: "synthetic-provider-session".into(),
-                        request_id: Some("request-1".into()), provider: "host-script".into(), provider_sequence: None, event,
+                        request_id: Some("00000000-0000-4000-8000-000000000001".into()), provider: "host-script".into(), provider_sequence: None, event,
                     };
                 }
             }),
@@ -134,7 +134,7 @@ impl SessionControl for Control {
         self.inputs.lock().unwrap().push(input);
         self.generated.notify_one();
         Ok(RequestReceipt {
-            request_id: "request-1".into(),
+            request_id: "00000000-0000-4000-8000-000000000001".into(),
         })
     }
 

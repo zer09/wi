@@ -21,6 +21,7 @@ mod failures;
 mod preparation;
 mod races;
 mod receipts;
+mod reconcile_task;
 mod reducer;
 
 const RAW: &str = "  raw task 雪\r\ntext\n";
@@ -145,7 +146,7 @@ impl Provider for Script {
                         yield EventEnvelope {
                             schema_version: 1, sequence: (index * 2 + offset + 1) as u64,
                             event_id: format!("event-{index}-{offset}"), session_id: "private-provider-session-canary".into(),
-                            request_id: Some(format!("request-{index}")), provider: "http-test".into(), provider_sequence: None, event,
+                            request_id: Some(format!("00000000-0000-4000-8000-{index:012x}")), provider: "http-test".into(), provider_sequence: None, event,
                         };
                     }
                 }
@@ -177,7 +178,7 @@ impl SessionControl for Control {
     }
     async fn generate(&self, input: Vec<InputItem>) -> crate::Result<RequestReceipt> {
         let mut inputs = self.inputs.lock().unwrap();
-        let request_id = format!("request-{}", inputs.len());
+        let request_id = format!("00000000-0000-4000-8000-{:012x}", inputs.len());
         inputs.push(input);
         if matches!(self.mode, Mode::Model) {
             return Err(GatewayError::Protocol("private-format-canary"));

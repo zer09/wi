@@ -91,6 +91,97 @@ impl SessionHandle {
         self.inner.lifecycle.admit().map(ExecutionHold)
     }
 
+    pub async fn conversation_page(
+        &self,
+        query: crate::conversation::ConversationQuery,
+    ) -> std::result::Result<crate::conversation::ConversationPage, ConversationError> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                let _lock = inner.session_lock(&id).await;
+                let (mut connection, provenance) = connection(&inner, &id, false).await?;
+                let result =
+                    conversation::reads::pages::read(&mut connection, &id, &provenance, query)
+                        .await;
+                let result = match result {
+                    Err(ConversationError::Storage(error)) => Err(error),
+                    value => Ok(value),
+                };
+                database::finish_read(connection, &inner.lifecycle, result).await
+            })
+            .await?
+    }
+
+    pub async fn conversation_changes(
+        &self,
+        after: crate::conversation::LiveCursor,
+    ) -> std::result::Result<crate::conversation::ConversationChanges, ConversationError> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                #[cfg(test)]
+                test_hooks::latency::display();
+                #[cfg(test)]
+                let _wait_time = test_hooks::latency::span(test_hooks::latency::Stage::DisplayWait);
+                let _lock = inner.session_lock(&id).await;
+                #[cfg(test)]
+                drop(_wait_time);
+                #[cfg(test)]
+                let _held_time = test_hooks::latency::span(test_hooks::latency::Stage::DisplayHeld);
+                let (mut connection, provenance) = connection(&inner, &id, false).await?;
+                let result =
+                    conversation::reads::changes::read(&mut connection, &id, &provenance, after)
+                        .await;
+                let result = match result {
+                    Err(ConversationError::Storage(error)) => Err(error),
+                    value => Ok(value),
+                };
+                database::finish_read(connection, &inner.lifecycle, result).await
+            })
+            .await?
+    }
+
+    pub async fn conversation_entry(
+        &self,
+        run_id: RunId,
+        entry_id: crate::conversation::EntryId,
+    ) -> std::result::Result<crate::conversation::EntryPage, ConversationError> {
+        self.conversation_read(conversation::reads::Address::Entry(run_id, entry_id))
+            .await
+    }
+
+    pub async fn conversation_content(
+        &self,
+        cursor: crate::conversation::ContentCursor,
+    ) -> std::result::Result<crate::conversation::EntryPage, ConversationError> {
+        self.conversation_read(conversation::reads::Address::Content(cursor))
+            .await
+    }
+
+    async fn conversation_read(
+        &self,
+        address: conversation::reads::Address,
+    ) -> std::result::Result<crate::conversation::EntryPage, ConversationError> {
+        let id = self.id.clone();
+        self.inner
+            .clone()
+            .operation(false, move |inner| async move {
+                let _lock = inner.session_lock(&id).await;
+                let (mut connection, provenance) = connection(&inner, &id, false).await?;
+                let result =
+                    conversation::reads::read(&mut connection, &id, &provenance, address).await;
+                // Keep the existing storage retirement path without generalizing operation errors.
+                let result = match result {
+                    Err(ConversationError::Storage(error)) => Err(error),
+                    value => Ok(value),
+                };
+                database::finish_read(connection, &inner.lifecycle, result).await
+            })
+            .await?
+    }
+
     pub async fn manifest(&self) -> Result<SessionManifest> {
         let id = self.id.clone();
         self.inner
@@ -260,7 +351,13 @@ impl SessionHandle {
                 test_hooks::select_record(&operation, &mutation);
                 // A dropped SQL waiter must not release the acceptance lock before commit.
                 let _acceptance = acceptance;
+                #[cfg(test)]
+                let _wait_time = test_hooks::latency::span(test_hooks::latency::Stage::SessionWait);
                 let _lock = inner.session_lock(&id).await;
+                #[cfg(test)]
+                drop(_wait_time);
+                #[cfg(test)]
+                let _held_time = test_hooks::latency::span(test_hooks::latency::Stage::SessionHeld);
                 let (mut connection, provenance) = connection(&inner, &id, true)
                     .await
                     .map_err(StorageError::not_committed)?;
@@ -449,6 +546,9 @@ pub(super) async fn open(
     if version == 1 {
         migration::migrate(&inner, &provenance).await?;
     }
+    if version <= 2 {
+        migration::project(&inner, &provenance).await?;
+    }
     let path = filesystem::session_path(&inner.root, &id, false)?;
     let mut connection = database::open(&path, false, &inner.lifecycle).await?;
     let result = interruption::reconcile(&mut connection, &provenance, &inner.instance_id).await;
@@ -461,6 +561,8 @@ pub(super) async fn connection(
     id: &ApplicationSessionId,
     writable: bool,
 ) -> Result<(SqliteConnection, CreationProvenance)> {
+    #[cfg(test)]
+    let _setup_time = test_hooks::latency::span(test_hooks::latency::Stage::SessionSetup);
     let entry = catalog_ops::entry(inner, id).await?;
     match entry.summary.availability() {
         SessionAvailability::Ready => {}
@@ -477,7 +579,14 @@ pub(super) async fn connection(
     }
     let provenance = entry.reservation.provenance;
     let path = filesystem::session_path(&inner.root, id, false)?;
+    #[cfg(test)]
+    let _open_time = test_hooks::latency::span(test_hooks::latency::Stage::ReadOnlyOpen);
     let mut connection = database::open(&path, true, &inner.lifecycle).await?;
+    #[cfg(test)]
+    drop(_open_time);
+    #[cfg(test)]
+    let _validation_time =
+        test_hooks::latency::span(test_hooks::latency::Stage::ConnectionValidation);
     let result = async {
         let manifest = session_schema::validate(&mut connection, id, Some(&provenance)).await?;
         let version = session_schema::version(&mut connection).await?;
@@ -491,10 +600,19 @@ pub(super) async fn connection(
         Ok(())
     }
     .await;
+    #[cfg(test)]
+    drop(_validation_time);
     if !writable && result.is_ok() {
         return Ok((connection, provenance));
     }
+    #[cfg(test)]
+    let _retirement_time =
+        test_hooks::latency::span(test_hooks::latency::Stage::ReadOnlyRetirement);
     database::finish_read(connection, &inner.lifecycle, result).await?;
+    #[cfg(test)]
+    drop(_retirement_time);
+    #[cfg(test)]
+    let _open_time = test_hooks::latency::span(test_hooks::latency::Stage::WritableOpen);
     database::open(&path, false, &inner.lifecycle)
         .await
         .map(|connection| (connection, provenance))
@@ -598,6 +716,9 @@ pub(super) async fn rename_transaction(
         if matches!(fault, Some(RenameFault::AfterEvent)) { return Err(StorageError::new(StorageErrorKind::Io)); }
         sqlx::query("UPDATE manifest SET title=?, updated_at_ms=?, head_sequence=? WHERE singleton=1")
             .bind(title).bind(timestamp).bind(sequence).execute(&mut *transaction).await.map_err(database::error)?;
+        conversation::projector::apply(&mut transaction, conversation::projector::Event {
+            sequence: sequence as u64, run: None, input: conversation::projector::Input::Renamed,
+        }).await?;
         #[cfg(test)]
         if matches!(fault, Some(RenameFault::AfterManifest)) { return Err(StorageError::new(StorageErrorKind::Io)); }
         sqlx::query("INSERT INTO commands (operation_id, method, payload_hash, first_sequence, last_sequence, receipt_json) VALUES (?, 'rename', ?, ?, ?, ?)")

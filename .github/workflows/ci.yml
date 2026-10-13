@@ -21,3 +21,26 @@ jobs:
       - run: cargo build --all-targets
       - run: cargo test --doc
       # No login, provider credentials, or live model requests in CI.
+
+  browser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+      - run: cargo test --lib --no-run --locked
+        working-directory: .
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps chromium
+      - run: npm run typecheck
+      - run: npm run verify:assets
+      - run: npm test
+      - name: Publish browser fixture executable
+        run: |
+          node --input-type=module -e 'import { appendFileSync } from "node:fs"; import { discoverFixture } from "./test-support/fixture.mjs"; appendFileSync(process.env.GITHUB_ENV, `WI_C3A_FIXTURE=${await discoverFixture()}\n`);'
+      - run: npm run test:e2e

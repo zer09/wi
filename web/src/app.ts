@@ -1,10 +1,10 @@
-import { createClient } from './client.js';
-import { mountView, parseSessionHash, sessionHash, supportedOrigin } from './view.js';
+import { createDisplayClient } from './display-client.js';
+import { mountDisplayView, parseSessionHash, sessionHash, supportedOrigin } from './display-view.js';
 
 const root = document.getElementById('app');
 if (root !== null) {
-  const client = createClient();
-  const view = mountView(root, client, sid => {
+  const client = createDisplayClient();
+  const view = mountDisplayView(root, client, sid => {
     const hash = sessionHash(sid);
     if (window.location.hash === hash) readHash();
     else window.location.hash = hash;

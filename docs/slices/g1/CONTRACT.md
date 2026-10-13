@@ -53,7 +53,7 @@ Fixed observation settings, not run limits:
 - At most **512 KiB encoded JSON** per conversation page or live batch.
 - At most **32 KiB encoded JSON** per compact entry/anchor fragment, including its metadata/cursors.
 - Stored text chunks at most **8 KiB of UTF-8 bytes**, cut on scalar boundaries.
-These settings bound one response/read. They never reject, truncate or delete canonical work and never stop a task. Exact serialized overhead counts. SCHEMA/CLIENT_PROTOCOL define mandatory progress for long content and many fields.
+These settings bound one response/read. They never reject, truncate or delete valid canonical work and never stop a task because content is large. Identifier validity is separate: the owner's October 1 amendment requires rejecting malformed new IDs, not paging them. See IDENTIFIERS.md. Exact serialized overhead counts. SCHEMA/CLIENT_PROTOCOL define mandatory progress for long content and many fields. The owner approved an explicit display-read error for a genuinely oversized legacy mandatory header that cannot fit even after progress-preserving fragment reduction. This does not classify the canonical record as corruption or authorize omission, block skipping, rewriting or a task failure; raw history remains unchanged. See IDENTIFIERS.md.
 
 Backward membership uses immutable positions. Page contents are current as of each page's own snapshot head, not an indefinitely retained database transaction or invented time-travel snapshot. Newer writes cannot shift older membership. Replacements invalidate only incompatible content cursors. No cursor expiry timer or history retention is added.
 
@@ -87,7 +87,7 @@ Literal-loopback HTTP is a NORMAL local mode, not a requirement to install HTTPS
 
 ## 8. Compatibility and migration
 
-Session schema advances to **3** only to add display projections. Catalog1, stored1, runtime2, provider1 and existing HTTP API1 remain. New display protocol is separately `conversation_version:1`. Preserve raw /history and /events for existing callers, and preserve all old mutation routes and result/error semantics.
+Session schema advances to **3** only to add display projections. Catalog1, stored1, runtime2, provider1 and existing HTTP API1 remain. The October 1 identifier amendment tightens new-input admission without changing these versions or public shapes. Request IDs require canonical 36-character non-nil UUID spelling at producer and storage boundaries, including RunFinished summaries and direct RunResult appends. Historical decoding and canonical bytes remain unchanged. IDENTIFIERS.md records other identifier rules and unresolved external-format/existing-data decisions. New display protocol is separately `conversation_version:1`. Preserve raw /history and /events for existing callers, and preserve all old mutation routes and result/error semantics.
 
 Existing schema1/2 sessions upgrade once during explicit open under existing ownership. Schema1 first uses the existing 1->2 migration, then 2->3. Initial backfill is the documented exception to no event reduction on reads. The browser shows Preparing conversation during first-open upgrade; measure it separately. After successful upgrade, opening/paging cannot repeatedly backfill. Do not scan/upgrade every session merely to list the catalog. No provider/tool execution, account assignment or old-file overwrite occurs in upgrade. Details and failure rules are in SCHEMA.md.
 

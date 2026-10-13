@@ -20,7 +20,7 @@ Retain one fetch-based standard SSE decoder, already present and tested, because
 
 ## Request and data boundary
 
-All old and new `/v1` reads/writes/streams/reconciliation remain protected by the existing bearer, exact Host/absolute-authority and Origin checks. Existing input/media/body/workspace protections remain. The public exception is only the exact compiled-in page/assets after Host/Origin validation. No directory server, dynamic HTML containing credentials, arbitrary file endpoint or SPA fallback.
+All old and new `/v1` reads/writes/streams/reconciliation remain protected by the existing bearer, exact Host/absolute-authority and Origin checks. Existing input/media/body/workspace protections remain. The October 1 identifier amendment rejects malformed new Wi-owned identifiers at producer and storage boundaries with static diagnostics, never the rejected ID. Preserve historical canonical bytes and existing provider-native/authentication rules; see IDENTIFIERS.md for unresolved external-format and compatibility decisions. The public exception is only the exact compiled-in page/assets after Host/Origin validation. No directory server, dynamic HTML containing credentials, arbitrary file endpoint or SPA fallback.
 
 Projection metadata and HTTP payloads must not serialize raw StoredEvent, RecordedRunInput, ModelResponse.native, provider binding, account digest, prepared instructions or internal tool definitions. Extract only explicitly allowed display scalars. The original task text and actual tool result can legitimately contain private user content; excluding internal credentials is not a claim that conversations are public.
 

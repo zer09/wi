@@ -392,7 +392,12 @@ test('each numeric DTO field uses its source range, not a JavaScript Number', ()
       if (key.endsWith('_sequence') || ['sequence', 'created_at_ms', 'updated_at_ms'].includes(key)) {
         const copy = structuredClone(fixture);
         at(copy, path.slice(0, -1))[key] = '9223372036854775808';
-        rejects(() => validate(copy));
+        if (name === 'SessionView' && key === 'head_sequence') {
+          // SessionManifest exposes u64; raw history/receipt positions retain their existing i64 guard.
+          assert.deepEqual(validate(copy), copy);
+        } else {
+          rejects(() => validate(copy));
+        }
       }
     }
   }

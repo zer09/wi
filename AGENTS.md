@@ -2,6 +2,14 @@
 
 Updated September29,2026. Accepted master is76bb32fd04fd4737c0efcceaabc7d10387453147. PR #10 contains an unaccepted implementation checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579. The owner approved replacing the rejected history design and resuming local implementation under **g1.1**. This is not G1 acceptance or merge authorization.
 
+## Current continuation checkpoint
+
+The latest transfer handoff is [C49 reviewed continuation](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md), with its [fresh-agent prompt](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume-prompt.md). Its bounded next task is now completed: [C50 same-H interrupted parity](docs/slices/g1/C3B_INTERRUPTED_DISPLAY_PARITY.md) passed one15.9s Chromium case and both scoped reviews. C43-C49 results and failures remain preserved; do not replay completed cases or restart the architecture. All40 G11 rows remain PARTIAL, accepted=false. C15/active1 remain owner-deferred; keep the application reader unchanged. Preserve failed roles and separately supplied diagnostic work. C50 authorizes no next increment. Verify current Git/evidence/environment state before any separately authorized continuation. A handoff alone grants no implementation or Git authority.
+
+## Current delegate execution policy
+
+For NEW wi assignments issued from October 11, 2026, after owner approval, follow [Delegate execution policy](docs/DELEGATE_EXECUTION.md). It supersedes older all-command literal-prefix and permanently fatal harmless-diagnostic rules prospectively only. Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged. Explicit acceptance requirements and explicitly terminal rules remain mandatory.
+
 ## Read first
 
 Read docs/slices/g1/CONTRACT.md, SCHEMA.md, RUST_API.md, CLIENT_PROTOCOL.md, SECURITY.md, MATRIX.md, DISPOSITION.md, VALIDATION.md and IMPLEMENTOR_PROMPT.md. Then read the historical VERIFICATION.md/verification.json/DESIGN_REVIEW.md and current applicable source/platform documents. Old pause/continuation handoffs and g1.0 prompts remain historical; their blocked full-prefix/Window B requirements are superseded by g1.1.

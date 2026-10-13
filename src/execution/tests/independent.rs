@@ -113,7 +113,10 @@ fn assert_trace(rig: &Rig, history: &[StoredEvent], model: &ModelResponse, compl
                         );
                         assert!(
                             source.request_id.as_deref()
-                                == Some(&format!("{}1", rig.script.source.request_prefix))
+                                == Some(&format!(
+                                    "{}000000000001",
+                                    rig.script.source.request_prefix
+                                ))
                         );
                         assert!(event.session_id.as_deref() == Some(source.session_id.as_str()));
                         assert!(event.request_id == source.request_id);
@@ -167,7 +170,10 @@ fn assert_trace(rig: &Rig, history: &[StoredEvent], model: &ModelResponse, compl
                         assert!(event.turn_id == turn_id);
                         assert!(
                             event.request_id.as_deref()
-                                == Some(&format!("{}1", rig.script.source.request_prefix))
+                                == Some(&format!(
+                                    "{}000000000001",
+                                    rig.script.source.request_prefix
+                                ))
                         );
                         kinds.push("turn_finished");
                     }
@@ -177,7 +183,10 @@ fn assert_trace(rig: &Rig, history: &[StoredEvent], model: &ModelResponse, compl
                         assert!(event.turn_id.is_none());
                         assert!(
                             event.request_id.as_deref()
-                                == Some(&format!("{}1", rig.script.source.request_prefix))
+                                == Some(&format!(
+                                    "{}000000000001",
+                                    rig.script.source.request_prefix
+                                ))
                         );
                         kinds.push("finished");
                     }
@@ -386,7 +395,7 @@ impl Rig {
         let script = Arc::new(Script {
             source: SourceIds {
                 session: "provider-session-b",
-                request_prefix: "b-q",
+                request_prefix: "b0000000-0000-4000-8000-",
                 event_prefix: "b-source-",
             },
             binding: binding.clone(),

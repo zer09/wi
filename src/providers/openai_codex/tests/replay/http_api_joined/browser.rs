@@ -13,6 +13,8 @@ mod acceptance_warning;
 mod account_mismatch;
 #[path = "browser/cancellation.rs"]
 mod cancellation;
+#[path = "browser/failure_tests.rs"]
+mod failure_tests;
 #[path = "browser/fixed_head.rs"]
 mod fixed_head;
 #[path = "browser/input_framing.rs"]
@@ -23,10 +25,10 @@ mod lifecycle_failure;
 mod mutations;
 #[path = "browser/presentation.rs"]
 mod presentation;
-#[path = "browser/read_reconnect.rs"]
-mod read_reconnect;
 #[path = "browser/replay_head.rs"]
 mod replay_head;
+#[path = "browser/restart.rs"]
+mod restart;
 #[path = "browser/task.rs"]
 mod task;
 #[path = "browser/tool_fidelity.rs"]
@@ -45,6 +47,13 @@ const ANSWERS: [&str; 2] = [
 const ARGUMENTS: [&str; 2] = ["{\"a\":17,\r\n \"b\":25}", "{\"a\":42,\r\n \"b\":8}"];
 const OUTPUTS: [&str; 2] = ["{\"sum\":42}", "{\"sum\":50}"];
 const LIMIT: u64 = 4096;
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum FinalPolling {
+    Baseline,
+    Incremental,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,12 +77,44 @@ struct Start {
     #[serde(default)]
     cancellation: bool,
     #[serde(default)]
-    read_reconnect: bool,
+    gate11_diagnostics: bool,
+    #[serde(default)]
+    native_latency: bool,
+    #[serde(default, deserialize_with = "final_polling")]
+    final_polling: Option<FinalPolling>,
     owner: String,
+}
+
+fn final_polling<'de, D: serde::Deserializer<'de>>(
+    input: D,
+) -> std::result::Result<Option<FinalPolling>, D::Error> {
+    FinalPolling::deserialize(input).map(Some)
 }
 
 impl Start {
     fn validate(&self) {
+        assert!(
+            self.final_polling.is_none() || (self.native_latency && self.gate11_diagnostics),
+            "fixture polling mode rejected"
+        );
+        assert!(
+            !self.native_latency || self.gate11_diagnostics,
+            "fixture latency mode rejected"
+        );
+        assert!(
+            !self.gate11_diagnostics
+                || (self.presentation
+                    && !self.mutations
+                    && !self.unbound_history
+                    && !self.fixed_head
+                    && !self.tool_fidelity
+                    && !self.lifecycle_failure
+                    && !self.cancellation
+                    && self.transport == Transport::WebSocket
+                    && !self.recovered
+                    && self.mime),
+            "fixture diagnostic mode rejected"
+        );
         assert!(
             self.id > 0
                 && self.owner.len() == 64
@@ -81,20 +122,6 @@ impl Start {
                     .owner
                     .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-            "fixture start rejected"
-        );
-        assert!(
-            !self.read_reconnect
-                || (!self.cancellation
-                    && !self.lifecycle_failure
-                    && !self.tool_fidelity
-                    && !self.mutations
-                    && !self.presentation
-                    && !self.unbound_history
-                    && !self.fixed_head
-                    && self.transport == Transport::WebSocket
-                    && !self.recovered
-                    && self.mime),
             "fixture start rejected"
         );
         assert!(
@@ -178,6 +205,13 @@ enum Control {
     Inspect {
         id: u32,
     },
+    Gate11Diagnostic {
+        id: NonZeroU32,
+    },
+    Gate11Latency {
+        id: NonZeroU32,
+        page: u16,
+    },
     InspectMutations {
         id: u32,
     },
@@ -186,15 +220,6 @@ enum Control {
     },
     InspectToolFidelity {
         id: NonZeroU32,
-    },
-    ReadReconnect {
-        id: NonZeroU32,
-        step: read_reconnect::Step,
-        window: u8,
-        subscription: u64,
-        session_id: ApplicationSessionId,
-        run_id: RunId,
-        operation_id: OperationId,
     },
     ArmCancellation {
         id: NonZeroU32,
@@ -250,7 +275,6 @@ impl Control {
             | Self::ArmAcceptanceWarning { id }
             | Self::RotateAccount { id }
             | Self::InspectToolFidelity { id }
-            | Self::ReadReconnect { id, .. }
             | Self::ArmCancellation { id }
             | Self::WaitCancellationPending { id, .. }
             | Self::WaitCancellation { id }
@@ -260,7 +284,9 @@ impl Control {
             | Self::WaitLifecycleFailure { id, .. }
             | Self::ReleaseLifecycleFailure { id, .. }
             | Self::InspectLifecycleFailure { id }
-            | Self::ReplayHead { id, .. } => id.get(),
+            | Self::ReplayHead { id, .. }
+            | Self::Gate11Diagnostic { id }
+            | Self::Gate11Latency { id, .. } => id.get(),
             Self::Select { id, .. }
             | Self::ArmAcceptance { id }
             | Self::WaitAcceptance { id }
@@ -283,6 +309,57 @@ fn emit(mut value: Value) {
     out.write_all(&bytes).unwrap();
     out.write_all(b"\n").unwrap();
     out.flush().unwrap();
+}
+
+// These labels are the entire terminal diagnostic vocabulary. Never send panic text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FixtureFailure {
+    ConnectBusy,
+    ConnectOther,
+    EventsQueryBusy,
+    EventsQueryOther,
+    EventsDecode,
+    ReceiptsQueryBusy,
+    ReceiptsQueryOther,
+    ReceiptsDecode,
+    SelectionInvariant,
+    ControlOther,
+}
+impl FixtureFailure {
+    fn labels(self) -> (&'static str, &'static str) {
+        match self {
+            Self::ConnectBusy => ("connect", "connect_busy"),
+            Self::ConnectOther => ("connect", "connect_other"),
+            Self::EventsQueryBusy => ("events_query", "query_busy"),
+            Self::EventsQueryOther => ("events_query", "query_other"),
+            Self::EventsDecode => ("events_decode", "decode"),
+            Self::ReceiptsQueryBusy => ("receipts_query", "query_busy"),
+            Self::ReceiptsQueryOther => ("receipts_query", "query_other"),
+            Self::ReceiptsDecode => ("receipts_decode", "decode"),
+            Self::SelectionInvariant => ("selection", "invariant"),
+            Self::ControlOther => ("unknown", "control_other"),
+        }
+    }
+}
+
+fn caught_failure(payload: &(dyn std::any::Any + Send)) -> FixtureFailure {
+    payload
+        .downcast_ref::<FixtureFailure>()
+        .copied()
+        .unwrap_or(FixtureFailure::ControlOther)
+}
+
+fn emit_failure(out: &mut impl Write, failure: FixtureFailure) {
+    let (phase, category) = failure.labels();
+    // A closed output pipe must not interrupt native teardown.
+    if let Ok(bytes) = serde_json::to_vec(
+        &json!({"protocol":1,"event":"fixture_failed","phase":phase,"category":category}),
+    ) {
+        let _ = out
+            .write_all(&bytes)
+            .and_then(|_| out.write_all(b"\n"))
+            .and_then(|_| out.flush());
+    }
 }
 
 async fn control<T: serde::de::DeserializeOwned>(
@@ -318,6 +395,7 @@ struct Proof {
     provider_failed: bool,
     mismatch_armed: bool,
     mismatch_closed: bool,
+    diagnostic: Option<Arc<presentation::Trace>>,
 }
 
 #[derive(Clone)]
@@ -345,44 +423,67 @@ impl Database {
             .disable_statement_logging()
             .connect()
             .await
-            .unwrap_or_else(|error| {
-                *self.read_failure.lock().unwrap() = Some(
-                    if matches!(
-                        error.as_database_error().and_then(|e| e.code()).as_deref(),
-                        Some("5" | "6" | "261" | "517")
-                    ) {
-                        "connect_busy"
-                    } else {
-                        "connect_other"
-                    },
-                );
-                panic!("fixture database read failed");
-            });
-        assert!(self.reader.lock().await.replace(reader).is_none());
-        assert!(self.session.lock().unwrap().replace(sid).is_none());
-        assert_eq!(self.records().await.len(), 1);
+            .unwrap_or_else(|error| self.sql_failure(error, "connect"));
+        if self.reader.lock().await.replace(reader).is_some()
+            || self.session.lock().unwrap().replace(sid).is_some()
+            || self.records().await.len() != 1
+        {
+            std::panic::panic_any(FixtureFailure::SelectionInvariant);
+        }
     }
 
     async fn records(&self) -> Vec<StoredEvent> {
         let Some(sid) = self.session.lock().unwrap().clone() else {
             return vec![];
         };
+        use crate::storage::test_hooks::latency::{self, Stage};
+        let _lock_time = latency::span(Stage::ReaderLock);
         let mut reader = self.reader.lock().await;
+        drop(_lock_time);
+        let _fetch_time = latency::marker(latency::FETCH);
         let rows = sqlx::query("SELECT sequence,event_id,event_type,event_version,created_at_ms,run_id,payload_json FROM events ORDER BY sequence")
-            .fetch_all(reader.as_mut().unwrap()).await.unwrap_or_else(|error| {
-                *self.read_failure.lock().unwrap() = Some(if matches!(error.as_database_error().and_then(|e| e.code()).as_deref(), Some("5" | "6" | "261" | "517")) {
-                    "query_busy"
-                } else {
-                    "query_other"
-                });
-                panic!("fixture database read failed");
-            });
+            .fetch_all(reader.as_mut().unwrap()).await.unwrap_or_else(|error| self.sql_failure(error, "events_query"));
+        latency::work(latency::FETCHED_ROWS, rows.len() as u64);
+        drop(_fetch_time);
+        self.decode_rows(sid, rows)
+    }
+
+    async fn records_after(&self, after: u64) -> Vec<StoredEvent> {
+        let sid = self.session.lock().unwrap().clone().unwrap();
+        use crate::storage::test_hooks::latency::{self, Stage};
+        let _lock_time = latency::span(Stage::ReaderLock);
+        let mut reader = self.reader.lock().await;
+        drop(_lock_time);
+        let _fetch_time = latency::marker(latency::FETCH);
+        let rows = sqlx::query("SELECT sequence,event_id,event_type,event_version,created_at_ms,run_id,payload_json FROM events WHERE sequence > ? ORDER BY sequence")
+            .bind(i64::try_from(after).unwrap())
+            .fetch_all(reader.as_mut().unwrap()).await.unwrap_or_else(|error| self.sql_failure(error, "events_query"));
+        latency::work(latency::FETCHED_ROWS, rows.len() as u64);
+        drop(_fetch_time);
+        self.decode_rows(sid, rows)
+    }
+
+    fn decode_rows(
+        &self,
+        sid: ApplicationSessionId,
+        rows: Vec<sqlx::sqlite::SqliteRow>,
+    ) -> Vec<StoredEvent> {
+        use crate::storage::test_hooks::latency;
+        let _reconstruction_time = latency::marker(latency::RECONSTRUCT);
         rows.into_iter().map(|row| {
-            let payload: Value = serde_json::from_str(row.get::<&str,_>("payload_json")).unwrap();
-            serde_json::from_value(json!({"schema_version":1,"application_session_id":sid,
-                "sequence":row.get::<i64,_>("sequence"),"event_id":row.get::<String,_>("event_id"),
-                "event_type":row.get::<String,_>("event_type"),"event_version":row.get::<i64,_>("event_version"),
-                "created_at_ms":row.get::<i64,_>("created_at_ms"),"run_id":row.get::<Option<String>,_>("run_id"),"payload":payload})).unwrap()
+            let decoded = (|| -> std::result::Result<StoredEvent, Box<dyn std::error::Error>> {
+                let payload: Value = serde_json::from_str(row.try_get::<&str,_>("payload_json")?)?;
+                Ok(serde_json::from_value(json!({"schema_version":1,"application_session_id":sid,
+                    "sequence":row.try_get::<i64,_>("sequence")?,"event_id":row.try_get::<String,_>("event_id")?,
+                    "event_type":row.try_get::<String,_>("event_type")?,"event_version":row.try_get::<i64,_>("event_version")?,
+                    "created_at_ms":row.try_get::<i64,_>("created_at_ms")?,"run_id":row.try_get::<Option<String>,_>("run_id")?,"payload":payload}))?)
+            })();
+            let record = decoded.unwrap_or_else(|_| {
+                latency::fail();
+                std::panic::panic_any(FixtureFailure::EventsDecode)
+            });
+            latency::work(latency::DECODED_ROWS, 1);
+            record
         }).collect()
     }
 
@@ -392,13 +493,34 @@ impl Database {
             return vec![];
         };
         let rows: Vec<String> = sqlx::query_scalar("SELECT receipt_json FROM commands WHERE method='accept_history_run' ORDER BY first_sequence")
-            .fetch_all(reader).await.unwrap();
+            .fetch_all(reader).await.unwrap_or_else(|error| self.sql_failure(error, "receipts_query"));
         rows.into_iter()
             .map(|row| {
-                let receipt: crate::storage::CommitReceipt = serde_json::from_str(&row).unwrap();
-                serde_json::to_value(crate::http_api::dto::ReceiptView::from(&receipt)).unwrap()
+                let receipt: crate::storage::CommitReceipt = serde_json::from_str(&row)
+                    .unwrap_or_else(|_| std::panic::panic_any(FixtureFailure::ReceiptsDecode));
+                serde_json::to_value(crate::http_api::dto::ReceiptView::from(&receipt))
+                    .unwrap_or_else(|_| std::panic::panic_any(FixtureFailure::ReceiptsDecode))
             })
             .collect()
+    }
+
+    fn sql_failure(&self, error: sqlx::Error, phase: &'static str) -> ! {
+        let busy = matches!(
+            error.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("5" | "6" | "261" | "517")
+        );
+        let failure = match (phase, busy) {
+            ("connect", true) => FixtureFailure::ConnectBusy,
+            ("connect", false) => FixtureFailure::ConnectOther,
+            ("events_query", true) => FixtureFailure::EventsQueryBusy,
+            ("events_query", false) => FixtureFailure::EventsQueryOther,
+            ("receipts_query", true) => FixtureFailure::ReceiptsQueryBusy,
+            ("receipts_query", false) => FixtureFailure::ReceiptsQueryOther,
+            _ => unreachable!(),
+        };
+        *self.read_failure.lock().unwrap() = Some(failure.labels().1);
+        // The marker travels with this unwind, independently of provider-task reads.
+        std::panic::panic_any(failure);
     }
 
     async fn inspect(&self, id: u32, proof: &Mutex<Proof>, auth: &CountedAuth) -> Value {
@@ -474,6 +596,7 @@ async fn provider(
     mime: bool,
     (presentation, mutations, fixed_head): (bool, bool, bool),
 ) {
+    let diagnostic = proof.lock().unwrap().diagnostic.clone();
     let mut prior = vec![];
     let mut old_key = Value::Null;
     for task in 0..if mutations { 1 } else { 2 } {
@@ -614,6 +737,15 @@ async fn provider(
             } else {
                 task * 2 + turn + 1
             };
+            let cursor = if presentation {
+                presentation::ordinary_cursor(gate, &records, diagnostic.as_deref())
+            } else {
+                None
+            };
+            if let Some(trace) = presentation::gate_trace(diagnostic.as_deref(), gate) {
+                // Reuse the already validated request records, not a new gate10 history query.
+                trace.bind_prefix(&records, &final_id);
+            }
             {
                 let mut p = proof.lock().unwrap();
                 p.prepared_exact += 1;
@@ -621,6 +753,10 @@ async fn provider(
             }
             emit(json!({"event":"model_paused","gate":gate}));
             assert_eq!(watch(drive.recv()).await, Some(gate));
+            let trace = presentation::gate_trace(diagnostic.as_deref(), gate);
+            if let Some(trace) = trace {
+                trace.consumed();
+            }
             let (id, items) = if turn == 0 {
                 (parent.as_str(), calls.clone())
             } else {
@@ -630,9 +766,19 @@ async fn provider(
             if presentation {
                 let mut partial = vec![reply.remove(0)];
                 partial.extend(presentation::partial(id, task, turn));
-                presentation::reply(&mut wire, &db, id, partial).await;
+                presentation::reply(&mut wire, &db, id, partial, trace, cursor).await;
                 proof.lock().unwrap().gate = Some(gate + 1);
+                if let Some(collector) = trace.and_then(|t| t.latency.as_ref()) {
+                    collector.freeze();
+                }
+                if let Some(trace) = trace {
+                    trace.gate(0);
+                    trace.gate(1);
+                }
                 emit(json!({"event":"model_paused","gate":gate + 1}));
+                if let Some(trace) = trace {
+                    trace.gate(2);
+                }
                 assert_eq!(watch(drive.recv()).await, Some(gate + 1));
                 // Keep item replacement observable before response authority and tool execution.
                 wire.reply(presentation::done(id, &items), None).await;
@@ -648,7 +794,7 @@ async fn provider(
                 if mutations {
                     // Let Chromium apply the real provisional text before the final snapshot.
                     let terminal = reply.split_off(3);
-                    presentation::reply(&mut wire, &db, id, reply).await;
+                    presentation::reply(&mut wire, &db, id, reply, None, None).await;
                     reply = terminal;
                     proof.lock().unwrap().gate = Some(3);
                     emit(json!({"event":"model_paused","gate":3}));
@@ -787,6 +933,10 @@ async fn child() {
     // Even a failed wire assertion must never print request bodies or credentials.
     std::panic::set_hook(Box::new(|_| eprintln!("browser_fixture.failure")));
     let mut input = tokio::io::BufReader::new(tokio::io::stdin());
+    if restart::selected() {
+        restart::child(&mut input).await;
+        return;
+    }
     let start: Start = control(&mut input).await;
     start.validate();
     let temp = tempfile::tempdir().unwrap();
@@ -868,7 +1018,6 @@ async fn child() {
         .lifecycle_failure
         .then(lifecycle_failure::Audit::default);
     let mut cancellation_audit = start.cancellation.then(cancellation::Audit::default);
-    let mut reconnect = start.read_reconnect.then(read_reconnect::Audit::default);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let mut options = SessionOptions::new(MODEL);
@@ -908,18 +1057,16 @@ async fn child() {
     };
     let stop = CancellationToken::new();
     let config = ApiConfig::new(settings, OwnerToken::load(&token).unwrap());
-    let server = if let Some(audit) = &reconnect {
-        tokio::spawn(crate::http_api::serve_with_event_faults(
-            listener,
-            host,
-            config,
-            stop.clone(),
-            audit.faults.clone(),
-        ))
-    } else {
-        tokio::spawn(serve(listener, host, config, stop.clone()))
-    };
+    let server = tokio::spawn(serve(listener, host, config, stop.clone()));
     let proof = Arc::new(Mutex::new(Proof::default()));
+    let mut diagnostic = presentation::new_trace(start.gate11_diagnostics);
+    if let Some(trace) = diagnostic.as_mut() {
+        Arc::get_mut(trace).unwrap().polling = start.final_polling;
+    }
+    if start.native_latency {
+        Arc::get_mut(diagnostic.as_mut().unwrap()).unwrap().latency = Some(hooks.enable_latency());
+    }
+    proof.lock().unwrap().diagnostic = diagnostic.clone();
     let (drive, driven) = mpsc::channel(1);
     let provider_db = db.clone();
     let provider_proof = proof.clone();
@@ -929,10 +1076,6 @@ async fn child() {
             let _ = wire.listener.accept().await.unwrap();
             provider_proof.lock().unwrap().connections += 1;
             panic!("unbound-history unexpected provider connection");
-        }
-        if start.read_reconnect {
-            read_reconnect::provider(wire, provider_db, provider_proof, driven).await;
-            return;
         }
         if start.cancellation {
             cancellation::provider(wire, provider_db, provider_proof).await;
@@ -966,6 +1109,7 @@ async fn child() {
     let mut account_mismatch = account_mismatch::Gate::default();
     let mut incompatible_mismatch_control = false;
     let mut last_control_id = start.id;
+    let mut latency_page = 0;
     let mut other_task_control = false;
     let mut ready = json!({"id":start.id,"event":"ready","origin":origin});
     if let Some(audit) = &unbound {
@@ -991,14 +1135,6 @@ async fn child() {
                 "fixture control order rejected"
             );
             last_control_id = command.id();
-            if let Some(audit) = &mut reconnect {
-                audit.check_control(&command);
-            } else {
-                assert!(
-                    !matches!(command, Control::ReadReconnect { .. }),
-                    "fixture mode rejected"
-                );
-            }
             if let Some(audit) = &mut cancellation_audit {
                 audit.check_control(&command);
             } else {
@@ -1056,7 +1192,9 @@ async fn child() {
             match command {
                 Control::Select { id, session_id } => {
                     assert!(!acceptance_warning.armed);
-                    let sid: ApplicationSessionId = session_id.parse().unwrap();
+                    let sid: ApplicationSessionId = session_id.parse().unwrap_or_else(|_| {
+                        std::panic::panic_any(FixtureFailure::SelectionInvariant)
+                    });
                     if fixed.is_none() {
                         db.open(sid).await;
                     }
@@ -1132,8 +1270,35 @@ async fn child() {
                     assert!(!acceptance_warning.armed);
                     other_task_control = true;
                     assert_eq!(proof.lock().unwrap().gate.take(), Some(gate));
+                    if let Some(trace) = presentation::gate_trace(diagnostic.as_deref(), gate) {
+                        trace.admit();
+                    }
                     drive.send(gate).await.unwrap();
                     emit(json!({"id":id,"event":"driven"}));
+                }
+                Control::Gate11Latency { id, page } => {
+                    assert!(page <= 33 && usize::from(page) == latency_page);
+                    latency_page += 1;
+                    if let Some(collector) = diagnostic.as_ref().and_then(|t| t.latency.as_ref()) {
+                        collector.freeze();
+                        let state = collector.capture_state();
+                        if state == "captured" {
+                            let (pages, rows) = collector.page(usize::from(page)).expect("fixture latency page rejected");
+                            emit(json!({"id":id.get(),"event":"gate11_latency","state":state,"page":page,"pages":pages,"rows":rows}));
+                        } else {
+                            emit(json!({"id":id.get(),"event":"gate11_latency","state":state,"page":page,"pages":0,"rows":[]}));
+                        }
+                    } else {
+                        emit(json!({"id":id.get(),"event":"gate11_latency","state":"disabled","page":page,"pages":0,"rows":[]}));
+                    }
+                }
+                Control::Gate11Diagnostic { id } => {
+                    // In-memory only. A failed provider must not enter inspect's SQL/assertions.
+                    if let Some(trace) = &diagnostic {
+                        emit(trace.snapshot(id.get()));
+                    } else {
+                        emit(json!({"id":id.get(),"event":"gate11_diagnostic","state":"disabled","trace":null}));
+                    }
                 }
                 Control::Inspect { id } => {
                     if let Some(audit) = &fixed {
@@ -1143,15 +1308,6 @@ async fn child() {
                     } else {
                         emit(db.inspect(id, &proof, &auth).await);
                     }
-                }
-                Control::ReadReconnect { .. } => {
-                    emit(
-                        reconnect
-                            .as_mut()
-                            .unwrap()
-                            .apply(&command, &db, &lifecycle_client, &proof, &drive)
-                            .await,
-                    );
                 }
                 Control::ArmCancellation { id } => {
                     cancellation_audit
@@ -1305,13 +1461,18 @@ async fn child() {
     })
     .catch_unwind()
     .await;
+    if let Err(payload) = &result {
+        emit_failure(
+            &mut std::io::stdout().lock(),
+            caught_failure(payload.as_ref()),
+        );
+    }
     if let Some(pause) = pause {
         pause.release.notify_one();
     }
     drop(replay_head);
     drop(lifecycle_audit);
     drop(cancellation_audit);
-    drop(reconnect);
     if !provider_done {
         provider.abort();
         let _ = provider.await;

@@ -89,7 +89,7 @@ pub(super) async fn publish(
             }
             if observed.availability() != SessionAvailability::Ready
                 || observed.fault_code().is_some()
-                || !(1..=2).contains(&observed.schema_version())
+                || !(1..=3).contains(&observed.schema_version())
                 || observed.schema_version() < current.schema_version() {
                 return Err(integrity());
             }
@@ -99,8 +99,8 @@ pub(super) async fn publish(
             if current.observed_head_sequence() == observed.observed_head_sequence() {
                 if current == *observed { return Ok(RefreshResult::Unchanged); }
                 let mut upgraded = current.clone();
-                upgraded.schema_version = 2;
-                if current.schema_version() != 1 || upgraded != *observed { return Err(integrity()); }
+                upgraded.schema_version = observed.schema_version();
+                if current.schema_version() >= observed.schema_version() || upgraded != *observed { return Err(integrity()); }
             }
             let manifest = observed.observed_manifest();
             sqlx::query("UPDATE sessions SET title=?, workspace_json=?, created_at_ms=?, updated_at_ms=?, head_sequence=?, schema_version=?, last_run_id=?, last_run_state=? WHERE session_id=? AND availability='ready' AND head_sequence <= ?")

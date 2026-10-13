@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { decodeJson, validateErrorView, validateRenameView, validateSessionView } from '../dist/api.js';
+import { validateConversationPage } from '../dist/display-api.js';
 import { discoverFixture, startFixture } from '../test-support/fixture.mjs';
 import { exact } from '../test-support/joined.mjs';
-import { checkEmbeddedAssets, installStaleHistoryObserver } from '../test-support/stale-history.mjs';
+import { checkEmbeddedAssets } from '../test-support/stale-history.mjs';
 
 const { titles, renames } = JSON.parse(await readFile(new URL('../test-support/mutations.json', import.meta.url), 'utf8'));
 const TASK = '  Stale head 雪\n<em>task & inert</em>\n  ';
@@ -23,12 +25,20 @@ test('one Send rejects stale captured history after one real browser rename comm
   let sid;
   let taskPath;
   let renamePath;
-  let observed = null;
+  const observed = {
+    reply: { status: null, decoded: false, validated: false, exact: false },
+    latest: { status: null, decoded: false, validated: false, exact: false },
+    rename: { status: null, decoded: false, validated: false, exact: false },
+    manifest: { status: null, decoded: false, validated: false, exact: false },
+    counts: { task: 0, rename: 0, manifest: 0 },
+  };
+  const displayReads = [];
+  let renameReceipt;
+  let createArticle;
+  let renameArticle;
   let assetEvidence = null;
   let stage = 'startup';
   let resourceErrors = 0;
-  const forceObserverFailure = process.env.WI_STALE_HISTORY_FAIL_DEVTOOLS === '1';
-  let observerFailures = 0;
   const wire = { create: null, task: null, rename: null };
   const posts = { create: 0, task: 0, rename: 0, other: 0 };
   const faults = { external: 0, console: 0, page: 0, secret: 0, request: 0, asset: 0, response: 0 };
@@ -53,11 +63,21 @@ test('one Send rejects stale captured history after one real browser rename comm
       const url = new URL(request.url());
       if (url.origin !== fixture.origin) faults.external++;
       if (leaked(request.url())) faults.secret++;
-      if (url.pathname.startsWith('/v1/') && request.headers().authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      const headers = request.headers();
+      if (headers.cookie !== undefined || (headers.origin !== undefined && headers.origin !== fixture.origin)) faults.request++;
+      if (url.pathname.startsWith('/v1/') && headers.authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      if (/\/(history|events|operations)(\/|$)/.test(url.pathname) && !url.pathname.endsWith('/conversation/events')) faults.request++;
+      if (['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(url.pathname)) faults.request++;
       if (request.method() !== 'POST') {
         if (request.method() !== 'GET' || /\/(operations|runs)\//.test(url.pathname)) faults.request++;
+        if (url.pathname.endsWith('/conversation/events')) {
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          displayReads.push({ kind: 'events', matching_head: url.pathname === `/v1/sessions/${sid}/conversation/events`
+            && url.searchParams.size === 1 && url.searchParams.get('after') === after });
+        }
         return;
       }
+      if (headers.origin !== fixture.origin || url.search !== '') faults.request++;
       let kind;
       if (url.pathname === '/v1/sessions') kind = 'create';
       else if (url.pathname === taskPath) kind = 'task';
@@ -79,33 +99,21 @@ test('one Send rejects stale captured history after one real browser rename comm
       } catch { faults.request++; }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
-    const reads = new Set();
     context.on('response', response => {
-      const path = new URL(response.url()).pathname;
+      const url = new URL(response.url()), path = url.pathname;
       const method = response.request().method();
       if (response.status() >= 300 && !(path === taskPath && method === 'POST' && response.status() === 409)) faults.response++;
-      if (forceObserverFailure && path === taskPath && method === 'POST' && response.status() === 409) {
-        // Break only the test observer, not the response consumed by the application.
-        response.json = response.body = async () => { observerFailures++; throw new Error('forced observer failure'); };
-        const read = response.json().then(() => { faults.response++; }, () => {}).finally(() => reads.delete(read));
-        reads.add(read);
-      }
+      if (path === taskPath && method === 'POST') observed.counts.task++;
+      if (path === renamePath && method === 'POST') observed.counts.rename++;
+      if (path === `/v1/sessions/${sid}` && method === 'GET') observed.counts.manifest++;
+      if (path.endsWith('/conversation')) displayReads.push({ kind: 'latest', status: response.status(),
+        exact: path === `/v1/sessions/${sid}/conversation` && url.search === '' });
       if (files.has(path)) assets.add(path);
     });
-    await context.addInitScript(installStaleHistoryObserver, { secrets, initialTitle: titles[0], renamedTitle: renames[0] });
+    // Ordinary response observations replace the retired forced DevTools/global-fetch observer.
     page = await context.newPage();
-    async function capture() {
-      observed = await page.evaluate(() => globalThis.staleHistoryCapture.summary());
-      expect(observed.failures).toEqual([]);
-      return observed;
-    }
-    async function drain() {
-      await page.evaluate(() => globalThis.staleHistoryCapture.drain());
-      while (reads.size !== 0) await Promise.all(reads);
-      await capture();
-    }
     page.on('console', message => {
       const text = message.text();
       if (leaked(text) || leaked(message.location().url)) faults.secret++;
@@ -143,9 +151,15 @@ test('one Send rejects stale captured history after one real browser rename comm
         && entry.catalog_head_sequence === entry.sequence_count && entry.rename_events === renamed
         && entry.renames.length === renamed && entry.rename_event_ids.length === renamed
         && entry.receipt.session_id === sid && entry.receipt.operation_id === wire.create.operation_id).toBe(true);
-      if (renamed) expect(await page.evaluate(({ receipt, operation }) => globalThis.staleHistoryCapture.matchesRename(receipt, operation),
-        { receipt: entry.renames[0], operation: wire.rename.operation_id })).toBe(true);
+      if (renamed) {
+        const receipt = entry.renames[0];
+        expect(renameReceipt !== undefined && renameReceipt.operation_id === wire.rename.operation_id
+          && Object.keys(renameReceipt).length === Object.keys(receipt).length
+          && Object.keys(renameReceipt).every(key => renameReceipt[key] === receipt[key])).toBe(true);
+        expect(observed.rename.exact && observed.manifest.exact).toBe(true);
+      }
       expect(posts).toEqual({ create: 1, task: tasks, rename: renamed, other: 0 });
+      expect(displayReads).toEqual([{ kind: 'latest', status: 200, exact: true }, { kind: 'events', matching_head: true }]);
     }
     async function preserved(locator, expected, input = false) {
       expect(await locator.evaluate((node, { expected, input }) => {
@@ -154,8 +168,10 @@ test('one Send rejects stale captured history after one real browser rename comm
       }, { expected, input })).toBe(true);
     }
     const task = page.getByLabel('Task', { exact: true });
-    const command = page.locator('.command');
-    const outcome = page.locator('.commands > section > pre');
+    const command = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const renameCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^rename:/ }) });
+    const outcome = renameCommand.locator(':scope > pre');
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     const title = page.getByRole('heading', { name: 'Canonical session title', exact: true });
 
@@ -167,14 +183,39 @@ test('one Send rejects stale captured history after one real browser rename comm
     expect(await page.getByLabel('Owner token', { exact: true }).inputValue() === '').toBe(true);
     await page.getByLabel('Title', { exact: true }).fill(titles[0]);
     await page.getByRole('button', { name: 'Create session', exact: true }).click();
-    await expect.poll(async () => (await outcome.textContent()).includes('Accepted receipt (not completion)')).toBe(true);
+    await expect(createCommand.locator(':scope > pre')).toContainText('Accepted receipt (not completion)');
     const audit = await fixture.inspectMutations();
-    sid = audit.creations[0].receipt.session_id;
+    const creation = audit.creations[0].receipt;
+    expect(creation.operation_id === wire.create.operation_id && creation.run_id === null
+      && creation.first_sequence === '1' && creation.last_sequence === '1' && uuid(creation.session_id)).toBe(true);
+    sid = creation.session_id;
     taskPath = `/v1/sessions/${sid}/runs`;
     renamePath = `/v1/sessions/${sid}/rename`;
-    await page.evaluate(sid => globalThis.staleHistoryCapture.select(sid), sid);
+    await exact(createCommand.locator('h3'), 'create: accepted');
+    await exact(createCommand.locator(':scope > pre'), `Accepted receipt (not completion)\nOperation: ${wire.create.operation_id}\nSession: ${sid}\nRun: none\nSequences: 1 to 1\n\nWarning: none; duplicate: false\n\nAccepted is not completed.`);
+    createArticle = await createCommand.evaluate(node => node.outerHTML);
     await fixture.request({ command: 'select', session_id: sid });
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === `/v1/sessions/${sid}/conversation`
+        && response.request().method() === 'GET').then(async response => {
+        observed.latest.status = response.status();
+        const bytes = await response.body();
+        const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        if (leaked(raw)) faults.secret++;
+        const value = decodeJson(raw, response.headers()['content-type'], parsed => {
+          observed.latest.decoded = true;
+          return validateConversationPage(parsed);
+        });
+        observed.latest.validated = true;
+        const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+        expect(response.status() === 200 && value.session_id === sid && value.session.session_id === sid
+          && value.snapshot_head === '1' && value.session.head_sequence === '1' && value.session.title === titles[0]
+          && value.session.workspace === wire.create.workspace && value.block === null && value.entries.length === 0
+          && value.previous_block === null && value.earlier_activity === null && value.live_after === after).toBe(true);
+        observed.latest.exact = true;
+      }),
+      createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click(),
+    ]);
     await exact(transcript, 'No messages yet.');
     await exact(title, titles[0]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
@@ -191,32 +232,90 @@ test('one Send rejects stale captured history after one real browser rename comm
     await command.locator('summary').click();
     await preserved(command.locator('details pre'), TASK);
     await exact(command.locator('.metadata'), `Operation: ${wire.task.operation_id}\nSession: ${sid}`);
-    expect((await capture()).reply.status).toBe(null);
+    expect(observed.reply.status).toBe(null);
+    expect(observed.counts.task).toBe(0);
     await noWork(1, 0);
 
     stage = 'one real browser rename commits before task release';
     const rename = page.getByLabel('Exact new title', { exact: true });
     await rename.fill(renames[0]);
     await preserved(rename, renames[0], true);
-    await page.getByRole('button', { name: 'Rename session', exact: true }).click();
-    await expect.poll(async () => { const value = await capture(); return value.rename && value.canonicalRename; }).toBe(true);
-    await exact(outcome, `rename command\n\nAccepted receipt (not completion)\nOperation: ${wire.rename.operation_id}\nSession: ${sid}\nRun: none\nSequences: 2 to 2\n\nDuplicate receipt: false\nIndependent catalog refresh: updated`);
+    await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === renamePath && response.request().method() === 'POST')
+        .then(async response => {
+          observed.rename.status = response.status();
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const value = decodeJson(raw, response.headers()['content-type'], parsed => {
+            observed.rename.decoded = true;
+            return validateRenameView(parsed);
+          });
+          observed.rename.validated = true;
+          expect(response.status() === 200 && value.receipt.operation_id === wire.rename.operation_id
+            && value.receipt.session_id === sid && value.receipt.run_id === null
+            && value.receipt.first_sequence === '2' && value.receipt.last_sequence === '2'
+            && value.duplicate === false && value.warning_code === null && value.catalog_refresh === 'updated').toBe(true);
+          observed.rename.exact = true;
+          renameReceipt = value.receipt;
+        }),
+      page.waitForResponse(response => new URL(response.url()).pathname === `/v1/sessions/${sid}` && response.request().method() === 'GET')
+        .then(async response => {
+          observed.manifest.status = response.status();
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const value = decodeJson(raw, response.headers()['content-type'], parsed => {
+            observed.manifest.decoded = true;
+            return validateSessionView(parsed);
+          });
+          observed.manifest.validated = true;
+          expect(response.status() === 200 && value.session_id === sid && value.title === renames[0]
+            && value.head_sequence === '2' && value.workspace === wire.create.workspace).toBe(true);
+          observed.manifest.exact = true;
+        }),
+      page.getByRole('button', { name: 'Rename session', exact: true }).click(),
+    ]);
+    await exact(renameCommand.locator('h3'), 'rename: accepted');
+    await exact(outcome, `Accepted receipt (not completion)\nOperation: ${wire.rename.operation_id}\nSession: ${sid}\nRun: none\nSequences: 2 to 2\n\nWarning: none; duplicate: false\n\nIndependent catalog refresh: updated\n\nAccepted is not completed.`);
+    renameArticle = await renameCommand.evaluate(node => node.outerHTML);
     await exact(title, renames[0]);
-    await expect.poll(async () => (await page.locator('.conversation').textContent()).includes(`Applied cursor: ${sid}:2\n`)).toBe(true);
+    // The title can come from canonical metadata; it does not expose the store's live cursor.
+    await exact(transcript, 'No messages yet.');
     await exact(command.locator('h3'), 'task: sending');
+    await exact(command.locator('.metadata'), `Operation: ${wire.task.operation_id}\nSession: ${sid}`);
     await preserved(task, TASK, true);
     await preserved(command.locator('details pre'), TASK);
-    expect((await capture()).reply.status).toBe(null);
+    expect(observed.reply.status).toBe(null);
+    expect(observed.counts.task).toBe(0);
+    expect(await createCommand.evaluate(node => node.outerHTML) === createArticle).toBe(true);
     await noWork(1, 1);
     await privateBoundary();
 
     stage = 'release and exact stale-history rejection';
-    expect((await fixture.request({ command: 'replay_head', step: 'release' })).step).toBe('released');
+    await Promise.all([
+      page.waitForResponse(response => new URL(response.url()).pathname === taskPath && response.request().method() === 'POST')
+        .then(async response => {
+          observed.reply.status = response.status();
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const error = decodeJson(raw, response.headers()['content-type'], parsed => {
+            // Parsing succeeded here; schema validation may still fail.
+            observed.reply.decoded = true;
+            return validateErrorView(parsed);
+          });
+          observed.reply.validated = true;
+          expect(response.status() === 409 && error.api_version === 1 && error.code === 'storage.stale_history'
+            && error.stage === 'acceptance' && error.certainty === 'not_committed'
+            && error.acceptance === null && error.notices.length === 0).toBe(true);
+          observed.reply.exact = true;
+        }),
+      fixture.request({ command: 'replay_head', step: 'release' }).then(reply => { expect(reply.step).toBe('released'); }),
+    ]);
     await exact(command.locator('h3'), 'task: rejected');
-    await drain();
     expect(observed.reply).toEqual({ status: 409, decoded: true, validated: true, exact: true });
-    expect(observed.counts).toEqual({ task: 1, rename: 1, manifest: 2 });
-    expect(observerFailures).toBe(forceObserverFailure ? 1 : 0);
+    expect(observed.counts).toEqual({ task: 1, rename: 1, manifest: 1 });
     await exact(command.locator(':scope > pre'), 'HTTP 409\nCode: storage.stale_history\nStage: acceptance\nCertainty: not_committed');
     await preserved(task, TASK, true);
     await preserved(command.locator('details pre'), TASK);
@@ -225,7 +324,10 @@ test('one Send rejects stale captured history after one real browser rename comm
     await exact(transcript, 'No messages yet.');
     await expect(page.locator('.run')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Cancel current run', exact: true })).toBeDisabled();
-    expect(new Set(Object.values(wire).map(body => body.operation_id)).size).toBe(3);
+    expect(new Set([sid, wire.task.run_id, ...Object.values(wire).map(body => body.operation_id)]).size).toBe(5);
+    await expect(page.locator('.command')).toHaveCount(3);
+    expect(await createCommand.evaluate(node => node.outerHTML) === createArticle).toBe(true);
+    expect(await renameCommand.evaluate(node => node.outerHTML) === renameArticle).toBe(true);
     await noWork(1, 1);
 
     stage = 'draft edit preserves immutable rejected command and truthful rename';
@@ -237,7 +339,9 @@ test('one Send rejects stale captured history after one real browser rename comm
     await preserved(command.locator('details pre'), TASK);
     await exact(command.locator('.metadata'), `Operation: ${wire.task.operation_id}\nSession: ${sid}`);
     await exact(title, renames[0]);
-    expect((await outcome.textContent()).startsWith('rename command\n\nAccepted receipt (not completion)')).toBe(true);
+    expect(await createCommand.evaluate(node => node.outerHTML) === createArticle).toBe(true);
+    expect(await renameCommand.evaluate(node => node.outerHTML) === renameArticle).toBe(true);
+    await expect(page.locator('.command')).toHaveCount(3);
     await noWork(1, 1);
     await privateBoundary();
 
@@ -246,11 +350,9 @@ test('one Send rejects stale captured history after one real browser rename comm
     assetEvidence = await page.evaluate(checkEmbeddedAssets, { secrets,
       files: await Promise.all([...files].map(async ([path, file]) => [path, [...await readFile(new URL(`../${file}`, import.meta.url))]])) });
     expect(assetEvidence).toEqual({ checked: files.size, failures: [] });
-    await drain();
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await exact(page.locator('.topbar [role="status"]'), 'disconnected');
     await expect(page.locator('.command,.run,.session-list li')).toHaveCount(0);
-    await exact(outcome, '');
     await exact(page.locator('.transcript'), '');
     expect(await page.evaluate(canaries => {
       const nodes = Array.from(document.querySelectorAll('input,textarea,select'));
@@ -265,7 +367,7 @@ test('one Send rejects stale captured history after one real browser rename comm
   } catch (cause) {
     const kind = ['Error', 'TypeError', 'SyntaxError', 'TimeoutError', 'ProtocolError'].includes(cause?.name) ? cause.name : 'other';
     const line = /task-stale-history\.spec\.mjs:(\d+):/.exec(cause?.stack ?? '')?.[1] ?? 'none';
-    failure = new Error(`Stale history failed: ${stage}; kind=${kind} line=${line}; capture=${JSON.stringify(observed)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}; forced_observer_failures=${observerFailures}`);
+    failure = new Error(`Stale history failed: ${stage}; kind=${kind} line=${line}; capture=${JSON.stringify(observed)}; assets=${JSON.stringify(assetEvidence)}; faults=${JSON.stringify(faults)}; posts=${JSON.stringify(posts)}; display=${JSON.stringify(displayReads)}`);
   } finally {
     try {
       await context?.close(); cleanup.browser = context !== undefined;
@@ -283,5 +385,5 @@ test('one Send rejects stale captured history after one real browser rename comm
   if (failure) throw failure;
   expect(Object.values(faults)).toEqual(Array(7).fill(0));
   expect(resourceErrors).toBe(1);
-  console.log(`Stale history evidence: HTTP=409 flat_error_exact=${observed.reply.exact}; observer_failures=${observerFailures} captures=${JSON.stringify(observed.counts)} assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} rename_posts=${posts.rename}; task_bytes=${Buffer.byteLength(TASK)} rename_bytes=${Buffer.byteLength(renames[0])} wire_draft_command_exact=true canonical_rename_exact=${observed.canonicalRename}; sessions=2 browser_sequence=2 seed_sequence=1 rename_commands=1 rename_receipts=1 task_commands=0 task_receipts=0 runs=0 checkpoints=0 runtime=0 results=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 unrelated_mutations=0 disconnect_cleared=true`);
+  console.log(`Stale history evidence: HTTP=409 flat_error_exact=${observed.reply.exact}; captures=${JSON.stringify(observed.counts)} latest_h1_exact=${observed.latest.exact} matching_display_sse=true assets_checked=${assetEvidence.checked}; create_posts=${posts.create} task_posts=${posts.task} rename_posts=${posts.rename}; task_bytes=${Buffer.byteLength(TASK)} rename_bytes=${Buffer.byteLength(renames[0])} wire_draft_command_exact=true canonical_rename_exact=${observed.manifest.exact}; sessions=2 browser_sequence=2 seed_sequence=1 rename_commands=1 rename_receipts=1 task_commands=0 task_receipts=0 runs=0 checkpoints=0 runtime=0 results=0 tools=0 provider_connections=0 provider_requests=0 auth_loads=0 auth_prepares=0 cancel=0 retry=0 unrelated_mutations=0 disconnect_cleared=true`);
 });

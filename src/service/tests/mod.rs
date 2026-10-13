@@ -15,19 +15,6 @@ mod loss;
 mod replay;
 mod storage;
 
-impl RunClient {
-    // Joined fixture stimuli use the same store without creating a second owner.
-    pub(crate) async fn test_open_session(&self, id: ApplicationSessionId) -> SessionHandle {
-        self.inner
-            .upgrade()
-            .expect("fixture host missing")
-            .store
-            .open_session(id)
-            .await
-            .expect("fixture session open failed")
-    }
-}
-
 async fn watchdog<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(20), future)
         .await

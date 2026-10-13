@@ -1,10 +1,10 @@
 use serde::Serialize;
-use serde_json::Value;
 
 use super::super::wire::Decimal;
 use crate::{
     CallOrigin, FunctionCall, ItemKind, ModelResponse, OutputItem, OutputProvenance,
     ResponseOutcome, Usage,
+    conversation::{FieldKind, projection::project_item},
 };
 
 #[derive(Clone, Serialize)]
@@ -54,62 +54,29 @@ pub struct ItemView {
 }
 impl From<&OutputItem> for ItemView {
     fn from(value: &OutputItem) -> Self {
-        let mut view = Self {
-            item_id: value.id.clone(),
-            kind: value.kind.clone(),
-            function_call: None,
-            content: Vec::new(),
-            unsupported_content: false,
-        };
-        match value.kind {
-            ItemKind::Message => view.parts(value.native.get("content"), false),
-            ItemKind::Reasoning => {
-                let summary = value.native.get("summary");
-                let content = value.native.get("content");
-                if summary.is_none() && content.is_none() {
-                    view.unsupported_content = true;
-                }
-                if summary.is_some() {
-                    view.parts(summary, true);
-                }
-                if content.is_some() {
-                    view.parts(content, true);
-                }
-            }
-            ItemKind::FunctionCall => {
-                view.function_call = value.function_call.as_ref().map(FunctionCallView::from);
-                view.unsupported_content = view.function_call.is_none();
-            }
-            _ => view.unsupported_content = true,
-        }
-        view
-    }
-}
-impl ItemView {
-    fn parts(&mut self, value: Option<&Value>, reasoning: bool) {
-        let Some(parts) = value.and_then(Value::as_array) else {
-            self.unsupported_content = true;
-            return;
-        };
-        for part in parts {
-            // Read only named scalar fields. Native objects never cross this boundary.
-            let (kind, field) = match (reasoning, part.get("type").and_then(Value::as_str)) {
-                (false, Some("output_text")) => (TextBlockKind::Text, "text"),
-                (false, Some("refusal")) => (TextBlockKind::Refusal, "refusal"),
-                (true, Some("summary_text")) => (TextBlockKind::ReasoningSummary, "text"),
-                (true, Some("reasoning_text")) => (TextBlockKind::ReasoningText, "text"),
-                _ => {
-                    self.unsupported_content = true;
-                    continue;
-                }
-            };
-            match part.get(field).and_then(Value::as_str) {
-                Some(text) => self.content.push(TextBlockView {
-                    kind,
-                    text: text.to_owned(),
-                }),
-                None => self.unsupported_content = true,
-            }
+        let projection = project_item(value);
+        Self {
+            item_id: projection.item_id.map(str::to_owned),
+            kind: projection.kind.clone(),
+            function_call: projection.function_call.map(FunctionCallView::from),
+            content: projection
+                .parts
+                .iter()
+                .filter_map(|part| {
+                    let kind = match part.kind {
+                        FieldKind::Text => TextBlockKind::Text,
+                        FieldKind::Refusal => TextBlockKind::Refusal,
+                        FieldKind::ReasoningSummary => TextBlockKind::ReasoningSummary,
+                        FieldKind::ReasoningText => TextBlockKind::ReasoningText,
+                        _ => return None,
+                    };
+                    Some(TextBlockView {
+                        kind,
+                        text: part.text.to_owned(),
+                    })
+                })
+                .collect(),
+            unsupported_content: projection.unsupported_content(),
         }
     }
 }

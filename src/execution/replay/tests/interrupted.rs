@@ -237,7 +237,10 @@ async fn check_case(case: Case, replayable: bool) {
                     .await
                     .unwrap()
                     .unwrap();
-                assert_eq!(saved.request_id(), Some("request-0"));
+                assert_eq!(
+                    saved.request_id(),
+                    Some("00000000-0000-4000-8000-000000000000")
+                );
                 assert_eq!(saved.output(), Some(output.as_str()));
                 assert_eq!(saved.is_error(), Some(false));
                 assert_eq!(

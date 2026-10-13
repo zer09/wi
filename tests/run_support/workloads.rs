@@ -59,7 +59,7 @@ async fn run_l_160_distinct_calls_then_final_uses_161_requests() {
             } if call_id == &format!("c{i}") && tool_name == "add_numbers"));
             assert_eq!(
                 start.request_id.as_deref(),
-                Some(format!("q{}", i + 1).as_str())
+                Some(format!("00000000-0000-4000-8000-{:012x}", i + 1).as_str())
             );
             assert_eq!(start.request_id, finish.request_id);
             assert_eq!(start.turn_id, finish.turn_id);

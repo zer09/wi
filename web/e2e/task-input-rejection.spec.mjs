@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { validateErrorView } from '../dist/api.js';
+import { decodeJson, validateErrorView } from '../dist/api.js';
+import { validateConversationPage } from '../dist/display-api.js';
 import { discoverFixture, startFixture } from '../test-support/fixture.mjs';
 import { exact } from '../test-support/joined.mjs';
 
@@ -15,8 +16,13 @@ test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
 // Own the context and replace failures so no page snapshot or fill argument reaches a report.
 test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or starting work', async ({ browser }) => {
+  const previousNoCopyPrompt = process.env.PLAYWRIGHT_NO_COPY_PROMPT;
   let fixture;
   let context;
+  let sid;
+  let createBody;
+  let creationArticle;
+  const displayReads = [];
   let failure;
   let stage = 'startup';
   let taskPath;
@@ -37,6 +43,8 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
       'private-native', 'private-skills', 'private-data', 'private-config-canary',
       'principal_digest', 'encrypted_content', 'opaque_response', 'provider_session_id', 'prepared_request'];
     const leaked = text => secrets.some(secret => text.includes(secret));
+    // Keep the failure-snapshot guard through failed creation or close.
+    process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
     context = await browser.newContext({ serviceWorkers: 'block' });
     await context.route('**/*', async route => {
       if (new URL(route.request().url()).origin !== fixture.origin) { faults.external++; await route.abort(); }
@@ -47,14 +55,40 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
       if (url.origin !== fixture.origin) faults.external++;
       if (leaked(request.url())) faults.secret++;
       requests.push({ method: request.method(), path: url.pathname });
-      if (request.method() !== 'POST' || url.pathname !== taskPath) return;
+      const headers = request.headers();
+      if (headers.cookie !== undefined || (headers.origin !== undefined && headers.origin !== fixture.origin)) faults.request++;
+      if (url.pathname.startsWith('/v1/') && headers.authorization !== `Bearer ${fixture.owner}`) faults.request++;
+      if (/\/(history|events|operations)(\/|$)/.test(url.pathname) && !url.pathname.endsWith('/conversation/events')) faults.request++;
+      if (['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(url.pathname)) faults.request++;
+      if (request.method() !== 'POST') {
+        if (request.method() !== 'GET' || /\/(operations|runs)\//.test(url.pathname)) faults.request++;
+        if (url.pathname.endsWith('/conversation/events')) {
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          displayReads.push({ kind: 'events', matching_head: url.pathname === `/v1/sessions/${sid}/conversation/events`
+            && url.searchParams.size === 1 && url.searchParams.get('after') === after });
+        }
+        return;
+      }
+      if (headers.origin !== fixture.origin || url.search !== '') faults.request++;
+      if (url.pathname === '/v1/sessions') {
+        try {
+          const raw = request.postDataBuffer().toString('utf8');
+          const body = JSON.parse(raw);
+          if (createBody !== undefined || Object.keys(body).sort().join(',') !== 'operation_id,title,workspace'
+            || body.title !== titles[0] || typeof body.workspace !== 'string' || leaked(raw)) faults.request++;
+          createBody = body;
+        } catch { faults.request++; }
+        return;
+      }
+      if (url.pathname !== taskPath) return;
       try {
         // Keep the raw body local to this callback; only the first IDs survive until the next request.
         const raw = request.postData();
         const body = JSON.parse(raw);
         if (Object.keys(body).sort().join(',') !== 'operation_id,run_id,text' || typeof body.text !== 'string'
           || ![body.operation_id, body.run_id].every(id => typeof id === 'string'
-            && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id))) { faults.request++; return; }
+            && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id)
+            && id !== '00000000-0000-0000-0000-000000000000')) { faults.request++; return; }
         if (leaked(raw)) faults.secret++;
         const evidence = [raw, body.text].map(text => ({ byteLength: Buffer.byteLength(text, 'utf8'),
           start: text.slice(0, 64), end: text.slice(-64), digest: createHash('sha256').update(text, 'utf8').digest('hex') }));
@@ -67,16 +101,30 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
           identityChanged.run_changed = body.run_id !== firstIdentity.run_id;
           firstIdentity = undefined;
         }
-        captured.push({ body: evidence[0], text: evidence[1] });
+        captured.push({ body: evidence[0], text: evidence[1], operation_id: body.operation_id, run_id: body.run_id });
       } catch { faults.request++; }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     const reads = [];
     context.on('response', response => {
-      const path = new URL(response.url()).pathname;
+      const url = new URL(response.url()), path = url.pathname;
       if (response.status() >= 300 && !(path === taskPath && [422, 413].includes(response.status()))) faults.response++;
+      if (path.endsWith('/conversation')) {
+        displayReads.push({ kind: 'latest', status: response.status(), exact: path === `/v1/sessions/${sid}/conversation` && url.search === '' });
+        reads.push((async () => {
+          const bytes = await response.body();
+          const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          if (leaked(raw)) faults.secret++;
+          const value = decodeJson(raw, response.headers()['content-type'], validateConversationPage);
+          const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+          if (value.session_id !== sid || value.session.session_id !== sid || value.snapshot_head !== '1'
+            || value.session.head_sequence !== '1' || value.session.title !== titles[0] || value.session.workspace !== createBody.workspace
+            || value.block !== null || value.entries.length !== 0 || value.previous_block !== null
+            || value.earlier_activity !== null || value.live_after !== after) faults.response++;
+        })().catch(() => { faults.response++; }));
+      }
       const file = files.get(path);
       if (file === undefined) return;
       reads.push((async () => {
@@ -117,6 +165,7 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
       expect(requests.filter(request => request.method === 'POST').map(request => request.path))
         .toEqual(['/v1/sessions', ...Array(tasks).fill(taskPath)]);
       expect(captured.length).toBe(tasks);
+      expect(displayReads).toEqual([{ kind: 'latest', status: 200, exact: true }, { kind: 'events', matching_head: true }]);
     }
     async function noWork(tasks) {
       const proof = await fixture.inspect();
@@ -134,8 +183,9 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
       postCounts(tasks);
     }
     const task = page.getByLabel('Task', { exact: true });
-    const command = page.locator('.command');
-    const outcome = page.locator('.commands > section > pre');
+    const commands = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const outcome = createCommand.locator(':scope > pre');
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     async function preserved(locator, expected) {
       const evidence = await locator.evaluate(async node => {
@@ -156,23 +206,26 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
     await exact(page.locator('.topbar [role="status"]'), 'connected');
     expect(await page.getByLabel('Owner token', { exact: true }).inputValue() === '').toBe(true);
     await page.getByLabel('Title', { exact: true }).fill(titles[0]);
-    // Let create's canonical read finish before selection can abort that separate read.
-    const creationRead = page.waitForResponse(response => response.request().method() === 'GET'
-      && /^\/v1\/sessions\/[0-9a-f-]{36}$/.test(new URL(response.url()).pathname)).then(response => response.finished());
     await page.getByRole('button', { name: 'Create session', exact: true }).click();
     await expect(outcome).toContainText('Accepted receipt (not completion)');
-    await creationRead;
     const creation = await fixture.inspectMutations();
     expect([creation.session_count, creation.seed_sessions, creation.creations.length]).toEqual([2, 1, 1]);
     const entry = creation.creations[0];
     expect(entry.exact && entry.catalog_current && entry.sequence_count === '1' && entry.catalog_head_sequence === '1'
       && entry.rename_events === 0 && entry.renames.length === 0 && entry.rename_event_ids.length === 0
-      && entry.receipt.first_sequence === '1' && entry.receipt.last_sequence === '1' && entry.receipt.run_id === null).toBe(true);
-    const sid = entry.receipt.session_id;
+      && entry.receipt.first_sequence === '1' && entry.receipt.last_sequence === '1' && entry.receipt.run_id === null
+      && entry.receipt.operation_id === createBody.operation_id).toBe(true);
+    sid = entry.receipt.session_id;
     taskPath = `/v1/sessions/${sid}/runs`;
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    await exact(createCommand.locator('h3'), 'create: accepted');
+    await exact(outcome, `Accepted receipt (not completion)\nOperation: ${entry.receipt.operation_id}\nSession: ${sid}\nRun: none\nSequences: 1 to 1\n\nWarning: none; duplicate: false\n\nAccepted is not completed.`);
+    creationArticle = await createCommand.evaluate(node => node.outerHTML);
+    await createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click();
     await exact(transcript, 'No messages yet.');
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
+    await exact(page.getByRole('heading', { name: 'Canonical session title', exact: true }), titles[0]);
+    expect(await page.evaluate(selected => location.hash === `#session=${selected}`, sid)).toBe(true);
+    await Promise.all(reads);
     await fixture.request({ command: 'select', session_id: sid });
     stage = 'creation SQLite and provider idle checks';
     await noWork(0);
@@ -188,13 +241,14 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
       end: text.slice(-64), digest: createHash('sha256').update(text, 'utf8').digest('hex') }));
     let blankIdentity;
     for (const [index, text] of texts.entries()) {
+      const command = commands.nth(index);
       stage = index === 0 ? 'whitespace input and real HTTP rejection' : 'oversized input and real HTTP rejection';
       await task.fill(text);
       await preserved(task, expected[index]);
       if (index === 1) {
-        // Editing the draft cannot mutate the rejected command. Only the next explicit Send supersedes it.
-        await exact(command.locator('details pre'), BLANK);
-        await exact(command.locator('.metadata'), blankIdentity);
+        // A new Send adds an article; it must not erase the earlier rejection.
+        await preserved(commands.first().locator('details pre'), expected[0]);
+        expect(await commands.first().locator('.metadata').textContent() === blankIdentity).toBe(true);
         postCounts(1);
       }
       const [{ status, error }] = await Promise.all([
@@ -202,22 +256,28 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
           .then(async response => {
             replyEvidence.status = response.status();
             replyEvidence.decoded = false; replyEvidence.validated = false;
-            const value = await response.json();
-            replyEvidence.decoded = true;
-            const error = validateErrorView(value);
+            const bytes = await response.body();
+            const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            if (leaked(raw)) faults.secret++;
+            const error = decodeJson(raw, response.headers()['content-type'], value => {
+              // Keep the parse milestone even if the schema rejects the parsed value.
+              replyEvidence.decoded = true;
+              return validateErrorView(value);
+            });
             replyEvidence.validated = true;
             return { status: response.status(), error };
           }),
         page.getByRole('button', { name: 'Send', exact: true }).click(),
       ]);
-      observed.push({ status, code: error.code, stage: error.stage, certainty: error.certainty,
-        acceptance_null: error.acceptance === null, notices: error.notices.length });
       const requiredStatus = index === 0 ? 422 : 413;
       const requiredCode = index === 0 ? 'context.invalid_request' : 'api.body_too_large';
+      expect(replyEvidence).toEqual({ status: requiredStatus, decoded: true, validated: true });
       expect(status).toBe(requiredStatus);
       expect(error).toEqual({ api_version: 1, code: requiredCode, stage: null, certainty: 'not_applicable', acceptance: null, notices: [] });
-      await expect(command).toHaveCount(1);
+      observed.push({ status: requiredStatus, code: requiredCode, stage: null, certainty: 'not_applicable', acceptance_null: true, notices: 0 });
+      await expect(commands).toHaveCount(index + 1);
       await exact(command.locator('h3'), 'task: rejected');
+      await exact(command.locator('.metadata'), `Operation: ${captured[index].operation_id}\nSession: ${sid}`);
       await exact(command.locator(':scope > pre'), `HTTP ${requiredStatus}\nCode: ${requiredCode}\nStage: none\nCertainty: not_applicable`);
       await command.locator('summary').click();
       await preserved(command.locator('details pre'), expected[index]);
@@ -232,15 +292,24 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
         expect(captured[index].body.byteLength > max).toBe(true);
         expect(await command.locator('.metadata').textContent() !== blankIdentity).toBe(true);
         expect(identityChanged).toEqual({ operation_changed: true, run_changed: true });
+        expect(new Set([sid, createBody.operation_id, ...captured.flatMap(item => [item.operation_id, item.run_id])]).size).toBe(6);
       }
       stage = index === 0 ? 'whitespace rejection stays idle' : 'oversized rejection stays idle';
       // A finite observation window checks for automatic retries without introducing a product timeout.
       await page.waitForTimeout(300);
-      await expect(command).toHaveCount(1);
-      await exact(command.locator('h3'), 'task: rejected');
-      await preserved(command.locator('details pre'), expected[index]);
+      await expect(commands).toHaveCount(index + 1);
+      for (let previous = 0; previous <= index; previous++) {
+        const retained = commands.nth(previous);
+        await exact(retained.locator('h3'), 'task: rejected');
+        await preserved(retained.locator('details pre'), expected[previous]);
+        expect(await retained.locator('.metadata').textContent() === `Operation: ${captured[previous].operation_id}\nSession: ${sid}`).toBe(true);
+        await exact(retained.locator(':scope > pre'), previous === 0
+          ? 'HTTP 422\nCode: context.invalid_request\nStage: none\nCertainty: not_applicable'
+          : 'HTTP 413\nCode: api.body_too_large\nStage: none\nCertainty: not_applicable');
+      }
       await preserved(task, expected[index]);
       await exact(outcome, createEvidence);
+      expect(await createCommand.evaluate(node => node.outerHTML) === creationArticle).toBe(true);
       await exact(transcript, 'No messages yet.');
       await expect(page.locator('.run')).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Cancel current run', exact: true })).toBeDisabled();
@@ -254,7 +323,6 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
     await exact(page.locator('.topbar [role="status"]'), 'disconnected');
     await expect(page.locator('.command,.run,.session-list li')).toHaveCount(0);
-    await exact(outcome, '');
     // Role locators exclude the hidden conversation after Disconnect; inspect its cleared DOM directly.
     await exact(page.locator('.transcript'), '');
     expect(await page.evaluate(canaries => {
@@ -276,8 +344,13 @@ test('whitespace-empty and HTTP-body-oversized tasks reject without accepting or
     failure = new Error(`Task rejection failed: ${stage}; kind=${kind} line=${line}; reply=${JSON.stringify(replyEvidence)}; observed=${JSON.stringify(observed)}; faults=${JSON.stringify(faults)}; task_posts=${requests.filter(request => request.method === 'POST' && request.path === taskPath).length}`);
   } finally {
     firstIdentity = undefined;
-    try { await context?.close(); cleanup.browser = context !== undefined; }
-    catch { failure ??= new Error('Task rejection browser cleanup failed'); }
+    try {
+      await context?.close(); cleanup.browser = context !== undefined;
+      if (cleanup.browser) {
+        if (previousNoCopyPrompt === undefined) delete process.env.PLAYWRIGHT_NO_COPY_PROMPT;
+        else process.env.PLAYWRIGHT_NO_COPY_PROMPT = previousNoCopyPrompt;
+      }
+    } catch { failure ??= new Error('Task rejection browser cleanup failed'); }
     try { await fixture?.stop(); cleanup.fixture = fixture !== undefined; }
     catch { failure ??= new Error('Task rejection fixture cleanup failed'); }
   }

@@ -15,7 +15,7 @@ let executable;
 test.beforeAll(async () => { test.setTimeout(150_000); executable = await discoverFixture(); });
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
-test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recovery, then real tool completion', async ({ browser }) => {
+test('one task: canonical display survives a lost HTTP reply, explicit server reconciliation, then real tool completion', async ({ browser }) => {
   let fixture;
   let context;
   let loss;
@@ -23,11 +23,14 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
   let stage = 'startup';
   let taskPath;
   let taskUrl;
+  let reconcilePath;
   let dropping = false;
   let expectedNetworkErrors = 0;
   let captured = null;
+  let reconciliationReads = 0;
   const faults = { external: 0, console: 0, page: 0, secret: 0, asset: 0, response: 0 };
   const requests = [];
+  const displayReads = [];
   const count = (method, path) => requests.filter(request => request.method === method && request.path === path).length;
   try {
     fixture = await startFixture(executable, { transport: 'websocket', recovered: false, mime: true, mutations: true });
@@ -57,19 +60,29 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
           else captured = { operation_id: body.operation_id, run_id: body.run_id };
         } catch { faults.response++; }
       }
-      if (url.pathname.endsWith('/history') && count('GET', url.pathname) === 2) {
+      if (request.method() === 'POST' && url.pathname === reconcilePath) {
+        try {
+          const body = request.postDataJSON();
+          if (captured === null || Object.keys(body).sort().join(',') !== 'operation_id,run_id,text'
+            || body.operation_id !== captured.operation_id || body.run_id !== captured.run_id || body.text !== TASK) faults.response++;
+        } catch { faults.response++; }
+      }
+      if (request.method() === 'GET' && url.pathname.endsWith('/conversation/events')) {
         const sid = url.pathname.split('/')[3];
-        if (url.searchParams.get('after') !== `${sid}:1` || url.searchParams.get('through') !== '3'
-          || url.searchParams.get('limit') !== '32' || [...url.searchParams.keys()].sort().join(',') !== 'after,limit,through') faults.response++;
+        const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+        displayReads.push({ kind: 'events', path: url.pathname, matching_head: url.searchParams.get('after') === after });
       }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     const reads = [];
     context.on('response', response => {
       if (response.status() >= 300) faults.response++;
       const path = new URL(response.url()).pathname;
+      if (response.request().method() === 'GET' && path.endsWith('/conversation')) {
+        displayReads.push({ kind: 'latest', path, status: response.status() });
+      }
       const file = files.get(path);
       if (file === undefined) return;
       reads.push((async () => {
@@ -103,7 +116,10 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
       expect(await page.locator('.run em,.run script,.run img,.run a,.command em,.conversation h2 em,img,iframe').count()).toBe(0);
     }
     function postCounts() {
-      expect(requests.filter(request => request.method === 'POST').map(request => request.path)).toEqual(['/v1/sessions', taskPath]);
+      // Reconciliation is an explicit read-only POST, not another Task submission.
+      expect(requests.filter(request => request.method === 'POST' && request.path !== reconcilePath)
+        .map(request => request.path)).toEqual(['/v1/sessions', taskPath]);
+      expect(count('POST', reconcilePath)).toBe(reconciliationReads);
     }
     function quiet(proof, requestCount, toolCount, completed) {
       expect([proof.requests, proof.connections, proof.auth_loads, proof.auth_prepares, proof.prepared_exact,
@@ -116,11 +132,11 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
       expect(proof.continuations).toBe(requestCount - 1);
       postCounts();
     }
-    const outcome = page.locator('.commands > section > pre');
-    const command = page.locator('.command');
+    const createCommand = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^create:/ }) });
+    const command = page.locator('.command').filter({ has: page.getByRole('heading', { name: /^task:/ }) });
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
     const run = transcript.locator('.run');
-    const cursor = page.locator('.conversation > div > .metadata').first();
+    const observation = page.locator('.conversation > div > .metadata').first();
     const taskField = page.getByLabel('Task', { exact: true });
 
     stage = 'browser create and canonical selection';
@@ -144,11 +160,17 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     const sid = created.receipt.session_id;
     taskPath = `/v1/sessions/${sid}/runs`;
     taskUrl = `${fixture.origin}${taskPath}`;
-    await expect(outcome).toContainText('Accepted receipt (not completion)');
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
+    reconcilePath = `${taskPath}/reconcile`;
+    await exact(createCommand.locator('h3'), 'create: accepted');
+    await expect(createCommand.locator(':scope > pre')).toContainText('Accepted receipt (not completion)');
+    await createCommand.getByRole('button', { name: 'Open receipt session', exact: true }).click();
     await exact(page.getByRole('heading', { name: 'Canonical session title', exact: true }), titles[0]);
     await exact(page.locator('.conversation > .metadata'), `Workspace: ${workspaceValue}\nSession: ${sid}`);
-    await exact(cursor, `Applied cursor: ${sid}:1\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
+    expect(displayReads).toEqual([
+      { kind: 'latest', path: `/v1/sessions/${sid}/conversation`, status: 200 },
+      { kind: 'events', path: `/v1/sessions/${sid}/conversation/events`, matching_head: true },
+    ]);
     await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
     await exact(transcript, 'No messages yet.');
     await fixture.request({ command: 'select', session_id: sid });
@@ -161,6 +183,7 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     await taskField.fill(TASK);
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await fixture.request({ command: 'wait_acceptance' });
+    await expect(page.locator('.command')).toHaveCount(2);
     await exact(command.locator('h3'), 'task: sending');
     await command.locator('summary').click();
     await exact(command.locator('details pre'), TASK);
@@ -192,23 +215,32 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     expect(JSON.stringify(accepted.receipts[0]) === JSON.stringify(receipt)).toBe(true);
     expect(accepted.accepted[0]).toEqual({ run_id: receipt.run_id, accepted_sequence: '2' });
     expect(accepted.sequence_count).toBe(committed.sequence_count);
-    await exact(cursor, `Applied cursor: ${sid}:${committed.sequence_count}\nSnapshot head: 1`);
-    await exact(run.locator('.user-text'), TASK);
+    await exact(observation, 'Observation: streaming');
+    await expect(run).toHaveCount(1);
+    await expect(run).toHaveAttribute('data-run', captured.run_id);
+    const human = run.locator('.entry').filter({ has: page.getByRole('heading', { name: 'Human', exact: true }) });
+    await exact(human.locator('[data-field] pre'), TASK);
+    await expect(human).toHaveAttribute('data-entry', 'e:2:0');
     await expect(run).toContainText('Execution: running. Final result not recorded.');
-    await exact(command.locator('h3'), 'Canonical acceptance; receipt recovery');
-    await expect(page.locator('.commands > div').first().locator('.command')).toHaveCount(0);
-    await expect(command.locator('details')).toHaveCount(0);
-    await expect(command.getByRole('button')).toHaveCount(1);
-    await expect(command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Retry identical command', exact: true })).toHaveCount(0);
+    // Display execution facts cannot manufacture a mutation receipt from a lost reply.
+    await exact(command.locator('h3'), 'task: sending');
+    await exact(command.locator(':scope > pre'), '');
+    await exact(command.locator('details pre'), TASK);
+    await expect(command.getByRole('button')).toHaveCount(0);
     await expect(taskField).toHaveValue(EDITED);
-    expect((await outcome.textContent()).includes(receipt.operation_id)).toBe(false);
+    await expect(createCommand).toHaveCount(1);
 
-    stage = 'lost reply cannot demote known canonical acceptance or invent a receipt';
+    stage = 'lost reply cannot demote canonical display or invent a receipt';
     dropping = true;
     await loss.drop();
-    await exact(command.locator(':scope > pre'), 'Network reply unavailable. This does not establish whether a command was accepted.\n\nCanonical task already accepted. Only read-only reconciliation is available; do not execute again.\n\nAccepted is not completed. Read canonical history for execution state.');
-    await exact(command.locator('h3'), 'Canonical acceptance; receipt recovery');
+    await exact(command.locator(':scope > pre'), 'Network read or reply failed. This does not prove rollback.\n\nAcceptance is uncertain. No automatic retry.');
+    await exact(command.locator('h3'), 'task: uncertain');
+    await exact(command.locator('details pre'), TASK);
+    await expect(command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true })).toBeVisible();
+    await expect(command.getByRole('button', { name: 'Retry identical command', exact: true })).toBeVisible();
+    await expect(command.getByRole('button', { name: 'Open receipt session', exact: true })).toHaveCount(0);
+    await expect(run).toContainText('Execution: running. Final result not recorded.');
+    await exact(human.locator('[data-field] pre'), TASK);
     await exact(command.locator('.metadata'), `Operation: ${receipt.operation_id}\nSession: ${sid}`);
     await expect(taskField).toHaveValue(EDITED);
     await page.waitForTimeout(300);
@@ -218,21 +250,26 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     quiet(await fixture.inspect(), 1, 0, 0);
     await privateBoundary();
 
-    stage = 'explicit GET operation, run and exact two-record history establish the same receipt';
-    const operationPath = `/v1/sessions/${sid}/operations/${receipt.operation_id}`;
-    const runPath = `${taskPath}/${receipt.run_id}`;
-    const historyPath = `/v1/sessions/${sid}/history`;
-    expect([count('GET', operationPath), count('GET', runPath), count('GET', historyPath)]).toEqual([0, 0, 1]);
+    stage = 'explicit read-only server reconciliation establishes the same receipt and current run';
     const baseline = requests.length;
-    await command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true }).click();
-    await exact(outcome, `task command\n\nAccepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${sid}\nRun: ${receipt.run_id}\nSequences: 2 to 3`);
-    await expect(command).toHaveCount(0);
-    expect(requests.slice(baseline)).toEqual([operationPath, runPath, historyPath].map(path => ({ method: 'GET', path })));
-    expect([count('GET', operationPath), count('GET', runPath), count('GET', historyPath)]).toEqual([1, 1, 2]);
+    reconciliationReads++;
+    const [reconcileReply] = await Promise.all([
+      page.waitForResponse(response => response.url() === `${fixture.origin}${reconcilePath}` && response.request().method() === 'POST'),
+      command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true }).click(),
+    ]);
+    expect(reconcileReply.status()).toBe(200);
+    await exact(command.locator('h3'), 'task: accepted');
+    const receiptText = `Accepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${sid}\nRun: ${receipt.run_id}\nSequences: 2 to 3\n\nReconciliation: accepted\n\nAccepted is not completed.`;
+    await exact(command.locator(':scope > pre'), receiptText);
+    await expect(command).toHaveCount(1);
+    await expect(command.getByRole('button', { name: 'Retry identical command', exact: true })).toHaveCount(0);
+    expect(requests.slice(baseline)).toEqual([{ method: 'POST', path: reconcilePath }]);
+    const runRead = page.locator('pre.metadata').filter({ hasText: /^Read-only run view:/ });
+    await exact(runRead, `Read-only run view: ${receipt.run_id}\nExecution: running\nResult recorded: false\nTerminal sequence: none\nResult sequence: none`);
     const { id: _reconciledId, ...reconciled } = await fixture.inspectTask();
     expect(JSON.stringify(reconciled) === JSON.stringify(stable)).toBe(true);
     quiet(await fixture.inspect(), 1, 0, 0);
-    await exact(cursor, `Applied cursor: ${sid}:${committed.sequence_count}\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
     await expect(run).toContainText('Execution: running. Final result not recorded.');
     await expect(taskField).toHaveValue(EDITED);
 
@@ -241,10 +278,12 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     await fixture.wait('model_paused', 2);
     await occurrences(run, OUTPUT, 1);
     await occurrences(run, ARGUMENTS, 1);
-    const tool = run.locator('.entry').filter({ has: page.getByRole('heading', { name: 'Tool: add_numbers', exact: true }) });
+    const tool = run.locator('.entry').filter({ has: page.getByRole('heading', { name: 'tool', exact: true }) });
     await expect(tool).toHaveCount(1);
-    await expect(tool).toContainText('finished (success)');
-    await expect(tool).toContainText('Result: success');
+    await occurrences(tool, 'add_numbers', 1);
+    await exact(tool.locator(':scope > .metadata').first(), 'Recorded state: completed; Provisional: false; result_recorded: true; finish_recorded: true; is_error: false');
+    await tool.getByText('tool_result', { exact: true }).click();
+    await expect(tool.locator('details pre')).toBeVisible();
     await occurrences(run, ANSWER, 0);
     quiet(await fixture.inspect(), 2, 1, 0);
     const tools = await fixture.inspectTask();
@@ -256,7 +295,9 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     await fixture.wait('model_paused', 3);
     const partial = await fixture.inspectTask();
     expect(partial.deltas).toBe(1);
-    await exact(cursor, `Applied cursor: ${sid}:${partial.sequence_count}\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
+    const provisional = run.locator('.entry').filter({ has: page.getByRole('heading', { name: 'assistant', exact: true }) }).last();
+    await exact(provisional.locator(':scope > .metadata').first(), 'Recorded state: in_progress; Provisional: true');
     await occurrences(run, '42 雪', 1);
     await occurrences(run, ANSWER, 0);
     quiet(await fixture.inspect(), 2, 1, 0);
@@ -276,19 +317,25 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     const result = finished.result_sequences[0];
     expect(BigInt(response) < BigInt(terminal) && BigInt(terminal) < BigInt(result)).toBe(true);
     expect(finished.sequence_count).toBe(result);
-    await exact(cursor, `Applied cursor: ${sid}:${result}\nSnapshot head: 1`);
+    await exact(observation, 'Observation: streaming');
     await expect(run).toHaveCount(1);
     await expect(run).toContainText('Execution: completed. Final result recorded.');
-    await expect(run).toContainText('Output provenance: native_terminal');
-    await expect(run).toContainText('Terminal outcome: completed');
+    await exact(provisional.locator(':scope > .metadata').first(), 'Recorded state: completed; Provisional: false');
     await expect(run).toContainText('Outcome: completed');
+    await expect(run).toContainText('Events complete: true');
     await expect(run).toContainText('new_tool_dispatches: 1');
     await expect(run).toContainText('model_requests_admitted: 2');
     await occurrences(run, ANSWER, 1);
     await occurrences(run, '42 雪', 0);
     await occurrences(run, OUTPUT, 1);
-    await exact(run.locator('.user-text'), TASK);
-    await expect(command).toHaveCount(0);
+    await exact(human.locator('[data-field] pre'), TASK);
+    await expect(run.locator('.entry > h4')).toHaveText(['Human', 'assistant', 'tool', 'assistant']);
+    expect(await run.locator('.entry').evaluateAll(nodes => {
+      const positions = nodes.map(node => BigInt(node.dataset.entry.split(':')[1]));
+      return positions.every((position, index) => index === 0 || position > positions[index - 1]);
+    })).toBe(true);
+    await exact(command.locator(':scope > pre'), receiptText);
+    await expect(page.locator('.command')).toHaveCount(2);
     await expect(taskField).toHaveValue(EDITED);
     const final = await fixture.inspectTask();
     expect(final.exact && final.run_state === 'completed' && final.sequence_count === result).toBe(true);
@@ -297,17 +344,32 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     expect(JSON.stringify(final.receipt) === JSON.stringify(receipt)
       && final.accepted_event_id === committed.accepted_event_id && final.checkpoint_event_id === committed.checkpoint_event_id).toBe(true);
 
-    stage = 'explicit real run read and final no-retry, no-cancel, no-private-state evidence';
-    await run.getByRole('button', { name: 'Read run status', exact: true }).click();
-    await expect(page.locator('pre.metadata').filter({ hasText: /^Read-only run view:/ }))
-      .toContainText(`Execution: completed\nResult recorded: true\nTerminal sequence: ${terminal}\nResult sequence: ${result}\nOutcome: completed`);
+    stage = 'explicit final server reconciliation and no-retry, no-cancel, no-private-state evidence';
+    const finalReadBaseline = requests.length;
+    reconciliationReads++;
+    const [finalReply] = await Promise.all([
+      page.waitForResponse(response => response.url() === `${fixture.origin}${reconcilePath}` && response.request().method() === 'POST'),
+      command.getByRole('button', { name: 'Reconcile receipt (read only)', exact: true }).click(),
+    ]);
+    expect(finalReply.status()).toBe(200);
+    await exact(runRead, `Read-only run view: ${receipt.run_id}\nExecution: completed\nResult recorded: true\nTerminal sequence: ${terminal}\nResult sequence: ${result}`);
+    await exact(command.locator(':scope > pre'), receiptText);
+    await expect(run).toContainText('Outcome: completed');
     await page.waitForTimeout(300);
-    expect([count('GET', operationPath), count('GET', runPath), count('GET', historyPath), count('GET', `/v1/sessions/${sid}/events`),
-      count('GET', '/v1/settings'), count('GET', '/v1/sessions')]).toEqual([1, 2, 2, 1, 1, 1]);
+    expect(requests.slice(finalReadBaseline)).toEqual([{ method: 'POST', path: reconcilePath }]);
+    expect([count('GET', `/v1/sessions/${sid}/conversation`), count('GET', `/v1/sessions/${sid}/conversation/events`),
+      count('GET', '/v1/settings'), count('GET', '/v1/sessions'), count('POST', reconcilePath)]).toEqual([1, 1, 1, 1, 2]);
+    expect(requests.some(request => request.path.endsWith('/history') || request.path === `/v1/sessions/${sid}/events`
+      || request.path.includes('/operations/') || request.path === `${taskPath}/${receipt.run_id}`
+      || ['/assets/client.js', '/assets/state.js', '/assets/view.js'].includes(request.path))).toBe(false);
+    const { id: _finalId, ...finalStable } = final;
+    const { id: _statusId, ...status } = await fixture.inspectTask();
+    expect(JSON.stringify(status) === JSON.stringify(finalStable)).toBe(true);
     quiet(await fixture.inspect(), 2, 1, 1);
     await privateBoundary();
     await expect.poll(() => assets.size).toBe(files.size);
     await Promise.all(reads);
+    expect([...assets].sort()).toEqual([...files.keys()].sort());
     expect(Object.values(faults)).toEqual(Array(6).fill(0));
     expect(expectedNetworkErrors).toBe(1);
     expect(await page.locator('.error').evaluateAll(nodes => nodes.every(node => node.textContent === ''))).toBe(true);
@@ -318,10 +380,11 @@ test('one task: canonical acceptance wins a lost HTTP reply, explicit GET recove
     await expect(taskField).toHaveValue('');
     await privateBoundary();
     quiet(await fixture.inspect(), 2, 1, 1);
-    console.log(`Task recovery: ordering=canonical-first tasks=1 task_posts=1 retry_posts=0 create_posts=1 reconcile_gets=3 final_run_gets=1 provider_requests=2 connections=1 auth_loads=1 auth_prepares=1 tool_results=1 response_finishes=2 terminals=1 results=1 response=${response} terminal=${terminal} result=${result} applied=${result} cancel_posts=0`);
-  } catch {
-    // Never attach raw assertions, captured commands, response data, DOM or child diagnostics.
-    failure = new Error(`Task recovery failed: ${stage}; counts=${JSON.stringify(faults)}; task_posts=${count('POST', taskPath)}`);
+    console.log(`Task recovery: ordering=display-first receipt=server-proven tasks=1 task_posts=1 retry_posts=0 create_posts=1 reconcile_posts=2 reconcile_effects=0 provider_requests=2 connections=1 auth_loads=1 auth_prepares=1 tool_results=1 response_finishes=2 terminals=1 results=1 response=${response} terminal=${terminal} result=${result} cancel_posts=0`);
+  } catch (cause) {
+    // Keep only this test's line number, never raw assertions, DOM or child diagnostics.
+    const line = cause?.stack?.match(/task-recovery\.spec\.mjs:(\d+):\d+/)?.[1] ?? 'unknown';
+    failure = new Error(`Task recovery failed: ${stage}; line=${line}; counts=${JSON.stringify(faults)}; task_posts=${count('POST', taskPath)}`);
   } finally {
     try { await loss?.stop(); } catch { failure ??= new Error('Task recovery interceptor cleanup failed'); }
     try { await context?.close(); } catch { failure ??= new Error('Task recovery browser cleanup failed'); }

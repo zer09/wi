@@ -39,6 +39,7 @@ test('create reply loss retries the identical committed command, then creates a 
   let expectedNetworkErrors = 0;
   let dropping = false;
   const requests = [];
+  const displayReads = [];
   try {
     fixture = await startFixture(executable, { transport: 'websocket', recovered: false, mime: true, mutations: true });
     const secrets = [fixture.owner, 'synthetic-replay-token-', 'synthetic-replay-account',
@@ -58,14 +59,22 @@ test('create reply loss retries the identical committed command, then creates a 
       if (leaked(request.url())) faults.secret++;
       // Retain only method/path, never headers, body, query strings or Request objects.
       requests.push({ method: request.method(), path: url.pathname });
+      if (request.method() === 'GET' && url.pathname.endsWith('/conversation/events')) {
+        const sid = url.pathname.split('/')[3];
+        const after = `g11l.${Buffer.from(JSON.stringify([1, sid, '1', '3', '', ''])).toString('base64url')}`;
+        displayReads.push({ kind: 'events', path: url.pathname, matching_head: url.searchParams.get('after') === after });
+      }
     });
     const files = new Map([['/', 'index.html'], ['/assets/wi.css', 'style.css'],
-      ...['api', 'app', 'client', 'sse', 'state', 'view'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
+      ...['api', 'app', 'display-api', 'display-client', 'display-store', 'display-view', 'sse'].map(name => [`/assets/${name}.js`, `dist/${name}.js`])]);
     const assets = new Set();
     const reads = [];
     context.on('response', response => {
       if (response.status() >= 300) faults.response++;
       const path = new URL(response.url()).pathname;
+      if (response.request().method() === 'GET' && path.endsWith('/conversation')) {
+        displayReads.push({ kind: 'latest', path, status: response.status() });
+      }
       const file = files.get(path);
       if (file === undefined) return;
       reads.push((async () => {
@@ -111,10 +120,10 @@ test('create reply loss retries the identical committed command, then creates a 
       expect(requests.some(request => request.method === 'POST' && request.path !== '/v1/sessions')).toBe(false);
     }
     const createPosts = () => requests.filter(request => request.method === 'POST' && request.path === '/v1/sessions').length;
-    const outcome = page.locator('.commands > section > pre');
     async function accepted(receipt, duplicate) {
-      await exact(outcome, `create command\n\nAccepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${receipt.session_id}\nRun: none\nSequences: 1 to 1\n\nDuplicate receipt: ${duplicate}`);
-      await expect(page.locator('.command')).toHaveCount(0);
+      const row = page.locator('.command').filter({ has: page.locator('.metadata', { hasText: receipt.operation_id }) });
+      await exact(row.locator('h3'), 'create: accepted');
+      await exact(row.locator(':scope > pre'), `Accepted receipt (not completion)\nOperation: ${receipt.operation_id}\nSession: ${receipt.session_id}\nRun: none\nSequences: 1 to 1\n\nWarning: none; duplicate: ${duplicate}\n\nAccepted is not completed.`);
     }
 
     stage = 'authenticated connection and workspace order';
@@ -145,7 +154,7 @@ test('create reply loss retries the identical committed command, then creates a 
     const committed = await fixture.inspectMutations();
     creationOnly(committed, 1);
     const first = committed.creations[0].receipt;
-    const pending = page.locator('.command');
+    const pending = page.locator('.command').filter({ has: page.locator('.metadata', { hasText: first.operation_id }) });
     await expect(pending).toHaveCount(1);
     await exact(pending.locator('h3'), 'create: sending');
     await exact(pending.locator('.metadata'), `Operation: ${first.operation_id}\nSession: not yet known`);
@@ -157,7 +166,7 @@ test('create reply loss retries the identical committed command, then creates a 
     await exact(pending.locator('h3'), 'create: uncertain');
     await pending.locator('summary').click();
     await exact(pending.locator('details pre'), titles[0]);
-    await exact(pending.locator(':scope > pre'), `Network reply unavailable. This does not establish whether a command was accepted.\n\nWorkspace: ${workspaces[0]}\n\nAcceptance is uncertain. A missing reply or receipt does not prove rollback.`);
+    await exact(pending.locator(':scope > pre'), 'Network read or reply failed. This does not prove rollback.\n\nAcceptance is uncertain. No automatic retry.');
     await expect(pending.getByRole('button', { name: 'Retry identical command', exact: true })).toBeEnabled();
     await exact(pending.locator('.metadata'), `Operation: ${first.operation_id}\nSession: not yet known`);
     await privateBoundary();
@@ -169,6 +178,10 @@ test('create reply loss retries the identical committed command, then creates a 
     await noWork(1);
 
     stage = 'explicit identical retry returns duplicate receipt';
+    // Retry must keep the original title/workspace despite later form edits.
+    await page.getByLabel('Title', { exact: true }).fill(titles[1]);
+    await workspace.selectOption(workspaces[1]);
+    await exact(pending.locator('details pre'), titles[0]);
     const [retryReply] = await Promise.all([
       page.waitForResponse(response => response.url() === `${fixture.origin}/v1/sessions` && response.request().method() === 'POST'),
       pending.getByRole('button', { name: 'Retry identical command', exact: true }).click(),
@@ -180,15 +193,25 @@ test('create reply loss retries the identical committed command, then creates a 
     expect(JSON.stringify(retried.creations) === JSON.stringify(committed.creations)).toBe(true);
     await noWork(2);
 
-    stage = 'receipt opens exact canonical metadata and empty conversation';
-    await page.getByRole('button', { name: 'Open receipt session', exact: true }).click();
-    await exact(page.getByRole('heading', { name: 'Canonical session title', exact: true }), titles[0]);
-    await exact(page.locator('.conversation > .metadata'), `Workspace: ${workspaces[0]}\nSession: ${first.session_id}`);
-    expect(new URL(page.url()).hash === `#session=${first.session_id}`).toBe(true);
     const transcript = page.getByRole('region', { name: 'Canonical conversation', exact: true });
-    await exact(transcript, 'No messages yet.');
-    await expect(transcript.locator('.run')).toHaveCount(0);
-    await privateBoundary();
+    for (const action of ['Open receipt session', 'Reconnect latest']) {
+      stage = `explicit ${action} reads exact canonical metadata without mutations`;
+      const baseline = displayReads.length;
+      await page.getByRole('button', { name: action, exact: true }).click();
+      await exact(page.getByRole('heading', { name: 'Canonical session title', exact: true }), titles[0]);
+      await exact(page.locator('.conversation > .metadata'), `Workspace: ${workspaces[0]}\nSession: ${first.session_id}`);
+      await exact(page.locator('.topbar [role="status"]'), 'connected; observation: streaming');
+      await exact(transcript, 'No messages yet.');
+      await expect(transcript.locator('.run')).toHaveCount(0);
+      expect(new URL(page.url()).hash === `#session=${first.session_id}`).toBe(true);
+      expect(displayReads.slice(baseline)).toEqual([
+        { kind: 'latest', path: `/v1/sessions/${first.session_id}/conversation`, status: 200 },
+        { kind: 'events', path: `/v1/sessions/${first.session_id}/conversation/events`, matching_head: true },
+      ]);
+      expect(JSON.stringify((await fixture.inspectMutations()).creations) === JSON.stringify(committed.creations)).toBe(true);
+      await noWork(2);
+      await privateBoundary();
+    }
 
     stage = 'changed title and workspace create a distinct command and session';
     await page.getByLabel('Title', { exact: true }).fill(titles[1]);
@@ -204,6 +227,8 @@ test('create reply loss retries the identical committed command, then creates a 
     expect(second.operation_id !== first.operation_id && second.session_id !== first.session_id).toBe(true);
     expect(JSON.stringify(created.creations[0]) === JSON.stringify(committed.creations[0])).toBe(true);
     await accepted(second, false);
+    await accepted(first, true);
+    await expect(page.locator('.command')).toHaveCount(2);
     await noWork(3);
 
     stage = 'explicit list refresh shows both exact titles';
@@ -224,6 +249,9 @@ test('create reply loss retries the identical committed command, then creates a 
     stage = 'public assets and final private boundary';
     await expect.poll(() => assets.size).toBe(files.size);
     await Promise.all(reads);
+    expect([...assets].sort()).toEqual([...files.keys()].sort());
+    expect(requests.some(request => /\/(history|events)$/.test(request.path) && !request.path.endsWith('/conversation/events'))).toBe(false);
+    expect(requests.some(request => /^\/assets\/(client|state|view)\.js$/.test(request.path))).toBe(false);
     expect(Object.values(faults)).toEqual(Array(6).fill(0));
     expect(expectedNetworkErrors).toBe(1);
     expect(await page.locator('.error').evaluateAll(nodes => nodes.every(node => node.textContent === ''))).toBe(true);

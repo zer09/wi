@@ -5,6 +5,14 @@ Accepted master: `76bb32fd04fd4737c0efcceaabc7d10387453147`.
 Preserved unaccepted checkpoint: `8f45dda2a2c168931735cf798560b8dfd02a1579`.
 The latest documentation commit is the resume-plan revision; inspect actual HEAD and record it. Do not confuse it with the tested runtime source.
 
+## Latest local continuation
+
+The [C49 handoff](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) and [fresh-agent prompt](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume-prompt.md) record current completed work, exact evidence, staging boundaries and remaining tasks. C49's one complete saved-main-SKILL Chromium case passed42.2s; both accumulated-scope reviews PASS. Current40 PARTIAL/acceptedfalse. C48 is retained native H/S/C; C49 adds representative C/B/H/J. Prior failures and separately supplied diagnostic work remain qualified. Do not restart implemented phases or replay completed cases from older future-work text. The handoff's proposed next increment is now complete: [C50](C3B_INTERRUPTED_DISPLAY_PARITY.md) passed one15.9s same-H24 interrupted-task comparison in two independent fresh connected browsers and both scoped reviews. It reuses C46/C47 machinery without replaying earlier cases. Current4022Node/629focused/172new controls and83in28 no-body collection pass; native gates remain prior source-bound reuse. Stop after C50. A new owner request is required for continuation; this index does not authorize another increment or Git transition.
+
+## Current delegate execution policy
+
+For NEW wi assignments issued from October 11, 2026, after owner approval, follow [Delegate execution policy](../../DELEGATE_EXECUTION.md). It supersedes older all-command literal-prefix and permanently fatal harmless-diagnostic rules prospectively only. Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged. Explicit acceptance requirements and explicitly terminal rules remain mandatory.
+
 ## Read before edits
 
 Read root AGENTS.md, then these files in docs/slices/g1:
@@ -15,6 +23,7 @@ Read root AGENTS.md, then these files in docs/slices/g1:
 5. DISPOSITION.md
 6. VALIDATION.md
 7. historical VERIFICATION.md, verification.json and DESIGN_REVIEW.md
+8. IDENTIFIERS.md for the October 1 owner amendment and boundary-specific audit
 
 Read applicable existing V1-B API/security, storage/source code and platform policy. Old paused handoffs and g1.0 instructions are historical. This new owner-approved contract resolves the pause. Do not run the old full-prefix or Window B assignment.
 

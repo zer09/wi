@@ -67,7 +67,7 @@ async fn p1b2_30_same_head_schema_upgrade_requires_identical_summary_and_good_av
     let (mut sql, _) = session::connection(&store.inner, id, false).await.unwrap();
     let canonical = catalog_sync::observe(&mut sql, id).await.unwrap();
     database::close(sql, &store.inner.lifecycle).await.unwrap();
-    assert_eq!(canonical.schema_version(), 2);
+    assert_eq!(canonical.schema_version(), 3);
     let mut catalog = catalog_ops::connect(&store.inner, true).await.unwrap();
     sqlx::query("UPDATE sessions SET schema_version=1 WHERE session_id=?")
         .bind(id.as_str())

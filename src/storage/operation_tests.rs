@@ -416,6 +416,8 @@ async fn storage_sequence_exhaustion_and_receipt_first_retry_are_not_quotas() {
         .execute(&mut connection)
         .await
         .unwrap();
+    sqlx::query("UPDATE conversation_projection SET applied_sequence=9223372036854775807, metadata_sequence=9223372036854775807")
+        .execute(&mut connection).await.unwrap();
     database::close(connection, &store.inner.lifecycle)
         .await
         .unwrap();

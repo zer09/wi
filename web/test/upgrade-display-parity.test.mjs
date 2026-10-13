@@ -40,6 +40,24 @@ test('actual independent released schema2 seeder preserves canonical facts, cons
   }catch{assert.fail('Seeder or owned cleanup control failed');}
   finally{await rm(fixture.root,{recursive:true,force:true});}
 });
+for(const [index,fact]of facts.entries())test(`actual seeded ${index} accepted transport and command fingerprint match the persisted input`,async()=>{
+  const fixture=await createRestartRoot();
+  try{
+    const seed=await seedLegacy(fixture),before=snapshot(fixture);
+    assert.equal(legacyProof(before,seed),true);
+    const accepted=before.canonical.events.filter(e=>e[2]==='run.accepted');assert.equal(accepted.length,2);
+    const event=accepted[index],payload=JSON.parse(event[8]);assert.equal(event[0],fact.accepted);assert.equal(payload.run_id,fact.run);
+    assert.equal(payload.input.prepared_request.options.transport,'web_socket');
+    const commands=before.canonical.commands.filter(c=>c[3]===fact.accepted);assert.equal(commands.length,1);
+    const command=commands[0];assert.equal(command[1],'accept_run');assert.equal(command[4],fact.accepted);
+    const request={method:'accept_run',session_id:sid,run_id:payload.run_id,input:payload.input};
+    assert.equal(command[2],digest(JSON.stringify(request)));
+    // A spelling-only payload patch must not leave the old command fingerprint behind.
+    const stale=clone(request);stale.input.prepared_request.options.transport='websocket';
+    assert.notEqual(command[2],digest(JSON.stringify(stale)));
+    assert.equal(handleFacts().active,0);assert.equal(handleFacts().opens,handleFacts().closes);
+  }finally{await rm(fixture.root,{recursive:true,force:true});}
+});
 for(const path of ['private-data','private-data/sessions',`private-data/sessions/${sid.slice(0,2)}`,`private-data/sessions/${sid.slice(0,2)}/${sid}`,
   'private-data/catalog.sqlite3',`private-data/sessions/${sid.slice(0,2)}/${sid}/session.sqlite3`])test(`actual seeded ownership rejects public mode: ${path}`,async()=>{
   const fixture=await createRestartRoot();

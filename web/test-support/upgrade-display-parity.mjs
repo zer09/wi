@@ -104,7 +104,7 @@ export async function seedLegacy(fixture) {
   insert('session.created', null, { title, workspace: null, creation_provenance: provenance }, uuid(3));
   for (const fact of facts) {
     const input = { user_text: fact.user, prepared_request: { provider_id: 'synthetic', options: { model: 'model', instructions: 'private-operator-legacy',
-      tools: [], transport: 'websocket', required_features: [] }, prompt: 'private-project-legacy\r\n雪' }, tool_definitions: [], available_skills: [], active_skills: [], project_instructions_source: null };
+      tools: [], transport: 'web_socket', required_features: [] }, prompt: 'private-project-legacy\r\n雪' }, tool_definitions: [], available_skills: [], active_skills: [], project_instructions_source: null };
     const owner = uuid(30 + fact.accepted);
     const accepted = insert('run.accepted', fact.run, { run_id: fact.run, owner_instance_id: owner, input });
     let source = 0;

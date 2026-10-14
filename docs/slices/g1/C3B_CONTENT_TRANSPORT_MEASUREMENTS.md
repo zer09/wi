@@ -1,8 +1,28 @@
 # C53: finite content-read transport measurement
 
-Current offline continuation: **C53R1 M2 COMPLETED_SCOPED_REVIEWED**. Original C53 browser case: **FAILED / verification_failure**. All40 rows remain **PARTIAL**, accepted=false. No content transport sample was obtained.
+Current browser continuation: **C53R2 COMPLETED_SCOPED_REVIEWED**. Original C53 browser case remains **FAILED / verification_failure**. All40 rows remain **PARTIAL**, accepted=false. One fresh repaired-source content transport sample was obtained.
 
-## M2 final deletion admission
+## C53R2 fresh repaired-source runtime
+
+At checkpoint50864fa3c30271b9526d3649adcd869fe08c0862, the sole new unchanged-source Chromium case passes in10.5s. Fresh external C53R2.once.json and ordinary public TestInfo C53.once.json consume this invocation. Total C53 attempts2: historicalFAILED plus freshPASS; four markers are not four executions. Original retained root/markers/failure/unknown first assertion remain unchanged. No retry or source change.
+
+Exact1Latest/1SSE/1content/0setupContent/0Before/0Within/0Entry/0mutations/0helperHTTP. Original Connect first opens genuine schema2/H21/0projections to3. Initial B human `[163840,192000)` is28160known scalar-valid UTF-8 bytes; one actual Load older click prepends29356bytes to `[134484,192000)`, retaining the exact28160-byte tail and unchanged B activity. Prefix gap `[0,134484)` and incomplete label remain truthful. Cursor derives from known fixture and verified DOM before intent. Initial geometry31490height/383viewport/31107top proves overflow, not pixel-anchor certification. Full canonical/nonprojection-DDL and post-Latest projection/catalog equality holds through Stop:5tables/2blocks/6entries/8fields/31chunks/epoch12/generation12/192000human bytes.
+
+| Original content transport metric | Observation |
+|---|---:|
+| First byte |127.325ms|
+| Download |9.967ms|
+| Total |137.292ms|
+| Request body /headers |0 /479bytes|
+| Response body /headers |64820 /183bytes|
+
+Public Request timing/sizes and exact Request/Response/finish identity supply this single instrumented sample. Response includes repeated compact block/human/addressed-entry metadata, not only29356new text bytes;64820 is below enclosing524288page cap, not the32768fragment cap. No original Latest/content/SSE body read by instrumentation; SSE headers only. No SQL/server CPU/ordinary latency/SLA/statistics/scaling/memory/complete traversal/anchor claim.
+
+All11cleanup steps pass. Normal native Stop/drain/input-end/exit0/signalnull/empty stderr/reap,4strict zero-work records, no fallback. One native/six known browser identities independently absent; finite discoveries5/6/6members/no enumeration/stat/identity errors.13SQLite opens/13closes/0active; new owned root removed. Direct npm/recorder retirement does not inventory every CLI descendant or all-host state. Initial independent absence check covered observer cwd only; final delivery and parent audit check the whole new root. No prior record rewritten. CLI529raw-stderr bytes discarded/cause unknown; native stderr0 is separate. Retained sanitized logs have separate hashes; raw hashes are not retained-log proof. Route interruption after completed PASS resumed reporting only, no second invocation.
+
+Evidence (local record). Parent IMPLEMENTATION_AUDIT.json rehashes7651purpose-bound references/freezes31files/verifies780source/6833sealed/432native inputs/original root12files/HEAD/index. Saved238controls/2161focused/4712default Node/syntax/static/privacy/whitespace/typecheck/eightassets/86in31collection and six native gates revalidated, not rerun;821child reuse references overlap parent sets. No Cargo/discovery/build/relink/native preprobe/gate/provider/tool/auth/sampler/other case. Reader/C15-active1/default-SSE/platform/ledger unchanged. Both fresh scoped reviews PASS/no findings/0proof bodies. Parent REVIEW_AUDIT.json freezes10review files/verifies780source/6833sealed/31runtime files. Five old report hashes inside821reuse references remain pre-reconciliation cutoff records;816nonreport references/current source match, not a current-report rehash claim. Review-b's4external Context Mode boundary rejections and2unbound directory checks are disclosed, not environment proof or runtime failure. Standing local checkpoint follows final validation; actual receipt (local record), no push. No further runtime/whole-row acceptance follows.
+
+## Prior offline M2 final deletion admission
 
 Two added spec lines drain the collector and prove its state after the last awaited file/binding validation, immediately before rm. Earlier and post-cleanup proofs remain.16actual-callback schedules use original registered handlers/real collector pending sizes tasks: pre-deletion non-SSE failures/duplicates reject removal and retain the new mock root; pending valid settlement permits safe removal but not a failed-body PASS. First error/immutable packet/later artifacts and all45operations remain unchanged. Faults first arriving after rm starts are FAILED with truthful completed-removal facts, not reversible-deletion proof. No real SDK quiescence/delivery claim.
 

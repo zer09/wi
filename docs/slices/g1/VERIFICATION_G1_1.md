@@ -1,10 +1,20 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B53R1_M2_REVIEWED_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C3B53R2_CONTENT_RUNTIME_REVIEWED_ALL40_PARTIAL**.
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
-## Current C53R1 M2: COMPLETED_SCOPED_REVIEWED
+## Current C53R2: COMPLETED_SCOPED_REVIEWED
+
+Sole fresh unchanged-source Chromium case at50864fa3 passes10.5s, consuming fresh external/ordinary markers; total2attempts(FAILED+PASS)/4markers, no retry. Exact1Latest/1SSE/1content/0setupContent/0Before/Within/Entry/mutations/helperHTTP. Original Connect opens genuine schema2/H21->3; exact B suffix163840->134484of192000/29356prepend/28160retained tail/remaining prefix gap/incomplete label/ordinary activity/canonical-DDL/post-Latest projection equality through Stop.5tables/2blocks/6entries/8fields/31chunks/epoch-generation12. One real accessible Load older click; independently built cursor before intent.
+
+Original public Request first-byte127.325/download9.967/total137.292ms; request0body/479header and response64820body/183header bytes. Repeated compact block/human/addressed metadata, not only29356text bytes; enclosing524288cap distinct from32768fragment cap. No original API/SSE body read or helper HTTP; SSE headers only. One instrumented sample, not SQL/server CPU/ordinary latency/SLA/statistics/anchor/scaling/memory/complete traversal proof.
+
+11cleanup steps pass/no fallback/normal native Stop/drain/input-end/exit0/empty native stderr/reap/4zero-work records/7known identities absent/13handles balanced/new root removed. Finite discoveries5/6/6no errors; not all-host/complete CLI-descendant inventory. Narrow initial independent root check covered observer cwd only, final delivery/parent verify whole-root absence. CLI raw stderr529discarded/cause unavailable, native stderr0 separate; retained sanitized-log hashes distinct. Post-PASS route interruption resumes reporting only. Parent IMPLEMENTATION_AUDIT.json rehashes7651purpose-bound references/freezes31files/preserves780source/6833sealed/432native inputs/original root12files/HEAD/index. Saved238controls/2161focused/4712default Node/syntax/static/privacy/whitespace/typecheck/eightassets/86in31collection and6native gates revalidated,0bodies. No Cargo/discovery/build/relink/provider/tool/auth/sampler/other case. [Evidence](C3B_CONTENT_TRANSPORT_MEASUREMENTS.md), (local record).
+
+Both fresh scoped reviews PASS/no findings/0proof bodies. Parent REVIEW_AUDIT.json freezes10review files/verifies780source/6833sealed/31runtime files. Five old report hashes in821reuse references remain runtime-cutoff records;816nonreport/current source references match, not current-report claims. Review-b4external Context Mode boundary rejections/2unbound directory checks disclosed, not environment proof. Standing local checkpoint follows final validation; actual (local record), no push. Original failed C53/root/markers/unknown first assertion/default2fail and reader/C15-active1/default-SSE/platform/ledger/all40PARTIAL/acceptedfalse unchanged. No automatic next runtime/push/acceptance.
+
+## Prior offline C53R1 M2: COMPLETED_SCOPED_REVIEWED
 
 Final collector drain/proof follows last awaited file/binding validation and immediately precedes rm. Earlier/post-cleanup proofs,45body operations/M1 fixes unchanged.16actual-callback schedules use original handlers/real pending sizes tasks and verify pre-deletion retention, settlement ordering, first-error/immutable packet/safe publication. After-rm-start faults remain FAILED/truthful removal, not preventable-retention proof or SDK quiescence.
 

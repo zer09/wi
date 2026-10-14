@@ -1,8 +1,36 @@
 # C52: finite browser-observed transport and Linux memory measurements
 
-Status: **COMPLETED_SCOPED_REVIEWED**. Contract: **g1.1**. All forty G11 rows remain **PARTIAL**, accepted=false.
+Current continuation: **C52R2 COMPLETED_SCOPED_REVIEWED**. Prior C52/R1 cutoff: **COMPLETED_SCOPED_REVIEWED**. Contract: **g1.1**. All forty G11 rows remain **PARTIAL**, accepted=false.
 
-## Scope and authority
+## C52R2: one fresh repaired-source ordinary-output case
+
+The owner approved one fresh repaired-source runtime case after local checkpoint `67c8be6b094c08093114acfe8fcd20d0070ce963`. The unchanged case passed once in **11.0s**, workers1/retries0/recordingoff. No source change, Cargo/discovery/build/relink, gate-body or old-case replay occurred. Parent execution contract: (local record).
+
+`WI_C52_EVIDENCE` was absent. Public TestInfo.outputPath supplied `playwright-output/display-measurements-finit-cf161-d-Linux-memory-measurements/c52-evidence` under fresh owned (local record). The callback exclusively reserved its mode0700 directory before effects and created its mode0600 `C52.once.json`. The recorder's separate exclusive `C52R2.once.json` consumed the one external budget. Neither invocation directory/marker was precreated. The explicit validated fixture/digest selected the supplied-binding branch, so unchanged discovery was not called. This proves that ordinary output/supplied-binding runtime path, not an absent-binding discovery or hosted suite execution.
+
+Genuine schema2/H21 first opening upgraded to3/5projection tables with canonical/nonprojection DDL equality and2blocks/6entries/8fields/8chunks. Exact B/title before A, explicit warm Latest/matching SSE and genuine Home Before A preserved chronological A-B, unchanged B and full canonical/DDL/projection data. Counts **2Latest/2SSE/1Before/0setupBefore/0mutations/0helperHTTP**. Numeric native work stayed0/fresh_emptyfalse through four samples and the stopped record. No real provider/tool work ran.
+
+| Fresh operation | First byte, ms | Download, ms | Total, ms | Response body bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Cold Latest | 149.717 | 6.704 | 156.421 | 4036 |
+| Warm Latest | 87.133 | 8.831 | 95.964 | 4036 |
+| Before A | 89.485 | 8.277 | 97.762 | 3134 |
+
+Original-identity200JSON/no-store/requestfinished metadata supplied these values; no original API/SSE body was read. GET bodies0bytes/request headers471bytes/response headers182bytes. Cold/warm SSE header handshakes82.655/82.564ms, without completion/size/live-change timing. Cold page-clock heading Preparing-to-title/B observation198.400ms; no warm installation or first-paint claim. Values rounded here. Original10.7s values below remain original-source only. Fresh versus original values do not establish improvement or a statistical comparison.
+
+24valid native/24complete-for-observed-membership browser samples covered3087.324ms. Native maximum observed RSS and sampled process-lifetime HWM51560448bytes; browser observed-tree maximum RSS sum473321472bytes. All seven named boundary samples were valid. Nominal100ms sampling had actual start gaps88.315..220.337ms. **Substantial sample wall cost:3016.854ms**, longest220.293ms, includes awaits/scheduling. One stat-discovery gap remains; no churn/partial/enumeration/identity errors. Sampling captures cwd but compares PID/start/executable/PPID, not cwd. Non-atomic discovery, approximate status, shared-page duplication and missed transient spikes remain. No ordinary-latency/SLA/true/unique/all-host peak/leak/phase-caused/comparative-effect claim follows.
+
+All ten cleanup steps passed. Sampler stop/await, context/connection/server close, normal native Stop/drain/input end/exit0/empty native stderr/no fallback/reap, native1/browser6 independent absence,14opens14closes0active and owned-root removal passed. Npm independently retired too. Source/executable binding remained unchanged. The passing normal path does not replace the existing deterministic failure-path controls with new real failure executions.
+
+R1 offline184controls/1220focused/4474default Node/three syntax/typecheck/eightassets/static/privacy/whitespace/85in30 and native six gates/432inputs/F1/source pins were revalidated/reused, not executed. Three new syntax checks cover only external metadata scripts. Implementation revalidation lists1074purpose-bound reuse entries; its report calls these unique, but entries repeat. Parent audit deduplicates the combined manifest/reuse references and rehashes **672unique path/digest pairs**, freezes30implementation files, and preserves776source/6152sealed/HEAD/index/native artifact. These are overlapping audit counts, not new product proofs.
+
+Evidence (local record). Parent `IMPLEMENTATION_AUDIT.json` is under `wi-c52-r2-parent`. Parent initial broad native selector, reuse count/array parser and boolean `fresh_empty` classifier failures remain disclosed in INITIAL_DIAGNOSTIC.json/AUDIT_DIAGNOSTIC.json. Corrected canonical checks pass without source changes or case retry. Implementation short read-only inspections are not environment acceptance evidence. Runner stderr527bytes was discarded; native stderr0 is independent. Only sanitized logs were saved and rehashed; discarded raw hashes are not retained-file claims. Old failed roles/findings/original source archives/markers remain immutable.
+
+Both fresh scoped reviews **PASS/no blocking or advisory findings/0proof replay**. Reports/metadata are (local record) and (local record). Parent REVIEW_AUDIT.json freezes10review files and preserves776source/6152sealed/30implementation/432native inputs. Review-a's relative/absolute deduplication, key regex and exclusive own diagnostic/delta-publication errors remain recorded with corrected metadata results. Its report_pending field predates the completed PASS report/final-preservation verdict. Review-b's external ctx_execute_file workspace-boundary rejection preceded access/effects and was corrected to a canonical read-only Node query. No product/gate replay or repository edit occurred.
+
+Standing owner-authorized local checkpoint follows passed final validation; actual Git receipt (local record), no push or acceptance. Both fresh markers are consumed; no repeat or automatic expanded matrix execution. All40PARTIAL/acceptedfalse, reader/C15-active1/default-SSE/platform/ledger unchanged.
+
+## Prior C52 scope and authority
 
 The owner approved a bounded G11-36 measurement increment after local checkpoint `df7f3588b7efcff0f401923a077fab1b2b5e31c6`. This is a distinct case, not a replay of C51's upgrade/reopen proof. Completed solution-a and solution-b investigations informed the parent contract. Solution-c remains FAILED/routes_unavailable and permanently unavailable by owner direction; it is not passed. One advisory oracle returned REVISE. The parent adopted cold-only DOM observation and acquired-resource cleanup requirements without an oracle loop.
 
@@ -97,7 +125,7 @@ Actual-wrapper/callback fake regressions and current-source gates pass **184cont
 
 Evidence (local record). Parent R1_IMPLEMENTATION_AUDIT.json rehashes234purpose-bound references/freezes112remediation files/preserves773nonassigned/5868sealed/96original implementation/20role/3archive records. Original discarded raw-log metadata remains distinct from saved sanitized logs. Nineteen gate targets across material versions remain recorded. Initial guessed recorder path/guard rejection/shared diagnostic timeout and inspected outward-error sanitization correction remain disclosed. Parent's initial classifier omitted native/archive reuse from purpose-specific bindings; correction changes no product acceptance or proof.
 
-**Repaired-source browser/native cases:0.** No Chromium/native/Cargo/build/discovery/relink/provider/tool or product-proof replay ran. The successful10.7s data remains original-source evidence, not positive runtime proof of this repair. No new actual browser marker exists; fake controls use memory-only markers.
+**At the R1 remediation cutoff, repaired-source browser/native cases:0.** C52R2 above is later evidence. No Chromium/native/Cargo/build/discovery/relink/provider/tool or product-proof replay ran. The successful10.7s data remains original-source evidence, not positive runtime proof of this repair. No new actual browser marker exists; fake controls use memory-only markers.
 
 Both fresh repeat complete-increment reviews **PASS**, with0blocking findings and0proof replay. Review-a records one low documentation advisory, now corrected: memory identity reads capture cwd; sampling equality checks PID/start/executable/PPID rather than cwd. The sampler is unchanged. Review-b has no findings. Reports/metadata are (local record) and (local record).
 
@@ -107,4 +135,4 @@ Standing owner authorization permits the local checkpoint after final validation
 
 ## Remaining scope
 
-G11-36 gains this finite cold/warm/older transport, SSE-handshake, cold DOM and Linux observed-memory evidence. It remains PARTIAL. Content/live-change/commit+projection transport timing, unrelated-history browser scaling, SQL-trace zero-backfill, actual tools, true memory/disk peaks, macOS, hosted/final full gates, three complete-master reviewers and owner acceptance remain open. The original spec's local assignment bindings are the verified F2 integration defect, not portable hosted evidence. The completed offline source repair does not establish a repaired-source browser/native or hosted execution pass. C51's original-body prohibition and failed-attempt history are unchanged. No automatic browser replay follows.
+G11-36 gains this finite cold/warm/older transport, SSE-handshake, cold DOM and Linux observed-memory evidence. It remains PARTIAL. Content/live-change/commit+projection transport timing, unrelated-history browser scaling, SQL-trace zero-backfill, actual tools, true memory/disk peaks, macOS, hosted/final full gates, three complete-master reviewers and owner acceptance remain open. The original spec's local assignment bindings are the verified F2 integration defect, not portable hosted evidence. At the R1 cutoff, the offline source repair established no repaired-source runtime pass. C52R2 now supplies one fresh supplied-binding/ordinary-output case, not absent-binding discovery or hosted execution. C51's original-body prohibition and failed-attempt history are unchanged. No automatic browser replay follows.

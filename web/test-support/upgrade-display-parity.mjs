@@ -83,7 +83,7 @@ export function upgradedProof(value, seed, held) {
   if (held !== undefined) equal(value, held);
   return true;
 }
-export async function seedLegacy(fixture) {
+export async function seedLegacy(fixture, seedFacts = facts) {
   await rootProof(fixture, 'observe');
   const ddl = [];
   for (const [file, expected] of ddlPins) { const bytes = await readFile(join(ROOT, file)); if (digest(bytes) !== expected) reject(); ddl.push(bytes.toString('utf8')); }
@@ -102,7 +102,7 @@ export async function seedLegacy(fixture) {
     canonical.events.push([sequence,event,type,1,42,run,payload.event_id ?? null,payload.sequence ?? null,text]); return sequence;
   };
   insert('session.created', null, { title, workspace: null, creation_provenance: provenance }, uuid(3));
-  for (const fact of facts) {
+  for (const fact of seedFacts) {
     const input = { user_text: fact.user, prepared_request: { provider_id: 'synthetic', options: { model: 'model', instructions: 'private-operator-legacy',
       tools: [], transport: 'web_socket', required_features: [] }, prompt: 'private-project-legacy\r\n雪' }, tool_definitions: [], available_skills: [], active_skills: [], project_instructions_source: null };
     const owner = uuid(30 + fact.accepted);

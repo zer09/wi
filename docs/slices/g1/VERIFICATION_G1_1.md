@@ -1,10 +1,28 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B54D3_READER_DIAGNOSTIC_REVIEWED_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C3B54D4_M1_REVIEWED_ALL40_PARTIAL**.
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
-## Current C54D3: COMPLETED_SCOPED_REVIEWED, offline only
+## Current C54D4 M1: COMPLETED_SCOPED_REVIEWED
+
+ThreeNodepaths addpost-clone strictvalidation beforefreezing/retention, retainingoriginaldescriptorproof andsingleholdercapture. Brandedkeeper/reader/totals/error facts orstatefulgetters cannotyieldavailablemalformedownedcopies. Nativeprotocol/actualmocklauncher/B/16actualregisteredcallback fault schedules retainoriginalerrors, firstpackets, body-errorroots andwritablesiblings/closureattempts. Rust/Bhelper/spec/keeperlifetime/a59artifact443inputs unchanged.
+
+Final16gates pass427nativeNode/308B/1582affected/5447unfiltereddefaultNode/fivesyntax/typecheck/eightassets/staticprivacywhitespace/87in32no-body/fivestoredRustframes throughcurrentNode/B. Native6categories/26controls/platform1 strictlyrevalidatedunchangedinputs,nobodies. ParentM1_AUDIT rehashes1014refs/freezes67files/preserves785nonassigned/8252sealed/138D4/20findingfiles/all5artifacts/Git/shared0755. Regressionfirst735/683PASS52FAIL included8cleanup-onlyearlyartifact expectationfaults, corrected735/688PASS47FAIL beforehelperfix; both retained, finalPASS. Directinventory/modeproceduralcorrections disclosed,notgate/environmentproof.
+
+BothfreshcompleteD4+M1reviews PASS/no findings/0bodies; F1closedoffline. ParentREPEAT_REVIEW_AUDIT freezes5reviewfiles/preserves138D4/20finding/67M1/788source/8252sealed. Standingcheckpoint followsfinalvalidation; actualreceipt (local record). Thenonedistinctunchangedsourcecase withnewoutput/markers underownerstandingcontinuation, separatelyfinalized, notoldcase replay. Report (local record); [C54](C3B_LIVE_COMMIT_MEASUREMENTS.md).0runtime0markers/no retainedrootaccess; exactD2causeUNVERIFIED/4FAILED8markers/nullmeasurements/reader/C15-active1/deferrals/ledger/all40PARTIAL/acceptedfalse unchanged. No automaticruntime/push/acceptance.
+
+## Prior C54D4: IMPLEMENTED/CHANGES_REQUIRED_F1, offline only
+
+One separate read-only zero-busy keeper is owned before its real WAL-table priming query and before concurrent work. It does not replace short observers. read_owned/snapshot are byte-identical to D3; selected shortclose precedes writerrelease. Ready/captured/terminal/failure/cleanup/stopped now distinguish shortreaders, keeper and total knownreturned-unretired handles. With a keeper alive, totalactive1 is truthful; normalstopped/deletion requires keeperretiredonce and totalactive0. Keepererrors/secondaryclose remain separate from short-reader errors and immutablefirst packets. Cleanup awaits server/storage ownership before keeper close and attempts later closure despite earlier failures/panics.
+
+Directsynthetic controls demonstrate lastwriterWAL removal withoutkeeper, WALretention withprimedkeeper, freshcommittedhead1->2/no pinnedsnapshot, physicalshortclose-before-release and truthful totals. They do not reproduce D2's missingcode. Close/storage-error seams run afterphysicalclose and test conservativeuncertainty, not realI/O failure. Testshapedserverowner usesrealstorage withoutHTTP/provider/nativechild.
+
+All22finalapplicablegates pass26Rust/platform1/356nativeNode/262B/1465affected/5330unfiltereddefaultNode/fivesyntax/typecheck/eightassets/staticprivacywhitespace/87tests32files no-bodycollection/fiveRustserializedframes->Node/B. Newartifacta59bdbc6b1300b82f77350c736511c2fc2ea3b07c3f8826a7cb8d31ffa13ddde/current443inputs; prior4unchanged. Parent928refs/138files preserves788source/782nonassigned/8252sealed/HEAD/index/refs/shared0755.32historicalbefore-after references differ onlybyremovedEOFblankline inindependentNode test; reconstructedbytes match, dependentgates reran. Initial1/618 sharedmockgetter failure and EOFwhitespace failure retained/corrected.
+
+Report (local record), [C54](C3B_LIVE_COMMIT_MEASUREMENTS.md). Initialreview-aCHANGES_REQUIRED/review-bPASS. D4-A-01 independentlyREPRODUCED in8pureNode schedules/119checks/0scaffolds: validbrandedkeeper input losesfacts duringclone; unvalidatedcopyretainedasavailable andfrozenDate setterchangesfirstpacketserialization. OrdinarywireJSONnotDatereproduction. ParentF1_AUDIT freezes20rolefiles. NextfocusedM1ownedclonevalidation/regressions thenbothcomplete repeatreviews beforecheckpoint.0runtime0markers/no retainedrootaccess/evenmetadata; D2exactcauseUNVERIFIED/4FAILED8markers/nullmeasurements/reader/C15-active1/deferrals/ledger/all40PARTIAL/acceptedfalse unchanged. No automaticruntime/push/acceptance.
+
+## Prior C54D3: COMPLETED_SCOPED_REVIEWED, offline only
 
 The six assigned fixture/Node paths add fixed connect/settle_chunks/settle_results/close/watchdog/action attribution, closed driver classes, nullable bounded SQLite codes and settle context, original-plus-secondary error ownership, and nested protocol/B diagnostic immutability. Reader lifetime, zero busy timeout,5ms poll,30s bounds, selected-snapshot closure, telemetry leaves, E2E spec, reader and production behavior are unchanged. No keeper is added.
 

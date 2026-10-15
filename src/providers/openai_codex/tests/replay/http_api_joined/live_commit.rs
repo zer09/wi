@@ -53,14 +53,34 @@ enum Origin {
     Cleanup,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "ReaderFactsFields")]
 struct ReaderFacts {
     opened: usize,
     closed: usize,
     active: usize,
 }
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ReaderFactsFields {
+    opened: usize,
+    closed: usize,
+    active: usize,
+}
+impl TryFrom<ReaderFactsFields> for ReaderFacts {
+    type Error = &'static str;
+    fn try_from(v: ReaderFactsFields) -> std::result::Result<Self, Self::Error> {
+        if v.opened > 1_000_001 || v.closed > v.opened || v.active != v.opened - v.closed {
+            return Err("reader diagnostic rejected");
+        }
+        Ok(Self {
+            opened: v.opened,
+            closed: v.closed,
+            active: v.active,
+        })
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, try_from = "FailureFields")]
 struct Failure {
     origin: Origin,
     phase: Phase,
@@ -70,6 +90,61 @@ struct Failure {
     readers: Option<ReaderFacts>,
     #[serde(deserialize_with = "reader_optional")]
     reader_error: Option<ReaderError>,
+    keeper: KeeperFacts,
+    #[serde(deserialize_with = "reader_optional")]
+    totals: Option<ReaderFacts>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FailureFields {
+    origin: Origin,
+    phase: Phase,
+    #[serde(deserialize_with = "reader_optional")]
+    last_completed: Option<Phase>,
+    #[serde(deserialize_with = "reader_optional")]
+    readers: Option<ReaderFacts>,
+    #[serde(deserialize_with = "reader_optional")]
+    reader_error: Option<ReaderError>,
+    keeper: KeeperFacts,
+    #[serde(deserialize_with = "reader_optional")]
+    totals: Option<ReaderFacts>,
+}
+impl TryFrom<FailureFields> for Failure {
+    type Error = &'static str;
+    fn try_from(v: FailureFields) -> std::result::Result<Self, Self::Error> {
+        let counts = match (&v.readers, &v.totals) {
+            (None, None) => true,
+            (Some(r), Some(t)) => {
+                r.opened <= 1_000_000
+                    && t.opened == r.opened + v.keeper.opened
+                    && t.closed == r.closed + v.keeper.closed
+                    && t.active == r.active + v.keeper.active
+            }
+            _ => false,
+        };
+        if !counts
+            || v.reader_error.as_ref().is_some_and(|e| {
+                matches!(
+                    e.first.stage,
+                    ReaderStage::KeeperConnect
+                        | ReaderStage::KeeperPrime
+                        | ReaderStage::KeeperClose
+                        | ReaderStage::KeeperAction
+                )
+            })
+        {
+            return Err("failure diagnostic rejected");
+        }
+        Ok(Self {
+            origin: v.origin,
+            phase: v.phase,
+            last_completed: v.last_completed,
+            readers: v.readers,
+            reader_error: v.reader_error,
+            keeper: v.keeper,
+            totals: v.totals,
+        })
+    }
 }
 #[derive(Default)]
 struct Tracker {
@@ -84,7 +159,7 @@ impl Tracker {
     fn complete(&mut self) {
         self.last_completed = Some(self.phase);
     }
-    fn freeze(&mut self, origin: Origin, readers: &Readers) {
+    fn freeze(&mut self, origin: Origin, readers: &Readers, keeper: &Keeper) {
         if self.first.is_none() {
             self.first = Some(Failure {
                 origin,
@@ -92,6 +167,8 @@ impl Tracker {
                 last_completed: self.last_completed,
                 readers: readers.diagnostic(),
                 reader_error: readers.first.lock().unwrap().clone(),
+                keeper: keeper.facts(),
+                totals: keeper.totals(readers),
             });
         }
     }
@@ -490,6 +567,10 @@ enum ReaderStage {
     Close,
     SettleWatchdog,
     Action,
+    KeeperConnect,
+    KeeperPrime,
+    KeeperClose,
+    KeeperAction,
 }
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -580,7 +661,18 @@ impl TryFrom<ReaderIssueFields> for ReaderIssue {
         };
         if codes
             && context
-            && (issue.stage == ReaderStage::Action) == (issue.driver == Driver::Panic)
+            && (if matches!(issue.stage, ReaderStage::Action | ReaderStage::KeeperAction) {
+                issue.driver == Driver::Panic
+            } else {
+                issue.driver != Driver::Panic || issue.stage == ReaderStage::KeeperClose
+            })
+            && (!matches!(
+                issue.stage,
+                ReaderStage::KeeperConnect
+                    | ReaderStage::KeeperPrime
+                    | ReaderStage::KeeperClose
+                    | ReaderStage::KeeperAction
+            ) || issue.attempt.is_none())
             && (issue.stage == ReaderStage::SettleWatchdog) == (issue.driver == Driver::Watchdog)
         {
             Ok(issue)
@@ -605,10 +697,20 @@ struct ReaderErrorFields {
 impl TryFrom<ReaderErrorFields> for ReaderError {
     type Error = &'static str;
     fn try_from(v: ReaderErrorFields) -> std::result::Result<Self, Self::Error> {
-        if v.close
-            .as_ref()
-            .is_some_and(|c| c.stage != ReaderStage::Close || v.first.stage == ReaderStage::Close)
-        {
+        if v.close.as_ref().is_some_and(|c| {
+            let close = if matches!(
+                v.first.stage,
+                ReaderStage::KeeperConnect
+                    | ReaderStage::KeeperPrime
+                    | ReaderStage::KeeperAction
+                    | ReaderStage::KeeperClose
+            ) {
+                ReaderStage::KeeperClose
+            } else {
+                ReaderStage::Close
+            };
+            c.stage != close || v.first.stage == close
+        }) {
             return Err("reader diagnostic rejected");
         }
         Ok(Self {
@@ -900,6 +1002,176 @@ fn selected_leaves(collector: &crate::storage::test_hooks::latency::Collector) -
     leaves
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, try_from = "KeeperFields")]
+struct KeeperFacts {
+    acquired: bool,
+    initialized: bool,
+    opened: usize,
+    closed: usize,
+    active: usize,
+    error: Option<ReaderError>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeeperFields {
+    acquired: bool,
+    initialized: bool,
+    opened: usize,
+    closed: usize,
+    active: usize,
+    #[serde(deserialize_with = "reader_optional")]
+    error: Option<ReaderError>,
+}
+impl TryFrom<KeeperFields> for KeeperFacts {
+    type Error = &'static str;
+    fn try_from(v: KeeperFields) -> std::result::Result<Self, Self::Error> {
+        let valid_error = v.error.as_ref().is_none_or(|e| {
+            matches!(
+                e.first.stage,
+                ReaderStage::KeeperConnect
+                    | ReaderStage::KeeperPrime
+                    | ReaderStage::KeeperClose
+                    | ReaderStage::KeeperAction
+            ) && (e.first.stage != ReaderStage::KeeperConnect || !v.acquired)
+                && (e.first.stage == ReaderStage::KeeperConnect || v.acquired)
+                && (e.first.stage != ReaderStage::KeeperPrime || !v.initialized)
+                && (v.acquired || e.close.is_none())
+                && e.close
+                    .as_ref()
+                    .is_none_or(|c| c.stage == ReaderStage::KeeperClose)
+                && (e.first.stage != ReaderStage::KeeperClose && e.close.is_none() || v.closed == 0)
+        });
+        if v.opened > 1
+            || v.closed > v.opened
+            || v.active != v.opened - v.closed
+            || v.acquired != (v.opened == 1)
+            || v.initialized && !v.acquired
+            || !valid_error
+        {
+            return Err("keeper diagnostic rejected");
+        }
+        Ok(Self {
+            acquired: v.acquired,
+            initialized: v.initialized,
+            opened: v.opened,
+            closed: v.closed,
+            active: v.active,
+            error: v.error,
+        })
+    }
+}
+#[derive(Default)]
+struct Keeper {
+    connection: Option<SqliteConnection>,
+    initialized: bool,
+    opened: usize,
+    closed: usize,
+    error: Option<ReaderError>,
+    // Offline seams run only after the physical close. Neither proves a real close error.
+    close_error: Option<sqlx::Error>,
+    close_panic: bool,
+}
+impl Keeper {
+    fn freeze(&mut self, issue: ReaderIssue) {
+        if let Some(first) = &mut self.error {
+            if issue.stage == ReaderStage::KeeperClose
+                && first.first.stage != ReaderStage::KeeperClose
+                && first.close.is_none()
+            {
+                first.close = Some(issue);
+            }
+        } else {
+            self.error = Some(ReaderError {
+                first: issue,
+                close: None,
+            });
+        }
+    }
+    async fn open(&mut self, root: &Path, sid: &ApplicationSessionId) {
+        assert!(self.opened == 0 && self.error.is_none());
+        let result = SqliteConnectOptions::new()
+            .filename(db_path(root, sid))
+            .read_only(true)
+            .busy_timeout(Duration::ZERO)
+            .disable_statement_logging()
+            .connect()
+            .await;
+        match result {
+            Ok(connection) => {
+                // Own the returned handle before any query or assertion can fail.
+                self.connection = Some(connection);
+                self.opened = 1;
+            }
+            Err(error) => {
+                let issue = Readers::default().sql_error(ReaderStage::KeeperConnect, &error);
+                self.freeze(issue.clone());
+                std::panic::resume_unwind(Box::new(ReaderPanic(issue)));
+            }
+        }
+        let result = AssertUnwindSafe(async {
+            // fetch_all finishes the bounded WAL-table read; no snapshot survives this await.
+            let heads: Vec<i64> = sqlx::query_scalar("SELECT head_sequence FROM manifest LIMIT 1")
+                .fetch_all(self.connection.as_mut().unwrap())
+                .await?;
+            assert_eq!(heads.len(), 1);
+            Ok::<_, sqlx::Error>(())
+        })
+        .catch_unwind()
+        .await;
+        let issue = match result {
+            Ok(Ok(())) => {
+                self.initialized = true;
+                return;
+            }
+            Ok(Err(error)) => Readers::default().sql_error(ReaderStage::KeeperPrime, &error),
+            Err(payload) => {
+                self.freeze(Readers::default().issue(ReaderStage::KeeperAction, Driver::Panic));
+                std::panic::resume_unwind(payload);
+            }
+        };
+        self.freeze(issue.clone());
+        std::panic::resume_unwind(Box::new(ReaderPanic(issue)));
+    }
+    async fn close(&mut self) -> bool {
+        if let Some(connection) = self.connection.take() {
+            let result = AssertUnwindSafe(async {
+                connection.close().await?;
+                assert!(!self.close_panic, "keeper close rejected");
+                self.close_error.take().map_or(Ok(()), Err)
+            })
+            .catch_unwind()
+            .await;
+            match result {
+                Ok(Ok(())) => self.closed += 1,
+                Ok(Err(error)) => {
+                    self.freeze(Readers::default().sql_error(ReaderStage::KeeperClose, &error))
+                }
+                Err(_) => {
+                    self.freeze(Readers::default().issue(ReaderStage::KeeperClose, Driver::Panic))
+                }
+            }
+        }
+        self.opened == self.closed
+    }
+    fn facts(&self) -> KeeperFacts {
+        KeeperFacts {
+            acquired: self.opened == 1,
+            initialized: self.initialized,
+            opened: self.opened,
+            closed: self.closed,
+            active: self.opened - self.closed,
+            error: self.error.clone(),
+        }
+    }
+    fn totals(&self, readers: &Readers) -> Option<ReaderFacts> {
+        readers.diagnostic().map(|r| ReaderFacts {
+            opened: r.opened + self.opened,
+            closed: r.closed + self.closed,
+            active: r.active + self.opened - self.closed,
+        })
+    }
+}
 #[derive(Default)]
 struct Resources {
     store: Option<SessionStore>,
@@ -908,6 +1180,10 @@ struct Resources {
     pause: Option<Arc<Pause>>,
     wire: Option<Wire>,
     readers: Readers,
+    keeper: Keeper,
+    cleanup_failed: bool,
+    // Offline shutdown controls inject only after the real storage close completes.
+    store_close_fault: u8,
     tracker: Tracker,
 }
 impl Resources {
@@ -917,23 +1193,40 @@ impl Resources {
         }
         // Stop drains the existing host before its storage closes. Do not delete the parent's root.
         self.stop.cancel();
-        let drained = if let Some(server) = self.server.take() {
-            match AssertUnwindSafe(watch(server)).catch_unwind().await {
+        let drained = if let Some(mut server) = self.server.take() {
+            match AssertUnwindSafe(watch(&mut server)).catch_unwind().await {
                 Ok(Ok(outcome)) => {
                     outcome.http.is_ok() && matches!(&*outcome.shutdown, ShutdownOutcome::Closed)
                 }
-                _ => false,
+                Ok(Err(_)) => false,
+                Err(_) => {
+                    // A watchdog unwind must not detach a still-running storage owner.
+                    let _ = server.await;
+                    false
+                }
             }
         } else {
             true
         };
         let closed = if let Some(store) = self.store.take() {
-            store.close().await.is_ok()
+            matches!(
+                AssertUnwindSafe(async {
+                    let result = store.close().await;
+                    assert!(self.store_close_fault != 2, "storage close rejected");
+                    result.is_ok() && self.store_close_fault != 1
+                })
+                .catch_unwind()
+                .await,
+                Ok(true)
+            )
         } else {
             true
         };
+        // The store normally lives inside RunHost. Await server/storage before retiring the keeper.
+        let keeper_closed = self.keeper.close().await;
         self.wire.take();
-        assert!(drained && closed);
+        self.cleanup_failed |= !drained || !closed || !keeper_closed;
+        assert!(!self.cleanup_failed);
         assert_eq!(
             self.readers.opened.load(Ordering::SeqCst),
             self.readers.closed.load(Ordering::SeqCst)
@@ -985,6 +1278,8 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
         .await
         .unwrap();
     let sid = created.session_id().clone();
+    resources.keeper.open(&start.root, &sid).await;
+    let store = resources.store.as_ref().unwrap();
     let handle = store.open_session(sid.clone()).await.unwrap();
     let hooks = handle.test_hooks();
     let collector = hooks.enable_latency();
@@ -1045,7 +1340,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
     resources.tracker.complete();
     resources.tracker.begin(Phase::ReadyEmit);
     emit(
-        json!({"event":"ready","id":1,"pid":std::process::id(),"origin":origin,"session_id":sid,"head":1,"work":work(&auth,&counts,0,false)}),
+        json!({"event":"ready","id":1,"pid":std::process::id(),"origin":origin,"session_id":sid,"head":1,"work":work(&auth,&counts,0,false),"readers":resources.readers.facts(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers)}),
     );
     resources.tracker.complete();
     loop {
@@ -1168,7 +1463,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 order.pages = collector.page(0).unwrap().0;
                 saved = Some(second);
                 emit(
-                    json!({"event":"captured","id":id,"saved":saved,"operation_id":operation,"pause_hits":1,"reader_closed":true,"readers":resources.readers.facts(),"released":true,"pages":order.pages}),
+                    json!({"event":"captured","id":id,"saved":saved,"operation_id":operation,"pause_hits":1,"reader_closed":true,"readers":resources.readers.facts(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers),"released":true,"pages":order.pages}),
                 );
             }
             Control::Page { page, .. } => {
@@ -1238,7 +1533,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 completed = true;
                 saved = Some(final_state);
                 emit(
-                    json!({"event":"terminal","id":id,"saved":saved,"work":work(&auth,&counts,wire.requests,prepared)}),
+                    json!({"event":"terminal","id":id,"saved":saved,"work":work(&auth,&counts,wire.requests,prepared),"readers":resources.readers.facts(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers)}),
                 );
             }
             Control::ObservedTerminal { .. } => {
@@ -1250,7 +1545,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 resources.tracker.begin(Phase::Stop);
                 resources.wire.as_ref().unwrap().no_request();
                 emit(
-                    json!({"event":"stopping","id":id,"complete":completed && observed_terminal,"work":work(&auth,&counts,resources.wire.as_ref().unwrap().requests,prepared)}),
+                    json!({"event":"stopping","id":id,"complete":completed && observed_terminal,"work":work(&auth,&counts,resources.wire.as_ref().unwrap().requests,prepared),"readers":resources.readers.facts(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers)}),
                 );
                 resources.tracker.complete();
                 return id;
@@ -1265,7 +1560,9 @@ async fn finish(
     out: &mut impl Write,
 ) -> bool {
     if result.is_err() {
-        resources.tracker.freeze(Origin::Run, &resources.readers);
+        resources
+            .tracker
+            .freeze(Origin::Run, &resources.readers, &resources.keeper);
         // Flush the owned failure before shutdown can close the browser's SSE.
         resources.tracker.publish(out);
     }
@@ -1276,20 +1573,27 @@ async fn finish(
     } else if resources.tracker.first.is_none() {
         resources
             .tracker
-            .freeze(Origin::Cleanup, &resources.readers);
+            .freeze(Origin::Cleanup, &resources.readers, &resources.keeper);
         resources.tracker.publish(out);
     }
     if resources.tracker.first.is_some() {
         publish(
             out,
-            &json!({"protocol":1,"event":"failure_cleanup","outcome":if cleanup.is_ok() { "closed" } else { "failed" },"readers":resources.readers.diagnostic()}),
+            &json!({"protocol":1,"event":"failure_cleanup","outcome":if cleanup.is_ok() { "closed" } else { "failed" },"readers":resources.readers.diagnostic(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers)}),
         );
         return false;
     }
     resources.tracker.begin(Phase::StoppedEmit);
+    if !resources.keeper.initialized
+        || resources.keeper.error.is_some()
+        || resources.keeper.opened != 1
+        || resources.keeper.closed != 1
+    {
+        return false;
+    }
     publish(
         out,
-        &json!({"protocol":1,"event":"stopped","id":result.unwrap(),"drained":true,"readers":resources.readers.facts()}),
+        &json!({"protocol":1,"event":"stopped","id":result.unwrap(),"drained":true,"readers":resources.readers.facts(),"keeper":resources.keeper.facts(),"totals":resources.keeper.totals(&resources.readers)}),
     )
 }
 #[tokio::test]

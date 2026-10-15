@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
 import { allocationProgress, outerProof, allocateParent, allocationProof, resolveAllocation, removeAllocation, prepareInvocation, browserProgram, browserProof, phaseDrive, liveCollector, diagnostics, newFaults, resolveBinding, reserveOutput, modesProof, sourceGuard } from '../test-support/live-commit-measurements.mjs';
-import { texts, digest, workKeys, protocol, savedProof, telemetryProof, terminalProof, removeRoot, createRoot, rootProof } from '../test-support/live-commit-native.mjs';
+import { texts, digest, workKeys, protocol, savedProof, telemetryProof, terminalProof, removeRoot, createRoot, rootProof, nativeFailureProof, nativeCleanupProof } from '../test-support/live-commit-native.mjs';
 import { resources, acquireResource } from '../test-support/display-measurements.mjs';
 import { files } from '../test-support/interrupted-display-parity.mjs';
 import { replaceLatest } from '../dist/display-store.js';
@@ -16,6 +16,10 @@ import { expectedPage } from '../test-support/upgrade-display-parity.mjs';
 const sid = '54000000-0000-4000-8000-000000000001', rid = '54000000-0000-4000-8000-000000000002';
 const origin = 'http://127.0.0.1:54321', owner = 'synthetic-owner', clone = v => structuredClone(v);
 const readers = { opened: 2, closed: 2, active: 0 };
+const connections = (closed = false, r = readers) => ({ readers: clone(r),
+  keeper: { acquired: true, initialized: true, opened: 1, closed: Number(closed), active: Number(!closed), error: null },
+  totals: r === null ? null : { opened: r.opened + 1, closed: r.closed + Number(closed), active: r.active + Number(!closed) } });
+const keeperError = () => ({ first: { stage: 'keeper_action', driver: 'panic', sqlite_primary: null, sqlite_extended: null, attempt: null, elapsed_ms: null }, close: null });
 const readerError = () => ({ first: { stage: 'settle_results', driver: 'sqlite_busy', sqlite_primary: 5, sqlite_extended: 517, attempt: 4, elapsed_ms: 19 },
   close: { stage: 'close', driver: 'io', sqlite_primary: null, sqlite_extended: null, attempt: 4, elapsed_ms: 20 } });
 const work = stage => Object.fromEntries(workKeys.map(k => [k, stage > 0 && !['completed', 'tool_validations', 'tool_executions'].includes(k) || stage === 2 && k === 'completed' ? 1 : 0]));
@@ -267,17 +271,18 @@ async function specCase(t, options = {}) {
   let callback, cleanupResult, network, sse, task, disposing = false, cleaned = false, finalPreparing = false, releaseAsset, injected = false;
   let serverClosed = false, browserClosed = false, commandSerial = 1, notifyNative, diagnosticReads = 0;
   const nativeFailure = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'first_wire_reply',
-    last_completed: 'provider_request_match', readers: options.readerUnavailable ? null : clone(readers), reader_error: options.readerError ? readerError() : null };
+    last_completed: 'provider_request_match', ...connections(false, options.readerUnavailable ? null : readers), reader_error: options.readerError ? readerError() : null };
+  if (options.keeperError) nativeFailure.keeper.error = keeperError();
   function nativeFailed() {
     Object.assign(facts, { failure: true, first_boundary: 'native_frame', native_failure: clone(nativeFailure) });
     notifyNative('native_failed_frame', clone(facts));
   }
   const handlers = new Map();
   const faults = newFaults(), state = protocol();
-  state.reply({ protocol: 1, event: 'ready', id: 1, pid: 900, origin, session_id: sid, head: 1, work: work(0) });
+  state.reply({ protocol: 1, event: 'ready', id: 1, pid: 900, origin, session_id: sid, head: 1, work: work(0), ...connections() });
   const nativeIdentity = { pid: 900, ppid: process.pid, start_ticks: '42', executable: '/synthetic/native', cwd: '/synthetic/root/child' };
   const browserIdentity = { state: 'present', pid: 901, ppid: process.pid, start_ticks: '43', executable: '/synthetic/browser', cwd: '/synthetic' };
-  const facts = { identity: nativeIdentity, closed: false, input_ended: false, stopped: false, drained: false, readers: clone(readers), code: null, signal: null,
+  const facts = { identity: nativeIdentity, closed: false, input_ended: false, stopped: false, drained: false, ...connections(), code: null, signal: null,
     stderr_bytes: 0, failure: false, fallback: false, retired: false, first_boundary: null, native_failure: null, native_cleanup: null };
   const binding = { executable: '/synthetic/native', sha256: 'a'.repeat(64), selector: 'synthetic', sources: {} };
   const parent = { path: '/synthetic/wi-c54-private-ABC123', uid: process.getuid(), mode: 0o700, device: 1, inode: 2 };
@@ -317,23 +322,38 @@ async function specCase(t, options = {}) {
       if (body.command === 'first') reply = { ...common, event: 'first', saved: saved('first'), work: work(1) };
       else if (body.command === 'observed_first') reply = { ...common, event: 'first_observed' };
       else if (body.command === 'arm') reply = { ...common, event: 'armed' };
-      else if (body.command === 'second') { h.show('append'); reply = { ...common, event: 'captured', saved: saved('append'), operation_id: rid, pause_hits: 1, reader_closed: true, released: true, readers: clone(readers), pages: telemetry().length }; }
+      else if (body.command === 'second') { h.show('append'); reply = { ...common, event: 'captured', saved: saved('append'), operation_id: rid, pause_hits: 1, reader_closed: true, released: true, ...connections(), pages: telemetry().length }; }
       else if (body.command === 'page') reply = { ...common, event: 'page', ...telemetry()[body.page] };
       else if (body.command === 'authoritative') { h.show('authority'); reply = { ...common, event: 'authoritative', saved: saved('authority') }; }
-      else if (body.command === 'terminal') { h.show('terminal'); reply = { ...common, event: 'terminal', saved: saved('terminal'), work: work(2) }; }
+      else if (body.command === 'terminal') { h.show('terminal'); reply = { ...common, event: 'terminal', saved: saved('terminal'), work: work(2), ...connections() }; }
       else if (body.command === 'observed_terminal') reply = { ...common, event: 'complete' };
       state.reply(reply); return reply;
     },
     async stop() {
       raise('native-stop');
+      if (options.lateDiagnostic) {
+        const badFailure = clone(nativeFailure), badCleanup = { protocol: 1, event: 'failure_cleanup', outcome: 'failed', ...connections() };
+        for (const frame of [badFailure, badCleanup]) {
+          if (options.lateDiagnostic === 'brand') frame.keeper = Object.assign(new Date(0), frame.keeper);
+          else Object.defineProperty(frame.keeper, 'active', { enumerable: true, get() { throw publication; } });
+        }
+        notifyNative('native_cleanup', { ...clone(facts), native_failure: badFailure, native_cleanup: badCleanup });
+        events.push('late-diagnostic');
+      }
       if (options.nativeOrder) {
         if (options.readerError) facts.native_failure.reader_error.first.sqlite_extended = 999;
-        facts.native_cleanup = { protocol: 1, event: 'failure_cleanup', outcome: 'failed', readers: null };
+        if (options.keeperError) facts.native_failure.keeper.error.first.driver = 'other';
+        facts.native_cleanup = { protocol: 1, event: 'failure_cleanup', outcome: 'failed', ...connections(true, null) };
+        if (options.keeperError) {
+          facts.native_cleanup.keeper.error = keeperError();
+          facts.native_cleanup.keeper.error.close = { stage: 'keeper_close', driver: 'io', sqlite_primary: null, sqlite_extended: null, attempt: null, elapsed_ms: null };
+          facts.native_cleanup.keeper.closed = 0; facts.native_cleanup.keeper.active = 1;
+        }
         notifyNative('native_cleanup', clone(facts));
         Object.assign(facts, { closed: true, code: 1, retired: true }); notifyNative('native_close', clone(facts));
         throw publication;
       }
-      Object.assign(facts, { closed: true, input_ended: true, stopped: true, drained: true, code: 0, retired: true });
+      Object.assign(facts, { closed: true, input_ended: true, stopped: true, drained: true, code: 0, retired: true, ...connections(!options.keeperOpen) });
       if (options.nativeDefect) facts[options.nativeDefect] = options.nativeDefect === 'fallback' ? true : false;
     },
     async abandon() { raise('native-abandon'); Object.assign(facts, { closed: true, input_ended: true, fallback: true }); },
@@ -462,9 +482,130 @@ test('D1 native facts before assignment survive unavailable measurements getters
     assert.ok(!c.events.includes('rm'));
   });
 });
+test('D4 B first packet owns keeper and total facts through mutation late getters and separate cleanup', () => {
+  const d = diagnostics(() => ({ counts: {}, pending: 0, failed: false }));
+  const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null,
+    ...connections(), reader_error: readerError() };
+  frame.keeper.error = keeperError();
+  const value = { first_boundary: 'native_frame', native_failure: frame, native_cleanup: null, closed: false, code: null };
+  d.native('native_failed_frame', value); const packet = d.packet(), first = packet.native.failure;
+  for (const v of [first.keeper, first.keeper.error, first.keeper.error.first, first.totals]) assert.ok(Object.isFrozen(v));
+  assert.throws(() => { first.keeper.active = 0; });
+  frame.keeper.error.first.driver = 'other'; frame.totals.active = 0;
+  Object.defineProperty(frame.keeper, 'active', { get() { throw Error('unpublished late getter'); } });
+  const cleanup = { protocol: 1, event: 'failure_cleanup', outcome: 'failed', ...connections() };
+  cleanup.keeper.error = keeperError(); cleanup.keeper.error.close = { ...keeperError().first, stage: 'keeper_close', driver: 'io' };
+  d.native('native_cleanup', { ...value, native_cleanup: cleanup });
+  assert.equal(d.packet(), packet); assert.equal(first.keeper.active, 1); assert.equal(first.totals.active, 1);
+  assert.equal(first.keeper.error.first.driver, 'panic'); assert.equal(first.keeper.error.close, null);
+  assert.equal(d.facts().native.cleanup.keeper.error.close.driver, 'io');
+  assert.ok(Object.isFrozen(d.facts().native.cleanup.keeper.error.close));
+  assert.deepEqual(first.reader_error, readerError());
+});
+test('D4 registered callback keeps keeper diagnostics and original errors through independent artifact faults', async t => {
+  for (const options of [{}, { getter: 'native' }, { getter: 'diagnostics' }, ...['CLEANUP.json', 'MEASUREMENTS.json', 'ACCEPTANCE.json'].flatMap(name => [{ serialize: name }, { write: name }])]) await t.test(JSON.stringify(options), async t => {
+    const c = await specCase(t, { nativeOrder: 'native-first', readerError: true, keeperError: true, ...options });
+    assert.equal(c.error, c.failure); assert.equal(c.cleanupResult.error, c.failure);
+    const before = c.artifacts.get('FAILURE_BEFORE_CLEANUP.json'), result = c.artifacts.get('BROWSER_RESULT.json');
+    assert.deepEqual(before.native.failure.keeper.error, keeperError()); assert.deepEqual(before.native.failure.reader_error, readerError());
+    assert.deepEqual(result.first_failure, before); assert.equal(result.status, 'FAILED');
+    assert.equal(before.native.failure.totals.active, 1); assert.ok(Object.isFrozen(c.firstPacket.native.failure.keeper.error.first));
+    assert.ok(!c.events.includes('rm')); assert.ok(!c.events.includes('parent-rmdir'));
+    for (const event of ['native-stop', 'context-close', 'server-close', 'browser-close']) assert.ok(c.events.includes(event));
+    for (const name of ['CLEANUP.json', 'MEASUREMENTS.json', 'ACCEPTANCE.json']) if (options.serialize !== name && options.write !== name) assert.ok(c.artifacts.has(name));
+    if (result.diagnostics) assert.deepEqual(result.diagnostics.native.failure.keeper.error, keeperError());
+  });
+});
+test('D4 registered callback rejects open keeper at terminal despite balanced short readers', async t => {
+  const c = await specCase(t, { keeperOpen: true });
+  assert.ok(c.error); assert.equal(c.facts.readers.active, 0); assert.equal(c.facts.keeper.active, 1); assert.equal(c.facts.totals.active, 1);
+  assert.equal(c.artifacts.get('CLEANUP.json').pass, false); assert.equal(c.artifacts.get('BROWSER_RESULT.json').status, 'FAILED');
+  assert.ok(!c.events.includes('rm')); assert.ok(!c.events.includes('parent-rmdir'));
+  for (const event of ['native-stop', 'context-close', 'server-close', 'browser-close']) assert.ok(c.events.includes(event));
+});
+test('D4 B malformed keeper and total facts are unavailable rather than invented', () => {
+  for (const defect of ['missing', 'unknown', 'getter', 'totals', 'owner', 'range', 'null']) {
+    const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null, ...connections(), reader_error: null };
+    if (defect === 'missing') delete frame.keeper.error;
+    if (defect === 'unknown') frame.keeper.extra = 'unpublished';
+    if (defect === 'getter') Object.defineProperty(frame.keeper, 'error', { get() { throw Error('unpublished'); } });
+    if (defect === 'totals') frame.totals.active = 0;
+    if (defect === 'owner') frame.keeper.error = readerError();
+    if (defect === 'range') frame.keeper.opened = 2;
+    if (defect === 'null') frame.keeper = null;
+    const d = diagnostics(() => ({})); d.native('native_failed_frame', { native_failure: frame, native_cleanup: null });
+    assert.equal(d.packet().native.failure, null); assert.equal(d.packet().native.failure_availability, 'unavailable');
+    assert.ok(!JSON.stringify(d.packet()).includes('unpublished'));
+  }
+});
+test('D4 M1 B rejects branded owned clones across failure and both cleanup outcomes', async t => {
+  for (const kind of ['failure', 'failed-cleanup', 'closed-cleanup']) {
+    const frame = kind === 'failure'
+      ? { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null, ...connections(), reader_error: readerError() }
+      : { protocol: 1, event: 'failure_cleanup', outcome: kind === 'failed-cleanup' ? 'failed' : 'closed', ...connections(kind === 'closed-cleanup') };
+    frame.keeper.error = keeperError();
+    if (kind === 'failed-cleanup') frame.keeper.error.close = { ...keeperError().first, stage: 'keeper_close', driver: 'io' };
+    const cleanup = kind !== 'failure', proof = cleanup ? nativeCleanupProof : nativeFailureProof;
+    const paths = ['keeper', 'readers', 'totals', 'keeper.error', 'keeper.error.first'];
+    if (kind === 'failure') paths.push('reader_error', 'reader_error.first', 'reader_error.close');
+    if (kind === 'failed-cleanup') paths.push('keeper.error.close');
+    for (const path of paths) await t.test(`${kind} ${path}`, () => {
+      const bad = clone(frame), parts = path.split('.'), key = parts.pop(); let holder = bad;
+      for (const part of parts) holder = holder[part];
+      holder[key] = Object.assign(new Date(0), holder[key]); assert.equal(proof(bad), true);
+      const d = diagnostics(() => ({}));
+      d.native('native_failed_frame', { native_failure: cleanup ? null : bad, native_cleanup: cleanup ? bad : null });
+      const packet = d.packet(), native = packet.native, name = cleanup ? 'cleanup' : 'failure';
+      assert.equal(native[name], null); assert.equal(native[name + '_availability'], 'unavailable');
+      const serialized = JSON.stringify(packet); holder[key].setTime(1000);
+      assert.equal(JSON.stringify(packet), serialized); assert.ok(!serialized.includes('1970-'));
+    });
+    for (const throwing of [false, true]) await t.test(`${kind} nested stateful getter throwing ${throwing}`, () => {
+      const bad = clone(frame); let reads = 0;
+      Object.defineProperty(bad.keeper, 'active', { enumerable: true, get() { reads++; if (throwing) throw Error('unpublished'); return reads === 1 ? 1 : 0; } });
+      const d = diagnostics(() => ({})); d.native('native_failed_frame', { native_failure: cleanup ? null : bad, native_cleanup: cleanup ? bad : null });
+      assert.equal(d.packet().native[cleanup ? 'cleanup' : 'failure'], null);
+      assert.equal(d.packet().native[cleanup ? 'cleanup_availability' : 'failure_availability'], 'unavailable'); assert.equal(reads, 0);
+    });
+    await t.test(`${kind} holder captured once and plain owned immutable`, () => {
+      let reads = 0; const value = { native_failure: null, native_cleanup: null }, name = cleanup ? 'native_cleanup' : 'native_failure';
+      Object.defineProperty(value, name, { get() { reads++; if (reads !== 1) throw Error('unpublished second holder read'); return frame; } });
+      const d = diagnostics(() => ({})); d.native('native_failed_frame', value);
+      const packet = d.packet(), owned = packet.native[cleanup ? 'cleanup' : 'failure'];
+      assert.equal(reads, 1); assert.equal(proof(owned), true); assert.deepEqual(owned, frame);
+      for (const v of [owned, owned.keeper, owned.keeper.error, owned.keeper.error.first, owned.totals]) assert.ok(Object.isFrozen(v));
+      const serialized = JSON.stringify(packet); frame.keeper.error.first.driver = 'other'; frame.readers.opened++;
+      assert.equal(JSON.stringify(packet), serialized); assert.equal(proof(owned), true);
+      d.native('native_close', { get native_failure() { throw Error('unpublished holder'); }, get native_cleanup() { throw Error('unpublished holder'); } });
+      assert.equal(d.packet(), packet); assert.equal(JSON.stringify(packet), serialized);
+    });
+  }
+});
+test('D4 M1 registered callbacks preserve original body and cleanup errors after bad clones and publication faults', async t => {
+  for (const fail of ['privacy', 'context-close']) for (const lateDiagnostic of ['brand', 'getter']) {
+    for (const fault of [{}, { getter: 'diagnostics' }, { serialize: 'MEASUREMENTS.json' }, { write: 'CLEANUP.json' }]) await t.test(`${fail} ${lateDiagnostic} ${JSON.stringify(fault)}`, async t => {
+      const c = await specCase(t, { fail, lateDiagnostic, sseClose: true, ...fault });
+      assert.equal(c.error, c.failure); assert.equal(c.cleanupResult.error, c.failure);
+      const result = c.artifacts.get('BROWSER_RESULT.json'); assert.equal(result.status, 'FAILED');
+      assert.ok(c.events.includes('late-diagnostic')); assert.ok(!c.events.includes('rm')); assert.ok(!c.events.includes('parent-rmdir'));
+      assert.deepEqual(result.first_failure, c.firstPacket); assert.ok(Object.isFrozen(c.firstPacket));
+      if (fail === 'privacy') assert.deepEqual(c.artifacts.get('FAILURE_BEFORE_CLEANUP.json'), c.firstPacket);
+      else assert.equal(c.artifacts.has('FAILURE_BEFORE_CLEANUP.json'), false, 'cleanup-only failures occur after the body packet publication point');
+      if (c.artifacts.has('CLEANUP.json')) assert.deepEqual(c.artifacts.get('CLEANUP.json').first_failure, c.firstPacket);
+      assert.equal(JSON.stringify(c.firstPacket).includes('1970-'), false);
+      if (result.diagnostics) {
+        assert.equal(result.diagnostics.native.failure, null); assert.equal(result.diagnostics.native.cleanup, null);
+        assert.equal(result.diagnostics.native.failure_availability, 'unavailable'); assert.equal(result.diagnostics.native.cleanup_availability, 'unavailable');
+      }
+      for (const event of ['native-stop', 'context-close', 'server-close', 'browser-close', 'retire-tree']) assert.equal(c.events.filter(v => v === event).length, 1);
+      for (const name of ['CLEANUP.json', 'MEASUREMENTS.json', 'ACCEPTANCE.json']) if (fault.serialize !== name && fault.write !== name) assert.ok(c.artifacts.has(name));
+      assert.equal(c.allocation.removed, false);
+    });
+  }
+});
 test('D3 B first packet owns and deeply freezes reader facts through later callbacks', () => {
   const d = diagnostics(() => ({ counts: {}, pending: 0, failed: false }));
-  const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: 'control_admission', readers: clone(readers), reader_error: readerError() };
+  const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: 'control_admission', ...connections(), reader_error: readerError() };
   const value = { first_boundary: 'native_frame', native_failure: frame, native_cleanup: null, closed: false, code: null };
   d.native('native_failed_frame', value);
   const packet = d.packet(), issue = packet.native.failure.reader_error;
@@ -491,7 +632,7 @@ test('D3 actual callback reader facts survive getters serialization publication 
 });
 test('D3 B malformed nested reader facts remain unavailable without inventing reader errors', () => {
   for (const defect of ['code', 'unknown', 'getter', 'missing', 'extra']) {
-    const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null, readers: null, reader_error: readerError() };
+    const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null, ...connections(false, null), reader_error: readerError() };
     if (defect === 'code') frame.reader_error.first.sqlite_primary = 6;
     if (defect === 'unknown') frame.reader_error.first.driver = 'unpublished';
     if (defect === 'getter') Object.defineProperty(frame.reader_error, 'first', { get() { throw Error('unpublished'); } });

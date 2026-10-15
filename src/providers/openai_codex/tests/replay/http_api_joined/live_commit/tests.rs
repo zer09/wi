@@ -119,6 +119,23 @@ async fn actual_storage_selected_append_freezes_complete_leaves_and_short_snapsh
         .await
         .unwrap();
     let sid = created.session_id().clone();
+    let mut keeper = Keeper::default();
+    keeper.open(root, &sid).await;
+    assert!(keeper.initialized);
+    let sql = keeper.connection.as_mut().unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA busy_timeout")
+            .fetch_one(&mut *sql)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        sqlx::query("UPDATE manifest SET head_sequence=head_sequence")
+            .execute(&mut *sql)
+            .await
+            .is_err()
+    );
     let handle = store.open_session(sid.clone()).await.unwrap();
     let run = RunId::new();
     let input = RecordedRunInput::new(
@@ -222,7 +239,16 @@ async fn actual_storage_selected_append_freezes_complete_leaves_and_short_snapsh
         rows.iter()
             .any(|r| r[0] == 2 && r[2] == op && r[1] == 2 && r[7] == 1)
     );
+    assert_eq!(readers.facts()["active"], 0);
+    assert_eq!(keeper.facts().active, 1);
+    assert_eq!(keeper.totals(&readers).unwrap().active, 1);
     pause.release.notify_one();
+    assert!(publish(
+        &mut std::io::stdout(),
+        &json!({"protocol":1,"event":"captured","id":5,"saved":second,
+        "operation_id":operation,"pause_hits":1,"reader_closed":true,"released":true,"pages":pages,
+        "readers":readers.facts(),"keeper":keeper.facts(),"totals":keeper.totals(&readers)})
+    ));
     let receipt = watch(writer).await.unwrap();
     assert_eq!(receipt.receipt().operation_id(), &operation);
     assert_eq!(receipt.receipt().session_id(), &sid);
@@ -351,6 +377,10 @@ async fn actual_storage_selected_append_freezes_complete_leaves_and_short_snapsh
     assert_eq!(terminal.field_id, authoritative.field_id);
     assert_eq!(readers.facts()["active"], 0);
     store.close().await.unwrap();
+    assert!(keeper.close().await);
+    assert!(keeper.close().await);
+    assert_eq!(keeper.facts().closed, 1);
+    assert_eq!(keeper.totals(&readers).unwrap().active, 0);
     temp.close().unwrap();
 }
 
@@ -624,7 +654,7 @@ fn tracker_owns_closed_phase_origin_and_reader_facts_without_panic_payload() {
             let mut tracker = Tracker::default();
             tracker.complete();
             tracker.begin(phase);
-            tracker.freeze(origin, &readers);
+            tracker.freeze(origin, &readers, &Keeper::default());
             let first = tracker.first.clone().unwrap();
             assert_eq!(first.phase, phase);
             assert_eq!(first.origin, origin);
@@ -632,7 +662,7 @@ fn tracker_owns_closed_phase_origin_and_reader_facts_without_panic_payload() {
             let bytes = serde_json::to_vec(&first).unwrap();
             assert_eq!(serde_json::from_slice::<Failure>(&bytes).unwrap(), first);
             tracker.begin(Phase::Cleanup);
-            tracker.freeze(Origin::Cleanup, &readers);
+            tracker.freeze(Origin::Cleanup, &readers, &Keeper::default());
             assert_eq!(tracker.first, Some(first));
         }
     }
@@ -1121,4 +1151,521 @@ fn reader_watchdog_uses_real_elapsed_without_sleep_and_first_is_immutable() {
     assert!(first.first.elapsed_ms.unwrap() >= 31000);
     readers.freeze(readers.issue(ReaderStage::Action, Driver::Panic));
     assert_eq!(*readers.first.lock().unwrap(), Some(first));
+}
+
+#[tokio::test]
+async fn keeper_wal_lifecycle_is_a_last_connection_contrast_not_a_race_reproduction() {
+    for retained in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let sid = ApplicationSessionId::new();
+        let path = db_path(temp.path(), &sid);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(Duration::ZERO)
+            .disable_statement_logging();
+        let mut writer = options.clone().connect().await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE manifest(head_sequence INTEGER); INSERT INTO manifest VALUES(1);",
+        )
+        .execute(&mut writer)
+        .await
+        .unwrap();
+        let wal = path.with_file_name("session.sqlite3-wal");
+        assert!(std::fs::metadata(&wal).unwrap().len() > 0);
+        let mut keeper = Keeper::default();
+        if retained {
+            keeper.open(temp.path(), &sid).await;
+        }
+        writer.close().await.unwrap();
+        assert_eq!(wal.exists(), retained);
+        if retained {
+            assert_eq!(keeper.facts().active, 1);
+            let sql = keeper.connection.as_mut().unwrap();
+            assert_eq!(
+                sqlx::query_scalar::<_, String>("PRAGMA journal_mode")
+                    .fetch_one(&mut *sql)
+                    .await
+                    .unwrap(),
+                "wal"
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("PRAGMA busy_timeout")
+                    .fetch_one(&mut *sql)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert!(
+                sqlx::query("INSERT INTO manifest VALUES(2)")
+                    .execute(&mut *sql)
+                    .await
+                    .is_err()
+            );
+            // A completed keeper query does not pin the old snapshot or block a new writer.
+            let mut writer = options.connect().await.unwrap();
+            sqlx::query("BEGIN IMMEDIATE")
+                .execute(&mut writer)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE manifest SET head_sequence=2")
+                .execute(&mut writer)
+                .await
+                .unwrap();
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT head_sequence FROM manifest LIMIT 1")
+                    .fetch_one(&mut *sql)
+                    .await
+                    .unwrap(),
+                1
+            );
+            sqlx::query("COMMIT").execute(&mut writer).await.unwrap();
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT head_sequence FROM manifest LIMIT 1")
+                    .fetch_one(&mut *sql)
+                    .await
+                    .unwrap(),
+                2
+            );
+            let readers = Readers::default();
+            let head: i64 = read_owned(temp.path(), &sid, &readers, |sql, _| {
+                Box::pin(async move {
+                    sqlx::query_scalar("SELECT head_sequence FROM manifest LIMIT 1")
+                        .fetch_one(sql)
+                        .await
+                        .unwrap()
+                })
+            })
+            .await;
+            assert_eq!(head, 2);
+            assert_eq!(readers.facts()["active"], 0);
+            assert_eq!(keeper.totals(&readers).unwrap().active, 1);
+            // Close the keeper while a writer remains. That writer can now be the last connection.
+            assert!(keeper.close().await);
+            assert!(wal.exists());
+            writer.close().await.unwrap();
+            assert!(!wal.exists());
+            assert!(keeper.close().await);
+            assert_eq!(keeper.facts().closed, 1);
+        }
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn keeper_acquisition_and_priming_failures_keep_returned_handles_owned_until_cleanup() {
+    for boundary in 0..3 {
+        let temp = tempfile::tempdir().unwrap();
+        let sid = ApplicationSessionId::new();
+        if boundary > 0 {
+            let mut writer = reader_database(temp.path(), &sid).await;
+            if boundary == 2 {
+                sqlx::query("CREATE TABLE manifest(head_sequence INTEGER)")
+                    .execute(&mut writer)
+                    .await
+                    .unwrap();
+            }
+            writer.close().await.unwrap();
+        }
+        let mut resources = Resources::default();
+        resources.tracker.begin(Phase::Setup);
+        let result = AssertUnwindSafe(resources.keeper.open(temp.path(), &sid))
+            .catch_unwind()
+            .await;
+        assert!(result.is_err());
+        assert_eq!(resources.keeper.connection.is_some(), boundary > 0);
+        assert!(!resources.keeper.initialized);
+        let first = resources.keeper.error.clone().unwrap();
+        assert_eq!(
+            first.first.stage,
+            match boundary {
+                0 => ReaderStage::KeeperConnect,
+                1 => ReaderStage::KeeperPrime,
+                _ => ReaderStage::KeeperAction,
+            }
+        );
+        assert_eq!(resources.keeper.opened, usize::from(boundary > 0));
+        let mut out = vec![];
+        assert!(!finish(result.map(|_| 2), &mut resources, &mut out).await);
+        assert!(resources.keeper.connection.is_none());
+        assert_eq!(resources.keeper.closed, usize::from(boundary > 0));
+        assert!(resources.keeper.close().await);
+        assert_eq!(
+            resources.tracker.first.as_ref().unwrap().keeper.error,
+            Some(first)
+        );
+        assert!(
+            resources
+                .tracker
+                .first
+                .as_ref()
+                .unwrap()
+                .reader_error
+                .is_none()
+        );
+        // Acquisition counters cover successfully returned handles, never all SQLx worker absence.
+        assert!(!String::from_utf8(out).unwrap().contains("sqlite3"));
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn keeper_shutdown_attempts_survive_server_and_storage_errors_panics_and_repeated_cleanup() {
+    for fault in 0..5 {
+        let temp = tempfile::tempdir().unwrap();
+        let mut resources = Resources::default();
+        let store = SessionStore::open(temp.path().join("private-data"))
+            .await
+            .unwrap();
+        let sid = store
+            .create_session(CreateSession::new(OperationId::new(), "cleanup".into(), None).unwrap())
+            .await
+            .unwrap()
+            .session_id()
+            .clone();
+        resources.keeper.open(temp.path(), &sid).await;
+        let pause = Arc::new(Pause::default());
+        resources.pause = Some(pause.clone());
+        if fault < 3 {
+            // No HTTP or provider is started. This task owns real storage like the server does.
+            let stop = resources.stop.clone();
+            resources.server = Some(tokio::spawn(async move {
+                stop.cancelled().await;
+                store.close().await.unwrap();
+                assert!(fault != 2, "unpublished server panic");
+                ServeOutcome {
+                    local_addr: None,
+                    http: if fault == 1 {
+                        Err(crate::http_api::ServeError::Http)
+                    } else {
+                        Ok(())
+                    },
+                    shutdown: Arc::new(ShutdownOutcome::Closed),
+                }
+            }));
+        } else {
+            resources.store = Some(store);
+            resources.store_close_fault = fault - 2;
+        }
+        let closed = AssertUnwindSafe(resources.close()).catch_unwind().await;
+        assert_eq!(closed.is_ok(), fault == 0);
+        watch(pause.release.notified()).await;
+        assert!(resources.stop.is_cancelled());
+        assert!(resources.server.is_none() && resources.store.is_none());
+        assert!(resources.keeper.connection.is_none());
+        assert_eq!(resources.keeper.facts().closed, 1);
+        let repeated = AssertUnwindSafe(resources.close()).catch_unwind().await;
+        assert_eq!(repeated.is_ok(), fault == 0);
+        assert_eq!(resources.keeper.closed, 1);
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn keeper_close_error_or_unknown_retirement_is_conservative_and_first_failure_survives() {
+    for fault in 1..=2 {
+        for primary in 0..3 {
+            let temp = tempfile::tempdir().unwrap();
+            let store = SessionStore::open(temp.path().join("private-data"))
+                .await
+                .unwrap();
+            let sid = store
+                .create_session(
+                    CreateSession::new(OperationId::new(), "close".into(), None).unwrap(),
+                )
+                .await
+                .unwrap()
+                .session_id()
+                .clone();
+            let mut resources = Resources {
+                store: Some(store),
+                ..Default::default()
+            };
+            resources.keeper.open(temp.path(), &sid).await;
+            if fault == 1 {
+                resources.keeper.close_error =
+                    Some(sqlx::Error::Io(std::io::ErrorKind::BrokenPipe.into()));
+            } else {
+                resources.keeper.close_panic = true;
+            }
+            resources.tracker.begin(Phase::Settle);
+            if primary == 1 {
+                resources
+                    .readers
+                    .freeze(Readers::default().issue(ReaderStage::Action, Driver::Panic));
+            }
+            if primary == 2 {
+                resources
+                    .keeper
+                    .freeze(Readers::default().issue(ReaderStage::KeeperAction, Driver::Panic));
+            }
+            let result = Err(Box::new(()) as Box<dyn std::any::Any + Send>);
+            let mut out = vec![];
+            assert!(!finish(result, &mut resources, &mut out).await);
+            let first = resources.tracker.first.clone().unwrap();
+            assert_eq!(first.origin, Origin::Run);
+            assert_eq!(first.phase, Phase::Settle);
+            assert_eq!(first.reader_error.is_some(), primary == 1);
+            assert_eq!(first.keeper.error.is_some(), primary == 2);
+            assert_eq!(first.keeper.closed, 0);
+            let later = resources.keeper.error.as_ref().unwrap();
+            let close = if primary == 2 {
+                later.close.as_ref().unwrap()
+            } else {
+                &later.first
+            };
+            assert_eq!(close.stage, ReaderStage::KeeperClose);
+            assert_eq!(
+                close.driver,
+                if fault == 1 {
+                    Driver::Io
+                } else {
+                    Driver::Panic
+                }
+            );
+            assert_eq!(resources.keeper.facts().active, 1);
+            assert!(resources.keeper.connection.is_none());
+            assert!(!resources.keeper.close().await);
+            assert!(
+                AssertUnwindSafe(resources.close())
+                    .catch_unwind()
+                    .await
+                    .is_err()
+            );
+            assert_eq!(resources.tracker.first, Some(first));
+            let frames: Vec<Value> = out
+                .split(|b| *b == b'\n')
+                .filter(|b| !b.is_empty())
+                .map(|b| serde_json::from_slice(b).unwrap())
+                .collect();
+            assert_eq!(frames[1]["outcome"], "failed");
+            assert_eq!(frames[1]["totals"]["active"], 1);
+            if primary == 2 && fault == 1 {
+                assert!(publish(&mut std::io::stdout(), &frames[0]));
+                assert!(publish(&mut std::io::stdout(), &frames[1]));
+            }
+            temp.close().unwrap();
+        }
+    }
+}
+
+#[test]
+fn keeper_strict_serialization_rejects_missing_unknown_duplicate_and_inconsistent_owned_facts() {
+    let keeper = Keeper::default();
+    let mut tracker = Tracker::default();
+    tracker.freeze(Origin::Run, &Readers::default(), &keeper);
+    let value = serde_json::to_value(tracker.first.unwrap()).unwrap();
+    assert!(serde_json::from_value::<Failure>(value.clone()).is_ok());
+    for key in [
+        "acquired",
+        "initialized",
+        "opened",
+        "closed",
+        "active",
+        "error",
+    ] {
+        let mut missing = value.clone();
+        missing["keeper"].as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<Failure>(missing).is_err());
+    }
+    for (key, invalid) in [
+        ("acquired", json!(true)),
+        ("initialized", json!(true)),
+        ("opened", json!(2)),
+        ("closed", json!(1)),
+        ("active", json!(1)),
+        ("payload", json!("unpublished")),
+    ] {
+        let mut changed = value.clone();
+        changed["keeper"][key] = invalid;
+        assert!(serde_json::from_value::<Failure>(changed).is_err());
+    }
+    for key in [
+        "readers",
+        "reader_error",
+        "keeper",
+        "totals",
+        "last_completed",
+    ] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<Failure>(missing).is_err());
+    }
+    let mut changed = value.clone();
+    changed["totals"]["opened"] = json!(1);
+    changed["totals"]["active"] = json!(1);
+    assert!(serde_json::from_value::<Failure>(changed).is_err());
+    let mut changed = value.clone();
+    changed["totals"] = Value::Null;
+    assert!(serde_json::from_value::<Failure>(changed).is_err());
+    let mut changed = value.clone();
+    changed["reader_error"] = serde_json::to_value(ReaderError {
+        first: Readers::default().issue(ReaderStage::KeeperAction, Driver::Panic),
+        close: None,
+    })
+    .unwrap();
+    assert!(serde_json::from_value::<Failure>(changed).is_err());
+    let mut changed = value.clone();
+    changed["keeper"]["error"] = serde_json::to_value(ReaderError {
+        first: Readers::default().sql_error(ReaderStage::KeeperConnect, &sqlx::Error::PoolClosed),
+        close: Some(
+            Readers::default().sql_error(ReaderStage::KeeperClose, &sqlx::Error::PoolClosed),
+        ),
+    })
+    .unwrap();
+    assert!(serde_json::from_value::<Failure>(changed).is_err());
+    let bytes = serde_json::to_string(&value).unwrap().replace(
+        "\"acquired\":false",
+        "\"acquired\":false,\"acquired\":false",
+    );
+    assert!(serde_json::from_str::<Failure>(&bytes).is_err());
+}
+
+#[tokio::test]
+async fn keeper_remains_owned_while_server_storage_drains_and_duplicate_acquisition_cannot_replace_it()
+ {
+    let temp = tempfile::tempdir().unwrap();
+    let store = SessionStore::open(temp.path().join("private-data"))
+        .await
+        .unwrap();
+    let sid = store
+        .create_session(CreateSession::new(OperationId::new(), "drain".into(), None).unwrap())
+        .await
+        .unwrap()
+        .session_id()
+        .clone();
+    let mut resources = Resources::default();
+    resources.keeper.open(temp.path(), &sid).await;
+    let repeated = AssertUnwindSafe(resources.keeper.open(temp.path(), &sid))
+        .catch_unwind()
+        .await;
+    assert!(repeated.is_err());
+    assert_eq!(resources.keeper.opened, 1);
+    assert!(resources.keeper.connection.is_some());
+    let wal = db_path(temp.path(), &sid).with_file_name("session.sqlite3-wal");
+    let (release, held) = tokio::sync::oneshot::channel();
+    let stop = resources.stop.clone();
+    resources.server = Some(tokio::spawn(async move {
+        stop.cancelled().await;
+        held.await.unwrap();
+        store.close().await.unwrap();
+        ServeOutcome {
+            local_addr: None,
+            http: Ok(()),
+            shutdown: Arc::new(ShutdownOutcome::Closed),
+        }
+    }));
+    let mut closing = Box::pin(resources.close());
+    assert!(futures_util::poll!(&mut closing).is_pending());
+    assert!(wal.exists());
+    release.send(()).unwrap();
+    closing.await;
+    assert_eq!(resources.keeper.closed, 1);
+    assert_eq!(
+        resources.keeper.totals(&resources.readers).unwrap().active,
+        0
+    );
+    temp.close().unwrap();
+}
+
+#[tokio::test]
+async fn keeper_normal_stopped_requires_initialized_retirement_and_truthful_zero_totals() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = SessionStore::open(temp.path().join("private-data"))
+        .await
+        .unwrap();
+    let sid = store
+        .create_session(CreateSession::new(OperationId::new(), "stopped".into(), None).unwrap())
+        .await
+        .unwrap()
+        .session_id()
+        .clone();
+    let mut resources = Resources {
+        store: Some(store),
+        ..Default::default()
+    };
+    resources.keeper.open(temp.path(), &sid).await;
+    let mut out = vec![];
+    assert!(finish(Ok(2), &mut resources, &mut out).await);
+    let frame: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(frame["event"], "stopped");
+    assert_eq!(frame["keeper"]["initialized"], true);
+    assert_eq!(frame["keeper"]["closed"], 1);
+    assert_eq!(frame["totals"]["active"], 0);
+    assert!(publish(&mut std::io::stdout(), &frame));
+    resources.close().await;
+    assert_eq!(resources.keeper.closed, 1);
+    let mut empty = Resources::default();
+    assert!(!finish(Ok(2), &mut empty, &mut vec![]).await);
+    temp.close().unwrap();
+}
+
+#[tokio::test]
+async fn keeper_closure_and_original_reader_error_survive_every_failed_frame_publication_boundary()
+{
+    for fault in 0..=3 {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(temp.path().join("private-data"))
+            .await
+            .unwrap();
+        let sid = store
+            .create_session(
+                CreateSession::new(OperationId::new(), "publication".into(), None).unwrap(),
+            )
+            .await
+            .unwrap()
+            .session_id()
+            .clone();
+        let mut resources = Resources {
+            store: Some(store),
+            ..Default::default()
+        };
+        resources.keeper.open(temp.path(), &sid).await;
+        *resources.readers.settle.lock().unwrap() = Some((1, tokio::time::Instant::now()));
+        let result = AssertUnwindSafe(read_owned(
+            temp.path(),
+            &sid,
+            &resources.readers,
+            |sql, readers| {
+                Box::pin(async move {
+                    readers.checked(
+                        sqlx::query_scalar::<_, i64>("SELECT missing_column FROM manifest")
+                            .fetch_one(sql)
+                            .await,
+                        ReaderStage::SettleResults,
+                    )
+                })
+            },
+        ))
+        .catch_unwind()
+        .await
+        .map(|_| 2);
+        let original = result.unwrap_err();
+        assert!(original.downcast_ref::<ReaderPanic>().is_some());
+        let mut out = FailureWriter {
+            stop: resources.stop.clone(),
+            bytes: vec![],
+            first_flushed_before_cleanup: false,
+            fault,
+        };
+        assert!(!finish(Err(original), &mut resources, &mut out).await);
+        assert!(resources.store.is_none());
+        assert_eq!(resources.keeper.closed, 1);
+        assert_eq!(resources.readers.facts()["active"], 0);
+        assert_eq!(
+            resources.keeper.totals(&resources.readers).unwrap().active,
+            0
+        );
+        let first = resources.tracker.first.as_ref().unwrap();
+        assert!(first.keeper.error.is_none());
+        assert_eq!(first.keeper.active, 1);
+        assert!(first.reader_error.is_some());
+        if fault == 0 {
+            assert!(out.first_flushed_before_cleanup);
+        }
+        assert!(!String::from_utf8(out.bytes).unwrap().contains("sqlite3"));
+        temp.close().unwrap();
+    }
 }

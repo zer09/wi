@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import { isAbsolute, join, dirname, basename } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { validateTaskCommand } from '../dist/api.js';
-import { texts, savedProof, nativeBinding, nativeFailureProof, nativeCleanupProof, nodeBoundaries } from './live-commit-native.mjs';
+import { texts, savedProof, nativeBinding, ownNativeDiagnostic, nodeBoundaries } from './live-commit-native.mjs';
 import { files, responseHeaders, newFaults } from './interrupted-display-parity.mjs';
 export { newFaults };
 const reject = () => { throw new Error('Live measurement rejected'); };
@@ -397,16 +397,9 @@ export function diagnostics(read) {
       if (['native_failed_frame', 'native_close'].includes(event)) observed(event);
       const failure = safe(() => {
         const v = value.native_failure; if (v === null) return null;
-        const owned = structuredClone(v); nativeFailureProof(owned);
-        if (owned.readers) Object.freeze(owned.readers);
-        if (owned.reader_error) {
-          Object.freeze(owned.reader_error.first);
-          if (owned.reader_error.close) Object.freeze(owned.reader_error.close);
-          Object.freeze(owned.reader_error);
-        }
-        return Object.freeze(owned);
+        return ownNativeDiagnostic(v);
       });
-      const cleanup = safe(() => { const v = value.native_cleanup; if (v === null) return null; nativeCleanupProof(v); const owned = structuredClone(v); if (owned.readers) Object.freeze(owned.readers); return Object.freeze(owned); });
+      const cleanup = safe(() => { const v = value.native_cleanup; if (v === null) return null; return ownNativeDiagnostic(v, true); });
       const boundary = safe(() => value.first_boundary), code = safe(() => value.code);
       native = Object.freeze({ first_boundary: native?.first_boundary ?? (boundary === null || nodeBoundaries.includes(boundary) ? boundary : 'unavailable'),
         failure: native?.failure ?? failure ?? null, cleanup: cleanup ?? native?.cleanup ?? null,

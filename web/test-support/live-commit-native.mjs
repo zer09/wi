@@ -13,7 +13,7 @@ export const texts = Object.freeze({ task: 'Give one short answer.', first: 'one
 export const digest = value => createHash('sha256').update(value).digest('hex');
 const fail = () => { throw Error('Live native rejected'); };
 const same = (a, b) => { if (!isDeepStrictEqual(a, b)) fail(); };
-const keys = (v, names) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(); same(Object.keys(v).sort(), [...names].sort()); };
+const keys = (v, names) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(); same(Object.keys(v).sort(), [...names].sort()); if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail(); };
 const uint = n => Number.isSafeInteger(n) && n >= 0;
 const positive = n => uint(n) && n > 0;
 const id = n => positive(n) && n <= 0xffffffff;
@@ -82,16 +82,16 @@ export const nativePhases = Object.freeze(['setup_control', 'setup', 'ready_emit
   'terminal', 'observed_terminal', 'stop', 'cleanup', 'stopped_emit']);
 export const nodeBoundaries = Object.freeze(['protocol', 'parser', 'native_frame', 'input', 'stdout', 'stderr', 'spawn', 'identity',
   'ipc_write', 'timeout', 'close', 'input_end', 'retirement', 'signal', 'observer', 'startup', 'abandon']);
-function failureReaders(v) {
+function failureReaders(v, limit = 1000000) {
   if (v === null) return;
   keys(v, ['opened', 'closed', 'active']);
-  if (![v.opened, v.closed, v.active].every(n => uint(n) && n <= 1000000) || v.closed > v.opened || v.active !== v.opened - v.closed) fail();
+  if (![v.opened, v.closed, v.active].every(n => uint(n) && n <= limit) || v.closed > v.opened || v.active !== v.opened - v.closed) fail();
 }
-function readerIssueProof(v) {
+function readerIssueProof(v, keeper = false) {
   keys(v, ['stage', 'driver', 'sqlite_primary', 'sqlite_extended', 'attempt', 'elapsed_ms']);
   // Only data fields may cross the diagnostic boundary, never executable getters.
   if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
-  if (!['connect', 'settle_chunks', 'settle_results', 'close', 'settle_watchdog', 'action'].includes(v.stage)
+  if (!(keeper ? ['keeper_connect', 'keeper_prime', 'keeper_close', 'keeper_action'] : ['connect', 'settle_chunks', 'settle_results', 'close', 'settle_watchdog', 'action']).includes(v.stage)
     || !['sqlite_busy', 'sqlite_locked', 'sqlite_other', 'database', 'decode', 'io', 'protocol', 'pool', 'other', 'panic', 'watchdog'].includes(v.driver)) fail();
   const sqlite = ['sqlite_busy', 'sqlite_locked', 'sqlite_other'].includes(v.driver);
   if (v.sqlite_extended === null) { if (v.sqlite_primary !== null || ['sqlite_busy', 'sqlite_locked'].includes(v.driver)) fail(); }
@@ -99,31 +99,71 @@ function readerIssueProof(v) {
     || v.sqlite_primary !== (v.sqlite_extended & 255)) fail();
   if (v.driver === 'sqlite_busy' && v.sqlite_primary !== 5 || v.driver === 'sqlite_locked' && v.sqlite_primary !== 6
     || v.driver === 'sqlite_other' && [5, 6].includes(v.sqlite_primary)) fail();
-  if (v.stage === 'action' && v.driver !== 'panic' || v.driver === 'panic' && v.stage !== 'action'
-    || v.stage === 'settle_watchdog' && v.driver !== 'watchdog' || v.driver === 'watchdog' && v.stage !== 'settle_watchdog') fail();
+  if (['action', 'keeper_action'].includes(v.stage) && v.driver !== 'panic' || v.driver === 'panic' && !['action', 'keeper_action', 'keeper_close'].includes(v.stage)
+    || v.stage === 'settle_watchdog' && v.driver !== 'watchdog' || v.driver === 'watchdog' && v.stage !== 'settle_watchdog' || keeper && v.attempt !== null) fail();
   if (v.attempt === null) { if (v.elapsed_ms !== null || v.stage.startsWith('settle_')) fail(); }
   else if (!positive(v.attempt) || v.attempt > 1000000 || !uint(v.elapsed_ms) || v.elapsed_ms > 4294967295) fail();
 }
-function readerErrorProof(v) {
+function readerErrorProof(v, keeper = false) {
   if (v === null) return;
   keys(v, ['first', 'close']);
   if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
-  readerIssueProof(v.first);
-  if (v.close !== null) { readerIssueProof(v.close); if (v.close.stage !== 'close' || v.first.stage === 'close') fail(); }
+  readerIssueProof(v.first, keeper);
+  const close = keeper ? 'keeper_close' : 'close';
+  if (v.close !== null) { readerIssueProof(v.close, keeper); if (v.close.stage !== close || v.first.stage === close) fail(); }
+}
+export function keeperProof(v) {
+  keys(v, ['acquired', 'initialized', 'opened', 'closed', 'active', 'error']);
+  if (typeof v.acquired !== 'boolean' || typeof v.initialized !== 'boolean' || ![v.opened, v.closed, v.active].every(n => uint(n) && n <= 1)
+    || v.closed > v.opened || v.active !== v.opened - v.closed || v.acquired !== (v.opened === 1) || v.initialized && !v.acquired) fail();
+  readerErrorProof(v.error, true);
+  if (v.error) {
+    const e = v.error;
+    if ((e.first.stage === 'keeper_connect') === v.acquired || e.first.stage === 'keeper_prime' && v.initialized || !v.acquired && e.close !== null
+      || (e.first.stage === 'keeper_close' || e.close !== null) && v.closed !== 0) fail();
+  }
+  return true;
+}
+export function connectionProof(v, stage) {
+  failureReaders(v.readers); keeperProof(v.keeper); failureReaders(v.totals, 1000001);
+  if (v.readers === null) { if (v.totals !== null) fail(); }
+  else {
+    if (v.totals === null) fail();
+    for (const k of ['opened', 'closed', 'active']) if (v.totals[k] !== v.readers[k] + v.keeper[k]) fail();
+  }
+  if (stage) {
+    if (v.readers === null || v.totals === null || !v.keeper.initialized || v.keeper.error !== null || v.keeper.opened !== 1) fail();
+    readersProof(v.readers);
+    const closed = stage === 'closed';
+    if (v.keeper.closed !== Number(closed) || v.keeper.active !== Number(!closed) || v.totals.active !== Number(!closed)) fail();
+  }
+  return true;
 }
 export function nativeFailureProof(v) {
-  keys(v, ['protocol', 'event', 'category', 'origin', 'phase', 'last_completed', 'readers', 'reader_error']);
+  keys(v, ['protocol', 'event', 'category', 'origin', 'phase', 'last_completed', 'readers', 'reader_error', 'keeper', 'totals']);
   if (v.protocol !== 1 || v.event !== 'failed' || v.category !== 'native_failure' || !['run', 'cleanup'].includes(v.origin)
     || !nativePhases.includes(v.phase) || v.last_completed !== null && !nativePhases.includes(v.last_completed)) fail();
   if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
-  failureReaders(v.readers); readerErrorProof(v.reader_error); return true;
+  connectionProof(v); readerErrorProof(v.reader_error); return true;
 }
 export function nativeCleanupProof(v) {
-  keys(v, ['protocol', 'event', 'outcome', 'readers']);
+  keys(v, ['protocol', 'event', 'outcome', 'readers', 'keeper', 'totals']);
   if (v.protocol !== 1 || v.event !== 'failure_cleanup' || !['closed', 'failed'].includes(v.outcome)) fail();
-  failureReaders(v.readers);
-  if (v.outcome === 'closed' && v.readers !== null) readersProof(v.readers);
+  connectionProof(v);
+  if (v.outcome === 'closed' && (v.readers === null || v.totals === null || v.readers.active !== 0 || v.totals.active !== 0)) fail();
   return true;
+}
+export function ownNativeDiagnostic(v, cleanup = false) {
+  if (cleanup) nativeCleanupProof(v); else nativeFailureProof(v);
+  const owned = structuredClone(v);
+  // Cloning can drop attached fields on branded objects. Validate what we retain.
+  if (cleanup) nativeCleanupProof(owned); else nativeFailureProof(owned);
+  if (owned.readers) Object.freeze(owned.readers);
+  if (owned.totals) Object.freeze(owned.totals);
+  for (const error of [owned.reader_error, owned.keeper.error]) if (error) {
+    Object.freeze(error.first); if (error.close) Object.freeze(error.close); Object.freeze(error);
+  }
+  Object.freeze(owned.keeper); return Object.freeze(owned);
 }
 const events = { first: 'first', observed_first: 'first_observed', arm: 'armed', second: 'captured', page: 'page', authoritative: 'authoritative', terminal: 'terminal', observed_terminal: 'complete', stop: 'stopping' };
 export function protocol() {
@@ -150,33 +190,35 @@ export function protocol() {
       if (!v || typeof v !== 'object') fail();
       if (v.event === 'failed') {
         if (nativeFailure || stopped) fail();
-        const owned = structuredClone(v); nativeFailureProof(owned); nativeFailure = owned; fail();
+        nativeFailure = ownNativeDiagnostic(v); fail();
       }
       if (v.event === 'failure_cleanup') {
         if (!nativeFailure || nativeCleanup || stopped) fail();
-        nativeCleanupProof(v); nativeCleanup = structuredClone(v); return;
+        nativeCleanup = ownNativeDiagnostic(v, true); return;
       }
       if (nativeFailure) fail();
       if (phase === 'start') {
-        keys(v, ['protocol', 'event', 'id', 'pid', 'origin', 'session_id', 'head', 'work']);
+        keys(v, ['protocol', 'event', 'id', 'pid', 'origin', 'session_id', 'head', 'work', 'readers', 'keeper', 'totals']);
         if (v.protocol !== 1 || v.event !== 'ready' || v.id !== 1 || !id(v.pid) || !uuid(v.session_id) || v.head !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]*$/.test(v.origin)) fail();
         const url = new URL(v.origin);
         if (url.origin !== v.origin || Number(url.port) > 65535) fail();
-        workProof(v.work, 0); sid = v.session_id; phase = 'first'; return;
+        connectionProof(v, 'open'); workProof(v.work, 0); sid = v.session_id; phase = 'first'; return;
       }
       if (stopping && v.event === 'stopped') {
-        keys(v, ['protocol', 'event', 'id', 'drained', 'readers']);
+        keys(v, ['protocol', 'event', 'id', 'drained', 'readers', 'keeper', 'totals']);
         if (v.protocol !== 1 || v.id !== serial || v.drained !== true || stopped) fail();
-        readersProof(v.readers); stopped = true; return;
+        connectionProof(v, 'closed'); stopped = true; return;
       }
       if (!pending || v.protocol !== 1 || v.id !== serial || v.event !== events[pending]) fail();
       const extra = [];
       if (['first', 'captured', 'authoritative', 'terminal'].includes(v.event)) extra.push('saved');
       if (['first', 'terminal', 'stopping'].includes(v.event)) extra.push('work');
-      if (v.event === 'captured') extra.push('operation_id', 'pause_hits', 'reader_closed', 'readers', 'released', 'pages');
+      if (['captured', 'terminal', 'stopping'].includes(v.event)) extra.push('readers', 'keeper', 'totals');
+      if (v.event === 'captured') extra.push('operation_id', 'pause_hits', 'reader_closed', 'released', 'pages');
       if (v.event === 'page') extra.push('page', 'pages', 'rows');
       if (v.event === 'stopping') extra.push('complete');
       keys(v, ['protocol', 'event', 'id', ...extra]);
+      if (['captured', 'terminal', 'stopping'].includes(v.event)) connectionProof(v, 'open');
       if (v.event === 'first') {
         savedProof(v.saved, 'first'); if (v.saved.session_id !== sid) fail();
         saved = structuredClone(v.saved); workProof(v.work, 1); stage = 1; phase = 'observed_first';
@@ -344,7 +386,7 @@ export function identityProof(v, pid, executable, cwd, parent = process.pid) {
 export function terminalProof(v) {
   if (!v.identity || v.closed !== true || v.input_ended !== true || v.stopped !== true || v.drained !== true || v.code !== 0 || v.signal !== null
     || v.stderr_bytes !== 0 || v.failure !== false || v.fallback !== false || v.retired !== true) fail();
-  readersProof(v.readers); return true;
+  connectionProof(v, 'closed'); return true;
 }
 const bounded = async (promise, ms) => {
   let timer;
@@ -355,7 +397,7 @@ export async function launchNative({ fixture, binding, onDiagnostic }, overrides
   const io = { spawn, identity: processIdentity, binding: nativeBinding, root: rootProof, bounded, ...overrides };
   await io.root(fixture); await io.binding(binding);
   const cwd = join(fixture.root, 'child'), p = protocol();
-  const facts = { identity: null, closed: false, input_ended: false, stopped: false, drained: false, readers: null, code: null, signal: null, stderr_bytes: 0, failure: false, fallback: false, retired: false,
+  const facts = { identity: null, closed: false, input_ended: false, stopped: false, drained: false, readers: null, keeper: null, totals: null, code: null, signal: null, stderr_bytes: 0, failure: false, fallback: false, retired: false,
     first_boundary: null, native_failure: null, native_cleanup: null };
   let child = null, closed = null, pending = null, failure = null, next = 1, cleanupPromise = null, stopPromise = null;
   function notify(event) {
@@ -373,13 +415,13 @@ export async function launchNative({ fixture, binding, onDiagnostic }, overrides
   const feed = parser(message => {
     try {
       p.reply(message);
-      if (message.event === 'failure_cleanup') { facts.native_cleanup = p.diagnostics().native_cleanup; notify('native_cleanup'); }
-      else if (message.event === 'stopped') { facts.stopped = true; facts.drained = message.drained; facts.readers = structuredClone(message.readers); }
+      if (message.event === 'failure_cleanup') { facts.native_cleanup = ownNativeDiagnostic(p.diagnostics().native_cleanup, true); notify('native_cleanup'); }
+      else if (message.event === 'stopped') { facts.stopped = true; facts.drained = message.drained; facts.readers = Object.freeze(structuredClone(message.readers)); facts.keeper = Object.freeze(structuredClone(message.keeper)); facts.totals = Object.freeze(structuredClone(message.totals)); }
       else if (pending && pending.event === message.event && pending.id === message.id) { const w = pending; pending = null; w.resolve(message); }
       else fail();
     } catch {
       const diagnostic = p.diagnostics();
-      if (diagnostic.native_failure && !facts.native_failure) { facts.native_failure = diagnostic.native_failure; reject('native_frame'); }
+      if (diagnostic.native_failure && !facts.native_failure) { facts.native_failure = ownNativeDiagnostic(diagnostic.native_failure); reject('native_frame'); }
       else reject('protocol');
     }
   });

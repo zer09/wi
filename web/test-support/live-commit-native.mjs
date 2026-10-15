@@ -9,7 +9,7 @@ export const CHILD = 'providers::openai_codex::tests::replay_loopback_tests::htt
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url)).replace(/\/$/, '');
 export const TARGET = process.env.CARGO_TARGET_DIR || join(ROOT, 'target');
 export const CARGO_ARGS = Object.freeze(['test', '--locked', '--offline', '--lib', '--no-run', '--message-format=json']);
-export const texts = Object.freeze({ task: 'Give one short answer.', first: 'one 雪', delta: ' +🙂', append: 'one 雪 +🙂', final: 'final 雪🙂' });
+export const texts = Object.freeze({ task: 'Give one short answer.', first: 'one 雪', delta: ' +🙂', append: 'one 雪 +🙂', final: 'one 雪 +🙂 final' });
 export const digest = value => createHash('sha256').update(value).digest('hex');
 const fail = () => { throw Error('Live native rejected'); };
 const same = (a, b) => { if (!isDeepStrictEqual(a, b)) fail(); };
@@ -76,18 +76,44 @@ export function decode(line) {
   }
   try { return JSON.parse(line); } catch { fail(); }
 }
+export const nativePhases = Object.freeze(['setup_control', 'setup', 'ready_emit', 'control_receive', 'control_admission',
+  'first_wire_receive', 'acceptance_read', 'acceptance_decode', 'task_match', 'provider_request_match', 'first_wire_reply',
+  'settle', 'snapshot', 'saved_validation', 'first_emit', 'observed_first', 'arm', 'second', 'page', 'authoritative',
+  'terminal', 'observed_terminal', 'stop', 'cleanup', 'stopped_emit']);
+export const nodeBoundaries = Object.freeze(['protocol', 'parser', 'native_frame', 'input', 'stdout', 'stderr', 'spawn', 'identity',
+  'ipc_write', 'timeout', 'close', 'input_end', 'retirement', 'signal', 'observer', 'startup', 'abandon']);
+function failureReaders(v) {
+  if (v === null) return;
+  keys(v, ['opened', 'closed', 'active']);
+  if (![v.opened, v.closed, v.active].every(n => uint(n) && n <= 1000000) || v.closed > v.opened || v.active !== v.opened - v.closed) fail();
+}
+export function nativeFailureProof(v) {
+  keys(v, ['protocol', 'event', 'category', 'origin', 'phase', 'last_completed', 'readers']);
+  if (v.protocol !== 1 || v.event !== 'failed' || v.category !== 'native_failure' || !['run', 'cleanup'].includes(v.origin)
+    || !nativePhases.includes(v.phase) || v.last_completed !== null && !nativePhases.includes(v.last_completed)) fail();
+  failureReaders(v.readers); return true;
+}
+export function nativeCleanupProof(v) {
+  keys(v, ['protocol', 'event', 'outcome', 'readers']);
+  if (v.protocol !== 1 || v.event !== 'failure_cleanup' || !['closed', 'failed'].includes(v.outcome)) fail();
+  failureReaders(v.readers);
+  if (v.outcome === 'closed' && v.readers !== null) readersProof(v.readers);
+  return true;
+}
 const events = { first: 'first', observed_first: 'first_observed', arm: 'armed', second: 'captured', page: 'page', authoritative: 'authoritative', terminal: 'terminal', observed_terminal: 'complete', stop: 'stopping' };
 export function protocol() {
   let phase = 'start', serial = 1, pending = null, saved = null, sid = null, page = 0, pages = 0;
   let stopping = false, complete = false, stopped = false, stage = 0;
   const captures = [];
+  let nativeFailure = null, nativeCleanup = null;
   return {
+    diagnostics: () => structuredClone({ native_failure: nativeFailure, native_cleanup: nativeCleanup }),
     send(command) {
       const names = ['id', 'command'];
       if (['observed_first', 'authoritative', 'terminal', 'observed_terminal'].includes(command.command)) names.push('observed');
       if (command.command === 'page') names.push('page');
       keys(command, names);
-      if (phase === 'start' || stopping || pending || stopped || !id(command.id) || command.id !== serial + 1 || !Object.hasOwn(events, command.command)) fail();
+      if (nativeFailure || phase === 'start' || stopping || pending || stopped || !id(command.id) || command.id !== serial + 1 || !Object.hasOwn(events, command.command)) fail();
       const allowed = { first: 'first', observed_first: 'observed_first', arm: 'arm', second: 'second', page: 'page', authoritative: 'authoritative', terminal: 'terminal', observed_terminal: 'observed_terminal' };
       if (command.command !== 'stop' && phase !== allowed[command.command]) fail();
       if ('observed' in command) same(command.observed, saved);
@@ -97,7 +123,15 @@ export function protocol() {
     },
     reply(v) {
       if (!v || typeof v !== 'object') fail();
-      if (v.event === 'failed') fail();
+      if (v.event === 'failed') {
+        if (nativeFailure || stopped) fail();
+        nativeFailureProof(v); nativeFailure = structuredClone(v); fail();
+      }
+      if (v.event === 'failure_cleanup') {
+        if (!nativeFailure || nativeCleanup || stopped) fail();
+        nativeCleanupProof(v); nativeCleanup = structuredClone(v); return;
+      }
+      if (nativeFailure) fail();
       if (phase === 'start') {
         keys(v, ['protocol', 'event', 'id', 'pid', 'origin', 'session_id', 'head', 'work']);
         if (v.protocol !== 1 || v.event !== 'ready' || v.id !== 1 || !id(v.pid) || !uuid(v.session_id) || v.head !== 1 || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]*$/.test(v.origin)) fail();
@@ -138,7 +172,7 @@ export function protocol() {
       else if (v.event === 'stopping') { if (v.complete !== complete) fail(); workProof(v.work, stage); stopping = true; }
       pending = null;
     },
-    end() { if (!stopped || pending) fail(); return true; },
+    end() { if (nativeFailure || !stopped || pending) fail(); return true; },
   };
 }
 export function parser(onMessage) {
@@ -292,23 +326,41 @@ const bounded = async (promise, ms) => {
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Live native timeout')), ms); })]); }
   finally { clearTimeout(timer); }
 };
-export async function launchNative({ fixture, binding }, overrides = {}) {
+export async function launchNative({ fixture, binding, onDiagnostic }, overrides = {}) {
   const io = { spawn, identity: processIdentity, binding: nativeBinding, root: rootProof, bounded, ...overrides };
   await io.root(fixture); await io.binding(binding);
   const cwd = join(fixture.root, 'child'), p = protocol();
-  const facts = { identity: null, closed: false, input_ended: false, stopped: false, drained: false, readers: null, code: null, signal: null, stderr_bytes: 0, failure: false, fallback: false, retired: false };
+  const facts = { identity: null, closed: false, input_ended: false, stopped: false, drained: false, readers: null, code: null, signal: null, stderr_bytes: 0, failure: false, fallback: false, retired: false,
+    first_boundary: null, native_failure: null, native_cleanup: null };
   let child = null, closed = null, pending = null, failure = null, next = 1, cleanupPromise = null, stopPromise = null;
-  const reject = () => { failure ??= Error('Live native failed'); facts.failure = true; if (pending) { pending.reject(failure); pending = null; } };
+  function notify(event) {
+    try { onDiagnostic?.(event, structuredClone(facts)); }
+    catch {
+      failure ??= Error('Live native failed'); facts.failure = true; facts.first_boundary ??= 'observer';
+      if (pending) { pending.reject(failure); pending = null; }
+    }
+  }
+  const reject = boundary => {
+    failure ??= Error('Live native failed'); facts.failure = true; facts.first_boundary ??= boundary;
+    if (pending) { pending.reject(failure); pending = null; }
+    notify(boundary === 'native_frame' ? 'native_failed_frame' : 'node_failure');
+  };
   const feed = parser(message => {
     try {
       p.reply(message);
-      if (message.event === 'stopped') { facts.stopped = true; facts.drained = message.drained; facts.readers = structuredClone(message.readers); }
+      if (message.event === 'failure_cleanup') { facts.native_cleanup = p.diagnostics().native_cleanup; notify('native_cleanup'); }
+      else if (message.event === 'stopped') { facts.stopped = true; facts.drained = message.drained; facts.readers = structuredClone(message.readers); }
       else if (pending && pending.event === message.event && pending.id === message.id) { const w = pending; pending = null; w.resolve(message); }
       else fail();
-    } catch { reject(); }
+    } catch {
+      const diagnostic = p.diagnostics();
+      if (diagnostic.native_failure && !facts.native_failure) { facts.native_failure = diagnostic.native_failure; reject('native_frame'); }
+      else reject('protocol');
+    }
   });
   const wait = (event, serial) => {
-    if (pending || failure || facts.closed) fail();
+    if (failure) throw failure;
+    if (pending || facts.closed) fail();
     return new Promise((resolve, reject) => { pending = { event, id: serial, resolve, reject }; });
   };
   async function currentSignal() {
@@ -330,27 +382,28 @@ export async function launchNative({ fixture, binding }, overrides = {}) {
   async function cleanup() {
     cleanupPromise ??= (async () => {
       let bad = false;
-      try { await io.bounded(endInput(), 5000); } catch { reject(); bad = true; }
+      try { await io.bounded(endInput(), 5000); } catch { reject('input_end'); bad = true; }
       try { await io.bounded(closed, 5000); }
-      catch { reject(); bad = true; try { await currentSignal(); await io.bounded(closed, 2000); } catch { bad = true; } }
+      catch { reject('timeout'); bad = true; try { await currentSignal(); await io.bounded(closed, 2000); } catch { reject('signal'); bad = true; } }
       try {
         if (!facts.identity) fail();
         const now = await io.identity(child.pid);
         facts.retired = now === null || now.start_ticks !== facts.identity.start_ticks;
         if (!facts.retired) fail();
-      } catch { reject(); bad = true; }
-      if (bad) fail();
+      } catch { reject('retirement'); bad = true; }
+      if (bad) throw failure;
     })();
     return cleanupPromise;
   }
   const request = async body => {
-    if (failure || facts.closed || !body || Object.hasOwn(body, 'id')) fail();
+    if (failure) throw failure;
+    if (facts.closed || !body || Object.hasOwn(body, 'id')) fail();
     const command = { ...body, id: next + 1 };
     p.send(command); next++;
     const promise = wait(events[body.command], command.id);
-    try { child.stdin.write(JSON.stringify(command) + '\n', error => { if (error) reject(); }); } catch { reject(); }
+    try { child.stdin.write(JSON.stringify(command) + '\n', error => { if (error) reject('ipc_write'); }); } catch { reject('ipc_write'); }
     let reply;
-    try { reply = await io.bounded(promise, 30000); } catch { reject(); throw failure; }
+    try { reply = await io.bounded(promise, 30000); } catch { reject('timeout'); throw failure; }
     if (failure) throw failure;
     return reply;
   };
@@ -360,42 +413,50 @@ export async function launchNative({ fixture, binding }, overrides = {}) {
     });
     // Install close and pipe handlers before the first await after acquisition.
     closed = new Promise(resolve => child.once('close', (code, signal) => {
-      facts.closed = true; facts.code = code; facts.signal = signal;
-      try { feed.end(); p.end(); if (pending) fail(); } catch { reject(); }
+      facts.closed = true; facts.code = code; facts.signal = signal; notify('native_close');
+      if (code !== 0 || signal !== null) reject('close');
+      try { feed.end(); p.end(); if (pending) fail(); } catch { reject('close'); }
       resolve();
     }));
-    child.stdin.on('error', reject); child.stdout.on('error', reject); child.stderr.on('error', reject);
-    child.stdout.on('data', bytes => { try { feed.push(bytes); } catch { reject(); } });
-    child.stderr.on('data', bytes => { facts.stderr_bytes += bytes.length; reject(); });
+    child.stdin.on('error', () => reject('input')); child.stdout.on('error', () => reject('stdout')); child.stderr.on('error', () => reject('stderr'));
+    child.stdout.on('data', bytes => { try { feed.push(bytes); } catch { reject('parser'); } });
+    child.stderr.on('data', bytes => { facts.stderr_bytes += bytes.length; reject('stderr'); });
     const spawned = new Promise((resolve, rejectSpawn) => {
       child.once('spawn', resolve);
-      child.once('error', () => { reject(); rejectSpawn(Error('Live native spawn failed')); });
+      child.once('error', () => { reject('spawn'); rejectSpawn(failure); });
     });
-    await io.bounded(spawned, 5000);
-    const candidate = await io.identity(child.pid);
-    identityProof(candidate, child.pid, binding.executable, cwd);
-    facts.identity = structuredClone(candidate);
+    try { await io.bounded(spawned, 5000); } catch { reject('spawn'); throw failure; }
+    try {
+      const candidate = await io.identity(child.pid);
+      identityProof(candidate, child.pid, binding.executable, cwd);
+      facts.identity = structuredClone(candidate);
+    } catch { reject('identity'); throw failure; }
     const readyPromise = wait('ready', 1);
-    child.stdin.write(JSON.stringify({ id: 1, root: fixture.root, owner: fixture.owner }) + '\n', error => { if (error) reject(); });
-    const ready = await io.bounded(readyPromise, 30000);
-    if (ready.pid !== child.pid || failure) fail();
+    try { child.stdin.write(JSON.stringify({ id: 1, root: fixture.root, owner: fixture.owner }) + '\n', error => { if (error) reject('ipc_write'); }); }
+    catch { reject('ipc_write'); }
+    let ready;
+    try { ready = await io.bounded(readyPromise, 30000); } catch { reject('timeout'); throw failure; }
+    if (ready.pid !== child.pid || failure) { reject('protocol'); throw failure; }
     return {
       origin: ready.origin, session_id: ready.session_id, head: ready.head, pid: child.pid, request,
       evidence: () => structuredClone(facts),
       stop() {
         stopPromise ??= (async () => {
-          try { await request({ command: 'stop' }); } finally { await cleanup(); }
+          let error;
+          try { await request({ command: 'stop' }); } catch (caught) { error = failure ?? caught; }
+          try { await cleanup(); } catch (caught) { error ??= failure ?? caught; }
+          if (error) throw error;
           await io.binding(binding); await io.root(fixture); terminalProof(facts);
           return structuredClone(facts);
         })();
         return stopPromise;
       },
-      async abandon() { reject(); await cleanup(); return structuredClone(facts); },
+      async abandon() { reject('abandon'); await cleanup(); return structuredClone(facts); },
     };
   } catch {
-    reject();
+    reject('startup');
     if (child && closed) { try { await cleanup(); } catch { /* Retain the root and all failure facts. */ } }
-    throw Error('Live native startup failed');
+    throw failure;
   }
 }
 export async function removeRoot(fixture, processes, binding, overrides = {}) {

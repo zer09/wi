@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import {
   CHILD, ROOT, TARGET, texts, digest, workKeys, workProof, savedProof, readersProof, decode, protocol, parser,
   telemetryProof, artifactFromCargo, nativeSources, nativeBinding, sourceProof, createRoot, rootProof, identityProof,
+  nativePhases, nodeBoundaries, nativeFailureProof, nativeCleanupProof,
   terminalProof, launchNative, removeRoot,
 } from '../test-support/live-commit-native.mjs';
 
@@ -53,7 +54,7 @@ function observerTelemetry(shape) {
 }
 
 test('scalar fixtures and actual work counters have closed exact expectations', async t => {
-  assert.deepEqual(['first', 'delta', 'append', 'final'].map(k => Buffer.byteLength(texts[k])), [7, 6, 13, 13]);
+  assert.deepEqual(['first', 'delta', 'append', 'final'].map(k => Buffer.byteLength(texts[k])), [7, 6, 13, 19]);
   for (const stage of [0, 1, 2]) {
     assert.equal(workProof(work(stage), stage), true);
     for (const key of workKeys) await t.test(`stage ${stage} rejects counter ${key}`, () => {
@@ -374,6 +375,95 @@ test('actual launcher failure schedules retain roots and never signal rejected c
     assert.equal(native.evidence().failure || native.evidence().code !== 0 || native.evidence().signal !== null, true);
     assert.deepEqual(f.state.kills, options.stall ? ['SIGKILL'] : []);
   });
+});
+
+const nativeFailure = (extra = {}) => ({ protocol: 1, event: 'failed', category: 'native_failure',
+  origin: 'run', phase: 'first_wire_reply', last_completed: 'provider_request_match', readers: clone(readers), ...extra });
+const nativeCleanup = () => ({ protocol: 1, event: 'failure_cleanup', outcome: 'closed', readers: clone(readers) });
+test('D1 launcher freezes native failure before close and preserves separate later cleanup facts', async () => {
+  const f = fake(), observed = [];
+  const native = await launchNative({ fixture, binding, onDiagnostic: (event, facts) => observed.push({ event, facts }) }, f.io);
+  f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeFailure()) + '\n'));
+  assert.equal(native.evidence().native_failure?.phase, 'first_wire_reply');
+  assert.equal(observed[0]?.event, 'native_failed_frame');
+  assert.equal(observed[0].facts.closed, false);
+  f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeCleanup()) + '\n'));
+  assert.equal(native.evidence().native_cleanup?.outcome, 'closed');
+  await assert.rejects(native.stop());
+  assert.equal(native.evidence().first_boundary, 'native_frame');
+  assert.ok(observed.some(v => v.event === 'native_close'));
+});
+
+test('D1 exact native schemas cover every phase origin readers and reject arbitrary or unknown fields', async t => {
+  const rust = await readFile(new URL('../../src/providers/openai_codex/tests/replay/http_api_joined/live_commit.rs', import.meta.url), 'utf8');
+  const phaseBody = rust.slice(rust.indexOf('enum Phase {'), rust.indexOf('\n}', rust.indexOf('enum Phase {')));
+  const names = [...phaseBody.matchAll(/^    ([A-Z][a-zA-Z]+),$/gm)].map(m => m[1].replace(/[A-Z]/g, (c, i) => (i ? '_' : '') + c.toLowerCase()));
+  assert.deepEqual(names, nativePhases);
+  for (const phase of nativePhases) for (const origin of ['run', 'cleanup']) await t.test(`${origin} ${phase}`, () => {
+    const p = protocol(), v = nativeFailure({ phase, origin, last_completed: null, readers: null });
+    assert.equal(nativeFailureProof(v), true); assert.throws(() => p.reply(v));
+    assert.deepEqual(p.diagnostics().native_failure, v);
+    v.phase = 'unknown'; assert.notEqual(p.diagnostics().native_failure.phase, 'unknown');
+    assert.throws(() => p.send({ command: 'stop', id: 2 })); assert.throws(() => p.end());
+    p.reply(nativeCleanup()); assert.equal(p.diagnostics().native_cleanup.outcome, 'closed');
+    assert.throws(() => p.reply(nativeCleanup())); assert.throws(() => p.reply(ready(12345)));
+  });
+  const defects = { protocol: 2, event: 'other', category: 'payload', origin: 'unknown', phase: 'unknown', last_completed: 'payload', readers: { opened: 1, closed: 0, active: 0 }, extra: 'unpublished' };
+  for (const [key, value] of Object.entries(defects)) await t.test(`reject ${key}`, () => {
+    const v = nativeFailure({ [key]: value }), p = protocol(); assert.throws(() => p.reply(v)); assert.equal(p.diagnostics().native_failure, null);
+  });
+  for (const key of Object.keys(nativeFailure())) { const v = nativeFailure(); delete v[key]; assert.throws(() => nativeFailureProof(v)); }
+  for (const readers of [{ opened: 1, closed: 2, active: 0 }, { opened: 1.5, closed: 0, active: 1.5 }, { opened: 1000001, closed: 0, active: 1000001 }, { opened: 1, closed: 1, active: 0, payload: 'unpublished' }]) assert.throws(() => nativeFailureProof(nativeFailure({ readers })));
+  assert.equal(nativeFailureProof(nativeFailure({ readers: { opened: 2, closed: 1, active: 1 } })), true);
+  const p = protocol(); assert.throws(() => p.reply(nativeCleanup()));
+  for (const extra of [{ protocol: 2 }, { outcome: 'unknown' }, { readers: {} }, { readers: { opened: 2, closed: 1, active: 1 } }, { payload: 'unpublished' }]) assert.throws(() => nativeCleanupProof({ ...nativeCleanup(), ...extra }));
+});
+test('D1 earlier actual launcher boundaries survive later native failure cleanup callbacks and rejection objects', async t => {
+  for (const boundary of ['stderr', 'parser', 'protocol', 'ipc_write', 'timeout']) await t.test(boundary, async () => {
+    const f = fake(), observed = [];
+    const io = { ...f.io };
+    if (boundary === 'timeout') io.bounded = async (promise, ms) => { if (f.state.writes.length > 1 && ms === 30000) { promise.catch(() => {}); throw Error('unpublished timeout payload'); } return promise; };
+    const native = await launchNative({ fixture, binding, onDiagnostic: (event, facts) => observed.push({ event, facts }) }, io);
+    if (boundary === 'ipc_write') f.child.stdin.write = (bytes, callback) => { queueMicrotask(() => callback(Error('unpublished write payload'))); };
+    const request = native.request({ command: 'first' }); const caught = request.catch(error => error);
+    if (boundary === 'stderr') f.child.stderr.emit('data', Buffer.from('unpublished stderr payload'));
+    if (boundary === 'parser') f.child.stdout.emit('data', Buffer.from([0xff]));
+    if (boundary === 'protocol') f.child.stdout.emit('data', Buffer.from(JSON.stringify(reply('first', 2, { saved: saved('first'), work: work(0) })) + '\n'));
+    const firstError = await caught;
+    f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeFailure()) + '\n'));
+    f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeCleanup()) + '\n'));
+    await assert.rejects(native.request({ command: 'first' }), error => error === firstError);
+    await assert.rejects(native.stop(), error => error === firstError);
+    const facts = native.evidence(); assert.equal(facts.first_boundary, boundary); assert.ok(nodeBoundaries.includes(facts.first_boundary));
+    assert.equal(facts.native_failure.phase, 'first_wire_reply'); assert.equal(facts.native_cleanup.outcome, 'closed');
+    assert.equal(observed.filter(v => v.event === 'native_failed_frame').length, 1);
+    assert.ok(!JSON.stringify(facts).includes('payload')); assert.ok(!JSON.stringify(observed).includes('payload'));
+    const copy = native.evidence(); copy.native_failure.phase = 'unknown'; assert.equal(native.evidence().native_failure.phase, 'first_wire_reply');
+  });
+});
+test('D1 launcher rejects malformed duplicate and out of order frames without normal Stop acceptance', async t => {
+  for (const defect of ['schema', 'duplicate', 'cleanup-first', 'unknown', 'getter']) await t.test(defect, async () => {
+    const f = fake(), native = await launchNative({ fixture, binding }, f.io);
+    const emit = v => f.child.stdout.emit('data', Buffer.from(JSON.stringify(v) + '\n'));
+    if (defect === 'schema') emit(nativeFailure({ phase: 'unpublished payload' }));
+    if (defect === 'duplicate') { emit(nativeFailure()); emit(nativeFailure()); }
+    if (defect === 'cleanup-first') emit(nativeCleanup());
+    if (defect === 'unknown') emit({ protocol: 1, event: 'unknown' });
+    if (defect === 'getter') {
+      const p = protocol(), v = nativeFailure(); Object.defineProperty(v, 'phase', { get() { throw Error('unpublished getter payload'); } });
+      assert.throws(() => p.reply(v)); assert.equal(p.diagnostics().native_failure, null); emit(nativeFailure({ readers: {} }));
+    }
+    await assert.rejects(native.stop()); const facts = native.evidence(); assert.equal(facts.failure, true); assert.equal(facts.stopped, false);
+    assert.equal(facts.native_failure !== null, defect === 'duplicate'); assert.equal(facts.native_cleanup, null);
+  });
+});
+test('D1 early startup and observer exceptions cannot suppress cleanup or replace original failure', async () => {
+  const f = fake(), captured = [], io = { ...f.io };
+  io.identity = async () => { f.child.stdout.emit('data', Buffer.from(`running 1 test\ntest ${CHILD} ... ${JSON.stringify(nativeFailure({ phase: 'setup_control', last_completed: null, readers: null }))}\n`)); throw Error('unpublished identity payload'); };
+  await assert.rejects(launchNative({ fixture, binding, onDiagnostic: (event, facts) => { captured.push({ event, facts }); throw Error('unpublished observer payload'); } }, io));
+  assert.equal(f.state.ends, 1); assert.equal(f.state.closed, true); assert.equal(captured[0].facts.native_failure.phase, 'setup_control');
+  assert.equal(captured[0].facts.identity, null); assert.equal(captured[0].facts.first_boundary, 'native_frame');
+  assert.ok(!JSON.stringify(captured).includes('payload'));
 });
 
 test('identity, balanced reader and deletion gates reject unknown or live resources before effects', async t => {

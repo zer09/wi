@@ -12,9 +12,103 @@ const RESPONSE: &str = "task-1-final";
 const FIRST: &str = "one 雪";
 const DELTA: &str = " +🙂";
 const APPEND: &str = "one 雪 +🙂";
-const FINAL: &str = "final 雪🙂";
+const FINAL: &str = "one 雪 +🙂 final";
 const TASK: &str = "Give one short answer.";
 const LIMIT: usize = 16384;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Phase {
+    #[default]
+    SetupControl,
+    Setup,
+    ReadyEmit,
+    ControlReceive,
+    ControlAdmission,
+    FirstWireReceive,
+    AcceptanceRead,
+    AcceptanceDecode,
+    TaskMatch,
+    ProviderRequestMatch,
+    FirstWireReply,
+    Settle,
+    Snapshot,
+    SavedValidation,
+    FirstEmit,
+    ObservedFirst,
+    Arm,
+    Second,
+    Page,
+    Authoritative,
+    Terminal,
+    ObservedTerminal,
+    Stop,
+    Cleanup,
+    StoppedEmit,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Origin {
+    Run,
+    Cleanup,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ReaderFacts {
+    opened: usize,
+    closed: usize,
+    active: usize,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct Failure {
+    origin: Origin,
+    phase: Phase,
+    last_completed: Option<Phase>,
+    readers: Option<ReaderFacts>,
+}
+#[derive(Default)]
+struct Tracker {
+    phase: Phase,
+    last_completed: Option<Phase>,
+    first: Option<Failure>,
+}
+impl Tracker {
+    fn begin(&mut self, phase: Phase) {
+        self.phase = phase;
+    }
+    fn complete(&mut self) {
+        self.last_completed = Some(self.phase);
+    }
+    fn freeze(&mut self, origin: Origin, readers: &Readers) {
+        if self.first.is_none() {
+            self.first = Some(Failure {
+                origin,
+                phase: self.phase,
+                last_completed: self.last_completed,
+                readers: readers.diagnostic(),
+            });
+        }
+    }
+    fn publish(&self, out: &mut impl Write) {
+        if let Some(first) = &self.first {
+            let mut frame = serde_json::to_value(first).unwrap();
+            frame["protocol"] = json!(1);
+            frame["event"] = json!("failed");
+            frame["category"] = json!("native_failure");
+            publish(out, &frame);
+        }
+    }
+}
+fn publish(out: &mut impl Write, frame: &Value) -> bool {
+    // A broken observer must not stop resource cleanup or replace the first failure.
+    std::panic::catch_unwind(AssertUnwindSafe(|| {
+        serde_json::to_writer(&mut *out, frame)?;
+        out.write_all(b"\n")?;
+        out.flush()
+    }))
+    .is_ok_and(|result| result.is_ok())
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -364,6 +458,18 @@ fn delta(text: &str) -> Value {
 fn item() -> Value {
     json!({"type":"message","id":"answer","role":"assistant","status":"completed","content":[{"type":"output_text","text":FINAL}]})
 }
+fn first_frames() -> Vec<Value> {
+    vec![
+        json!({"type":"response.created","response":{"id":RESPONSE}}),
+        json!({"type":"response.output_item.added","response_id":RESPONSE,"output_index":0,"item":{"type":"message","id":"answer","role":"assistant","status":"in_progress","content":[]}}),
+        delta(FIRST),
+    ]
+}
+fn terminal_frames(item: Value) -> Vec<Value> {
+    let mut terminal = events(RESPONSE, vec![item], false);
+    terminal.remove(0);
+    terminal
+}
 fn db_path(root: &Path, sid: &ApplicationSessionId) -> PathBuf {
     root.join("private-data/sessions")
         .join(&sid.as_str()[..2])
@@ -376,6 +482,15 @@ struct Readers {
     closed: AtomicUsize,
 }
 impl Readers {
+    fn diagnostic(&self) -> Option<ReaderFacts> {
+        let opened = self.opened.load(Ordering::SeqCst);
+        let closed = self.closed.load(Ordering::SeqCst);
+        opened.checked_sub(closed).map(|active| ReaderFacts {
+            opened,
+            closed,
+            active,
+        })
+    }
     fn facts(&self) -> Value {
         let opened = self.opened.load(Ordering::SeqCst);
         let closed = self.closed.load(Ordering::SeqCst);
@@ -453,7 +568,9 @@ async fn settled(
     expected: &str,
     terminal: bool,
     readers: &Readers,
+    tracker: &mut Tracker,
 ) -> Saved {
+    tracker.begin(Phase::Settle);
     // Poll only a tiny scalar until the writer has finished. No session mutex is acquired.
     let started = tokio::time::Instant::now();
     loop {
@@ -471,7 +588,11 @@ async fn settled(
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    snapshot(root, sid, expected, None, readers).await
+    tracker.complete();
+    tracker.begin(Phase::Snapshot);
+    let saved = snapshot(root, sid, expected, None, readers).await;
+    tracker.complete();
+    saved
 }
 
 fn selected_leaves(collector: &crate::storage::test_hooks::latency::Collector) -> Vec<Vec<u64>> {
@@ -519,6 +640,7 @@ struct Resources {
     pause: Option<Arc<Pause>>,
     wire: Option<Wire>,
     readers: Readers,
+    tracker: Tracker,
 }
 impl Resources {
     async fn close(&mut self) {
@@ -551,7 +673,10 @@ impl Resources {
     }
 }
 async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut Resources) -> u32 {
+    resources.tracker.begin(Phase::SetupControl);
     let start: Start = control(input).await;
+    resources.tracker.complete();
+    resources.tracker.begin(Phase::Setup);
     let cwd = std::env::current_dir().unwrap();
     assert!(start.valid(&cwd), "live root rejected");
     for (key, name) in [
@@ -649,21 +774,31 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
     let mut prepared = false;
     let mut completed = false;
     let mut observed_terminal = false;
+    resources.tracker.complete();
+    resources.tracker.begin(Phase::ReadyEmit);
     emit(
         json!({"event":"ready","id":1,"pid":std::process::id(),"origin":origin,"session_id":sid,"head":1,"work":work(&auth,&counts,0,false)}),
     );
+    resources.tracker.complete();
     loop {
+        resources.tracker.begin(Phase::ControlReceive);
         let command: Control = control(input).await;
+        resources.tracker.complete();
+        resources.tracker.begin(Phase::ControlAdmission);
         assert!(order.admit(&command, saved.as_ref()), "live phase rejected");
+        resources.tracker.complete();
         let id = command.id();
         match command {
             Control::First { .. } => {
                 let wire = resources.wire.as_mut().unwrap();
                 let connecting = wire.websocket.is_none();
+                resources.tracker.begin(Phase::FirstWireReceive);
                 let body = wire.receive().await;
+                resources.tracker.complete();
                 if connecting {
                     counts.connections.fetch_add(1, Ordering::SeqCst);
                 }
+                resources.tracker.begin(Phase::AcceptanceRead);
                 let input: String = read_owned(&start.root, &sid, &resources.readers, |sql| {
                     Box::pin(async move {
                         sqlx::query_scalar(
@@ -675,10 +810,16 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                     })
                 })
                 .await;
+                resources.tracker.complete();
+                resources.tracker.begin(Phase::AcceptanceDecode);
                 let input: Value = serde_json::from_str(&input).unwrap();
                 let input: RecordedRunInput =
                     serde_json::from_value(input["input"].clone()).unwrap();
+                resources.tracker.complete();
+                resources.tracker.begin(Phase::TaskMatch);
                 assert!(input.user_text() == TASK);
+                resources.tracker.complete();
+                resources.tracker.begin(Phase::ProviderRequestMatch);
                 assert_request(
                     &body,
                     &[user(&input.prepared_request().prompt)],
@@ -687,16 +828,34 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 );
                 assert!(body.get("previous_response_id").is_none());
                 prepared = true;
-                wire.reply(vec![json!({"type":"response.created","response":{"id":RESPONSE}}),json!({"type":"response.output_item.added","response_id":RESPONSE,"output_index":0,"item":{"type":"message","id":"answer","role":"assistant","status":"in_progress","content":[]}}),delta(FIRST)],None).await;
-                let first = settled(&start.root, &sid, FIRST, false, &resources.readers).await;
+                resources.tracker.complete();
+                resources.tracker.begin(Phase::FirstWireReply);
+                wire.reply(first_frames(), None).await;
+                resources.tracker.complete();
+                let first = settled(
+                    &start.root,
+                    &sid,
+                    FIRST,
+                    false,
+                    &resources.readers,
+                    &mut resources.tracker,
+                )
+                .await;
+                resources.tracker.begin(Phase::SavedValidation);
                 assert!(first.valid("first"));
                 saved = Some(first);
+                resources.tracker.complete();
+                resources.tracker.begin(Phase::FirstEmit);
                 emit(
                     json!({"event":"first","id":id,"saved":saved,"work":work(&auth,&counts,wire.requests,prepared)}),
                 );
             }
-            Control::ObservedFirst { .. } => emit(json!({"event":"first_observed","id":id})),
+            Control::ObservedFirst { .. } => {
+                resources.tracker.begin(Phase::ObservedFirst);
+                emit(json!({"event":"first_observed","id":id}));
+            }
             Control::Arm { .. } => {
+                resources.tracker.begin(Phase::Arm);
                 let pause = Arc::new(Pause::default());
                 hooks.arm_record(
                     Record::PartialText,
@@ -708,6 +867,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 emit(json!({"event":"armed","id":id}));
             }
             Control::Second { .. } => {
+                resources.tracker.begin(Phase::Second);
                 resources
                     .wire
                     .as_mut()
@@ -744,14 +904,24 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 );
             }
             Control::Page { page, .. } => {
+                resources.tracker.begin(Phase::Page);
                 let (pages, rows) = collector.page(page).unwrap();
                 emit(json!({"event":"page","id":id,"page":page,"pages":pages,"rows":rows}));
             }
             Control::Authoritative { .. } => {
+                resources.tracker.begin(Phase::Authoritative);
                 let prior = saved.as_ref().unwrap().clone();
                 resources.wire.as_mut().unwrap().reply(vec![json!({"type":"response.output_item.done","response_id":RESPONSE,"output_index":0,"item":item()})],None).await;
-                let final_state =
-                    settled(&start.root, &sid, FINAL, false, &resources.readers).await;
+                let final_state = settled(
+                    &start.root,
+                    &sid,
+                    FINAL,
+                    false,
+                    &resources.readers,
+                    &mut resources.tracker,
+                )
+                .await;
+                resources.tracker.begin(Phase::Authoritative);
                 assert!(final_state.valid("authoritative"));
                 assert!(final_state.generation > prior.generation);
                 assert_eq!(final_state.content_epoch, prior.content_epoch);
@@ -760,14 +930,22 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 emit(json!({"event":"authoritative","id":id,"saved":saved}));
             }
             Control::Terminal { .. } => {
+                resources.tracker.begin(Phase::Terminal);
                 let prior = saved.as_ref().unwrap().clone();
                 let wire = resources.wire.as_mut().unwrap();
-                let mut terminal = events(RESPONSE, vec![item()], false);
-                terminal.remove(0);
-                wire.reply(terminal, None).await;
+                wire.reply(terminal_frames(item()), None).await;
                 wire.closed().await;
                 wire.no_request();
-                let final_state = settled(&start.root, &sid, FINAL, true, &resources.readers).await;
+                let final_state = settled(
+                    &start.root,
+                    &sid,
+                    FINAL,
+                    true,
+                    &resources.readers,
+                    &mut resources.tracker,
+                )
+                .await;
+                resources.tracker.begin(Phase::Terminal);
                 assert!(final_state.valid("terminal"));
                 assert_eq!(prior.generation, final_state.generation);
                 assert_eq!(prior.content_epoch, final_state.content_epoch);
@@ -796,18 +974,55 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 );
             }
             Control::ObservedTerminal { .. } => {
+                resources.tracker.begin(Phase::ObservedTerminal);
                 observed_terminal = true;
                 emit(json!({"event":"complete","id":id}));
             }
             Control::Stop { .. } => {
+                resources.tracker.begin(Phase::Stop);
                 resources.wire.as_ref().unwrap().no_request();
                 emit(
                     json!({"event":"stopping","id":id,"complete":completed && observed_terminal,"work":work(&auth,&counts,resources.wire.as_ref().unwrap().requests,prepared)}),
                 );
+                resources.tracker.complete();
                 return id;
             }
         }
+        resources.tracker.complete();
     }
+}
+async fn finish(
+    result: std::thread::Result<u32>,
+    resources: &mut Resources,
+    out: &mut impl Write,
+) -> bool {
+    if result.is_err() {
+        resources.tracker.freeze(Origin::Run, &resources.readers);
+        // Flush the owned failure before shutdown can close the browser's SSE.
+        resources.tracker.publish(out);
+    }
+    resources.tracker.begin(Phase::Cleanup);
+    let cleanup = AssertUnwindSafe(resources.close()).catch_unwind().await;
+    if cleanup.is_ok() {
+        resources.tracker.complete();
+    } else if resources.tracker.first.is_none() {
+        resources
+            .tracker
+            .freeze(Origin::Cleanup, &resources.readers);
+        resources.tracker.publish(out);
+    }
+    if resources.tracker.first.is_some() {
+        publish(
+            out,
+            &json!({"protocol":1,"event":"failure_cleanup","outcome":if cleanup.is_ok() { "closed" } else { "failed" },"readers":resources.readers.diagnostic()}),
+        );
+        return false;
+    }
+    resources.tracker.begin(Phase::StoppedEmit);
+    publish(
+        out,
+        &json!({"protocol":1,"event":"stopped","id":result.unwrap(),"drained":true,"readers":resources.readers.facts()}),
+    )
 }
 #[tokio::test]
 #[ignore = "private C54 live producer; only the separately authorized browser harness may select it"]
@@ -818,12 +1033,7 @@ async fn child() {
     let result = AssertUnwindSafe(run(&mut input, &mut resources))
         .catch_unwind()
         .await;
-    let cleanup = AssertUnwindSafe(resources.close()).catch_unwind().await;
-    if let (Ok(id), Ok(())) = (result, cleanup) {
-        emit(json!({"event":"stopped","id":id,"drained":true,"readers":resources.readers.facts()}));
-    } else {
-        let _ = std::io::stdout()
-            .write_all(b"{\"protocol\":1,\"event\":\"failed\",\"category\":\"native_failure\"}\n");
+    if !finish(result, &mut resources, &mut std::io::stdout()).await {
         std::process::exit(1);
     }
 }

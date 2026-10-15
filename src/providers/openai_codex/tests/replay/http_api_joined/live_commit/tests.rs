@@ -51,10 +51,36 @@ fn update(text: &str) -> ProviderEvent {
 }
 
 #[test]
+fn actual_fixture_codec_and_lifecycle_accept_terminal_prefix() {
+    use crate::providers::openai_codex::{codec::ResponseDecoder, consistency::Lifecycle};
+    for (text, accepted) in [("final 雪🙂", false), (FINAL, true)] {
+        let mut decoder = ResponseDecoder::default();
+        let mut lifecycle = Lifecycle::default();
+        let mut final_item = item();
+        final_item["content"][0]["text"] = json!(text);
+        let mut frames = first_frames();
+        frames.push(delta(DELTA));
+        frames.push(json!({"type":"response.output_item.done","response_id":RESPONSE,"output_index":0,"item":final_item}));
+        frames.extend(terminal_frames(final_item));
+        let mut terminals = 0;
+        for frame in frames {
+            for event in decoder.apply(frame).unwrap() {
+                lifecycle.observe(&event).unwrap();
+                if let ProviderEvent::ResponseFinished { response } = event {
+                    terminals += 1;
+                    assert_eq!(lifecycle.validate(&response).is_ok(), accepted);
+                }
+            }
+        }
+        assert_eq!(terminals, 1);
+    }
+}
+
+#[test]
 fn scalar_fixture_lengths_and_protocol_admission() {
     assert_eq!(
         [FIRST.len(), DELTA.len(), APPEND.len(), FINAL.len()],
-        [7, 6, 13, 13]
+        [7, 6, 13, 19]
     );
     for bytes in [
         b"{\"command\":\"arm\",\"id\":2,\"extra\":1}\n".as_slice(),
@@ -561,6 +587,162 @@ async fn counters_read_actual_auth_and_registered_existing_tool_work() {
     assert_eq!(actual.tool_validations, 2);
     assert_eq!(actual.tool_executions, 1);
     assert_eq!(actual.completed, 0);
+}
+
+#[test]
+fn tracker_owns_closed_phase_origin_and_reader_facts_without_panic_payload() {
+    let phases = [
+        Phase::SetupControl,
+        Phase::Setup,
+        Phase::ReadyEmit,
+        Phase::ControlReceive,
+        Phase::ControlAdmission,
+        Phase::FirstWireReceive,
+        Phase::AcceptanceRead,
+        Phase::AcceptanceDecode,
+        Phase::TaskMatch,
+        Phase::ProviderRequestMatch,
+        Phase::FirstWireReply,
+        Phase::Settle,
+        Phase::Snapshot,
+        Phase::SavedValidation,
+        Phase::FirstEmit,
+        Phase::ObservedFirst,
+        Phase::Arm,
+        Phase::Second,
+        Phase::Page,
+        Phase::Authoritative,
+        Phase::Terminal,
+        Phase::ObservedTerminal,
+        Phase::Stop,
+        Phase::Cleanup,
+        Phase::StoppedEmit,
+    ];
+    for origin in [Origin::Run, Origin::Cleanup] {
+        for phase in phases {
+            let readers = Readers::default();
+            let mut tracker = Tracker::default();
+            tracker.complete();
+            tracker.begin(phase);
+            tracker.freeze(origin, &readers);
+            let first = tracker.first.clone().unwrap();
+            assert_eq!(first.phase, phase);
+            assert_eq!(first.origin, origin);
+            assert_eq!(first.last_completed, Some(Phase::SetupControl));
+            let bytes = serde_json::to_vec(&first).unwrap();
+            assert_eq!(serde_json::from_slice::<Failure>(&bytes).unwrap(), first);
+            tracker.begin(Phase::Cleanup);
+            tracker.freeze(Origin::Cleanup, &readers);
+            assert_eq!(tracker.first, Some(first));
+        }
+    }
+    let readers = Readers::default();
+    readers.closed.store(1, Ordering::SeqCst);
+    assert!(readers.diagnostic().is_none());
+    assert!(serde_json::from_str::<Phase>("\"unknown\"").is_err());
+    assert!(serde_json::from_str::<Origin>("\"unknown\"").is_err());
+}
+
+struct FailureWriter {
+    stop: CancellationToken,
+    bytes: Vec<u8>,
+    first_flushed_before_cleanup: bool,
+    fault: u8,
+}
+impl Write for FailureWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.fault == 1 {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        if self.fault == 2 {
+            panic!("unpublished writer payload");
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.stop.is_cancelled() {
+            self.first_flushed_before_cleanup = true;
+        }
+        if self.fault == 3 {
+            return Err(std::io::ErrorKind::BrokenPipe.into());
+        }
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn caught_run_failure_flushes_before_cleanup_and_publication_faults_do_not_prevent_close() {
+    for fault in 0..=3 {
+        let mut resources = Resources::default();
+        resources.tracker.begin(Phase::FirstWireReply);
+        let mut out = FailureWriter {
+            stop: resources.stop.clone(),
+            bytes: vec![],
+            first_flushed_before_cleanup: false,
+            fault,
+        };
+        let result = std::panic::catch_unwind(|| panic!("unpublished original payload"));
+        assert!(!finish(result, &mut resources, &mut out).await);
+        assert!(resources.stop.is_cancelled());
+        let first = resources.tracker.first.unwrap();
+        assert_eq!(first.origin, Origin::Run);
+        assert_eq!(first.phase, Phase::FirstWireReply);
+        if fault == 0 {
+            assert!(out.first_flushed_before_cleanup);
+            let frames: Vec<Value> = out
+                .bytes
+                .split(|b| *b == b'\n')
+                .filter(|b| !b.is_empty())
+                .map(|b| serde_json::from_slice(b).unwrap())
+                .collect();
+            assert_eq!(frames.len(), 2);
+            assert_eq!(frames[0]["event"], "failed");
+            assert_eq!(frames[1]["event"], "failure_cleanup");
+            assert_eq!(frames[1]["outcome"], "closed");
+            assert!(!String::from_utf8(out.bytes).unwrap().contains("payload"));
+        }
+    }
+}
+#[tokio::test]
+async fn cleanup_failure_is_separate_and_never_replaces_run_failure_or_unavailable_readers() {
+    for run_failed in [false, true] {
+        let mut resources = Resources::default();
+        resources.tracker.begin(Phase::AcceptanceDecode);
+        resources.readers.closed.store(1, Ordering::SeqCst);
+        let result = if run_failed {
+            Err(Box::new(()) as Box<dyn std::any::Any + Send>)
+        } else {
+            Ok(2)
+        };
+        let mut out = vec![];
+        assert!(!finish(result, &mut resources, &mut out).await);
+        let first = resources.tracker.first.unwrap();
+        assert_eq!(
+            first.origin,
+            if run_failed {
+                Origin::Run
+            } else {
+                Origin::Cleanup
+            }
+        );
+        assert_eq!(
+            first.phase,
+            if run_failed {
+                Phase::AcceptanceDecode
+            } else {
+                Phase::Cleanup
+            }
+        );
+        assert!(first.readers.is_none());
+        let frames: Vec<Value> = out
+            .split(|b| *b == b'\n')
+            .filter(|b| !b.is_empty())
+            .map(|b| serde_json::from_slice(b).unwrap())
+            .collect();
+        assert_eq!(frames[0]["readers"], Value::Null);
+        assert_eq!(frames[1]["outcome"], "failed");
+        assert_eq!(frames[1]["readers"], Value::Null);
+    }
 }
 
 #[tokio::test]

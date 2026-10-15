@@ -1,10 +1,28 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B54D1_M2_REVIEWED_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C3B54D3_READER_DIAGNOSTIC_REVIEWED_ALL40_PARTIAL**.
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
-## Current C54D1 M2: COMPLETED_SCOPED_REVIEWED, offline only
+## Current C54D3: COMPLETED_SCOPED_REVIEWED, offline only
+
+The six assigned fixture/Node paths add fixed connect/settle_chunks/settle_results/close/watchdog/action attribution, closed driver classes, nullable bounded SQLite codes and settle context, original-plus-secondary error ownership, and nested protocol/B diagnostic immutability. Reader lifetime, zero busy timeout,5ms poll,30s bounds, selected-snapshot closure, telemetry leaves, E2E spec, reader and production behavior are unchanged. No keeper is added.
+
+All22 final gates pass:18Rust controls, platform1,323nativeNode/249B/1419affected/5284unfiltered default Node,5syntax/typecheck/eightassets/staticprivacywhitespace and87tests32files no-body collection. Actual synthetic Rust frame passes Node/B consumers. NewD3targetartifact53498bf72a1c98ad349eb1187c70e041203623dc6c42a81bb65e7d4dda6a843e binds443currentinputs. Allthreepriorartifacts remain unchanged. V1/V2 D3artifact hashes remain historical superseded-source cutoffs; final22 bind V3. Source/report gates freeze the implementation cutoff, not later parent reporting bytes.
+
+Parent IMPLEMENTATION_AUDIT.json rehashes958purpose-boundreferences/freezes168implementationfiles/preserves788source/782nonassigned/8057sealed/441oldnonassignednativeinputs/Git/shared0755. Fourretainedroots/children remain entirelyunaccessed; facts inheritedcutoffonly. Initial schema/implicitmissingOption/callback/Clippy/staticchecker failures and redundant interop EEXIST remain disclosed. A successful original interop proof remains retained; the redundant failure is not promoted. Scoped tests and controlled busy/locked errors do not reproduce D2's exact historical cause. Counters cover returned connections, not every possible worker after failed acquisition.
+
+Report (local record); [C54](C3B_LIVE_COMMIT_MEASUREMENTS.md). Bothfreshcomplete scopedreviews PASS/no findings/0bodies. Parent REVIEW_AUDIT freezes7reviewfiles and preserves168implementation/788source/8057sealed. Standingcheckpoint followsfinalvalidation; actualreceipt (local record). Nextkeeper increment remains separatelyfinalized/offline. Runtime/markers0; D2causeUNVERIFIED/4FAILED8markers/measurementsnull/reader/C15-active1/deferrals/ledger/all40PARTIAL/acceptedfalse unchanged. No browser/privatechild/provider/HTTP/probe/hosted/Gittransition/push/acceptance.
+
+## Prior C54D2: FAILED/verification_failure
+
+D1M2reviewedofflinecheckpointb00144fe1c8a0e0a27917d10e0af424b76214512 completedlocally/nopush. Standingownercontinuation suppliedonedistinctunchangedsourcecase/newoutput/twomarkers; total4FAILED8markers. Actual145Chromium/native/context/page1, Latest200/SSE200headers/Task202finished1/settingscatalog1/9assets/forbiddenhelper0. First packetnative_failed_frame, originrun/phasesettle/lastcompletedcontrol_admission, terminalpending. First/firstDOM/arm/second/pages/appendDOM/authority/authorityDOMresolved are tracefacts, not retainedselectedleaves/telemetry/completeperformanceproof. Native/browsermeasurementsnull/unclaimed.
+
+Atfirstpacket collectorfailedfalse/failedRequestnull/nativeclosedfalse/code null; laterNodecallbackorder1native_failed_frame/2native_close/3browser_requestfailed, SSEkind/order28/HTTP200/responsepresent/notfinished/notclosing. No physical/crossclockcausalityclaim. Exactunderlyingassertion/SQL/provider/storage/timeout cause remainsUNVERIFIED; not retrospectiveBR2attribution. Nativefailurecleanupclosed/readers72balanced0active, but nativeexit1/signalnull/emptystderr/inputendStopdrainfalse/normalreadersnull/nofallback. Strictcleanup6PASS6FAIL; finalbrowserdiscoverypasses/errors0/initial5final6knownmembers;7knowncallbackidentities+runner independentlyabsent, notcompletetreeproof.
+
+New0700parent (local record), root `wi-live-commit-Eglyyq` retained. Onlydirectorymetadataafterfailure, no contents/token/SQL/adopt/remove/relaunch; older3roots entirelyunaccessed/cutofffacts. Parent FAILED_IMPLEMENTATION_AUDIT.json rehashes826references/freezes33files/preserves788source/8015sealed/443inputs/all3artifacts/Git/shared0755. D1/M2gates reuse revalidated,no bodies/Cargo/build/discovery/preprobe. Initialrecorder structuredbindingcomparison correctedbeforemarkers/0runtime, discardedrawlimits remain. Report (local record), [C54](C3B_LIVE_COMMIT_MEASUREMENTS.md). Nextoffline terminal-settle query/failure-boundary investigation; no automaticrepair/retry/reviews/checkpoint/commit/push. All40PARTIAL/acceptedfalse/reader/C15-active1/deferrals/ledger unchanged.
+
+## Prior C54D1 M2: COMPLETED_SCOPED_REVIEWED, offline only
 
 BothfreshcompleteA+B+D1+M1+M2reviews PASS/no findings/0bodies; F1/F2closed within offline scope. Fullreturned reports remaininsession, parent FINAL_REVIEWS.md summary. Readonly metadata projection/filename/ContextMode boundary/spooling diagnostics remain disclosed,not gate/runtimeproof. Standinglocalcheckpoint afterfinalparentvalidation; actualreceipt (local record), thenonedistinctdiagnosticcase underownerstandingcontinuation. No push/acceptance; offline source review doesnotprove BR2cause or producer/DOM/measurements.
 

@@ -87,11 +87,36 @@ function failureReaders(v) {
   keys(v, ['opened', 'closed', 'active']);
   if (![v.opened, v.closed, v.active].every(n => uint(n) && n <= 1000000) || v.closed > v.opened || v.active !== v.opened - v.closed) fail();
 }
+function readerIssueProof(v) {
+  keys(v, ['stage', 'driver', 'sqlite_primary', 'sqlite_extended', 'attempt', 'elapsed_ms']);
+  // Only data fields may cross the diagnostic boundary, never executable getters.
+  if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
+  if (!['connect', 'settle_chunks', 'settle_results', 'close', 'settle_watchdog', 'action'].includes(v.stage)
+    || !['sqlite_busy', 'sqlite_locked', 'sqlite_other', 'database', 'decode', 'io', 'protocol', 'pool', 'other', 'panic', 'watchdog'].includes(v.driver)) fail();
+  const sqlite = ['sqlite_busy', 'sqlite_locked', 'sqlite_other'].includes(v.driver);
+  if (v.sqlite_extended === null) { if (v.sqlite_primary !== null || ['sqlite_busy', 'sqlite_locked'].includes(v.driver)) fail(); }
+  else if (!sqlite || !positive(v.sqlite_extended) || v.sqlite_extended > 2147483647 || !positive(v.sqlite_primary)
+    || v.sqlite_primary !== (v.sqlite_extended & 255)) fail();
+  if (v.driver === 'sqlite_busy' && v.sqlite_primary !== 5 || v.driver === 'sqlite_locked' && v.sqlite_primary !== 6
+    || v.driver === 'sqlite_other' && [5, 6].includes(v.sqlite_primary)) fail();
+  if (v.stage === 'action' && v.driver !== 'panic' || v.driver === 'panic' && v.stage !== 'action'
+    || v.stage === 'settle_watchdog' && v.driver !== 'watchdog' || v.driver === 'watchdog' && v.stage !== 'settle_watchdog') fail();
+  if (v.attempt === null) { if (v.elapsed_ms !== null || v.stage.startsWith('settle_')) fail(); }
+  else if (!positive(v.attempt) || v.attempt > 1000000 || !uint(v.elapsed_ms) || v.elapsed_ms > 4294967295) fail();
+}
+function readerErrorProof(v) {
+  if (v === null) return;
+  keys(v, ['first', 'close']);
+  if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
+  readerIssueProof(v.first);
+  if (v.close !== null) { readerIssueProof(v.close); if (v.close.stage !== 'close' || v.first.stage === 'close') fail(); }
+}
 export function nativeFailureProof(v) {
-  keys(v, ['protocol', 'event', 'category', 'origin', 'phase', 'last_completed', 'readers']);
+  keys(v, ['protocol', 'event', 'category', 'origin', 'phase', 'last_completed', 'readers', 'reader_error']);
   if (v.protocol !== 1 || v.event !== 'failed' || v.category !== 'native_failure' || !['run', 'cleanup'].includes(v.origin)
     || !nativePhases.includes(v.phase) || v.last_completed !== null && !nativePhases.includes(v.last_completed)) fail();
-  failureReaders(v.readers); return true;
+  if (Object.keys(v).some(k => !Object.hasOwn(Object.getOwnPropertyDescriptor(v, k), 'value'))) fail();
+  failureReaders(v.readers); readerErrorProof(v.reader_error); return true;
 }
 export function nativeCleanupProof(v) {
   keys(v, ['protocol', 'event', 'outcome', 'readers']);
@@ -125,7 +150,7 @@ export function protocol() {
       if (!v || typeof v !== 'object') fail();
       if (v.event === 'failed') {
         if (nativeFailure || stopped) fail();
-        nativeFailureProof(v); nativeFailure = structuredClone(v); fail();
+        const owned = structuredClone(v); nativeFailureProof(owned); nativeFailure = owned; fail();
       }
       if (v.event === 'failure_cleanup') {
         if (!nativeFailure || nativeCleanup || stopped) fail();

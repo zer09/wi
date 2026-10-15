@@ -378,8 +378,70 @@ test('actual launcher failure schedules retain roots and never signal rejected c
 });
 
 const nativeFailure = (extra = {}) => ({ protocol: 1, event: 'failed', category: 'native_failure',
-  origin: 'run', phase: 'first_wire_reply', last_completed: 'provider_request_match', readers: clone(readers), ...extra });
+  origin: 'run', phase: 'first_wire_reply', last_completed: 'provider_request_match', readers: clone(readers), reader_error: null, ...extra });
 const nativeCleanup = () => ({ protocol: 1, event: 'failure_cleanup', outcome: 'closed', readers: clone(readers) });
+const readerIssue = (extra = {}) => ({ stage: 'settle_chunks', driver: 'sqlite_busy', sqlite_primary: 5, sqlite_extended: 261, attempt: 2, elapsed_ms: 7, ...extra });
+test('D3 closed reader schema owns nested facts and rejects invalid codes and availability', async t => {
+  for (const [code, driver] of [[5, 'sqlite_busy'], [6, 'sqlite_locked'], [261, 'sqlite_busy'], [517, 'sqlite_busy'], [1, 'sqlite_other'], [null, 'sqlite_other']]) await t.test(`code ${code}`, () => {
+    const issue = readerIssue({ driver, sqlite_primary: code === null ? null : code & 255, sqlite_extended: code });
+    const frame = nativeFailure({ reader_error: { first: issue, close: readerIssue({ stage: 'close', driver: 'io', sqlite_primary: null, sqlite_extended: null }) } });
+    assert.equal(nativeFailureProof(frame), true);
+    const p = protocol(); assert.throws(() => p.reply(frame)); issue.sqlite_extended = 999;
+    assert.notEqual(p.diagnostics().native_failure.reader_error.first.sqlite_extended, 999);
+    const copy = p.diagnostics(); copy.native_failure.reader_error.close.driver = 'other';
+    assert.equal(p.diagnostics().native_failure.reader_error.close.driver, 'io');
+  });
+  const invalid = [
+    { sqlite_extended: -1 }, { sqlite_extended: 0 }, { sqlite_extended: 2147483648 }, { sqlite_extended: 5.5 },
+    { sqlite_primary: 6 }, { sqlite_primary: null }, { sqlite_extended: null }, { driver: 'sqlite_locked' },
+    { driver: 'io' }, { stage: 'unknown' }, { driver: 'unknown' }, { attempt: 0 }, { attempt: 1000001 },
+    { attempt: null }, { elapsed_ms: null }, { elapsed_ms: -1 }, { elapsed_ms: 4294967296 }, { payload: 'unpublished' },
+  ];
+  for (const [n, extra] of invalid.entries()) await t.test(`invalid ${n}`, () => {
+    assert.throws(() => nativeFailureProof(nativeFailure({ reader_error: { first: readerIssue(extra), close: null } })));
+  });
+  const line = JSON.stringify(nativeFailure({ reader_error: { first: readerIssue(), close: null } }));
+  assert.throws(() => decode(line.replace('"sqlite_primary":5', '"sqlite_primary":5,"sqlite_primary":5') + '\n'));
+  const v = nativeFailure({ reader_error: { first: readerIssue(), close: null } });
+  Object.defineProperty(v.reader_error.first, 'driver', { get() { throw Error('unpublished'); } });
+  assert.throws(() => nativeFailureProof(v));
+});
+test('D3 actual launcher owns reader diagnostics through observer faults cleanup and returned evidence mutation', async t => {
+  for (const observerFault of [false, true]) await t.test(`observer ${observerFault}`, async () => {
+    const f = fake(), observed = [];
+    const native = await launchNative({ fixture, binding, onDiagnostic(event, facts) {
+      observed.push({ event, facts });
+      if (facts.native_failure?.reader_error) facts.native_failure.reader_error.first.sqlite_extended = 999;
+      if (observerFault) throw Error('unpublished observer');
+    } }, f.io);
+    const pending = native.request({ command: 'first' }).catch(error => error);
+    f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeFailure({ reader_error: { first: readerIssue(), close: readerIssue({ stage: 'close' }) } })) + '\n'));
+    const original = await pending;
+    const copy = native.evidence(); copy.native_failure.reader_error.first.driver = 'other';
+    f.child.stdout.emit('data', Buffer.from(JSON.stringify(nativeCleanup()) + '\n'));
+    await assert.rejects(native.stop(), error => error === original);
+    assert.equal(native.evidence().native_failure.reader_error.first.sqlite_extended, 261);
+    assert.equal(native.evidence().native_failure.reader_error.first.driver, 'sqlite_busy');
+    assert.equal(f.state.ends, 1); assert.equal(f.state.closed, true);
+    assert.ok(!JSON.stringify(native.evidence()).includes('unpublished'));
+  });
+});
+test('D3 Rust reader enums and exact null stage driver availability match Node', async () => {
+  const rust = await readFile(new URL('../../src/providers/openai_codex/tests/replay/http_api_joined/live_commit.rs', import.meta.url), 'utf8');
+  const variants = name => {
+    const start = rust.indexOf(`enum ${name} {`), body = rust.slice(start, rust.indexOf('\n}', start));
+    return [...body.matchAll(/^    ([A-Z][a-zA-Z]+),$/gm)].map(m => m[1].replace(/[A-Z]/g, (c, i) => (i ? '_' : '') + c.toLowerCase()));
+  };
+  assert.deepEqual(variants('ReaderStage'), ['connect', 'settle_chunks', 'settle_results', 'close', 'settle_watchdog', 'action']);
+  assert.deepEqual(variants('Driver'), ['sqlite_busy', 'sqlite_locked', 'sqlite_other', 'database', 'decode', 'io', 'protocol', 'pool', 'other', 'panic', 'watchdog']);
+  for (const stage of variants('ReaderStage')) {
+    const driver = stage === 'action' ? 'panic' : stage === 'settle_watchdog' ? 'watchdog' : 'decode';
+    const context = stage.startsWith('settle_');
+    const first = readerIssue({ stage, driver, sqlite_primary: null, sqlite_extended: null, attempt: context ? 1 : null, elapsed_ms: context ? 0 : null });
+    assert.equal(nativeFailureProof(nativeFailure({ reader_error: { first, close: null } })), true);
+    for (const key of Object.keys(first)) { const bad = clone(first); delete bad[key]; assert.throws(() => nativeFailureProof(nativeFailure({ reader_error: { first: bad, close: null } }))); }
+  }
+});
 test('D1 launcher freezes native failure before close and preserves separate later cleanup facts', async () => {
   const f = fake(), observed = [];
   const native = await launchNative({ fixture, binding, onDiagnostic: (event, facts) => observed.push({ event, facts }) }, f.io);

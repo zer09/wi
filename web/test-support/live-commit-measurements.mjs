@@ -395,11 +395,21 @@ export function diagnostics(read) {
     native(event, value) {
       if (!['node_failure', 'native_failed_frame', 'native_cleanup', 'native_close'].includes(event)) return;
       if (['native_failed_frame', 'native_close'].includes(event)) observed(event);
-      const failure = safe(() => { const v = value.native_failure; if (v === null) return null; nativeFailureProof(v); const owned = structuredClone(v); if (owned.readers) Object.freeze(owned.readers); return Object.freeze(owned); });
+      const failure = safe(() => {
+        const v = value.native_failure; if (v === null) return null;
+        const owned = structuredClone(v); nativeFailureProof(owned);
+        if (owned.readers) Object.freeze(owned.readers);
+        if (owned.reader_error) {
+          Object.freeze(owned.reader_error.first);
+          if (owned.reader_error.close) Object.freeze(owned.reader_error.close);
+          Object.freeze(owned.reader_error);
+        }
+        return Object.freeze(owned);
+      });
       const cleanup = safe(() => { const v = value.native_cleanup; if (v === null) return null; nativeCleanupProof(v); const owned = structuredClone(v); if (owned.readers) Object.freeze(owned.readers); return Object.freeze(owned); });
       const boundary = safe(() => value.first_boundary), code = safe(() => value.code);
       native = Object.freeze({ first_boundary: native?.first_boundary ?? (boundary === null || nodeBoundaries.includes(boundary) ? boundary : 'unavailable'),
-        failure: failure ?? native?.failure ?? null, cleanup: cleanup ?? native?.cleanup ?? null,
+        failure: native?.failure ?? failure ?? null, cleanup: cleanup ?? native?.cleanup ?? null,
         failure_availability: failure === undefined ? 'unavailable' : 'available', cleanup_availability: cleanup === undefined ? 'unavailable' : 'available',
         closed: bool(() => value.closed), code: code === null || integer(code) && code <= 255 ? code : 'unavailable' });
       if (event === 'native_failed_frame' || event === 'node_failure') freeze(event === 'native_failed_frame' ? event : 'native_node_failure');

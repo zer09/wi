@@ -16,6 +16,8 @@ import { expectedPage } from '../test-support/upgrade-display-parity.mjs';
 const sid = '54000000-0000-4000-8000-000000000001', rid = '54000000-0000-4000-8000-000000000002';
 const origin = 'http://127.0.0.1:54321', owner = 'synthetic-owner', clone = v => structuredClone(v);
 const readers = { opened: 2, closed: 2, active: 0 };
+const readerError = () => ({ first: { stage: 'settle_results', driver: 'sqlite_busy', sqlite_primary: 5, sqlite_extended: 517, attempt: 4, elapsed_ms: 19 },
+  close: { stage: 'close', driver: 'io', sqlite_primary: null, sqlite_extended: null, attempt: 4, elapsed_ms: 20 } });
 const work = stage => Object.fromEntries(workKeys.map(k => [k, stage > 0 && !['completed', 'tool_validations', 'tool_executions'].includes(k) || stage === 2 && k === 'completed' ? 1 : 0]));
 function saved(kind) {
   const terminal = kind === 'terminal', text = texts[['authority', 'terminal'].includes(kind) ? 'final' : kind];
@@ -265,7 +267,7 @@ async function specCase(t, options = {}) {
   let callback, cleanupResult, network, sse, task, disposing = false, cleaned = false, finalPreparing = false, releaseAsset, injected = false;
   let serverClosed = false, browserClosed = false, commandSerial = 1, notifyNative, diagnosticReads = 0;
   const nativeFailure = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'first_wire_reply',
-    last_completed: 'provider_request_match', readers: options.readerUnavailable ? null : clone(readers) };
+    last_completed: 'provider_request_match', readers: options.readerUnavailable ? null : clone(readers), reader_error: options.readerError ? readerError() : null };
   function nativeFailed() {
     Object.assign(facts, { failure: true, first_boundary: 'native_frame', native_failure: clone(nativeFailure) });
     notifyNative('native_failed_frame', clone(facts));
@@ -325,6 +327,7 @@ async function specCase(t, options = {}) {
     async stop() {
       raise('native-stop');
       if (options.nativeOrder) {
+        if (options.readerError) facts.native_failure.reader_error.first.sqlite_extended = 999;
         facts.native_cleanup = { protocol: 1, event: 'failure_cleanup', outcome: 'failed', readers: null };
         notifyNative('native_cleanup', clone(facts));
         Object.assign(facts, { closed: true, code: 1, retired: true }); notifyNative('native_close', clone(facts));
@@ -458,6 +461,46 @@ test('D1 native facts before assignment survive unavailable measurements getters
     if (options.nativeStartup) { assert.equal(c.artifacts.get('CLEANUP.json').availability.native, 'not_acquired'); assert.ok(!c.events.includes('server-acquired')); }
     assert.ok(!c.events.includes('rm'));
   });
+});
+test('D3 B first packet owns and deeply freezes reader facts through later callbacks', () => {
+  const d = diagnostics(() => ({ counts: {}, pending: 0, failed: false }));
+  const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: 'control_admission', readers: clone(readers), reader_error: readerError() };
+  const value = { first_boundary: 'native_frame', native_failure: frame, native_cleanup: null, closed: false, code: null };
+  d.native('native_failed_frame', value);
+  const packet = d.packet(), issue = packet.native.failure.reader_error;
+  assert.ok(Object.isFrozen(issue)); assert.ok(Object.isFrozen(issue.first)); assert.ok(Object.isFrozen(issue.close));
+  assert.throws(() => { issue.first.sqlite_extended = 999; });
+  frame.reader_error.first.sqlite_extended = 5;
+  d.native('native_close', { ...value, closed: true, code: 1 });
+  assert.equal(d.packet(), packet); assert.equal(d.facts().native.failure.reader_error.first.sqlite_extended, 517);
+  assert.equal(packet.native.failure.reader_error.first.sqlite_extended, 517);
+  assert.ok(!JSON.stringify(packet).includes('unpublished'));
+});
+test('D3 actual callback reader facts survive getters serialization publication and later close', async t => {
+  for (const options of [{}, { getter: 'native' }, { getter: 'diagnostics' }, ...['CLEANUP.json', 'MEASUREMENTS.json', 'ACCEPTANCE.json'].flatMap(name => [{ serialize: name }, { write: name }])]) await t.test(JSON.stringify(options), async t => {
+    const c = await specCase(t, { nativeOrder: 'native-first', readerError: true, ...options });
+    assert.equal(c.error, c.failure); assert.equal(c.cleanupResult.error, c.failure);
+    const before = c.artifacts.get('FAILURE_BEFORE_CLEANUP.json'), result = c.artifacts.get('BROWSER_RESULT.json');
+    assert.deepEqual(before.native.failure.reader_error, readerError()); assert.deepEqual(result.first_failure, before);
+    assert.equal(result.status, 'FAILED'); assert.ok(!c.events.includes('rm')); assert.ok(!c.events.includes('parent-rmdir'));
+    assert.ok(c.events.includes('native-stop')); assert.ok(c.events.includes('context-close')); assert.ok(c.events.includes('server-close'));
+    assert.ok(c.artifacts.has('ACCEPTANCE.json') || options.serialize === 'ACCEPTANCE.json' || options.write === 'ACCEPTANCE.json');
+    if (result.diagnostics) assert.deepEqual(result.diagnostics.native.failure.reader_error, readerError());
+    assert.ok(Object.isFrozen(c.firstPacket.native.failure.reader_error.first));
+  });
+});
+test('D3 B malformed nested reader facts remain unavailable without inventing reader errors', () => {
+  for (const defect of ['code', 'unknown', 'getter', 'missing', 'extra']) {
+    const frame = { protocol: 1, event: 'failed', category: 'native_failure', origin: 'run', phase: 'settle', last_completed: null, readers: null, reader_error: readerError() };
+    if (defect === 'code') frame.reader_error.first.sqlite_primary = 6;
+    if (defect === 'unknown') frame.reader_error.first.driver = 'unpublished';
+    if (defect === 'getter') Object.defineProperty(frame.reader_error, 'first', { get() { throw Error('unpublished'); } });
+    if (defect === 'missing') delete frame.reader_error.first.attempt;
+    if (defect === 'extra') frame.reader_error.first.payload = 'unpublished';
+    const d = diagnostics(() => ({})); d.native('native_failed_frame', { native_failure: frame, native_cleanup: null });
+    assert.equal(d.packet().native.failure, null); assert.equal(d.packet().native.failure_availability, 'unavailable');
+    assert.ok(!JSON.stringify(d.packet()).includes('unpublished'));
+  }
 });
 test('D1 actual failed Request callback uses only tracked identity and tolerates rejected status getters', async t => {
   for (const kind of ['latest', 'task', 'asset', 'untracked', 'status-unavailable', 'finished', 'closing']) await t.test(kind, async () => {

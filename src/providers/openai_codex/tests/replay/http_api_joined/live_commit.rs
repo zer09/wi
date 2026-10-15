@@ -64,8 +64,12 @@ struct ReaderFacts {
 struct Failure {
     origin: Origin,
     phase: Phase,
+    #[serde(deserialize_with = "reader_optional")]
     last_completed: Option<Phase>,
+    #[serde(deserialize_with = "reader_optional")]
     readers: Option<ReaderFacts>,
+    #[serde(deserialize_with = "reader_optional")]
+    reader_error: Option<ReaderError>,
 }
 #[derive(Default)]
 struct Tracker {
@@ -87,6 +91,7 @@ impl Tracker {
                 phase: self.phase,
                 last_completed: self.last_completed,
                 readers: readers.diagnostic(),
+                reader_error: readers.first.lock().unwrap().clone(),
             });
         }
     }
@@ -476,12 +481,221 @@ fn db_path(root: &Path, sid: &ApplicationSessionId) -> PathBuf {
         .join(sid.as_str())
         .join("session.sqlite3")
 }
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ReaderStage {
+    Connect,
+    SettleChunks,
+    SettleResults,
+    Close,
+    SettleWatchdog,
+    Action,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum Driver {
+    SqliteBusy,
+    SqliteLocked,
+    SqliteOther,
+    Database,
+    Decode,
+    Io,
+    Protocol,
+    Pool,
+    Other,
+    Panic,
+    Watchdog,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, try_from = "ReaderIssueFields")]
+struct ReaderIssue {
+    stage: ReaderStage,
+    driver: Driver,
+    sqlite_primary: Option<u32>,
+    sqlite_extended: Option<u32>,
+    attempt: Option<u32>,
+    elapsed_ms: Option<u32>,
+}
+fn reader_optional<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReaderIssueFields {
+    stage: ReaderStage,
+    driver: Driver,
+    #[serde(deserialize_with = "reader_optional")]
+    sqlite_primary: Option<u32>,
+    #[serde(deserialize_with = "reader_optional")]
+    sqlite_extended: Option<u32>,
+    #[serde(deserialize_with = "reader_optional")]
+    attempt: Option<u32>,
+    #[serde(deserialize_with = "reader_optional")]
+    elapsed_ms: Option<u32>,
+}
+impl TryFrom<ReaderIssueFields> for ReaderIssue {
+    type Error = &'static str;
+    fn try_from(v: ReaderIssueFields) -> std::result::Result<Self, Self::Error> {
+        let issue = Self {
+            stage: v.stage,
+            driver: v.driver,
+            sqlite_primary: v.sqlite_primary,
+            sqlite_extended: v.sqlite_extended,
+            attempt: v.attempt,
+            elapsed_ms: v.elapsed_ms,
+        };
+        let sqlite = matches!(
+            issue.driver,
+            Driver::SqliteBusy | Driver::SqliteLocked | Driver::SqliteOther
+        );
+        let codes = match (issue.sqlite_primary, issue.sqlite_extended) {
+            (None, None) => !matches!(issue.driver, Driver::SqliteBusy | Driver::SqliteLocked),
+            (Some(primary), Some(extended)) => {
+                sqlite
+                    && extended > 0
+                    && extended <= i32::MAX as u32
+                    && primary > 0
+                    && primary == extended & 255
+                    && match issue.driver {
+                        Driver::SqliteBusy => primary == 5,
+                        Driver::SqliteLocked => primary == 6,
+                        _ => primary != 5 && primary != 6,
+                    }
+            }
+            _ => false,
+        };
+        let context = match (issue.attempt, issue.elapsed_ms) {
+            (None, None) => !matches!(
+                issue.stage,
+                ReaderStage::SettleChunks
+                    | ReaderStage::SettleResults
+                    | ReaderStage::SettleWatchdog
+            ),
+            (Some(attempt), Some(_)) => (1..=1_000_000).contains(&attempt),
+            _ => false,
+        };
+        if codes
+            && context
+            && (issue.stage == ReaderStage::Action) == (issue.driver == Driver::Panic)
+            && (issue.stage == ReaderStage::SettleWatchdog) == (issue.driver == Driver::Watchdog)
+        {
+            Ok(issue)
+        } else {
+            Err("reader diagnostic rejected")
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, try_from = "ReaderErrorFields")]
+struct ReaderError {
+    first: ReaderIssue,
+    close: Option<ReaderIssue>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReaderErrorFields {
+    first: ReaderIssue,
+    #[serde(deserialize_with = "reader_optional")]
+    close: Option<ReaderIssue>,
+}
+impl TryFrom<ReaderErrorFields> for ReaderError {
+    type Error = &'static str;
+    fn try_from(v: ReaderErrorFields) -> std::result::Result<Self, Self::Error> {
+        if v.close
+            .as_ref()
+            .is_some_and(|c| c.stage != ReaderStage::Close || v.first.stage == ReaderStage::Close)
+        {
+            return Err("reader diagnostic rejected");
+        }
+        Ok(Self {
+            first: v.first,
+            close: v.close,
+        })
+    }
+}
+// Only this fixture-owned payload contains recoverable facts. All other panics stay opaque.
+struct ReaderPanic(ReaderIssue);
+fn sqlite_codes(code: Option<&str>) -> (Option<u32>, Option<u32>) {
+    let extended = code
+        .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|n| *n > 0 && *n <= i32::MAX as u32 && n & 255 != 0);
+    (extended.map(|n| n & 255), extended)
+}
 #[derive(Default)]
 struct Readers {
     opened: AtomicUsize,
     closed: AtomicUsize,
+    first: std::sync::Mutex<Option<ReaderError>>,
+    settle: std::sync::Mutex<Option<(u32, tokio::time::Instant)>>,
+    // Offline controls inject a returned close error only after the real connection closes.
+    close_error: std::sync::Mutex<Option<sqlx::Error>>,
 }
 impl Readers {
+    fn issue(&self, stage: ReaderStage, driver: Driver) -> ReaderIssue {
+        let context = *self.settle.lock().unwrap();
+        ReaderIssue {
+            stage,
+            driver,
+            sqlite_primary: None,
+            sqlite_extended: None,
+            attempt: context.map(|(attempt, _)| attempt),
+            elapsed_ms: context
+                .map(|(_, started)| started.elapsed().as_millis().min(u32::MAX as u128) as u32),
+        }
+    }
+    fn sql_error(&self, stage: ReaderStage, error: &sqlx::Error) -> ReaderIssue {
+        let driver = match error {
+            sqlx::Error::Database(_) => Driver::Database,
+            sqlx::Error::Decode(_) | sqlx::Error::ColumnDecode { .. } => Driver::Decode,
+            sqlx::Error::Io(_) | sqlx::Error::Tls(_) => Driver::Io,
+            sqlx::Error::Protocol(_) => Driver::Protocol,
+            sqlx::Error::PoolClosed | sqlx::Error::PoolTimedOut | sqlx::Error::WorkerCrashed => {
+                Driver::Pool
+            }
+            _ => Driver::Other,
+        };
+        let mut issue = self.issue(stage, driver);
+        if let sqlx::Error::Database(db) = error
+            && db.try_downcast_ref::<sqlx::sqlite::SqliteError>().is_some()
+        {
+            (issue.sqlite_primary, issue.sqlite_extended) = sqlite_codes(db.code().as_deref());
+            issue.driver = match issue.sqlite_primary {
+                Some(5) => Driver::SqliteBusy,
+                Some(6) => Driver::SqliteLocked,
+                _ => Driver::SqliteOther,
+            };
+        }
+        issue
+    }
+    fn freeze(&self, issue: ReaderIssue) {
+        let mut first = self.first.lock().unwrap();
+        if first.is_none() {
+            *first = Some(ReaderError {
+                first: issue,
+                close: None,
+            });
+        }
+    }
+    fn checked<T>(&self, result: std::result::Result<T, sqlx::Error>, stage: ReaderStage) -> T {
+        match result {
+            Ok(value) => value,
+            Err(error) => {
+                std::panic::resume_unwind(Box::new(ReaderPanic(self.sql_error(stage, &error))))
+            }
+        }
+    }
+    fn watchdog(&self, started: tokio::time::Instant) {
+        if started.elapsed() >= Duration::from_secs(30) {
+            let issue = self.issue(ReaderStage::SettleWatchdog, Driver::Watchdog);
+            self.freeze(issue.clone());
+            std::panic::resume_unwind(Box::new(ReaderPanic(issue)));
+        }
+    }
     fn diagnostic(&self) -> Option<ReaderFacts> {
         let opened = self.opened.load(Ordering::SeqCst);
         let closed = self.closed.load(Ordering::SeqCst);
@@ -501,21 +715,65 @@ async fn read_owned<T>(
     root: &Path,
     sid: &ApplicationSessionId,
     readers: &Readers,
-    action: impl for<'a> FnOnce(&'a mut SqliteConnection) -> futures_util::future::BoxFuture<'a, T>,
+    action: impl for<'a> FnOnce(
+        &'a mut SqliteConnection,
+        &'a Readers,
+    ) -> futures_util::future::BoxFuture<'a, T>,
 ) -> T {
-    let mut sql = SqliteConnectOptions::new()
+    let sql = SqliteConnectOptions::new()
         .filename(db_path(root, sid))
         .read_only(true)
         .busy_timeout(Duration::ZERO)
         .disable_statement_logging()
         .connect()
-        .await
-        .unwrap();
+        .await;
+    let mut sql = match sql {
+        Ok(sql) => sql,
+        Err(error) => {
+            let issue = readers.sql_error(ReaderStage::Connect, &error);
+            readers.freeze(issue.clone());
+            std::panic::resume_unwind(Box::new(ReaderPanic(issue)));
+        }
+    };
     readers.opened.fetch_add(1, Ordering::SeqCst);
-    let result = AssertUnwindSafe(action(&mut sql)).catch_unwind().await;
-    sql.close().await.unwrap();
+    // Catch invocation as well as polling so an immediate action panic still closes.
+    let result = AssertUnwindSafe(async { action(&mut sql, readers).await })
+        .catch_unwind()
+        .await;
+    if let Err(payload) = &result {
+        let issue = payload
+            .downcast_ref::<ReaderPanic>()
+            .map(|v| v.0.clone())
+            .unwrap_or_else(|| readers.issue(ReaderStage::Action, Driver::Panic));
+        readers.freeze(issue);
+    }
+    let close = sql.close().await;
+    let close = close.and_then(|()| {
+        readers
+            .close_error
+            .lock()
+            .unwrap()
+            .take()
+            .map_or(Ok(()), Err)
+    });
+    if let Err(error) = close {
+        let issue = readers.sql_error(ReaderStage::Close, &error);
+        readers.freeze(issue.clone());
+        {
+            let mut first = readers.first.lock().unwrap();
+            let first = first.as_mut().unwrap();
+            if first.first.stage != ReaderStage::Close && first.close.is_none() {
+                first.close = Some(issue.clone());
+            }
+        }
+        // A later close error must not replace the original action failure.
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
+        std::panic::resume_unwind(Box::new(ReaderPanic(issue)));
+    }
     readers.closed.fetch_add(1, Ordering::SeqCst);
-    result.unwrap_or_else(|_| panic!("live reader rejected"))
+    result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }
 // Every snapshot owns a short independent reader. Even a failed assertion closes it before unwinding.
 async fn snapshot(
@@ -528,7 +786,7 @@ async fn snapshot(
     let saved_sid = sid.clone();
     let expected = expected.to_owned();
     let operation = operation.cloned();
-    read_owned(root, sid, readers, move |sql| Box::pin(async move {
+    read_owned(root, sid, readers, move |sql, _| Box::pin(async move {
         let sid = saved_sid;
         let mut tx = sql.begin().await.unwrap();
         let version: i64 = sqlx::query_scalar("PRAGMA user_version").fetch_one(&mut *tx).await.unwrap(); assert_eq!(version, 3);
@@ -562,6 +820,16 @@ async fn snapshot(
         tx.commit().await.unwrap(); saved
     })).await
 }
+async fn settle_queries(sql: &mut SqliteConnection, readers: &Readers) -> (Vec<Vec<u8>>, i64) {
+    let rows = readers.checked(sqlx::query_scalar("SELECT c.bytes FROM conversation_chunks c JOIN conversation_entries e USING(run_id,entry_id) WHERE e.kind='assistant' ORDER BY c.start_byte").fetch_all(&mut *sql).await, ReaderStage::SettleChunks);
+    let results = readers.checked(
+        sqlx::query_scalar("SELECT count(*) FROM runs WHERE result_sequence IS NOT NULL")
+            .fetch_one(&mut *sql)
+            .await,
+        ReaderStage::SettleResults,
+    );
+    (rows, results)
+}
 async fn settled(
     root: &Path,
     sid: &ApplicationSessionId,
@@ -573,21 +841,21 @@ async fn settled(
     tracker.begin(Phase::Settle);
     // Poll only a tiny scalar until the writer has finished. No session mutex is acquired.
     let started = tokio::time::Instant::now();
+    let mut attempt = 0u32;
     loop {
-        let (rows, results) = read_owned(root, sid, readers, |sql| Box::pin(async move {
-                let rows: Vec<Vec<u8>> = sqlx::query_scalar("SELECT c.bytes FROM conversation_chunks c JOIN conversation_entries e USING(run_id,entry_id) WHERE e.kind='assistant' ORDER BY c.start_byte").fetch_all(&mut *sql).await.unwrap();
-                let results: i64 = sqlx::query_scalar("SELECT count(*) FROM runs WHERE result_sequence IS NOT NULL").fetch_one(&mut *sql).await.unwrap();
-                (rows, results)
-            })).await;
+        attempt = attempt.saturating_add(1).min(1_000_000);
+        *readers.settle.lock().unwrap() = Some((attempt, started));
+        let (rows, results) = read_owned(root, sid, readers, |sql, readers| {
+            Box::pin(settle_queries(sql, readers))
+        })
+        .await;
         if rows.concat() == expected.as_bytes() && (!terminal || results == 1) {
             break;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "live state watchdog"
-        );
+        readers.watchdog(started);
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    *readers.settle.lock().unwrap() = None;
     tracker.complete();
     tracker.begin(Phase::Snapshot);
     let saved = snapshot(root, sid, expected, None, readers).await;
@@ -799,7 +1067,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                     counts.connections.fetch_add(1, Ordering::SeqCst);
                 }
                 resources.tracker.begin(Phase::AcceptanceRead);
-                let input: String = read_owned(&start.root, &sid, &resources.readers, |sql| {
+                let input: String = read_owned(&start.root, &sid, &resources.readers, |sql, _| {
                     Box::pin(async move {
                         sqlx::query_scalar(
                             "SELECT payload_json FROM events WHERE event_type='run.accepted'",
@@ -949,7 +1217,7 @@ async fn run(input: &mut tokio::io::BufReader<tokio::io::Stdin>, resources: &mut
                 assert!(final_state.valid("terminal"));
                 assert_eq!(prior.generation, final_state.generation);
                 assert_eq!(prior.content_epoch, final_state.content_epoch);
-                let (payload, tools): (String, i64) = read_owned(&start.root, &sid, &resources.readers, |sql| Box::pin(async move {
+                let (payload, tools): (String, i64) = read_owned(&start.root, &sid, &resources.readers, |sql, _| Box::pin(async move {
                     let payload = sqlx::query_scalar("SELECT payload_json FROM events WHERE event_type='run.result.recorded'").fetch_one(&mut *sql).await.unwrap();
                     let tools = sqlx::query_scalar("SELECT count(*) FROM tool_results").fetch_one(&mut *sql).await.unwrap();
                     (payload, tools)

@@ -536,7 +536,7 @@ async fn independent_reader_closes_after_sql_failure_and_assertion_before_cleanu
         .clone();
     let readers = Readers::default();
     for sql_failure in [true, false] {
-        let result = AssertUnwindSafe(read_owned(temp.path(), &sid, &readers, move |sql| {
+        let result = AssertUnwindSafe(read_owned(temp.path(), &sid, &readers, move |sql, _| {
             Box::pin(async move {
                 if sql_failure {
                     sqlx::query("SELECT missing_column FROM manifest")
@@ -762,4 +762,363 @@ async fn partial_resources_close_store_and_release_pause_without_removing_parent
     assert!(temp.path().join("private-data").is_dir());
     resources.close().await;
     temp.close().unwrap();
+}
+
+async fn reader_database(root: &Path, sid: &ApplicationSessionId) -> SqliteConnection {
+    let path = db_path(root, sid);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .disable_statement_logging()
+        .connect()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn reader_connect_and_both_real_settle_query_boundaries_close_before_unwind() {
+    for boundary in [
+        ReaderStage::Connect,
+        ReaderStage::SettleChunks,
+        ReaderStage::SettleResults,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let sid = ApplicationSessionId::new();
+        if boundary != ReaderStage::Connect {
+            let mut sql = reader_database(temp.path(), &sid).await;
+            if boundary == ReaderStage::SettleResults {
+                sqlx::raw_sql("CREATE TABLE conversation_entries(run_id TEXT,entry_id TEXT,kind TEXT); CREATE TABLE conversation_chunks(run_id TEXT,entry_id TEXT,start_byte INTEGER,bytes BLOB);")
+                    .execute(&mut sql).await.unwrap();
+            }
+            sql.close().await.unwrap();
+        }
+        let readers = Readers::default();
+        *readers.settle.lock().unwrap() = Some((1, tokio::time::Instant::now()));
+        let result = AssertUnwindSafe(read_owned(temp.path(), &sid, &readers, |sql, readers| {
+            Box::pin(settle_queries(sql, readers))
+        }))
+        .catch_unwind()
+        .await;
+        assert!(result.is_err());
+        let first = readers.first.lock().unwrap().clone().unwrap();
+        assert_eq!(first.first.stage, boundary);
+        assert_eq!(first.first.driver, Driver::SqliteOther);
+        assert_eq!(
+            first.first.sqlite_primary,
+            Some(if boundary == ReaderStage::Connect {
+                14
+            } else {
+                1
+            })
+        );
+        assert_eq!(first.first.attempt, Some(1));
+        assert!(first.first.elapsed_ms.is_some());
+        assert!(first.close.is_none());
+        assert_eq!(readers.facts()["active"], 0);
+        assert_eq!(
+            readers.facts()["opened"],
+            usize::from(boundary != ReaderStage::Connect)
+        );
+        // These counters describe returned connections, not failed-acquisition worker retirement.
+        temp.close().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn reader_real_decode_has_no_database_code_and_first_survives_close_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let sid = ApplicationSessionId::new();
+    let mut sql = reader_database(temp.path(), &sid).await;
+    sqlx::raw_sql("CREATE TABLE conversation_entries(run_id TEXT,entry_id TEXT,kind TEXT); CREATE TABLE conversation_chunks(run_id TEXT,entry_id TEXT,start_byte INTEGER,bytes INTEGER); INSERT INTO conversation_entries VALUES('r','e','assistant'); INSERT INTO conversation_chunks VALUES('r','e',0,42);")
+        .execute(&mut sql).await.unwrap();
+    sql.close().await.unwrap();
+    let mut resources = Resources::default();
+    resources.tracker.begin(Phase::Settle);
+    *resources.readers.settle.lock().unwrap() = Some((3, tokio::time::Instant::now()));
+    *resources.readers.close_error.lock().unwrap() =
+        Some(sqlx::Error::Io(std::io::ErrorKind::BrokenPipe.into()));
+    let result = AssertUnwindSafe(read_owned(
+        temp.path(),
+        &sid,
+        &resources.readers,
+        |sql, readers| Box::pin(settle_queries(sql, readers)),
+    ))
+    .catch_unwind()
+    .await;
+    let payload = result.unwrap_err();
+    let original = &payload.downcast_ref::<ReaderPanic>().unwrap().0;
+    assert_eq!(original.stage, ReaderStage::SettleChunks);
+    assert_eq!(original.driver, Driver::Decode);
+    assert_eq!(original.sqlite_primary, None);
+    assert_eq!(original.sqlite_extended, None);
+    assert_eq!(resources.readers.facts()["active"], 1);
+    let mut out = vec![];
+    assert!(!finish(Err(payload), &mut resources, &mut out).await);
+    let frames: Vec<Value> = out
+        .split(|b| *b == b'\n')
+        .filter(|b| !b.is_empty())
+        .map(|b| serde_json::from_slice(b).unwrap())
+        .collect();
+    let first = &frames[0]["reader_error"];
+    assert_eq!(first["first"]["driver"], "decode");
+    assert_eq!(first["close"]["driver"], "io");
+    assert_eq!(frames[0]["phase"], "settle");
+    assert_eq!(frames[1]["outcome"], "failed");
+    assert_eq!(frames[1]["readers"]["active"], 1);
+    assert!(!String::from_utf8(out).unwrap().contains("42"));
+    temp.close().unwrap();
+}
+
+#[tokio::test]
+async fn reader_unknown_sync_and_async_panics_are_opaque_and_close_remains_fatal() {
+    let temp = tempfile::tempdir().unwrap();
+    let sid = ApplicationSessionId::new();
+    reader_database(temp.path(), &sid)
+        .await
+        .close()
+        .await
+        .unwrap();
+    for mode in 0..4 {
+        let readers = Readers::default();
+        if mode >= 2 {
+            *readers.close_error.lock().unwrap() =
+                Some(sqlx::Error::Protocol("unpublished close".into()));
+        }
+        let result = AssertUnwindSafe(read_owned(temp.path(), &sid, &readers, move |_, _| {
+            if mode == 0 {
+                panic!("unpublished immediate action");
+            }
+            Box::pin(async move {
+                if mode != 2 {
+                    panic!("unpublished action payload");
+                }
+            })
+        }))
+        .catch_unwind()
+        .await;
+        assert!(result.is_err());
+        let first = readers.first.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            first.first.stage,
+            if mode == 2 {
+                ReaderStage::Close
+            } else {
+                ReaderStage::Action
+            }
+        );
+        assert_eq!(
+            first.first.driver,
+            if mode == 2 {
+                Driver::Protocol
+            } else {
+                Driver::Panic
+            }
+        );
+        assert_eq!(first.close.is_some(), mode == 3);
+        assert_eq!(readers.facts()["active"], usize::from(mode >= 2));
+        assert!(first.first.attempt.is_none());
+        let bytes = serde_json::to_vec(&first).unwrap();
+        assert!(!String::from_utf8(bytes).unwrap().contains("unpublished"));
+    }
+    temp.close().unwrap();
+}
+
+#[tokio::test]
+async fn reader_controlled_exclusive_and_shared_cache_locks_classify_busy_and_locked() {
+    let temp = tempfile::tempdir().unwrap();
+    for shared in [false, true] {
+        let options = SqliteConnectOptions::new()
+            .filename(temp.path().join(if shared {
+                "shared.sqlite3"
+            } else {
+                "busy.sqlite3"
+            }))
+            .create_if_missing(true)
+            .shared_cache(shared)
+            .busy_timeout(Duration::ZERO)
+            .disable_statement_logging();
+        let mut writer = options.connect().await.unwrap();
+        sqlx::raw_sql("CREATE TABLE conversation_entries(run_id TEXT,entry_id TEXT,kind TEXT); CREATE TABLE conversation_chunks(run_id TEXT,entry_id TEXT,start_byte INTEGER,bytes BLOB); CREATE TABLE runs(result_sequence INTEGER);")
+            .execute(&mut writer).await.unwrap();
+        let mut reader = options.read_only(true).connect().await.unwrap();
+        sqlx::raw_sql("BEGIN EXCLUSIVE; INSERT INTO conversation_chunks VALUES('r','e',0,X'01');")
+            .execute(&mut writer)
+            .await
+            .unwrap();
+        let readers = Readers::default();
+        *readers.settle.lock().unwrap() = Some((1, tokio::time::Instant::now()));
+        let result = AssertUnwindSafe(settle_queries(&mut reader, &readers))
+            .catch_unwind()
+            .await;
+        let payload = result.unwrap_err();
+        let issue = &payload.downcast_ref::<ReaderPanic>().unwrap().0;
+        assert_eq!(issue.stage, ReaderStage::SettleChunks);
+        assert_eq!(
+            issue.driver,
+            if shared {
+                Driver::SqliteLocked
+            } else {
+                Driver::SqliteBusy
+            }
+        );
+        assert_eq!(issue.sqlite_primary, Some(if shared { 6 } else { 5 }));
+        assert_eq!(issue.sqlite_primary, issue.sqlite_extended.map(|n| n & 255));
+        reader.close().await.unwrap();
+        sqlx::query("ROLLBACK").execute(&mut writer).await.unwrap();
+        writer.close().await.unwrap();
+    }
+    // Controlled locks classify the driver; they do not reproduce the historical WAL race.
+    temp.close().unwrap();
+}
+
+#[test]
+fn reader_numeric_codes_null_availability_and_strict_serialization() {
+    for (code, expected) in [
+        (Some("5"), Some(5)),
+        (Some("6"), Some(6)),
+        (Some("261"), Some(261)),
+        (Some("517"), Some(517)),
+        (Some("1"), Some(1)),
+        (None, None),
+        (Some(""), None),
+        (Some("unknown"), None),
+        (Some("-1"), None),
+        (Some("0"), None),
+        (Some("256"), None),
+        (Some("2147483648"), None),
+    ] {
+        let (primary, extended) = sqlite_codes(code);
+        assert_eq!(extended, expected);
+        assert_eq!(primary, expected.map(|n| n & 255));
+        let driver = match primary {
+            Some(5) => Driver::SqliteBusy,
+            Some(6) => Driver::SqliteLocked,
+            _ => Driver::SqliteOther,
+        };
+        let mut issue = Readers::default().issue(ReaderStage::Connect, driver);
+        issue.sqlite_primary = primary;
+        issue.sqlite_extended = extended;
+        let value = serde_json::to_value(&issue).unwrap();
+        for key in [
+            "stage",
+            "driver",
+            "sqlite_primary",
+            "sqlite_extended",
+            "attempt",
+            "elapsed_ms",
+        ] {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<ReaderIssue>(missing).is_err());
+        }
+        assert_eq!(
+            serde_json::from_value::<ReaderIssue>(value.clone()).unwrap(),
+            issue
+        );
+        for (key, invalid) in [
+            ("sqlite_primary", json!(999)),
+            ("sqlite_extended", json!(2147483648u64)),
+            ("attempt", json!(0)),
+            ("stage", json!("unknown")),
+            ("driver", json!("unknown")),
+            ("payload", json!("unpublished")),
+        ] {
+            let mut changed = value.clone();
+            changed[key] = invalid;
+            assert!(serde_json::from_value::<ReaderIssue>(changed).is_err());
+        }
+        let line = serde_json::to_string(&issue)
+            .unwrap()
+            .replace("\"stage\":", "\"stage\":\"connect\",\"stage\":");
+        assert!(serde_json::from_str::<ReaderIssue>(&line).is_err());
+    }
+    for error in [
+        sqlx::Error::Decode("unpublished".into()),
+        sqlx::Error::Io(std::io::ErrorKind::Other.into()),
+        sqlx::Error::Protocol("unpublished".into()),
+        sqlx::Error::PoolClosed,
+        sqlx::Error::RowNotFound,
+    ] {
+        let issue = Readers::default().sql_error(ReaderStage::Connect, &error);
+        assert!(issue.sqlite_primary.is_none() && issue.sqlite_extended.is_none());
+        assert!(
+            !serde_json::to_string(&issue)
+                .unwrap()
+                .contains("unpublished")
+        );
+    }
+}
+
+#[tokio::test]
+async fn reader_failure_frames_are_safe_and_publication_faults_preserve_first_and_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let sid = ApplicationSessionId::new();
+    reader_database(temp.path(), &sid)
+        .await
+        .close()
+        .await
+        .unwrap();
+    for fault in 0..=3 {
+        let mut resources = Resources::default();
+        resources.tracker.begin(Phase::Settle);
+        *resources.readers.settle.lock().unwrap() = Some((2, tokio::time::Instant::now()));
+        *resources.readers.close_error.lock().unwrap() =
+            Some(sqlx::Error::Io(std::io::ErrorKind::BrokenPipe.into()));
+        let result = AssertUnwindSafe(read_owned(
+            temp.path(),
+            &sid,
+            &resources.readers,
+            |sql, readers| Box::pin(settle_queries(sql, readers)),
+        ))
+        .catch_unwind()
+        .await
+        .map(|_| 2);
+        let mut out = FailureWriter {
+            stop: resources.stop.clone(),
+            bytes: vec![],
+            first_flushed_before_cleanup: false,
+            fault,
+        };
+        assert!(!finish(result, &mut resources, &mut out).await);
+        assert!(resources.stop.is_cancelled());
+        let first = resources.tracker.first.as_ref().unwrap();
+        assert_eq!(first.phase, Phase::Settle);
+        assert_eq!(first.origin, Origin::Run);
+        let reader = first.reader_error.as_ref().unwrap();
+        assert_eq!(reader.first.stage, ReaderStage::SettleChunks);
+        assert_eq!(reader.close.as_ref().unwrap().stage, ReaderStage::Close);
+        if fault == 0 {
+            assert!(out.first_flushed_before_cleanup);
+            let frames: Vec<Value> = out
+                .bytes
+                .split(|b| *b == b'\n')
+                .filter(|b| !b.is_empty())
+                .map(|b| serde_json::from_slice(b).unwrap())
+                .collect();
+            assert_eq!(frames.len(), 2);
+            assert_eq!(frames[1]["outcome"], "failed");
+            assert_eq!(frames[0]["reader_error"]["first"]["sqlite_primary"], 1);
+            // This closed synthetic frame feeds the offline Rust-to-Node/B compatibility check.
+            assert!(publish(&mut std::io::stdout(), &frames[0]));
+        }
+        assert!(!String::from_utf8(out.bytes).unwrap().contains("sqlite3"));
+    }
+    temp.close().unwrap();
+}
+
+#[test]
+fn reader_watchdog_uses_real_elapsed_without_sleep_and_first_is_immutable() {
+    let readers = Readers::default();
+    let started = tokio::time::Instant::now() - Duration::from_secs(31);
+    *readers.settle.lock().unwrap() = Some((8, started));
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| readers.watchdog(started)));
+    assert!(result.is_err());
+    let first = readers.first.lock().unwrap().clone().unwrap();
+    assert_eq!(first.first.stage, ReaderStage::SettleWatchdog);
+    assert_eq!(first.first.driver, Driver::Watchdog);
+    assert_eq!(first.first.attempt, Some(8));
+    assert!(first.first.elapsed_ms.unwrap() >= 31000);
+    readers.freeze(readers.issue(ReaderStage::Action, Driver::Panic));
+    assert_eq!(*readers.first.lock().unwrap(), Some(first));
 }

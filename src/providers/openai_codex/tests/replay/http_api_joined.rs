@@ -23,6 +23,8 @@ mod failures;
 mod fidelity;
 #[path = "http_api_joined/identity.rs"]
 mod identity;
+#[path = "http_api_joined/live_commit.rs"]
+mod live_commit;
 #[path = "http_api_joined/ownership.rs"]
 mod ownership;
 

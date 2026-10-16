@@ -4,6 +4,26 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C61R2: catalog pagination and scalar request diagnostics, reviewed
+
+**One fresh C61R2 case and both complete-C61/R1/R2 scoped reviews PASS. All40PARTIAL; accepted=false; global inventory OPEN.** [Detailed results](C3B_CATALOG_PAGINATION.md) and JSON `c61_catalog_pagination_increment` supply this later cutoff. Root headers, historical blocks and94 prior test objects remain unchanged. Four selected exact bindings extend the inventory to98 records, not98 new tests or unique proofs.
+
+The actual embedded-app browser clicked Load more sessions and Refresh list: exact32->33->32 ordered ID/title/metadata/as-of observations, retained first32 identities after both actions and equal initial/Refresh DOM digests. Tail paginator is hidden; initial/Refresh are visible and enabled. The parent disabled-tail requirement was an oracle error, not a product requirement. Production and the reader remain unchanged.
+
+The saved6.6s Chromium145 case at HEADd6d7c84 with then-uncommitted three-file source records settings1/catalog3/all4GET,4matched/4finished calls,9byte-equal assets and all8faults0/request-failuretotal0. No extra automatic read, command, helper HTTP or API-body capture occurred. Native provider/auth/tool counters are null/unavailable. Five cleanup steps pass with normal native Stop/reap/exit0/empty stderr/no fallback/sandbox removal. Input-end/drain are source-bound; known runner/native retirement is not complete descendants. Runner stderr346bytes contains two color warnings, separate from native stderr.
+
+This is B/C with synthetic loopback API destinations on the real embedded app/native fetch/layout. Separately reused C60 actual H catalog keyset evidence and444-input/executable binding are not new Rust catalog SQL/J execution. The specific C59 NOT_LOCATED browser action now has finite evidence; complete G11-31 adequacy and current-head final gates remain open.
+
+R2 records first8 immutable scalar failures/uncapped total, closed route/error classes, event-time facts/active observe context and shared Node sequence/per-call terminal witnesses. Request failures still fail. First packets freeze before writing; final packets use later snapshots. Actual listener/classifier/observe/packet regressions pass. Node order is not physical causality.
+
+Current-source93focused/510affected/5623default-full Node,3syntax/typecheck/8asset/static and89in34registration-only gates pass. Counts overlap. CURRENT_SOURCE_INDEX binds ten final records; FINAL_GATES has nine ordinary gates and static is separate. Parent's initial index comparator and named-report writer parse errors are preserved/corrected metadata-only diagnostics, not proof replay.
+
+Original C61 stays FAILED at More with exact predicate UNVERIFIED. R1 stays FAILED at connect/initial/faults/request1, with failed-request identity/cause UNVERIFIED. The intermittent fault was not reproduced in R2; its cause remains UNVERIFIED. Do not infer that hidden-tail correction explains the original runtime predicate or that one PASS resolves intermittency. Three C61-family invocations/two FAILED/one PASS/six distinct marker paths and all initial failures remain preserved.
+
+Selected bindings: C61-B1 is the actual browser case; C61-C1 the actual controller exact-cursor/tail-no-op/Refresh test; C61-C2 the actual listener cap/total/immutable-snapshot control; C61-H1 the reused current-input C60 native H result. Exact names/commands/log lines/observers are in (local record). `REPORT.md` there includes expanded gate argv and the complete runtime packet. The implementation report is (local record).
+
+Parent IMPLEMENTATION_AUDIT binds800runtime-source/797nonassigned/696prior sealed/150R2artifacts/444native inputs. REVIEW_AUDIT freezes3files from both fresh PASS/no-finding/0body reviews. They reviewed the complete C61/R1/R2 source/evidence, not this later publication or the master diff. Parent publication checks and the authorized local checkpoint follow. Both C55 handoffs stay staged outside the checkpoint. C15/active1/reader/SSE/no-store/access/pins/deadlines/waiver/ledger unchanged. No push/acceptance; final assertion/full-browser/auxiliary/platform/hosted gates and three complete-master reviews remain open.
+
 ## C60: scoped native SSE read retirement, reviewed
 
 **The native test-control increment and both fresh scoped source/evidence reviews passed. All40PARTIAL; accepted=false; global inventory OPEN.** [C60 detailed results](C3B_SSE_READ_RETIREMENT.md) and JSON `c60_read_retirement_increment` record the later cutoff. Historical headers, C58/C59/prior records and85 existing test objects remain unchanged. Nine exact new control entries are appended, for94 inventory records, not94 new executions or unique proofs.

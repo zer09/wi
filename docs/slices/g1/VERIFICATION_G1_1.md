@@ -4,6 +4,54 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C58: first bounded named-assertion index, G11-31
+
+**Documentation/evidence research only at `6c99c9185c6b85566652a05d65d9967dc51bf1c1`. No new product execution or independent review.** The JSON `c58_assertion_index` is the machine counterpart. Global `test_inventory_status` remains OPEN. All40 matrix rows remain PARTIAL and accepted=false. The root status/tested_revision and historical sections below retain their earlier cutoffs; the new block does not reinterpret old next-action prose as current authority.
+
+C58 appends five exact named recorded-test entries to the existing80 test objects. The resulting85 records are not85 new executions or unique proofs. Eight distinct G11-31 obligations are indexed below. Other39 rows and complete current-head gate closure are outside this bounded publication.
+
+| Assertion ID | Obligation | Named references | Evidence retained and remaining limit |
+| --- | --- | --- | --- |
+| G11-31-A01 | ID-keyset ordering/pagination | C58-N2 | Recorded H: five created sessions, limit2 pages and exact sorted IDs/as-of metadata. Browser pagination/current-helper execution binding remains to reconcile, not an assumed new-test requirement. |
+| G11-31-A02 | Truthful as-of observation/explicit refresh | C58-N2, C58-B1 | Recorded H canonical-only rename and updated/unchanged refresh; scoped B/H populated catalog stays unchanged until explicit Refresh list. Final accumulated gate closure remains. |
+| G11-31-A03 | Selected metadata without old-message reordering | C58-B1 | Scoped B/H head16→17 at held gate3 preserves complete active block/entries/fields/native work and normalized run DOM. No particular SSE-frame consumption is inferred. |
+| G11-31-A04 | ID order, not a false global recency sort | C58-N2, C58-B1 | Recorded sorted keysets and same two browser IDs across renamed refresh. This is finite fixture coverage, not a universal UI certification. |
+| G11-31-A05 | Empty selected session has no invented messages | Existing `.tests[46]`; source candidate below | Source assertion and historical record only in this lookup. Complete execution/current-input binding was not revalidated in C58. No new B/H execution is claimed. |
+| G11-31-A06 | Empty catalog is an honest empty observation | Source candidate below | Source asserts zero buttons and the empty-observation label. A complete named saved execution binding remains to reconcile; this is not a demonstrated missing implementation. |
+| G11-31-A07 | Saved history when the recorded workspace path is absent | C58-B1; C58-N1 is separate support | B/H fresh-context exact completed head21 after one owned same-parent move, with no new observer command/work. N1 covers retired-allowlist manifest/raw history, not the same absent-path typed-display observation. |
+| G11-31-A08 | Rename while execution is active | C58-B1, C58-N3, C58-N4 | B/H real UI Rename at populated held gate3. H pending-provider and S concurrent-handle tests are separately attributed, not browser submissions. Final row/gate closure remains. |
+
+### Exact named tests, commands and observers
+
+| Reference | Exact test name and current assertion path | Level / recorded execution observer |
+| --- | --- | --- |
+| C58-N1 | `create_is_durable_idempotent_and_retired_workspace_remains_readable`; `src/http_api/router/tests/metadata_tests.rs:5-105` | H; C49 reader implementation's recorded native command, stdout line247. |
+| C58-N2 | `catalog_keyset_is_as_of_and_rename_refresh_preserve_exact_titles`; `src/http_api/router/tests/metadata_tests.rs:144-241` | H; same native command, stdout line245. |
+| C58-N3 | `cancellation_is_addressed_signal_only_and_rename_works_while_pending`; `src/http_api/router/tests/observation_tests.rs:343-482` | H; same native command, stdout line251. Tasks are submitted through the library, not browser UI. |
+| C58-N4 | `rename_during_active_projection_and_concurrent_handles_is_allowed`; `tests/storage/session_schema.rs:252-293` | S; same native command, stdout line1310. This is real storage, not B or J. |
+| C58-B1 | `saved populated history survives absent recorded workspace after Rename during active execution`; `web/e2e/saved-history-active-rename.spec.mjs:55-285` | B+H; C57R2 implementation's sole fresh Chromium case at9f1687c. Later scoped reviews inspect source/evidence and run no case. |
+
+The native command was exactly `cargo test --locked --offline --all-targets -- --test-threads=4`, recorded at `318b7f0da7d503e2e3a8cf33be84e78ebbe8affb`. Its bound pre/post/stdout/stderr are under (local record); the reused inventory is (local record). Post code0/null signal/no start failure and all four named PASS lines match their saved hashes. The three current assertion-source files match the recorded source rows. This is recorded execution with matching assertion source, not a re-run, complete dependency binding, whole current-head gate or default-concurrency SSE repair.
+
+**The native observer role itself remains FAILED/verification_failure on its separate C49 browser case.** Its (local record) preserves that boundary. Individual native PASS lines do not promote the role.
+
+C58-B1's exact intended CLI argv is retained in the JSON command record and the manifest-bound `RUNNER_READY.json` under (local record). Its actual OS argv is the separately bound owned runner, which imports the unchanged Playwright CLI after admission. Workers1/retries0, source9f1687c and the scalar case-result SHA256 `678624f8518b71842d0cb62f4db41f009ee3a75a7c271a1ea71424b7e950ece2` are retained. The complete bounded result and limits are in [C57 active Rename/saved history](C3B_SAVED_HISTORY_ACTIVE_RENAME.md).
+
+The two source-only candidates remain distinct from bound execution:
+
+- `active empty session and invalid hash never invent messages or mutate; catalog navigation opens display Latest`, `web/e2e/display-app.spec.mjs:214-222`, uses synthetic loopback DTOs. The original machine test object at zero-based `.tests[46]` remains unchanged; C58 does not revalidate its whole historical execution/input binding.
+- `B/C nine catalog replacement reconnect and removal cycles do not accumulate owned registrations`, `web/e2e/display-view.spec.mjs:363-390`, uses a synthetic renderer/controller harness. Current source asserts zero catalog buttons and `No sessions in this catalog observation.` This lookup does not supply a complete current saved execution binding.
+
+### Preserved cutoffs and remaining closure
+
+C57's first case remains FAILED with two consumed markers and exact predicate UNOBSERVED. C57R1's verified cursor-oracle repair and both offline reviews passed at local source checkpoint9f1687c; its83/476/5530 counts are earlier source-bound evidence, not new C58 execution. C57R2's one distinct case passed, followed by two completed scoped source/evidence reviews and publication checkpoint6c99c91. The first review-b route remains `routes_unavailable/provider_failed`; only its owner-directed fresh replacement completed PASS. Total C57 runtime attempts remain two, one FAILED and one PASS, with four distinct marker paths.
+
+Current closure receipts are (local record) and `CHECKPOINT_RESULT.json`. The old blocked `REVIEW_AUDIT.json` remains unchanged. These are not final complete-master reviews or G1 acceptance.
+
+C58's exact bindings and finite baseline are (local record) and `SOURCE_BASELINE.json`. Publication checks belong at `VALIDATION.json` in that directory. Parent researched and published the index; no implementation, remediation or review delegate ran. No tests, builds, syntax/typecheck/assets/collection, browser/native/HTTP/provider/auth, measurement or old proof writer ran.
+
+Empty-state/browser-pagination binding reconciliation, other39 named-assertion groups, full applicable native/browser gates, final complete-diff reviews, exact-head hosted CI and owner acceptance remain open. Do not infer a new browser case merely from an unbound candidate. C15/active1/default-concurrency SSE qualifications, original failures, reader/SSE/no-store/access boundaries, pins/deadlines, exact release-to-DOM WAIVED_BY_OWNER and ledger31/50 used19remaining remain unchanged.
+
 ## Current C54D5: COMPLETED_SCOPED_REVIEWED; browser release timing unavailable
 
 Onefreshunchangedsourcecase at528966025c721aa24ee764132e214c911000952f passed allfrozencorrectness/nativeleaf/physicalcleanup assertions. Twofreshmarkers consumed,total5cases(4FAILED1PASS)/10markers. Latest200/SSE200headers/Task2021/settingscatalog1/static9/forbiddenhelper0; originalAPI/SSEbodies unread. Exactsameidentity states heads9/10/11/15,generations9/9/11/11,epoch7,bytes7/13/19/19; terminalresult/eventscomplete andallDOMphases pass.

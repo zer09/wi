@@ -118,7 +118,8 @@ impl SessionHandle {
         after: crate::conversation::LiveCursor,
     ) -> std::result::Result<crate::conversation::ConversationChanges, ConversationError> {
         let id = self.id.clone();
-        self.inner
+        let operation = self
+            .inner
             .clone()
             .operation(false, move |inner| async move {
                 #[cfg(test)]
@@ -139,8 +140,10 @@ impl SessionHandle {
                     value => Ok(value),
                 };
                 database::finish_read(connection, &inner.lifecycle, result).await
-            })
-            .await?
+            });
+        #[cfg(test)]
+        let operation = test_hooks::read_retirement::classify(&self.inner.hooks, operation);
+        operation.await?
     }
 
     pub async fn conversation_entry(

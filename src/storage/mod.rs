@@ -142,12 +142,16 @@ impl StoreInner {
             }
         })?;
         #[cfg(test)]
+        let read_ticket = test_hooks::read_retirement::admit(&self.hooks);
+        #[cfg(test)]
         drop(_admission_time);
         #[cfg(test)]
         let _spawn_time = timing
             .as_ref()
             .and_then(|c| c.span(test_hooks::latency::Stage::SpawnWait));
         tokio::spawn(async move {
+            #[cfg(test)]
+            let read_ticket = read_ticket;
             #[cfg(test)]
             let _operation_time = _operation_time;
             #[cfg(test)]
@@ -161,7 +165,11 @@ impl StoreInner {
             drop(_maintenance_time);
             let action = action(self.clone());
             #[cfg(test)]
-            let action = self.hooks.scope(action);
+            let action = test_hooks::read_retirement::worker(
+                &self.hooks,
+                read_ticket.as_ref().map(|ticket| ticket.id()),
+                self.hooks.scope(action),
+            );
             #[cfg(test)]
             let result = if let Some(timing) = timing {
                 timing.scope(action).await
@@ -171,6 +179,13 @@ impl StoreInner {
             #[cfg(not(test))]
             let result = action.await;
             guard.finish();
+            #[cfg(test)]
+            {
+                drop(_maintenance);
+                if let Some(ticket) = read_ticket {
+                    ticket.finish();
+                }
+            }
             result
         })
         .await

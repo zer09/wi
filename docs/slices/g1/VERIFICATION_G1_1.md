@@ -4,6 +4,22 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C60: scoped native SSE read retirement, reviewed
+
+**The native test-control increment and both fresh scoped source/evidence reviews passed. All40PARTIAL; accepted=false; global inventory OPEN.** [C60 detailed results](C3B_SSE_READ_RETIREMENT.md) and JSON `c60_read_retirement_increment` record the later cutoff. Historical headers, C58/C59/prior records and85 existing test objects remain unchanged. Nine exact new control entries are appended, for94 inventory records, not94 new executions or unique proofs.
+
+Test-only tracking now registers conversation reads after actual admission and before worker spawn. A finite watermark waits for owned-worker retirement, not observer disappearance or global idle. Actual selected Open-failure receipts identify the consuming worker/store separately from retirement. Normal bookkeeping does not independently certify SQLx close health; quarantine/final storage close remain authoritative. The combined HTTP case and both error_after_partial siblings retain existing strict error/privacy/no-ID/EOF/no-cancel/completion/shutdown/drain and heartbeat assertions.
+
+Recorded at HEAD910d846 with the then-uncommitted six-file source snapshot:9 new controls,9 storage lifecycle tests and3 focused H cases pass. Exactly one complete router group passes104 with ordinary default concurrency. The completed unfiltered all-target gate passes1252/0failed/12 existing ignored/0filtered across23 harnesses. Fmt, all-target check, warning-denied Clippy, all-target build, doctest and platform gates pass;0 doctests is not a named-control pass. Counts overlap. RUST_TEST_THREADS is absent and there is no --test-threads override.
+
+Two earlier all-target attempts remain INCOMPLETE with unknown terminal/count/complete-descendant facts. Immediate line flushing and then an independently running recorder preserved the completed final gate. Their native command/source/default concurrency/assertions/deadlines did not change. Initial7PASS/2FAIL fixture controls, discarded-panic limits, implementation diagnostics and parent795-source-plus6-assigned inventory comparator correction remain disclosed. Historical103/1 failures retain their failed cutoff; neither their exact failing phase nor recipient is retrospectively diagnosed.
+
+Implementation (local record), `FINAL_AUDIT.json` and `MANIFEST.json` bind14 final gates. Parent `IMPLEMENTATION_AUDIT.json`, `NAMED_TEST_BINDINGS.json` and `REVIEW_AUDIT.json` under (local record) independently bind exact diff,796 runtime-source paths,790 implementation-nonassigned paths,294 prior sealed records,127 implementation files and8 review files. The new untracked module is covered by the source/assigned union. Review-a and review-b both PASS/no findings with0 bodies. They cover native source/integration, not this later parent publication or the complete master diff.
+
+The old a59 executable is preserved;444 current native input paths are separately recorded. No browser case, ignored one-shot body, attempt marker, real credential/private skill/auth/live generation or ledger use occurred. Final40 known sampled identities are not complete descendants/all-host proof; interrupted attempts have narrower limits. Application reader/SSE/no-store/access, C15/active1, pins/deadlines and release-to-DOM WAIVED_BY_OWNER remain unchanged.
+
+Parent documentation checks and the owner-authorized local checkpoint follow these completed scoped gates. Both C55 handoffs stay staged outside the checkpoint. Other39 assertion groups, browser-pagination adequacy, auxiliary/examples/browser gates, three final complete-diff reviews, explicit-push exact-head CI and owner acceptance remain open. Continued work is owner-authorized; no push or status promotion follows automatically.
+
 ## C59: bounded saved-evidence reconciliation, G11-31
 
 **Parent-owned documentation/evidence research at `785706ee93d870af61ed02fbf8b350251f9506aa`. No new product execution or independent review.** The JSON `c59_evidence_reconciliation` supplies this later cutoff. All85 existing test objects, C58/prior records and root headers remain unchanged. Global inventory stays OPEN; all40 rows remain PARTIAL and accepted=false.

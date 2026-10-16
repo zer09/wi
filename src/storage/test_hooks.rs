@@ -13,6 +13,7 @@ use std::{
 use tokio::sync::Notify;
 
 pub(crate) mod latency;
+pub(crate) mod read_retirement;
 
 tokio::task_local! {
     static ACTIVE: Arc<Hooks>;
@@ -157,9 +158,14 @@ pub(crate) struct Hooks(
     Mutex<Option<(Option<Record>, Point, Action)>>,
     Mutex<Measurements>,
     std::sync::OnceLock<Arc<latency::Collector>>,
+    read_retirement::Store,
 );
 
 impl Hooks {
+    pub(crate) fn track_reads(&self) -> Arc<read_retirement::Tracker> {
+        self.3.enable()
+    }
+
     pub(crate) fn enable_latency(&self) -> Arc<latency::Collector> {
         self.2.get_or_init(latency::Collector::new).clone()
     }
@@ -268,7 +274,11 @@ pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
                         record.as_ref().is_some_and(|(kind, _)| *kind == selected)
                     })
             }) {
-                armed.take().map(|(_, _, action)| action)
+                let action = armed.take().map(|(_, _, action)| action);
+                if point == Point::Open && matches!(action, Some(Action::Fail(_))) {
+                    read_retirement::consumed_open_failure(hooks);
+                }
+                action
             } else {
                 None
             }

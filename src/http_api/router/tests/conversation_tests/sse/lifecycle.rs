@@ -226,13 +226,32 @@ async fn b2_first_noncomment_exhausted_bound_and_eof_fail_without_scanning_later
     );
 }
 
+async fn error_read_retired(
+    tracker: &crate::storage::test_hooks::read_retirement::Tracker,
+    prefix: &crate::storage::test_hooks::read_retirement::ReadId,
+) {
+    let crate::storage::test_hooks::read_retirement::OpenFailure::Tracked(recipient) =
+        tracker.open_failure()
+    else {
+        panic!("Open failure must be consumed by a tracked read")
+    };
+    assert!(recipient.newer_than(prefix));
+    watchdog(tracker.wait_through(&recipient)).await.unwrap();
+}
+
 #[tokio::test]
 async fn b2_owned_partial_commit_reader_drop_error_and_shutdown_never_cancel_host() {
+    println!("C60 phase: setup");
     let (server, control) = scripted().await;
     let session = server.session().await;
+    let tracker = session.test_hooks().track_reads();
+    println!("C60 phase: submit");
     let run = submit(&server, &session, &control).await;
+    println!("C60 phase: latest");
     let (_, after) = latest(&server, &session).await;
+    println!("C60 phase: first_reader");
     let mut first = Reader::new(server.get(&path(&session, &after))).await;
+    println!("C60 phase: second_reader");
     let mut second = Reader::new(server.get(&path(&session, &after))).await;
     let pause = Arc::new(Pause::default());
     session.test_hooks().arm_record(
@@ -241,6 +260,7 @@ async fn b2_owned_partial_commit_reader_drop_error_and_shutdown_never_cancel_hos
         Action::Pause(pause.clone()),
     );
     control.partial.notify_one();
+    println!("C60 phase: precommit");
     watchdog(pause.reached.notified()).await;
     // A separate WAL connection observes only the old committed projection while the writer is paused.
     let mut sql = sql(&server, &session).await;
@@ -256,21 +276,31 @@ async fn b2_owned_partial_commit_reader_drop_error_and_shutdown_never_cancel_hos
             .is_err()
     );
     pause.release.notify_one();
+    println!("C60 phase: committed_partial");
     watchdog(control.waiting.notified()).await;
     let batch = session.conversation_changes(after.clone()).await.unwrap();
+    println!("C60 phase: first_exact");
     let value = first.exact(&batch).await;
     assert!(value.to_string().contains("partial"));
+    println!("C60 phase: second_exact");
     second.exact(&batch).await;
     assert_eq!(control.closes.load(Ordering::SeqCst), 0);
     drop(first);
+    println!("C60 phase: first_observer_retired");
     active(&server, 1).await;
+    let prefix = tracker.watermark();
+    println!("C60 phase: admitted_prefix_retired");
+    watchdog(tracker.wait_through(&prefix)).await.unwrap();
     session
         .test_hooks()
         .arm(Point::Open, Action::Fail(StorageErrorKind::Io));
+    println!("C60 phase: error_frame");
     let frame = first_noncomment(futures_util::stream::unfold(&mut second, |reader| async {
         reader.frame().await.map(|frame| (frame, reader))
     }))
     .await;
+    println!("C60 phase: error_read_retired");
+    error_read_retired(&tracker, &prefix).await;
     assert!(frame.starts_with("event: wi.error\ndata: "));
     assert!(!frame.contains("id:"));
     let error: Value = serde_json::from_str(
@@ -286,8 +316,10 @@ async fn b2_owned_partial_commit_reader_drop_error_and_shutdown_never_cancel_hos
     assert!(!frame.contains("private") && !frame.contains(TOKEN));
     assert!(second.frame().await.is_none());
     drop(second);
+    println!("C60 phase: second_observer_retired");
     active(&server, 0).await;
     assert_eq!(control.closes.load(Ordering::SeqCst), 0);
+    println!("C60 phase: shutdown_reader");
     let mut last = Reader::new(server.get(&path(&session, batch.next_after()))).await;
     server.stop.cancel();
     if let Some(frame) = last.frame().await {
@@ -300,7 +332,9 @@ async fn b2_owned_partial_commit_reader_drop_error_and_shutdown_never_cancel_hos
     drop(last);
     assert_eq!(control.closes.load(Ordering::SeqCst), 0);
     control.finish.notify_one();
+    println!("C60 phase: completed");
     completed(&session, run).await;
+    println!("C60 phase: shutdown_drain");
     server.finish().await;
 }
 
@@ -318,6 +352,7 @@ async fn error_after_partial(queued_heartbeat: bool) {
     use futures_util::StreamExt;
     let (server, control) = scripted().await;
     let session = server.session().await;
+    let tracker = session.test_hooks().track_reads();
     let run = submit(&server, &session, &control).await;
     control.partial.notify_one();
     watchdog(control.waiting.notified()).await;
@@ -362,6 +397,8 @@ async fn error_after_partial(queued_heartbeat: bool) {
         assert_eq!(&second.pending[..end], b": keep-alive\n\n");
         println!("RB-B2-01 retained actual TCP heartbeat before fault arming");
     }
+    let prefix = tracker.watermark();
+    watchdog(tracker.wait_through(&prefix)).await.unwrap();
     session
         .test_hooks()
         .arm(Point::Open, Action::Fail(StorageErrorKind::Io));
@@ -382,7 +419,8 @@ async fn error_after_partial(queued_heartbeat: bool) {
     } else {
         assert_eq!(comments, 0);
     }
-    println!("RB-B2-01 first noncomment={frame:?}; comments={comments}");
+    error_read_retired(&tracker, &prefix).await;
+    println!("RB-B2-01 first noncomment and retirement observed");
     assert!(frame.starts_with("event: wi.error\ndata: "));
     assert!(!frame.contains("id:"));
     let error: Value = serde_json::from_str(

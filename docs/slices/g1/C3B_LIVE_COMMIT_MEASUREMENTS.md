@@ -1,6 +1,12 @@
 # C54: bounded live-change and canonical-to-commit measurements
 
-Current C54D5: **FROZEN CASE PASS / SCOPED_REVIEWED**, with native intervals and browser arm-to-DOM observations only. The requested release-anchored browser interval remains unavailable, not passed or waived.
+Current C54D5: **FROZEN CASE PASS / SCOPED_REVIEWED**, with unchanged native intervals and browser arm-to-DOM upper bounds. **Exact release-to-DOM: WAIVED_BY_OWNER, not measured.**
+
+## Owner waiver after checkpoint cddb7044
+
+The owner waived the remaining exact release-to-DOM metric. Do not add an acknowledgement path or another clock boundary. Do not run a new case for this metric. The waiver does not turn an estimate into a measurement or accept G1.1. All 40 rows remain PARTIAL and accepted=false.
+
+This decision supersedes the pre-waiver timing disposition in the unchanged `VERIFICATION_G1_1.md`, `verification-g1.1.json` and frozen D5 review evidence. Those files retain their recorded cutoff; only this document, MATRIX.md and AGENTS.md change for the waiver.
 
 ## D5: repaired-source live case and bounded measurements
 
@@ -22,7 +28,23 @@ Selectedcollectoroperation26/kind1/delta2 validatesordered20/21/21/21/22 leaves,
 
 Collectorwindow84009us. ProjectionReceipt is notprojector-onlySQL/CPU orwholeTaskcost. Othernested/pendingoperationintervals are preservedseparately andnotaddedtoinferselectedcompletedtime.
 
-Browserperformance.now observationsarecumulativefromARM: append211.70000000298023ms, authority543.8000000044703ms, terminal1166.2000000029802ms. Fourcallbackevents/pending0/appendabsentatarm, exactidentity/range/bytes/state reservedbeforedigest. The interval begins BEFOREselectedwrite/hold/release, soincludescontrol/deliberatehold/storage-lock/poll/transport/parser/store/render/observation. No browser-clocktimestamp exists atnative release. **Exactrelease-to-DOM remainsUNMEASURED.** Do notlabel211.7ms post-release-only orpuretransport. Thiscorrectsmeasurementdescription, nottheoutstandingrequirement; casePASSdoesnotwaiveit. No clocksubtraction/calibration/combination, SLA/ordinarylatency/variance/CPU/perframe/SSEpayload/scaling/memory/disk/SQLtrace/macOS/hosted claims.
+The existing browser `performance.now` observations are cumulative from arm. The rounded values are upper bounds on elapsed time from the selected native pause release to each target's first qualifying DOM callback:
+
+| Target | Browser arm-to-DOM upper bound (ms) |
+| --- | ---: |
+| Append | 211.7 |
+| Authority | 543.8 |
+| Terminal | 1166.2 |
+
+Browser arm precedes native arm and the selected second append (`web/e2e/live-commit-measurements.spec.mjs:146-148`). Native release follows the independent snapshot (`src/providers/openai_codex/tests/replay/http_api_joined/live_commit.rs:1447-1462`). Each target callback follows that release. This causal ordering supports the upper bounds without subtracting browser and Rust clocks. Authority and terminal are later, sequential targets measured from the same browser arm, not independent phase latencies.
+
+The values include the deliberate hold, storage lock, poll, transport, parse and render time, plus control, store publication and observation overhead. The retained full-precision observations are 211.70000000298023 / 543.8000000044703 / 1166.2000000029802 ms. Four callback events/pending0/appendabsentatarm and exact identity/range/bytes/state reservation before digest remain unchanged. There is no browser-clock release timestamp. **Exact release-to-DOM is WAIVED_BY_OWNER, not measured.** These bounds are not isolated post-release measurements or pure transport latency.
+
+### Code-derived polling bound, not a new measurement
+
+The conversation SSE stream uses `POLL_INTERVAL = 250 ms` (`src/http_api/router/conversation/events.rs:18`). When there is no backlog, it waits for that timer before the next change query (`events.rs:90-113`). A release can therefore wait 0-250 ms in the polling phase before the server sees the change, plus query, encode, transport, parse and render time. Lock acquisition, task scheduling and stream backpressure can add delay. The 250 ms interval is a design-level polling bound, not a universal end-to-end SLA or an executed release-to-DOM measurement.
+
+No clock subtraction, calibration, acknowledgement path, new clock boundary or new case is added. Native insert, ProjectionReceipt, commit and start-through-end timings above are unchanged. No new ordinary-latency, variance, CPU, per-frame SSE payload, scaling, memory, disk, SQL-trace, macOS or hosted claim follows.
 
 All12actualcleanupstepsPASS. Nativeinputend/normalStop/host-storage-drain/exit0/signalnull/emptynativestderr/nofailure/nofallback; short66opened66closed0active,keeperinitialized/errornull1opened1closed0active,total67/67/0. Atcapture shortactive0/keeperactive1/totalactive1, physicalshortclose-before-release retainsindependence. Keeperclosesafterserver/storagequiescence. Finalbrowserdiscovery/errors0 andknown6browser+native independentlyabsent; directnpmrunneralsoabsent. Thisisfiniteknownidentityretirement, notcompletetree/allhost/allSQLxworkerproof. Newowned0700parentwi-c54-private-GxADnh/nestedwi-live-commit-SpHfCf bothremovedthroughfrozensafetyguards/nonrecursiveparentremoval, notmanuallatercleanup. No postcasefixturecontentsread; old4failedroots/children entirelyunaccessed, evenmetadata.
 
@@ -30,7 +52,7 @@ Firstfailurenull; nativefailure/cleanup-error available-null/code0/discoverynotr
 
 Parent (local record) rehashes822refs/freezes34files/preserves788source/8514sealed/443inputs/all5artifacts/Git/shared0755. Actualbindinga59bdbc6/currentD4targetunchangedbefore/afterspawn. OfflineM1sixteenfinalgates427native308B1582affected5447defaultNode/eightassets87in32 andnative6/26/platform1 revalidatedunchangedcode/compiledinputs,notbodies. Fivegatereporthashes pre-reconciliationcutoffonly;783nongate-reportfiles match. Recorder/wrapper/sealsyntax metadataonly; threeguessedmetadatafilenames correctedusingactualmanifests beforemarkers, preservedSCAFFOLD.json. Frameworkraw213stdout/544stderrbytesdiscarded/scalarsanitizedlogs only; notrawlogretention/exactstderrclassification. Nativestderr0 separatefact. Actualnpmspawn-to-close19.298999663s isnotframeworktestduration orapplicationlatency.
 
-Report (local record), FINAL_MANIFEST.json/MEASUREMENTS.json/ACCEPTANCE.json/CLEANUP.json/FINAL_RESULT.json. No source/Gittransition/Cargo/build/discovery/preprobe/extraHTTP/realcredential/ledger/hosted action. Bothfreshscopedreviews PASS/no findings/0testorproofbodies. Each explicitlyrecordswholemeasurementcontractfalse andUNMEASURED_NOT_WAIVEDrelease-to-DOM. ParentREVIEW_AUDIT freezes6reviewfiles/preserves34runtime/788source/8514sealed. Actualreview-b directory (local record) reflects concatenatedassignmentpathtext; exclusivefresh0700/0600 verified, no rename/adoption/runtimemeaning. Standingreportingcheckpoint followsfinalvalidation; actualGitreceipt (local record). Nextestablishasame-clockrelease-observationmeasurementboundary; no newcase inthisincrement. All40PARTIAL/acceptedfalse/reader/C15-active1/deferrals/ledger unchanged. Outstandingpure release-to-DOM timingneedsappropriatetest-onlyclockboundary beforeanyfutureclaim; broaderG11-36measurementgaps remain.
+Report (local record), FINAL_MANIFEST.json/MEASUREMENTS.json/ACCEPTANCE.json/CLEANUP.json/FINAL_RESULT.json. No source/Gittransition/Cargo/build/discovery/preprobe/extraHTTP/realcredential/ledger/hosted action. Bothfreshscopedreviews PASS/no findings/0testorproofbodies. At their pre-waiver cutoff, each explicitly recorded wholemeasurementcontractfalse and UNMEASURED_NOT_WAIVED release-to-DOM. The later owner decision changes only that metric's disposition to WAIVED_BY_OWNER, not measured; neither historical review is rewritten. ParentREVIEW_AUDIT freezes6reviewfiles/preserves34runtime/788source/8514sealed. Actualreview-b directory (local record) reflects concatenatedassignmentpathtext; exclusivefresh0700/0600 verified, no rename/adoption/runtimemeaning. D5 reporting checkpoint cddb7044bac8ad96347c82a6e80d60c23d1bd2d9 passed final validation; its receipt is (local record). The owner authorizes a separate local documentation checkpoint for this waiver after doc/whitespace checks. No new clock work or case follows. All40PARTIAL/acceptedfalse/reader/C15-active1/deferrals/ledger unchanged. Broader G1.1 closure remains open. Report the remaining scope and recommend the next increment; do not start it before owner approval.
 
 ## Prior D4 M1 reviewed cutoff
 

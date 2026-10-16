@@ -1,6 +1,40 @@
 # C54: bounded live-change and canonical-to-commit measurements
 
-Current C54D4 M1: **COMPLETED / SCOPED_REVIEWED**, owned-copy validation only. Parent remediation audit/all16 applicable gates and bothcomplete repeat reviews pass with no findings; F1closedoffline.
+Current C54D5: **FROZEN CASE PASS / SCOPED_REVIEWED**, with native intervals and browser arm-to-DOM observations only. The requested release-anchored browser interval remains unavailable, not passed or waived.
+
+## D5: repaired-source live case and bounded measurements
+
+After revieweddiagnostic checkpoint999fb4d4 andkeeper/M1checkpoint528966025c721aa24ee764132e214c911000952f, the parent finalizedonefreshunchangedsourcecase underownerstandingcontinuation. One invocation passed; bothnewmarkers consumed,total4FAILED1PASS/10markers. No oldcase replay orsourceedit. Versions145Chromium/PW1.58.2/TS5.9.3/Node24 andalltimeout/assertion settings unchanged. Actualbody/sourcefrozen assertions pass; this is notallrequestedmeasurementscomplete, completeG11row orG1acceptance.
+
+OriginalLatest1/HTTP200/SSE1/HTTP200headers/Task1/HTTP202finished/settingscatalog1/9assets/forbiddenhelper0. GenuineUIConnect/Taskonly, scriptedliteralprovider/syntheticcredentials, no realauth/livegenerations/originalAPI/SSEbody/helperHTTP/backscroll/reconnect. Exactnative+DOMfirst precedesarm/second; selectedAfterCommittelemetryfreeze+independentshortreceipt/canonical/projection snapshotclosesbeforewriterrelease; appendDOM, thenauthority+DOM, terminal+DOM/resultcomplete, observerfinish/privacy/bodyproof allpass. Same run/entry/field identities andepoch7; heads9->10->11->15, fieldgeneration9/9/11/11, bytes7/13/19/19. Terminalstatecompleted/nonprovisional/resultrecorded/responsefinished/runfinished/eventscomplete; authority/terminaldigestidentical.
+
+Selectedcollectoroperation26/kind1/delta2 validatesordered20/21/21/21/22 leaves, unique/no pending/clipped/truncatedselecteddata andcorrecttotals. Native collector clock measurements:
+
+| Interval | Microseconds |
+| --- | ---: |
+| CanonicalInsert | 304 |
+| ProjectionReceipt run row | 208 |
+| ProjectionReceipt projector plus DisplayApplied hook tail | 2453 |
+| ProjectionReceipt receipt/manifest/command | 299 |
+| ProjectionReceipt components sum | 2960 |
+| Commit | 6773 |
+| First selected start through last selected end, including gaps | 10083 |
+
+Collectorwindow84009us. ProjectionReceipt is notprojector-onlySQL/CPU orwholeTaskcost. Othernested/pendingoperationintervals are preservedseparately andnotaddedtoinferselectedcompletedtime.
+
+Browserperformance.now observationsarecumulativefromARM: append211.70000000298023ms, authority543.8000000044703ms, terminal1166.2000000029802ms. Fourcallbackevents/pending0/appendabsentatarm, exactidentity/range/bytes/state reservedbeforedigest. The interval begins BEFOREselectedwrite/hold/release, soincludescontrol/deliberatehold/storage-lock/poll/transport/parser/store/render/observation. No browser-clocktimestamp exists atnative release. **Exactrelease-to-DOM remainsUNMEASURED.** Do notlabel211.7ms post-release-only orpuretransport. Thiscorrectsmeasurementdescription, nottheoutstandingrequirement; casePASSdoesnotwaiveit. No clocksubtraction/calibration/combination, SLA/ordinarylatency/variance/CPU/perframe/SSEpayload/scaling/memory/disk/SQLtrace/macOS/hosted claims.
+
+All12actualcleanupstepsPASS. Nativeinputend/normalStop/host-storage-drain/exit0/signalnull/emptynativestderr/nofailure/nofallback; short66opened66closed0active,keeperinitialized/errornull1opened1closed0active,total67/67/0. Atcapture shortactive0/keeperactive1/totalactive1, physicalshortclose-before-release retainsindependence. Keeperclosesafterserver/storagequiescence. Finalbrowserdiscovery/errors0 andknown6browser+native independentlyabsent; directnpmrunneralsoabsent. Thisisfiniteknownidentityretirement, notcompletetree/allhost/allSQLxworkerproof. Newowned0700parentwi-c54-private-GxADnh/nestedwi-live-commit-SpHfCf bothremovedthroughfrozensafetyguards/nonrecursiveparentremoval, notmanuallatercleanup. No postcasefixturecontentsread; old4failedroots/children entirelyunaccessed, evenmetadata.
+
+Firstfailurenull; nativefailure/cleanup-error available-null/code0/discoverynotrejected/failedRequestnull/preparationpublicationfaultsempty. Nodeorder onlynative_close. SuccessdoesnotrecoverhistoricalD2/BR2codeorcause. Fourfailedcases/eightoldmarkers remainimmutable, newtwomarkersconsumed. No repeatedcaseafterPASS.
+
+Parent (local record) rehashes822refs/freezes34files/preserves788source/8514sealed/443inputs/all5artifacts/Git/shared0755. Actualbindinga59bdbc6/currentD4targetunchangedbefore/afterspawn. OfflineM1sixteenfinalgates427native308B1582affected5447defaultNode/eightassets87in32 andnative6/26/platform1 revalidatedunchangedcode/compiledinputs,notbodies. Fivegatereporthashes pre-reconciliationcutoffonly;783nongate-reportfiles match. Recorder/wrapper/sealsyntax metadataonly; threeguessedmetadatafilenames correctedusingactualmanifests beforemarkers, preservedSCAFFOLD.json. Frameworkraw213stdout/544stderrbytesdiscarded/scalarsanitizedlogs only; notrawlogretention/exactstderrclassification. Nativestderr0 separatefact. Actualnpmspawn-to-close19.298999663s isnotframeworktestduration orapplicationlatency.
+
+Report (local record), FINAL_MANIFEST.json/MEASUREMENTS.json/ACCEPTANCE.json/CLEANUP.json/FINAL_RESULT.json. No source/Gittransition/Cargo/build/discovery/preprobe/extraHTTP/realcredential/ledger/hosted action. Bothfreshscopedreviews PASS/no findings/0testorproofbodies. Each explicitlyrecordswholemeasurementcontractfalse andUNMEASURED_NOT_WAIVEDrelease-to-DOM. ParentREVIEW_AUDIT freezes6reviewfiles/preserves34runtime/788source/8514sealed. Actualreview-b directory (local record) reflects concatenatedassignmentpathtext; exclusivefresh0700/0600 verified, no rename/adoption/runtimemeaning. Standingreportingcheckpoint followsfinalvalidation; actualGitreceipt (local record). Nextestablishasame-clockrelease-observationmeasurementboundary; no newcase inthisincrement. All40PARTIAL/acceptedfalse/reader/C15-active1/deferrals/ledger unchanged. Outstandingpure release-to-DOM timingneedsappropriatetest-onlyclockboundary beforeanyfutureclaim; broaderG11-36measurementgaps remain.
+
+## Prior D4 M1 reviewed cutoff
+
+C54D4 M1: **COMPLETED / SCOPED_REVIEWED**, owned-copy validation only. Parent remediation audit/all16 applicable gates and bothcomplete repeat reviews pass with no findings; F1closedoffline.
 
 ## D4 M1: validate the owned copy
 

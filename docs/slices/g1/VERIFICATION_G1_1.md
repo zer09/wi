@@ -1,10 +1,20 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B54D4_M1_REVIEWED_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER_ARM_ONLY_ALL40_PARTIAL**.
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
-## Current C54D4 M1: COMPLETED_SCOPED_REVIEWED
+## Current C54D5: COMPLETED_SCOPED_REVIEWED; browser release timing unavailable
+
+Onefreshunchangedsourcecase at528966025c721aa24ee764132e214c911000952f passed allfrozencorrectness/nativeleaf/physicalcleanup assertions. Twofreshmarkers consumed,total5cases(4FAILED1PASS)/10markers. Latest200/SSE200headers/Task2021/settingscatalog1/static9/forbiddenhelper0; originalAPI/SSEbodies unread. Exactsameidentity states heads9/10/11/15,generations9/9/11/11,epoch7,bytes7/13/19/19; terminalresult/eventscomplete andallDOMphases pass.
+
+Collectorop26/delta2 exact20/21/21/21/22 gives304usCanonicalInsert,208/2453/299usProjectionReceiptcomponents(sum2960),6773usCommit,10083usfirststart-to-lastend includinggaps,84009uscollectorwindow. ProjectionReceipt includesrun-row/projector-hooktail/receipt-head-commandwork, notprojector-onlySQL. Browserperformance.now values211.7/543.8/1166.2ms are cumulative ARM-to-append/authority/terminal callback observations. Native release has no browserclocktimestamp. Requested exactrelease-to-DOM interval remainsUNMEASURED; no runtimePASS or reviewwaives thatmeasurementgap. No clockscombined, puretransport/SLA/ordinarylatency/perframe/payload/CPU/scaling/memory/disk/SQLtrace/hosted/macOS claim.
+
+All12cleanupstepsPASS: nativeinputend/normalStop/drain/exit0/signalnull/emptynativestderr/nofallback, short66/66/0+keeper1/1/0=knownfixturetotal67/67/0. FinalbrowserdiscoveryPASS/errors0; native+6knownbrowseridentities anddirectrunner independentlyabsent, notcompletetreeproof. Newprivateparentwi-c54-private-GxADnh/rootwi-live-commit-SpHfCf removed; old4roots whollyunaccessed/cutofffacts. Firstfailurenull, preparation/publicationfaultsempty.
+
+ParentIMPLEMENTATION_AUDIT rehashes822refs/freezes34files/preserves788source/8514sealed/443inputs/all5artifacts/HEAD/index/refs/shared0755. OfflineD4/M1gates strictlyrevalidated,no replay/Cargo/discovery/build/preprobe. Three guessedmetadatafilenames unavailablethenmanifest-corrected; no productcheck/markerfailure. Discardedframework213stdout/544stderrbytes notretainedlogs orcause; nativestderr0 separatefact. Report (local record); [C54](C3B_LIVE_COMMIT_MEASUREMENTS.md). Bothfreshscopedreviews PASS/no findings/0proofbodies andexplicitwholemeasurementcontractfalse/release-to-DOMUNMEASURED_NOT_WAIVED. ParentREVIEW_AUDIT freezes6files/preserves34runtime/788source/8514sealed; review-bactualsuffixb0700 isfilename-formattingonly/privatepermissionsvalid, notruntimeproof. Standingreportingcheckpoint followsfinalvalidation; actualreceipt (local record). Nextresolvevalidsame-clockrelease-observationboundary beforeanynewtimingclaim. No furthercase/push/acceptance; D2/BR2causeUNVERIFIED/all40PARTIAL/acceptedfalse/reader/C15-active1/deferrals/ledger unchanged.
+
+## Prior C54D4 M1: COMPLETED_SCOPED_REVIEWED
 
 ThreeNodepaths addpost-clone strictvalidation beforefreezing/retention, retainingoriginaldescriptorproof andsingleholdercapture. Brandedkeeper/reader/totals/error facts orstatefulgetters cannotyieldavailablemalformedownedcopies. Nativeprotocol/actualmocklauncher/B/16actualregisteredcallback fault schedules retainoriginalerrors, firstpackets, body-errorroots andwritablesiblings/closureattempts. Rust/Bhelper/spec/keeperlifetime/a59artifact443inputs unchanged.
 

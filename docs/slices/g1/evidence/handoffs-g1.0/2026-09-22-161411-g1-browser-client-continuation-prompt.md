@@ -1,6 +1,6 @@
 # Continuation prompt for the next agent
 
-Copy the text below into a fresh Pi agent session from `/home/gc/projects/wi`.
+Copy the text below into a fresh Pi agent session from `<repo>`.
 
 ---
 

@@ -6,7 +6,7 @@ Read these two files completely first:
 
 ## Current State Summary
 
-Expected project `~/projects/wi`, branch docs/g1-browser-conversation-client, HEAD318b7f0da7d503e2e3a8cf33be84e78ebbe8affb. Accepted master76bb32fd04fd4737c0efcceaabc7d10387453147 and preserved checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579 are ancestors. Expected379 staged paths, eight existing unstaged paths and this new handoff pair as two untracked files. Preserve later owner changes.
+Expected project `<repo>`, branch docs/g1-browser-conversation-client, HEAD318b7f0da7d503e2e3a8cf33be84e78ebbe8affb. Accepted master76bb32fd04fd4737c0efcceaabc7d10387453147 and preserved checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579 are ancestors. Expected379 staged paths, eight existing unstaged paths and this new handoff pair as two untracked files. Preserve later owner changes.
 
 All40 matrix rows G11-00..G11-39 remain PARTIAL;0PASS/0NOT_RUN/accepted=false. Ledger31/50 used19remaining, unchanged. Active display app, raw retirement, browser-CI source/fixture publication, offline example and runtime documentation are already implemented. Do not restart those tasks from old future-work paragraphs.
 

@@ -31,7 +31,7 @@ Production/Rust/dist/dependencies/auth/platform/timeouts and existing helpers re
 
 ## Saved local execution
 
-Observer: implementation role, Fastlane OFF. Full report: (local record). Exact command/cwd/six-value environment/UTC/exit/counters/process samples are in its named gate JSON records. Required environment remains (local record) with Node24.18.0-first PATH. Web cwd is `~/projects/wi/web`; Cargo cwd is the repository root. Native/discovery/browser commands use the existing shared flock. Browser workers1/retries0 and timeouts are unchanged.
+Observer: implementation role, Fastlane OFF. Full report: (local record). Exact command/cwd/six-value environment/UTC/exit/counters/process samples are in its named gate JSON records. Required environment remains (local record) with Node24.18.0-first PATH. Web cwd is `<repo>/web`; Cargo cwd is the repository root. Native/discovery/browser commands use the existing shared flock. Browser workers1/retries0 and timeouts are unchanged.
 
 | Gate | Actual saved disposition |
 |---|---|

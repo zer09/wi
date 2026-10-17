@@ -2,7 +2,7 @@
 
 ## Session Metadata
 - Created: 2026-09-22 16:14:11 Asia/Manila
-- Project: /home/gc/projects/wi
+- Project: <repo>
 - Branch: docs/g1-browser-conversation-client
 - HEAD: 122166bf842cc174cf4942e6284440318b5564dd
 - Accepted runtime baseline: 76bb32fd04fd4737c0efcceaabc7d10387453147

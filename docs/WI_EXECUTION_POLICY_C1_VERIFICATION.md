@@ -29,7 +29,7 @@ rustc 1.98.1; cargo 1.98.1; Node v24.18.0; uv 0.12.10. No hosted or non-Linux ex
 
 Final isolation used `HOME=/tmp/wi-c1-final.SWGC69`, with `XDG_CONFIG_HOME` and
 `CODEX_HOME` beneath that directory. Exact child paths were not supplied.
-`CARGO_HOME=/home/gc/.cargo`, `RUSTUP_HOME=/home/gc/.rustup` and
+`CARGO_HOME=~/.cargo`, `RUSTUP_HOME=~/.rustup` and
 `CARGO_NET_OFFLINE=true` selected trusted existing development caches.
 The temporary HOME is an observed location, not a portable or guaranteed-existing reproduction path.
 Credential locations were isolated; these development-cache paths do not imply credential reads.
@@ -50,7 +50,7 @@ it was an environment setup failure, not a product failure.
 
 Numeric baseline exit codes were not supplied and are null in JSON, not invented.
 Corrected isolation used isolated HOME/XDG_CONFIG_HOME/CODEX_HOME with explicit
-`/home/gc/.cargo`, `/home/gc/.rustup` and offline Cargo. Baseline verifier inventory:
+`~/.cargo`, `~/.rustup` and offline Cargo. Baseline verifier inventory:
 61 source files, 231 Rust test definitions, 25 fixture events.
 The six baseline Cargo gates are the same F1-F6 commands listed below, run by
 `scripts/verify.py:53-65`.

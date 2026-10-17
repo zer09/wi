@@ -4,7 +4,7 @@
 
 - Created: 2026-09-28 20:01:27 +0800
 - Updated: 2026-09-28 20:14 +0800
-- Project: `/home/gc/projects/wi`
+- Project: `<repo>`
 - Branch: `docs/g1-browser-conversation-client`
 - Accepted runtime baseline: `76bb32fd04fd4737c0efcceaabc7d10387453147`
 - Implementation checkpoint: `a89aeb49929929901e3613cc9bd3f450f3719f33`

@@ -34,8 +34,8 @@
       "HOME": "/tmp/wi-c1-final.SWGC69",
       "XDG_CONFIG_HOME": "under /tmp/wi-c1-final.SWGC69; exact child path not supplied",
       "CODEX_HOME": "under /tmp/wi-c1-final.SWGC69; exact child path not supplied",
-      "CARGO_HOME": "/home/gc/.cargo",
-      "RUSTUP_HOME": "/home/gc/.rustup",
+      "CARGO_HOME": "~/.cargo",
+      "RUSTUP_HOME": "~/.rustup",
       "CARGO_NET_OFFLINE": "true",
       "portability": "Observed temporary location, not a portable or guaranteed-existing reproduction path. Trusted existing development caches were used; credential locations were isolated."
     }
@@ -56,7 +56,7 @@
     "initial_worktree": "clean",
     "head": "870f3c4c4446d787114b7fd0c4e558d4838f851d",
     "initial_isolation_failure": "HOME was isolated but explicit CARGO_HOME/RUSTUP_HOME were omitted. Offline Cargo could not find cached async-stream. Failure occurred before tests and was an environment setup failure, not a product failure.",
-    "corrected_isolation": "Isolated HOME/XDG_CONFIG_HOME/CODEX_HOME; CARGO_HOME=/home/gc/.cargo; RUSTUP_HOME=/home/gc/.rustup; CARGO_NET_OFFLINE=true.",
+    "corrected_isolation": "Isolated HOME/XDG_CONFIG_HOME/CODEX_HOME; CARGO_HOME=~/.cargo; RUSTUP_HOME=~/.rustup; CARGO_NET_OFFLINE=true.",
     "command_results": [
       {"attempt": "initial", "command": "uv run scripts/verify.py", "status": "ENVIRONMENT_SETUP_FAILURE", "exit_code": null, "result": "Failed before tests: offline Cargo could not find cached async-stream; numeric exit code not supplied."},
       {"attempt": "initial", "command": "cargo run --example run_offline", "status": "ENVIRONMENT_SETUP_FAILURE", "exit_code": null, "result": "Failed before execution for the same cache setup error; numeric exit code not supplied."},

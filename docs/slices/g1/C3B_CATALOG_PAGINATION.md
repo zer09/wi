@@ -65,7 +65,7 @@ All final pre-runtime gates bind the exact final three-file source. Counts overl
 | Playwright `test --config=web/playwright.config.mjs --list` | 89 registrations in34 files, no bodies. |
 | Owned static recorder | Scope/privacy/whitespace/exact-section/diff checks PASS. |
 
-The canonical launcher used configured Node24, both separators, empty bootstrap NODE_OPTIONS and the exact six values from (local record). Cwd was `~/projects/wi`. Exact argv/environment/source/process/terminal/reap/log bindings are retained in the evidence root.
+The canonical launcher used configured Node24, both separators, empty bootstrap NODE_OPTIONS and the exact six values from (local record). Cwd was `<repo>`. Exact argv/environment/source/process/terminal/reap/log bindings are retained in the evidence root.
 
 `CURRENT_SOURCE_INDEX.json` binds **ten** final gate records. `FINAL_GATES.json` contains **nine ordinary gates**, with static separately finalized. The parent initially expected ten in the ordinary index; `AUDIT_CORRECTION.json` preserves that comparator rejection and correction. No product proof reran for this correction.
 

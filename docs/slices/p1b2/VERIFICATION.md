@@ -530,7 +530,7 @@ and uncommitted, with no untracked files.
 ### 15.3 Required local checks (D)
 
 Checks ran once each on the uncommitted remediation based on the exact SHA above,
-in `/home/gc/projects/wi`, on Linux `6.18.33.2-microsoft-standard-WSL2` x86_64 with
+in `<repo>`, on Linux `6.18.33.2-microsoft-standard-WSL2` x86_64 with
 rustc/cargo `1.98.1`. Cargo commands used `env -i`, inherited trusted `PATH`,
 `CARGO_HOME` and `RUSTUP_HOME`, and `CARGO_NET_OFFLINE=true`. Synthetic `HOME`,
 `XDG_CONFIG_HOME`, `CODEX_HOME` and `TMPDIR` were under

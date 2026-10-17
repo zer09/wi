@@ -22,7 +22,7 @@ No production/Rust/generated/dependency/auth/platform/timeout change occurred. T
 
 ## Saved local execution
 
-Observer: implementation role, Fastlane OFF. Report: (local record). Exact child argv, cwd, six-value environment, UTC, exits, logs and source identities are in its named gate JSON records. All web commands use `~/projects/wi/web`; fixture compilation uses the repository root.
+Observer: implementation role, Fastlane OFF. Report: (local record). Exact child argv, cwd, six-value environment, UTC, exits, logs and source identities are in its named gate JSON records. All web commands use `<repo>/web`; fixture compilation uses the repository root.
 
 | Command or group | Result and level |
 |---|---|

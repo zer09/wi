@@ -12,7 +12,7 @@ The recorder captured 739 tracked/nonignored project records with per-file hashe
 
 The parent native-read (local record) before shell execution. The canonical launcher used absolute Node24.18.0 with NODE_OPTIONS empty. The detached recorder verified and inherited all six approved values without retyping PATH. Additional harness values were `CARGO_NET_OFFLINE=true` and `RUST_TEST_THREADS=4`.
 
-One product invocation ran from `~/projects/wi`:
+One product invocation ran from `<repo>`:
 
 `cargo test --locked --offline --all-targets -- --test-threads=4`
 

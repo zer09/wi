@@ -57,7 +57,7 @@
     "isolation": {
       "wrapper": "/tmp/wi-s2-final-k5UCVkK4/gate.mjs",
       "strategy": "Temporary Node spawnSync wrapper passes exact command arguments and an allowlisted environment, prints timestamps/exit codes, and stops the command chain on nonzero exit.",
-      "cwd": "/home/gc/projects/wi",
+      "cwd": "<repo>",
       "synthetic_root": "/tmp/wi-s2-final-k5UCVkK4",
       "HOME": "/tmp/wi-s2-final-k5UCVkK4/home",
       "XDG_CONFIG_HOME": "/tmp/wi-s2-final-k5UCVkK4/xdg",

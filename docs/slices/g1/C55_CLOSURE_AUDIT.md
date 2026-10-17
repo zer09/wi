@@ -10,7 +10,7 @@ Governing requirements remain in [CONTRACT.md](CONTRACT.md), [SCHEMA.md](SCHEMA.
 
 The C55 audit and C56 publication baseline was:
 
-- Project: `~/projects/wi`.
+- Project: `<repo>`.
 - Branch: `docs/g1-browser-conversation-client`.
 - HEAD: `00be716db7b29704075bd1cd7dce02f02c07f963`.
 - Accepted master: `76bb32fd04fd4737c0efcceaabc7d10387453147`, an ancestor.

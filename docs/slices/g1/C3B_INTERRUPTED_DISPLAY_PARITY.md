@@ -48,7 +48,7 @@ Actual Chromium proves UI submission, fresh Connects, DOM, original request/resp
 
 ## Checks and execution binding
 
-Approved cwd `~/projects/wi`; absolute Node24 `~/.nvm/versions/node/v24.18.0/bin/node`. The canonical two-separator launcher and inspected recorders bind the exact six approved values and PATH order from (local record), SHA256 `62ac2be605e1d570863957472aae6702b196259228ab75d2f59215ec75240fb1`.
+Approved cwd `<repo>`; absolute Node24 `~/.nvm/versions/node/v24.18.0/bin/node`. The canonical two-separator launcher and inspected recorders bind the exact six approved values and PATH order from (local record), SHA256 `62ac2be605e1d570863957472aae6702b196259228ab75d2f59215ec75240fb1`.
 
 | Check | Observed result |
 |---|---|

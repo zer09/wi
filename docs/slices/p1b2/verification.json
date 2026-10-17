@@ -198,7 +198,7 @@
     "source_revision": "80f387294c92ff0287e614a7f9c658901979352f",
     "tested_tree": "Uncommitted repair based on reviewed_head, before these report edits; not clean HEAD and not a new source commit.",
     "worktree": {
-      "path": "/home/gc/projects/wi",
+      "path": "<repo>",
       "initial_repair_state": "clean at exactly reviewed_head (P)",
       "head_matches_reviewed": true,
       "baseline_ancestry": "PASS (D)",
@@ -458,7 +458,7 @@
       "all_green_exact_head_hosted_closure": true
     },
     "worktree": {
-      "path": "/home/gc/projects/wi",
+      "path": "<repo>",
       "base_head": "c0534f4b6637fc90e739afac6ae4ddeee69adbaa",
       "tracked_modified": 3,
       "untracked": 0,

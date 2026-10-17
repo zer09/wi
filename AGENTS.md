@@ -78,6 +78,15 @@ The following transfer and failed-browser history predates C51D1. The latest tra
 
 For NEW wi assignments issued from October 11, 2026, after owner approval, follow [Delegate execution policy](docs/DELEGATE_EXECUTION.md). It supersedes older all-command literal-prefix and permanently fatal harmless-diagnostic rules prospectively only. Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged. Explicit acceptance requirements and explicitly terminal rules remain mandatory.
 
+## Local records and build output
+
+From October 17, 2026:
+
+- Keep reports, receipts, audits, logs and other evidence outside version control. The owner gives each session the location of local records and scratch space.
+- Do not write local filesystem paths, local record folder names or usernames into tracked files or commit messages. State results, counts and commit hashes inline. Earlier text that says "(local record)" or "<local path>" marks a removed local path.
+- Use one shared Cargo target: the repository `target/` folder. Do not create a separate target folder for each increment.
+- Do not keep built binaries as evidence. Record the source commit, `Cargo.lock`, toolchain and command. A later check rebuilds from that commit and reruns the tests; it does not need the old binary or its hash.
+
 ## Read first
 
 Read docs/slices/g1/CONTRACT.md, SCHEMA.md, RUST_API.md, CLIENT_PROTOCOL.md, SECURITY.md, MATRIX.md, DISPOSITION.md, VALIDATION.md and IMPLEMENTOR_PROMPT.md. Then read the historical VERIFICATION.md/verification.json/DESIGN_REVIEW.md and current applicable source/platform documents. Old pause/continuation handoffs and g1.0 prompts remain historical; their blocked full-prefix/Window B requirements are superseded by g1.1.

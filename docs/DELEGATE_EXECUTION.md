@@ -19,7 +19,7 @@ The JSON must use valid UTF-8 source bytes. It must decode to a plain object wit
 | Key | Required value or shape |
 |---|---|
 | TMPDIR | Absolute path, preserved exactly |
-| CARGO_TARGET_DIR | Absolute path, preserved exactly |
+| CARGO_TARGET_DIR | Absolute path of the repository `target/` folder, shared across increments, preserved exactly |
 | RUSTFLAGS | One string, including spaces or an empty value, preserved exactly |
 | GIT_OPTIONAL_LOCKS | Exactly `"0"` |
 | NODE_OPTIONS | Exactly `""` |
@@ -79,6 +79,8 @@ Capture only authorized synthetic diagnostics. Sanitize sensitive data before sa
 ## 5. Evidence and preservation
 
 Give each verification exactly one finding excerpt plus relevant path/line evidence. Include enough evidence in that verification's report; do not require extraction from sibling full reports. Report commands, counts, environment-binding method, initial failures, corrections, preservation boundary, current worktree state, deferred scope and remaining risks. Distinguish source review, local execution, hosted CI and live evidence.
+
+Save evidence files only in the owner-provided local record location. Tracked files and commit messages must not contain local filesystem paths, local record folder names or usernames; state the facts inline. Do not keep built binaries as evidence. Record the source commit, `Cargo.lock`, toolchain and command, so a later check can rebuild and rerun.
 
 Preserve owner changes, staged index, HEAD and branch unless the assignment explicitly authorizes a transition. Use a finite read-only baseline comparison for tracked and nonignored untracked nonassigned content and file modes. State exclusions such as known volatile tool caches and owned temporary fixtures. An ignored-inclusive aggregate without per-file evidence does not prove every ignored file unchanged. Do not restore caches or intentionally edit ignored product/user artifacts. Incidental CodeGraph cache maintenance is not user-source mutation.
 

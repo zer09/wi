@@ -83,7 +83,7 @@ For NEW wi assignments issued from October 11, 2026, after owner approval, follo
 From October 17, 2026:
 
 - Keep reports, receipts, audits, logs and other evidence outside version control. A local `AGENTS.md` outside the repository, provided by the owner, describes where local records, scratch space and the approved environment file are.
-- Do not write local filesystem paths, local record folder names or usernames into tracked files or commit messages. State results, counts and commit hashes inline. Earlier text that says "(local record)" or "<local path>" marks a removed local path.
+- Do not write local filesystem paths, local record folder names or usernames into tracked files or commit messages. State results, counts and commit hashes inline. Earlier text that says "(local record)" or "<local path>" marks a removed local path. `<repo>` means the repository root, and `~/` means the home folder of the machine that ran the recorded command.
 - Use one shared Cargo target: the repository `target/` folder. Do not create a separate target folder for each increment.
 - Do not keep built binaries as evidence. Record the source commit, `Cargo.lock`, toolchain and command. A later check rebuilds from that commit and reruns the tests; it does not need the old binary or its hash.
 

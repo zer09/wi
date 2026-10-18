@@ -4,6 +4,32 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C62: fresh exact-current-HEAD offline gates
+
+**All159 offline commands PASS_LOCAL; both fresh scoped evidence/publication reviews PASS with no findings and0product replays.** Tested revision: `6cf59f8e032cc5bf3df8e1045b92a97854311151`. This is a new run after relocation and history rewrite, not a continuation or reuse of either earlier C62 attempt. Later publication/checkpoint changes documentation only. Root historical headers, prior blocks, all98 named inventory objects, all40 PARTIAL rows, accepted=false and inventory OPEN remain unchanged.
+
+| Gate | Recorded result |
+| --- | --- |
+| `cargo fmt --all -- --check` | PASS. |
+| `cargo check --locked --offline --all-targets` | PASS. |
+| `cargo clippy --locked --offline --all-targets -- -D warnings` | PASS. |
+| `cargo build --locked --offline --all-targets` | PASS. |
+| `cargo test --locked --offline --all-targets` | 1252 passed,0 failed,12 existing ignored,0 filtered across23 harnesses. Standard default concurrency; no test-thread override. Counts are not a new unique assertion inventory. |
+| `cargo test --locked --offline --doc` | PASS with0 doctests; not a named-control pass. |
+| Full `npm --prefix web test` | 5623 passed,0 failed/skipped/cancelled/todo, unfiltered default concurrency. |
+| Configured Node syntax checks | All148 tracked JavaScript modules pass, each with its own command/result record. |
+| Typecheck and nonmutating assets verify | PASS;8 generated assets verified without publication. |
+| Structural static checks | Packaging, canonical Rust-name/fixture checks, C61 privacy guards, source/Git scope and whitespace PASS. Not a security audit, credential-isolation proof or execution of verify.py. |
+| Registration-only Playwright collection | 89 tests in34 files;0 browser bodies and0 real attempt markers. Collection is not browser execution. |
+
+The source lock hash is `069b9f5e3db8a82acd0157bd6cae1a3a8184215d070b7453a8461f622d0c37dc`. Toolchain: Cargo1.98.1, Rust1.98.1, rustfmt1.9.0-stable and Node24.18.0. Cargo was resolved from the approved PATH. The approved six-value environment was used unchanged, with the one shared repository target and a recorded two-job build limit. RUST_TEST_THREADS was absent; build jobs did not serialize tests or change product deadlines/retries.
+
+Exact resolved argv, cwd, environment, complete stdout/stderr, source/mode digests, known direct process identities and terminal/reap facts are retained (local record). The parent rehashed159 successful records/log chains and the801-file inventory:799 HEAD files plus two staged nonruntime handoffs. All45 record files from the two prior C62 attempts remain byte/mode-equal. No built binary or Git object store is retained as evidence; the recorded source, lock, toolchain and commands support rebuilding. Ignored caches/shared build output and unrelated evidence are outside per-file preservation claims. Known direct-child retirement is not complete-descendant/all-host proof.
+
+Earlier C62 failed before Cargo started because the parent used a stale absolute launcher. C62R1 later passed its first three recorded gates but stopped during all-target build when disk exhaustion crashed the system. Its RUNNING status is stale; the build terminal/counts remain unknown. Both used old9dab9b5979517e6323ad47a3ba67793036ddb62c, mapped after rewriting to81c19301e05c9dcc146b6cef62ececeb89ae49b2. Neither attempt is relabelled successful or used as current gate evidence. This new run executed every prescribed command against the actual later HEAD. There was no failed gate or gate retry in this new run.
+
+Only AGENTS.md and the existing human/JSON verification documents change for publication. Both fresh scoped reviews cover the saved gates and three-document publication draft, not final complete-master review. Their corrected read-only parser diagnostics are disclosed (local record); no product proof replay occurred. Final documentation/preservation checks precede the authorized local checkpoint. Both C55 handoffs stay staged and outside commit. No push, hosted/macOS evidence, final complete-master review or acceptance is claimed. The Python verifier, CLI/example/HTTP auxiliary executions, npm-ci proof and full current-head Playwright suite remain separate closure work. The C61 intermittent request fault was not exercised by collection and remains UNVERIFIED. C15/active1/application reader/SSE/no-store/access/pins/deadlines/release-to-DOM waiver/ledger remain unchanged.
+
 ## C61R2: catalog pagination and scalar request diagnostics, reviewed
 
 **One fresh C61R2 case and both complete-C61/R1/R2 scoped reviews PASS. All40PARTIAL; accepted=false; global inventory OPEN.** [Detailed results](C3B_CATALOG_PAGINATION.md) and JSON `c61_catalog_pagination_increment` supply this later cutoff. Root headers, historical blocks and94 prior test objects remain unchanged. Four selected exact bindings extend the inventory to98 records, not98 new tests or unique proofs.

@@ -80,7 +80,9 @@ Capture only authorized synthetic diagnostics. Sanitize sensitive data before sa
 
 Give each verification exactly one finding excerpt plus relevant path/line evidence. Include enough evidence in that verification's report; do not require extraction from sibling full reports. Report commands, counts, environment-binding method, initial failures, corrections, preservation boundary, current worktree state, deferred scope and remaining risks. Distinguish source review, local execution, hosted CI and live evidence.
 
-Save evidence files only in the owner-provided local record location. Tracked files and commit messages must not contain local filesystem paths, local record folder names or usernames; state the facts inline. Do not keep built binaries as evidence. Record the source commit, `Cargo.lock`, toolchain and command, so a later check can rebuild and rerun.
+Save evidence files only in the owner-provided local record location. Remote reviewers cannot read local records, so each tracked document must be understandable without them. Tracked files and commit messages must not contain local filesystem paths, local record folder names or usernames; state the facts inline. Do not keep built binaries, repository snapshots or Git object stores as evidence. Record the source commit, `Cargo.lock`, toolchain and command, so a later check can rebuild and rerun.
+
+The owner empties scratch space and cleans the Cargo target manually, without notice. Anything that must survive, including a retained failure root, belongs in the local record location, not in scratch space.
 
 Preserve owner changes, staged index, HEAD and branch unless the assignment explicitly authorizes a transition. Use a finite read-only baseline comparison for tracked and nonignored untracked nonassigned content and file modes. State exclusions such as known volatile tool caches and owned temporary fixtures. An ignored-inclusive aggregate without per-file evidence does not prove every ignored file unchanged. Do not restore caches or intentionally edit ignored product/user artifacts. Incidental CodeGraph cache maintenance is not user-source mutation.
 

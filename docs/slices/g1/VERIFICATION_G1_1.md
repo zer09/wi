@@ -4,6 +4,29 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C64: C57 current-invocation digest, offline-only repair
+
+**COMPLETED_OFFLINE_SCOPED_REVIEWED.** Source checkpoint: `cc243274b2fa16a7de718eb9d171ec36b70b798a`, plus the then-uncommitted two-file implementation. `web/e2e/saved-history-active-rename.spec.mjs:14,127-129,280-285` captures `WI_C3A_FIXTURE_SHA256`, requires a primitive exact64-character lowercase hex value inside the existing acquisition error boundary, and preserves both binding observations, marker order, cleanup, publication and environment restoration. No historical hash fallback or target-derived expected digest exists. No registration-time rejection is added.
+
+`web/test/saved-history-active-rename.test.mjs:251-395` adds33 controls using actual spec AST/VM extraction, real executable binding and owned synthetic files. Only browser work is replaced; marker/result I/O remains in memory. Tests cover malformed/missing/wrong digest, invalid target paths/types, captured-value stability, changed bytes/path types before finalization, first-error/cleanup precedence and environment restoration.
+
+| Final recorded gate | Result |
+| --- | --- |
+| Focused C57 Node file |116PASS,0failed/skipped/cancelled.|
+| Five-file affected set, explicit serial file scheduling |526PASS,0failed/skipped/cancelled. Not a concurrent affected PASS.|
+| Full default Node, all73 `test/*.test.mjs` paths expanded in argv, cwd `web/` |5656PASS,0failed/skipped/cancelled; no filtering, concurrency, retry or deadline override. Same target set as the package test glob.|
+| Both touched-module syntax checks/typecheck/nonmutating asset verify |PASS;8assets verified.|
+| Exact scope/privacy/whitespace/pins and finite preservation |PASS;2assigned files,799nonassigned paths preserved.|
+| Playwright registration-only, both runtime fixture variables unset |89tests in34files; no body or marker execution.|
+
+Both fresh scoped reviews PASS with no findings and0product-proof replays. Parent independently checks90implementation files,15record/log bindings,9accepted current-source gate manifests and801source bindings before publication. Subsequent documentation has a later cutoff. Known direct identity retirement is not complete-descendant or all-host proof. C62 native results remain qualified prior evidence for unchanged tracked native inputs, not a new C64 native run.
+
+**Failures remain:** initial focused89PASS27FAIL includes historical-pin rejection and scaffold failures;115PASS1FAIL corrected the missing-digest failed-result expectation;100PASS16FAIL corrected an unsupported error code to existing `acquire`. Two default affected attempts failed524PASS2FAIL and522PASS4FAIL in unchanged skill ownership controls. A separate synthetic actual-helper control demonstrates ancestor link-count5->6->5 sensitivity during owned sibling creation. It does not prove those earlier interleavings. Serial526PASS and full-default5656PASS do not erase either failure; no shared-helper repair is included. The second equivalent affected attempt is preserved, not counted as a repair.
+
+**Contract limits:** supplied digest equality at two observations does not establish current-source provenance. Preparation receipts remain later work. Identical-byte inode replacement remains allowed because existing C57 discards binding identities. Missing digest rejects before startup; the unchanged optional-hash helper can still publish a failed diagnostic result afterward. A final-only binding failure rejects and prevents result writing; an earlier body/cleanup error keeps precedence. No new cleanup or continuous-identity guarantee is claimed.
+
+No Cargo/build/discovery/native/browser/HTTP case, real attempt marker, dependency/configuration/reader/SSE change, disk check or hosted operation ran. All98 earlier inventory objects and40row objects stay unchanged; all40PARTIAL/acceptedfalse/inventoryOPEN, C15/active1/no-store/access/pins/deadlines/release-to-DOM waiver/ledger and C61 unknown remain. Both C55 handoffs stay staged outside the authorized checkpoint. Preparation, durable allocation, CI, full browser gate and final complete-master reviews remain open. Supporting commands/environment/source/log/terminal/review/preservation records are retained (local record); decisive facts are inline. Local checkpoint follows final documentation checks; no push or acceptance.
+
 ## C63: current-source browser readiness, research only
 
 **SOURCE_RESEARCH_COMPLETE; full browser readiness is not established.** Source baseline: `516177fe0523c6fa3f169b8dcec18610daaba1b5`. Three fresh read-only solution investigations completed. Parent verified the source evidence and one fresh advisory oracle returned VALID. These are research/advisory roles, not implementation reviews or three final complete-master reviews. No test, build, discovery, collection, browser/native/HTTP body, real attempt marker, disk check or hosted operation ran. C62 retains its exact tested-revision cutoff; its offline results are not relabeled as execution at this HEAD.

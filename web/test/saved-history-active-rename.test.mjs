@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, lstat, rename, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, lstat, rename, rm, realpath, writeFile, symlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { executableBinding } from '../test-support/skill-source-fidelity.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as f from '../test-support/display-fixtures.mjs';
-import { TASK, TITLE, RENAMED, ANSWER, ARGUMENTS, OUTPUT, nativeProof, pageProof, catalogProof,
+import { TASK, TITLE, RENAMED, ANSWER, ARGUMENTS, OUTPUT, requireProof, nativeProof, pageProof, catalogProof,
   proveActiveRename, proveSavedHistory, ownedWorkspace, runOwned, handshakeProof } from '../test-support/saved-history-active-rename.mjs';
 
 const workspace = '/synthetic/workspace';
@@ -244,4 +246,150 @@ for(const failure of ['route','page','privacy','close','none'])test(`actual spec
   if(failure==='none')await work;else await assert.rejects(work,error=>error===first);
   assert.equal(calls.filter(c=>c==='close').length,1);
   assert.equal(calls.at(-1),'publish');
+});
+
+// Keep the actual admission, cleanup and publication code; replace only browser work.
+let caseCallback, lifetimeCall;
+function digestSeams(node) {
+  if(ts.isCallExpression(node) && node.expression.getText(source)==='test')caseCallback=node.arguments[1];
+  if(ts.isCallExpression(node) && node.expression.getText(source)==='runOwned')lifetimeCall=node;
+  ts.forEachChild(node,digestSeams);
+}
+digestSeams(source);
+const innerTry=lifetimeCall.arguments[0].body.statements[0];
+const browserStart=innerTry.tryBlock.statements.find(s=>ts.isVariableStatement(s)
+  && s.declarationList.declarations.some(d=>d.name.getText(source)==='original'));
+const bodySuccess=innerTry.tryBlock.statements.at(-1);
+assert.equal(bodySuccess.getText(source),'result.body_success=true;');
+const digestSource=[...source.statements.filter(ts.isImportDeclaration).map(s=>({start:s.getStart(source),end:s.end,text:''})),
+  {start:browserStart.getStart(source),end:bodySuccess.getStart(source),text:'await body(own);\n'}]
+  .sort((a,b)=>b.start-a.start).reduce((text,edit)=>text.slice(0,edit.start)+edit.text+text.slice(edit.end),source.text)
+  .replaceAll('import.meta.url',JSON.stringify(new URL('../e2e/saved-history-active-rename.spec.mjs',import.meta.url).href));
+assert.ok(ts.isArrowFunction(caseCallback));
+
+function digestCase(executable, digest, {bodyFailure,cleanupFailure,beforePublish=async()=>{}}={}) {
+  const env={WI_C3A_FIXTURE:executable,WI_C3A_FIXTURE_SHA256:digest},calls=[],writes=[],bindings=[];
+  let registered;
+  const register=(_name,callback)=>{registered=callback;};register.use=()=>{};
+  const fixture={stop:async()=>{calls.push('stop');},evidence:()=>({synthetic:true})};
+  runInNewContext(digestSource,{test:register,process:{env},URL,join,tmpdir,createHash,
+    mkdir:async(path,options)=>{calls.push('mkdir');assert.equal(options.mode,0o700);},
+    writeFile:async(path,bytes,options)=>{calls.push(path.endsWith('CASE.once')?'marker':'result');writes.push({path,bytes,options});},
+    executableBinding:async(path,expected)=>{bindings.push({path,expected});return executableBinding(path,expected);},
+    startFixture:async()=>{calls.push('start');return fixture;},
+    strictStop:()=>{calls.push('strict-stop');},
+    requireProof,
+    runOwned:(body,publish)=>runOwned(body,async packet=>{calls.push('publish');await beforePublish(env);await publish(packet);}),
+    body:async own=>{
+      own('first-context',async()=>{calls.push('first-close');});
+      own('last-context',async()=>{calls.push('last-close');if(cleanupFailure)throw cleanupFailure;});
+      if(bodyFailure)throw bodyFailure;
+    },
+  });
+  return {env,calls,writes,bindings,run:()=>registered({browser:{}},{outputPath:()=>'/synthetic/c57-output'})};
+}
+const fixtureBytes='Synthetic C64 fixture bytes, not a product executable. 雪\n';
+const fixtureDigest=createHash('sha256').update(fixtureBytes).digest('hex');
+assert.notEqual(fixtureDigest,'a59bdbc6b1300b82f77350c736511c2fc2ea3b07c3f8826a7cb8d31ffa13ddde');
+async function digestFile(check) {
+  const root=await mkdtemp(join(tmpdir(),'wi-c64-digest-')),path=join(root,'fixture');
+  try {await writeFile(path,fixtureBytes);await check(path,root);}
+  finally {await rm(root,{recursive:true,force:true});}
+}
+function noResult(s) {assert.equal(s.writes.filter(w=>w.path.endsWith('RESULT.json')).length,0);}
+function closed(s) {assert.deepEqual(s.calls.filter(c=>['last-close','first-close','stop','strict-stop'].includes(c)),
+  ['last-close','first-close','stop','strict-stop']);}
+
+test('actual spec registers without runtime fixture variables',()=>{
+  const s=digestCase(undefined,undefined);assert.deepEqual(s.calls,[]);assert.deepEqual(s.writes,[]);
+});
+test('actual spec admits fresh supplied bytes and publishes after cleanup with two identical bindings',async()=>{
+  await digestFile(async path=>{
+    const s=digestCase(path,fixtureDigest);await s.run();closed(s);
+    assert.deepEqual(s.bindings,[{path,expected:fixtureDigest},{path,expected:fixtureDigest}]);
+    assert.deepEqual(s.calls,['mkdir','marker','start','last-close','first-close','stop','strict-stop','publish','result']);
+    assert.equal(s.writes.length,2);
+    for(const w of s.writes){assert.equal(w.options.flag,'wx');assert.equal(w.options.mode,0o600);}
+    const result=JSON.parse(s.writes[1].bytes);assert.equal(result.success,true);assert.equal(result.body_success,true);
+    assert.equal(result.cleanup.length,3);assert.equal(s.env.PLAYWRIGHT_NO_COPY_PROMPT,undefined);
+  });
+});
+for(const [name,digest] of [
+  ['missing',undefined],['empty',''],['null',null],['number',64],['boxed string',new String(fixtureDigest)],
+  ['object',{length:64,toString(){throw Error('must not coerce');}}],['short',fixtureDigest.slice(1)],
+  ['long',fixtureDigest+'0'],['nonhex','g'.repeat(64)],['uppercase',fixtureDigest.toUpperCase()],
+  ['leading whitespace',' '+fixtureDigest.slice(1)],['trailing whitespace',fixtureDigest.slice(1)+' '],
+  ['final newline',fixtureDigest+'\n'],['short plus newline',fixtureDigest.slice(1)+'\n'],
+  ['final carriage return',fixtureDigest.slice(1)+'\r'],['final line separator',fixtureDigest.slice(1)+'\u2028'],
+])test(`actual spec rejects ${name} digest before fixture admission`,async()=>{
+  await digestFile(async path=>{
+    const s=digestCase(path,digest);await assert.rejects(s.run(),{message:'C57:acquire'});
+    assert.equal(s.calls.includes('start'),false);assert.equal(s.bindings.length,1);
+    assert.equal(s.bindings[0].expected,digest);
+    if(digest===undefined) {
+      // The unchanged helper can publish failure diagnostics without an expected hash.
+      const result=JSON.parse(s.writes[1].bytes);
+      assert.equal(result.success,false);assert.equal(result.body_failed,true);assert.equal(result.first.code,'acquire');
+    } else noResult(s);
+    assert.equal(s.env.PLAYWRIGHT_NO_COPY_PROMPT,undefined);
+  });
+});
+for(const variant of ['wrong digest','symlink','noncanonical','directory','missing file'])
+  test(`actual spec rejects ${variant} using real executable binding`,async()=>{
+    await digestFile(async(path,root)=>{
+      let target=path,digest=fixtureDigest;
+      if(variant==='wrong digest')digest='0'.repeat(64);
+      if(variant==='symlink'){target=join(root,'link');await symlink(path,target);}
+      if(variant==='noncanonical')target=root+'/./fixture';
+      if(variant==='directory')target=root;
+      if(variant==='missing file')await rm(path);
+      const s=digestCase(target,digest);await assert.rejects(s.run(),{message:'C57:verification_failure'});
+      assert.equal(s.calls.includes('start'),false);assert.equal(s.bindings.length,2);noResult(s);
+    });
+  });
+for(const boundary of ['before admission','before publication'])
+  test(`actual spec keeps captured digest when isolated environment changes ${boundary}`,async()=>{
+    await digestFile(async path=>{
+      const mutate=env=>{env.WI_C3A_FIXTURE_SHA256='not a digest';};
+      const s=digestCase(path,fixtureDigest,{beforePublish:boundary==='before publication'?mutate:undefined});
+      if(boundary==='before admission')mutate(s.env);
+      s.env.PLAYWRIGHT_NO_COPY_PROMPT='previous';await s.run();closed(s);
+      assert.deepEqual(s.bindings.map(b=>b.expected),[fixtureDigest,fixtureDigest]);
+      assert.equal(s.env.WI_C3A_FIXTURE_SHA256,'not a digest');assert.equal(s.env.PLAYWRIGHT_NO_COPY_PROMPT,'previous');
+      assert.equal(JSON.parse(s.writes[1].bytes).success,true);
+    });
+  });
+for(const variant of ['changed bytes','symlink','directory','missing file'])
+  test(`actual publication rejects ${variant} after all cleanup and writes no result`,async()=>{
+    await digestFile(async(path,root)=>{
+      const s=digestCase(path,fixtureDigest,{beforePublish:async env=>{
+        env.WI_C3A_FIXTURE_SHA256=createHash('sha256').update('changed').digest('hex');
+        if(variant==='changed bytes')await writeFile(path,'changed');
+        else {await rm(path);if(variant==='directory')await mkdir(path);
+          if(variant==='symlink'){const other=join(root,'other');await writeFile(other,fixtureBytes);await symlink(other,path);}}
+      }});
+      await assert.rejects(s.run());closed(s);noResult(s);
+      assert.deepEqual(s.bindings.map(b=>b.expected),[fixtureDigest,fixtureDigest]);
+      assert.equal(s.calls.at(-1),'publish');assert.equal(s.env.PLAYWRIGHT_NO_COPY_PROMPT,undefined);
+    });
+  });
+for(const failure of ['body','cleanup','both'])test(`actual spec preserves ${failure} error before final hash failure`,async()=>{
+  await digestFile(async path=>{
+    const first=Error('cleanup sentinel'),s=digestCase(path,fixtureDigest,{
+      bodyFailure:failure!=='cleanup'?Error('C57:native'):undefined,
+      cleanupFailure:failure!=='body'?first:undefined,
+      beforePublish:async()=>{await writeFile(path,'changed');},
+    });
+    await assert.rejects(s.run(),error=>failure==='cleanup'?error===first:error.message==='C57:native');
+    closed(s);noResult(s);assert.equal(s.calls.at(-1),'publish');
+    assert.equal(s.bindings.length,2);assert.equal(s.env.PLAYWRIGHT_NO_COPY_PROMPT,undefined);
+  });
+});
+test('actual spec does not promise inode retention when replacement bytes are identical',async()=>{
+  await digestFile(async(path,root)=>{
+    const s=digestCase(path,fixtureDigest,{beforePublish:async()=>{
+      const replacement=join(root,'replacement');await writeFile(replacement,fixtureBytes);await rename(replacement,path);
+    }});
+    await s.run();closed(s);assert.equal(JSON.parse(s.writes[1].bytes).success,true);
+  });
 });

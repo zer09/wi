@@ -11,7 +11,7 @@ import { validateConversationPage, validateDisplayTaskAccepted } from '../dist/d
 import { TITLE, RENAMED, TASK, requireProof, equalProof, withoutId, pageProof, proveActiveRename,
   proveSavedHistory, ownedWorkspace, runOwned, handshakeProof } from '../test-support/saved-history-active-rename.mjs';
 
-const DIGEST = 'a59bdbc6b1300b82f77350c736511c2fc2ea3b07c3f8826a7cb8d31ffa13ddde';
+const DIGEST = process.env.WI_C3A_FIXTURE_SHA256;
 const markers = ['synthetic-replay-', 'private-operator-', 'private-project-', 'private-skill-', 'private-support-',
   'private-native', 'private-data', 'private-skills', 'private-config-canary', 'principal_digest', 'encrypted_content',
   'opaque_response', 'provider_session_id', 'prepared_request'];
@@ -124,6 +124,7 @@ test('saved populated history survives absent recorded workspace after Rename du
   try {
     await runOwned(async own => {
       try {
+        requireProof(typeof DIGEST === 'string' && DIGEST.length === 64 && /^[0-9a-f]{64}$/.test(DIGEST), 'acquire');
         await executableBinding(executable,DIGEST);
         fixture = await startFixture(executable,{transport:'websocket',recovered:false,mime:true,mutations:true});
         own('fixture', async () => {

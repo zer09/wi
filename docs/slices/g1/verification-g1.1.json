@@ -2,6 +2,29 @@
   "contract": "g1.1",
   "accepted": false,
   "status": "C3B54D5_CASE_REVIEWED_BROWSER_ARM_ONLY_ALL40_PARTIAL",
+  "c63_browser_readiness_research": {
+    "status":"SOURCE_RESEARCH_COMPLETE_NOT_RUNTIME_READY",
+    "source_revision":"516177fe0523c6fa3f169b8dcec18610daaba1b5",
+    "method":"Three completed read-only solution roles, parent source verification, one advisory oracle VALID; parent owns final contract/publication",
+    "product_operations":0,"browser_bodies":0,"attempt_markers":0,"build_discovery_collection":0,"implementation_review_remediation_roles":0,"disk_checks_hosted_work":0,
+    "facts":[
+      {"source":"web/test-support/fixture.mjs:27-58","finding":"Current locked/offline lib-test discovery is rebuildable; no historical executable retention is required"},
+      {"source":"web/e2e/saved-history-active-rename.spec.mjs:14,127,279","finding":"Historical executable digest is required at admission/finalization; new-build inequality remains unmeasured"},
+      {"source":"web/test-support/skill-source-fidelity.mjs:20-25","finding":"Omitted supplied digest disables equality; C57 needs explicit fail-closed invocation-digest admission"},
+      {"source":"web/test-support/live-commit-measurements.mjs:45-77;web/test-support/live-commit-native.mjs:305-349","finding":"C54 requires separately prepared binding/allocation and strong source/Cargo/selector/digest validation"},
+      {"source":"web/test-support/restart-display.mjs:155-183;web/test-support/live-commit-measurements.mjs:45-69","finding":"Restart source pins match; retainable C52/C53/C54 allocations currently originate in approved scratch, not durable records"},
+      {"source":".github/workflows/ci.yml:26-46","finding":"Ubuntu workflow publishes ordinary fixture path only, not complete C54 setup or new C57 digest"},
+      {"source":"web/playwright.config.mjs:5-10","finding":"workers1/retries0/case60s/global300s remain unchanged; full-suite duration is unmeasured"}
+    ],
+    "marker_accounting":{"recorded_C62_collection":{"cases":89,"files":34},"case_marker_sites":5,"cases":["C52","C53","C54","C57","C61"],"C54_outer":"OPTIONAL_SEPARATE","suite_guard":"SEPARATE_IF_RESERVED","actual_consumed":0,"limit":"Reservations may not all be reached; fresh exclusive output is required"},
+    "next_increment":{"id":"C64","scope":"Offline-only strict current-invocation C57 digest in the existing spec/unit-test files","files":["web/e2e/saved-history-active-rename.spec.mjs","web/test/saved-history-active-rename.test.mjs"],"admission":"Captured WI_C3A_FIXTURE_SHA256 must be a primitive string of exactly64 lowercase hex characters inside existing error boundary, not module registration","preserved":"Both original binding calls/same captured digest/marker order/error precedence/cleanup/environment restoration/all body assertions and deadlines","checks":"Actual-spec and real-binding synthetic offline regressions; focused/affected/full default Node/syntax/typecheck/assets/static/registration-only collection; parent inspection and two fresh scoped reviews","runtime_operations":0,"limit":"Supplied digest is not yet proof of current-source build provenance; preparation remains a later increment"},
+    "later":["Current-artifact preparation with source/lock/toolchain/command/per-file metadata receipts, no binary or repository snapshots","Explicit durable allocation for retainable roots with matching creation/cleanup ownership and unchanged approved environment","Equivalent local/Ubuntu preparation before a separately finalized unfiltered full-runtime gate"],
+    "not_adopted":["Filtering or skipping required cases","Deadline inflation or retries","Runtime extrapolation from selected case timings","Historical binary restoration or callback proof replay as preparation","Changing approved TMPDIR or moving/adopting historical roots","Removing currently matching source pins"],
+    "preservation":{"source_inventory":801,"staged_C55_handoffs":2,"prior_named_tests":98,"all_prior_JSON_fields":"UNCHANGED","records":"New external research records only, historical records not edited"},
+    "accepted":false,"official_status":"All40 PARTIAL","inventory":"OPEN","unchanged":"C15/active1/reader/SSE/no-store/access/pins/deadlines/waiver/ledger/C61 intermittent unknown/historical failures",
+    "limits":"Source research, not current binary compatibility/full-suite execution/scoped implementation review/final master review/hosted result/acceptance; harmless corrected diagnostics disclosed in local records",
+    "evidence":"Supporting reports and finite preservation receipts retained (local record); decisive source facts are inline"
+  },
   "c62_current_head_offline_gates": {
     "status":"OFFLINE_GATES_PASS_SCOPED_REVIEW_A_B_PASS",
     "tested_revision":"6cf59f8e032cc5bf3df8e1045b92a97854311151",

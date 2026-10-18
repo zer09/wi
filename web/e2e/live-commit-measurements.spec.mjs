@@ -9,7 +9,7 @@ import { allocationProgress, resolveAllocation, allocationProof, removeAllocatio
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 test('one genuine Task live append, authoritative replacement and terminal commit measurements', async ({}, testInfo) => {
-  let output, binding, fixture, native, server, browser, context, network, browserIdentity;
+  let output, binding, fixture, native, server, browser, context, network, browserIdentity, allocationBase;
   let bodySucceeded = false, rootRemoved = false, finalDiscovery = false, fallback = false, browserVersion = null;
   let nativeRetired = [], browserRetired = [], browserMembers = [], treeFacts = [], nativeMeasurement = null, browserMeasurement = null;
   let first, appended, authority, terminal, bindingUnchanged = false;
@@ -41,8 +41,11 @@ test('one genuine Task live append, authoritative replacement and terminal commi
   try {
     sourceGuard(await readFile(new URL(import.meta.url), 'utf8'), await readFile(new URL('../test-support/live-commit-measurements.mjs', import.meta.url), 'utf8'));
     binding = await operation('binding', () => resolveBinding(process.env));
-    await operation('allocation', () => resolveAllocation(process.env, allocation));
-    owned.register('allocation-parent', 95, () => operation('allocation_cleanup', () => removeAllocation(allocation, process.env.TMPDIR,
+    await operation('allocation', () => {
+      allocationBase = process.env.WI_BROWSER_FIXTURE_PARENT;
+      return resolveAllocation({ WI_BROWSER_FIXTURE_PARENT: allocationBase, WI_C54_ALLOCATION_PARENT: process.env.WI_C54_ALLOCATION_PARENT }, allocation);
+    });
+    owned.register('allocation-parent', 95, () => operation('allocation_cleanup', () => removeAllocation(allocation, allocationBase,
       { root_removed: rootRemoved, prior_cleanup_safe: !owned.cleanupFailed() }, { rmdir: async path => {
         await network.drain(); collectorProof();
         return rmdir(path);
@@ -57,7 +60,7 @@ test('one genuine Task live append, authoritative replacement and terminal commi
         || [...nativeRetired, ...browserRetired].some(i => !['absent', 'reused'].includes(i.retirement))) throw new Error('Root retained');
       const facts = native.evidence(); terminalProof(facts);
       await modesProof(value.root);
-      await allocationProof(allocation.identity, process.env.TMPDIR);
+      await allocationProof(allocation.identity, allocationBase);
       // A checks binding, root identity and native retirement before invoking this final callback.
       await removeRoot(value, [facts], binding, { remove: async (path, options) => {
         await network.drain(); collectorProof();

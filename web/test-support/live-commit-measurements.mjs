@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { isAbsolute, join, dirname, basename } from 'node:path';
+import { isAbsolute, join, dirname, basename, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { validateTaskCommand } from '../dist/api.js';
 import { texts, savedProof, nativeBinding, ownNativeDiagnostic, nodeBoundaries } from './live-commit-native.mjs';
@@ -13,10 +13,10 @@ export function allocationProgress() {
   return { phase: 'no_path', path: null, identity: null, nested: 'not_started', removed: false };
 }
 export async function outerProof(path, io = fs) {
-  if (typeof path !== 'string' || !isAbsolute(path)) reject();
+  if (typeof path !== 'string' || !path.isWellFormed() || path.includes('\0') || !isAbsolute(path) || resolve(path) !== path) reject();
   const s = await io.lstat(path);
   if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== process.getuid() || await io.realpath(path) !== path
-    || (s.mode & 0o300) !== 0o300 || (s.mode & 0o022) !== 0) reject();
+    || (s.mode & 0o7777) !== 0o700) reject();
   return true;
 }
 export async function allocationProof(value, outer, io = fs) {
@@ -48,7 +48,7 @@ export async function resolveAllocation(env, progress, io = fs) {
   if (typeof value?.path === 'string' && isAbsolute(value.path)) {
     progress.path = value.path; progress.phase = 'path_returned';
   }
-  progress.identity = await allocationProof(value, env.TMPDIR, io);
+  progress.identity = await allocationProof(value, env.WI_BROWSER_FIXTURE_PARENT, io);
   progress.phase = 'identity_verified'; return progress;
 }
 export async function removeAllocation(progress, outer, safety, overrides = {}) {
@@ -62,8 +62,9 @@ export async function removeAllocation(progress, outer, safety, overrides = {}) 
 export async function prepareInvocation({ env, excluded, progress, readiness, consume }, io = fs, bind = resolveBinding) {
   await readiness();
   const binding = await bind(env);
-  await allocateParent(env.TMPDIR, excluded, progress, io);
-  await allocationProof(progress.identity, env.TMPDIR, io);
+  const outer = env.WI_BROWSER_FIXTURE_PARENT;
+  await allocateParent(outer, excluded, progress, io);
+  await allocationProof(progress.identity, outer, io);
   await readiness();
   // The wrapper reserves OUTER only here. The registered callback reserves its own marker later.
   return consume({ binding, progress });

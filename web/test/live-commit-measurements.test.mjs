@@ -290,10 +290,13 @@ async function specCase(t, options = {}) {
   const allocationIo = options.allocationIo ?? {
     lstat: async p => {
       raise('parent-stat'); if (options.parentUnknown) throw failure;
-      return { uid: parent.uid, mode: p === '/synthetic' ? 0o755 : options.parentRejected ? 0o755 : parent.mode,
+      return { uid: parent.uid, mode: p === '/synthetic' ? 0o700 : options.parentRejected ? 0o755 : parent.mode,
         dev: parent.device, ino: parent.inode, isDirectory: () => true, isSymbolicLink: () => false };
     }, realpath: async p => p,
-    rmdir: async () => { raise('parent-rmdir'); if (options.parentContents) throw failure; },
+    rmdir: async (...args) => { removals.push({ kind: 'parent', args }); raise('parent-rmdir'); if (options.parentContents) throw failure; },
+  };
+  const removals = [], runtimeEnv = options.runtimeEnv ?? options.allocationEnv ?? {
+    TMPDIR: '/synthetic', WI_BROWSER_FIXTURE_PARENT: '/synthetic', WI_C54_ALLOCATION_PARENT: JSON.stringify(parent),
   };
   let allocation;
   function late() {
@@ -395,7 +398,7 @@ async function specCase(t, options = {}) {
     readFile: async u => u.href === specPath.href ? source : helper,
     writeFile: async (p, raw, opts) => { const name = p.split('/').at(-1); events.push('save:' + name); assert.equal(opts.mode, 0o600); assert.equal(opts.flag, 'wx');
       if (options.write === name) throw publication; artifacts.set(name, JSON.parse(raw)); },
-    rm: async () => { raise('rm'); if (options.late === 'rm-started') late(); }, rmdir: (...args) => allocationIo.rmdir(...args), lstat: async () => { throw { code: 'ENOENT' }; }, join,
+    rm: async (...args) => { removals.push({ kind: 'root', args }); raise('rm'); if (options.late === 'rm-started') late(); }, rmdir: (...args) => allocationIo.rmdir(...args), lstat: async () => { throw { code: 'ENOENT' }; }, join,
     JSON: { ...JSON, stringify: (v, ...args) => { const name = v?.steps ? 'CLEANUP.json' : v?.independent_clocks ? 'MEASUREMENTS.json' : v?.native_states !== undefined ? 'ACCEPTANCE.json' : v?.fresh_cases ? 'BROWSER_RESULT.json' : null;
       if (options.serialize === name && name) throw publication; return JSON.stringify(v, ...args); } },
     createRoot: async p => { raise('nested-create'); if (options.createNested) return options.createNested(p); assert.equal(p, parent.path); return { root: '/synthetic/root', owner }; }, rootProof: async () => { if (disposing) await seam('root'); },
@@ -421,9 +424,15 @@ async function specCase(t, options = {}) {
     }, retireTree: async members => { raise('retire-tree'); if (!serverClosed || options.unknownRetirement) throw failure; return members.map(v => ({ ...v, retirement: 'absent' })); },
     boundary: async () => {}, resolveBinding: async () => binding,
     allocationProgress: () => { allocation = allocationProgress(); return allocation; },
-    resolveAllocation: (env, progress) => resolveAllocation(options.allocationEnv ?? env, progress, allocationIo),
-    allocationProof: (value, outer) => allocationProof(value, options.allocationEnv?.TMPDIR ?? outer, allocationIo),
-    removeAllocation: (progress, outer, safety, overrides) => removeAllocation(progress, options.allocationEnv?.TMPDIR ?? outer, safety, { ...allocationIo, ...overrides }),
+    resolveAllocation: (env, progress) => {
+      if (options.baseSnapshot) {
+        assert.deepEqual(Object.keys(env).sort(), ['WI_BROWSER_FIXTURE_PARENT', 'WI_C54_ALLOCATION_PARENT'].sort());
+        assert.equal(env.WI_BROWSER_FIXTURE_PARENT, '/synthetic');
+      }
+      return resolveAllocation(env, progress, allocationIo);
+    },
+    allocationProof: (value, outer) => allocationProof(value, outer, allocationIo),
+    removeAllocation: (progress, outer, safety, overrides) => removeAllocation(progress, outer, safety, { ...allocationIo, ...overrides }),
     reserveOutput: (info, env) => reserveOutput(info, env, { mkdir: async () => { raise('reserve'); if (options.occupied) throw failure; }, writeFile: async (p, raw, opts) => { assert.equal(opts.mode, 0o600); assert.equal(opts.flag, 'wx'); raise('marker'); artifacts.set('C54.once.json', JSON.parse(raw)); } }),
     modesProof: async () => { disposing = true; await seam('modes'); }, browserProgram, browserProof, phaseDrive,
     liveCollector: args => {
@@ -440,15 +449,18 @@ async function specCase(t, options = {}) {
       operation: async (name, action) => {
         try { return await d.operation(name, async () => {
           raise(name); if (options.consoleFault && name === 'privacy') pageHandlers.get('console')();
+          if (name === options.mutateBaseAt) {
+            runtimeEnv.WI_BROWSER_FIXTURE_PARENT = '/synthetic/changed'; runtimeEnv.TMPDIR = '/synthetic/changed';
+          }
           return action();
         }); } catch (error) { firstOperationError ??= error; firstPacket ??= d.packet(); throw error; }
       } }; },
-    newFaults: () => faults, sourceGuard, process: { env: { TMPDIR: '/synthetic', WI_C54_ALLOCATION_PARENT: JSON.stringify(parent) }, pid: process.pid }, URL,
+    newFaults: () => faults, sourceGuard, process: { env: runtimeEnv, pid: process.pid }, URL,
   };
-  new Function(...Object.keys(values), script)(...Object.values(values)); let error;
+  new Function(...Object.keys(values), script)(...Object.values(values)); options.beforeCallback?.(); let error;
   try { await callback({}, { outputPath: name => { assert.equal(name, 'c54-evidence'); return '/synthetic/output/evidence'; } }); } catch (caught) { error = caught; }
   assert.equal(typeof callback, 'function'); assert.ok(!JSON.stringify([...artifacts.values()]).includes(failure.message));
-  return { artifacts, events, error, cleanupResult, failure, publication, network, facts, allocation, firstOperationError, firstPacket, ownedError, digestCalls };
+  return { artifacts, events, error, cleanupResult, failure, publication, network, facts, allocation, firstOperationError, firstPacket, ownedError, digestCalls, removals };
 }
 test('D1 actual registered callbacks preserve both Node callback orders and later native close without causal claims', async t => {
   for (const nativeOrder of ['browser-first', 'native-first']) for (const readerUnavailable of [false, true]) await t.test(`${nativeOrder} readers ${readerUnavailable}`, async t => {
@@ -903,14 +915,14 @@ test('C54B root metadata validator rejects symlinks wrong modes aliases ownershi
 
 async function allocationOuter(t) {
   const outer = await fs.mkdtemp(join(process.env.TMPDIR, 'wi-c54-control-'));
-  await fs.chmod(outer, 0o755);
+  await fs.chmod(outer, 0o700);
   // The test owns this synthetic outer independently of the product's deletion authority.
   t.after(() => fs.rm(outer, { recursive: true })); return outer;
 }
-test('C54B actual filesystem accepts 0755 outer with fresh 0700 parent and unchanged A root proofs', async t => {
-  const outer = await allocationOuter(t), progress = allocationProgress();
+test('C54B actual filesystem accepts private explicit base with fresh parent and unchanged A root proofs', async t => {
+  const scratch = process.env.TMPDIR, outer = await allocationOuter(t), progress = allocationProgress(), sibling = allocationProgress();
   assert.equal(await outerProof(outer), true);
-  await assert.rejects(createRoot(outer));
+  await allocateParent(outer, [], sibling);
   await allocateParent(outer, [join(outer, 'evidence'), join(outer, 'playwright')], progress);
   assert.equal(progress.phase, 'identity_verified'); assert.equal(progress.identity.mode, 0o700);
   const f = await createRoot(progress.path); assert.equal(await rootProof(f), true);
@@ -920,7 +932,9 @@ test('C54B actual filesystem accepts 0755 outer with fresh 0700 parent and uncha
   assert.equal(progress.removed, false); await fs.rm(f.root, { recursive: true });
   await removeAllocation(progress, outer, { root_removed: true, prior_cleanup_safe: true });
   assert.equal(progress.removed, true); await assert.rejects(fs.lstat(progress.path), { code: 'ENOENT' });
-  assert.equal((await fs.lstat(outer)).mode & 0o7777, 0o755);
+  assert.equal((await fs.lstat(outer)).mode & 0o7777, 0o700);
+  assert.notEqual(progress.path, sibling.path); assert.equal(await allocationProof(sibling.identity, outer).then(() => true), true);
+  await fs.rmdir(sibling.path); assert.deepEqual(await fs.readdir(outer), []); assert.equal(process.env.TMPDIR, scratch);
 });
 test('C54B actual allocation captures path before rejected or unavailable identity without deletion authority', async t => {
   for (const kind of ['mode', 'unavailable', 'canonical', 'uid', 'symlink', 'inode']) await t.test(kind, async t => {
@@ -945,16 +959,16 @@ test('C54B actual allocation captures path before rejected or unavailable identi
 });
 test('C54B actual parent validation rejects unsafe outer modes and occupied allocation is never adopted', async t => {
   const outer = await allocationOuter(t);
-  for (const mode of [0o775, 0o757, 0o555, 0o655]) {
+  for (const mode of [0o755, 0o775, 0o757, 0o555, 0o655, 0o1700, 0o2700, 0o4700]) {
     await fs.chmod(outer, mode); await assert.rejects(outerProof(outer));
   }
-  await fs.chmod(outer, 0o755);
+  await fs.chmod(outer, 0o700);
   const old = allocationProgress(), fresh = allocationProgress(); await allocateParent(outer, [], old); await allocateParent(outer, [], fresh);
   assert.notEqual(fresh.path, old.path);
   const progress = allocationProgress();
   await assert.rejects(allocateParent(outer, [], progress, { ...fs, mkdtemp: async () => { throw new Error('Synthetic occupied allocation'); } }));
   assert.equal(progress.phase, 'no_path'); assert.equal(progress.path, null);
-  await assert.rejects(resolveAllocation({ TMPDIR: outer, WI_C54_ALLOCATION_PARENT: JSON.stringify({ ...old.identity, inode: old.identity.inode + 1 }) }, allocationProgress()));
+  await assert.rejects(resolveAllocation({ WI_BROWSER_FIXTURE_PARENT: outer, WI_C54_ALLOCATION_PARENT: JSON.stringify({ ...old.identity, inode: old.identity.inode + 1 }) }, allocationProgress()));
 });
 test('C54B actual nonrecursive parent removal retains unexpected contents and identity or removal failures', async t => {
   for (const kind of ['contents', 'identity', 'rmdir']) await t.test(kind, async t => {
@@ -978,7 +992,7 @@ test('C54B actual callback retains known parent and unknown nested state when A 
   for (const kind of ['partial', 'after-A']) await t.test(kind, async t => {
     const outer = await allocationOuter(t), p = allocationProgress(); await allocateParent(outer, [], p);
     let nested;
-    const c = await specCase(t, { allocationIo: fs, allocationEnv: { TMPDIR: outer, WI_C54_ALLOCATION_PARENT: JSON.stringify(p.identity) }, createNested: async path => {
+    const c = await specCase(t, { allocationIo: fs, allocationEnv: { WI_BROWSER_FIXTURE_PARENT: outer, WI_C54_ALLOCATION_PARENT: JSON.stringify(p.identity) }, createNested: async path => {
       assert.equal(path, p.path);
       if (kind === 'after-A') { const f = await createRoot(path); await rootProof(f); nested = f.root; }
       else { nested = await fs.mkdtemp(join(path, 'wi-live-commit-')); await fs.mkdir(join(nested, 'workspace'), { mode: 0o700 }); }
@@ -1004,7 +1018,7 @@ test('C54B actual callback continues cleanup but never sweeps parent after root 
 test('C54B actual invocation preflight validates readiness binding and parent before OUTER then callback marker', async t => {
   for (const fail of ['none', 'readiness', 'binding', 'metadata', 'second-readiness']) await t.test(fail, async t => {
     const outer = await allocationOuter(t), progress = allocationProgress(), events = []; let reads = 0;
-    const run = prepareInvocation({ env: { TMPDIR: outer }, excluded: [join(outer, 'evidence'), join(outer, 'playwright')], progress,
+    const run = prepareInvocation({ env: { WI_BROWSER_FIXTURE_PARENT: outer }, excluded: [join(outer, 'evidence'), join(outer, 'playwright')], progress,
       readiness: async () => { events.push('ready'); if (fail === 'readiness' || fail === 'second-readiness' && ++reads === 2) throw new Error('Synthetic readiness failure'); },
       consume: async () => { events.push('OUTER'); assert.equal(progress.phase, 'identity_verified');
         await reserveOutput({ outputPath: () => join(outer, 'evidence') }, {}, { ...fs, writeFile: async (...args) => { events.push('callback'); return fs.writeFile(...args); } }); },
@@ -1015,4 +1029,123 @@ test('C54B actual invocation preflight validates readiness binding and parent be
       if (['metadata', 'second-readiness'].includes(fail)) { assert.equal(typeof progress.path, 'string'); assert.equal(progress.removed, false); assert.equal((await fs.lstat(progress.path)).isDirectory(), true); }
     }
   });
+});
+
+test('C67 invalid base syntax rejects before filesystem reads or allocation effects', async t => {
+  for (const value of [undefined, null, 1, {}, new String('/synthetic'), new URL('file:///synthetic'), '', 'relative', '/bad\0base', '/bad\ud800base', '/synthetic/', '/synthetic/.', '/synthetic/../synthetic', '//synthetic']) await t.test(String(value), async () => {
+    const p = allocationProgress(), io = { lstat: trap, realpath: trap, mkdtemp: trap };
+    await assert.rejects(outerProof(value, io), { message: 'Live measurement rejected' });
+    await assert.rejects(allocateParent(value, [], p, io), { message: 'Live measurement rejected' });
+    assert.deepEqual(p, allocationProgress());
+  });
+});
+test('C67 existing base must be canonical nonsymlink owned and exactly private before allocation', async t => {
+  for (const kind of ['missing', 'file', 'link', 'alias', 'public', 'sticky', 'setgid', 'setuid', 'uid']) await t.test(kind, async t => {
+    const outer = await allocationOuter(t), base = join(outer, 'base'), p = allocationProgress();
+    if (kind === 'file') await fs.writeFile(base, '', { mode: 0o600 });
+    else if (kind !== 'missing') await fs.mkdir(base, { mode: 0o700 });
+    let supplied = base;
+    if (kind === 'link' || kind === 'alias') {
+      await fs.symlink(base, join(outer, 'alias')); supplied = join(outer, 'alias');
+      if (kind === 'alias') { await fs.mkdir(join(base, 'nested'), { mode: 0o700 }); supplied += '/nested'; }
+    }
+    if (kind === 'public') await fs.chmod(base, 0o755);
+    if (kind === 'sticky') await fs.chmod(base, 0o1700);
+    if (kind === 'setgid') await fs.chmod(base, 0o2700);
+    if (kind === 'setuid') await fs.chmod(base, 0o4700);
+    const io = { ...fs, mkdtemp: trap, lstat: async path => {
+      const s = await fs.lstat(path);
+      if (kind === 'uid') return { ...s, uid: s.uid + 1, isDirectory: () => true, isSymbolicLink: () => false };
+      return s;
+    } };
+    await assert.rejects(allocateParent(supplied, [], p, io), error => kind === 'missing' ? error.code === 'ENOENT' : error.message === 'Live measurement rejected');
+    assert.deepEqual(p, allocationProgress());
+  });
+});
+test('C67 base I/O errors remain the original error and do not grant allocation authority', async t => {
+  for (const boundary of ['lstat', 'realpath']) await t.test(boundary, async () => {
+    const failure = new Error('Synthetic base I/O failure'), p = allocationProgress();
+    const io = { lstat: async () => ({ isDirectory: () => true, isSymbolicLink: () => false, uid: process.getuid(), mode: 0o700 }),
+      realpath: async path => path, mkdtemp: trap, [boundary]: async () => { throw failure; } };
+    await assert.rejects(allocateParent('/synthetic', [], p, io), error => error === failure);
+    assert.deepEqual(p, allocationProgress());
+  });
+});
+test('C67 explicit base is captured after readiness and binding and reused across allocation and reproof', async t => {
+  const outer = await allocationOuter(t), scratch = await allocationOuter(t), p = allocationProgress(), events = [];
+  let reads = 0, ready = 0, bound = false;
+  const env = { TMPDIR: scratch, get WI_BROWSER_FIXTURE_PARENT() {
+    assert.equal(ready, 1); assert.equal(bound, true); assert.equal(++reads, 1); return outer;
+  } };
+  const result = await prepareInvocation({ env, excluded: [], progress: p,
+    readiness: async () => { events.push('ready'); ready++; }, consume: async value => { events.push('consume'); return value; },
+  }, { ...fs, mkdtemp: async prefix => { assert.equal(prefix, join(outer, 'wi-c54-private-')); events.push('allocate'); return fs.mkdtemp(prefix); } },
+  async value => { assert.equal(value, env); events.push('bind'); bound = true; return { synthetic: true }; });
+  assert.equal(reads, 1); assert.deepEqual(events, ['ready', 'bind', 'allocate', 'ready', 'consume']);
+  assert.deepEqual(result, { binding: { synthetic: true }, progress: p });
+  const resolved = allocationProgress(); let resolveReads = 0;
+  await resolveAllocation({ TMPDIR: scratch, WI_C54_ALLOCATION_PARENT: JSON.stringify(p.identity),
+    get WI_BROWSER_FIXTURE_PARENT() { assert.equal(++resolveReads, 1); return outer; } }, resolved);
+  assert.deepEqual(resolved, p); assert.equal(resolveReads, 1); assert.deepEqual(await fs.readdir(scratch), []);
+});
+test('C67 missing explicit base never falls back to valid private scratch', async t => {
+  const outer = await allocationOuter(t), p = allocationProgress(); await allocateParent(outer, [], p);
+  const env = { TMPDIR: outer, WI_C54_ALLOCATION_PARENT: JSON.stringify(p.identity) }, progress = allocationProgress();
+  await assert.rejects(prepareInvocation({ env, excluded: [], progress, readiness: async () => {}, consume: trap }, { ...fs, mkdtemp: trap }, async () => ({})), { message: 'Live measurement rejected' });
+  assert.deepEqual(progress, allocationProgress());
+  const resolved = allocationProgress(); await assert.rejects(resolveAllocation(env, resolved));
+  assert.equal(resolved.identity, null); assert.equal(resolved.phase, 'path_returned');
+  const c = await specCase(t, { runtimeEnv: { TMPDIR: '/synthetic', WI_C54_ALLOCATION_PARENT: JSON.stringify({ path: '/synthetic/wi-c54-private-ABC123', uid: process.getuid(), mode: 0o700, device: 1, inode: 2 }) } });
+  assert.equal(c.error?.message, 'Live measurement rejected'); assert.equal(c.firstPacket.first_operation, 'allocation'); assert.equal(c.artifacts.size, 0);
+  for (const event of ['reserve', 'marker', 'nested-create', 'native-acquired', 'server-acquired', 'parent-rmdir']) assert.ok(!c.events.includes(event));
+});
+test('C67 actual callback snapshots the base only at allocation and keeps it through root and parent cleanup', async t => {
+  for (const kind of ['second-read', 'mutation']) await t.test(kind, async t => {
+    let reads = 0;
+    const env = { TMPDIR: '/synthetic/scratch', WI_C54_ALLOCATION_PARENT: JSON.stringify({ path: '/synthetic/wi-c54-private-ABC123', uid: process.getuid(), mode: 0o700, device: 1, inode: 2 }),
+      get WI_BROWSER_FIXTURE_PARENT() { assert.equal(++reads, 1); return '/synthetic'; },
+      set WI_BROWSER_FIXTURE_PARENT(value) { assert.equal(value, '/synthetic/changed'); Object.defineProperty(this, 'WI_BROWSER_FIXTURE_PARENT', { value, writable: true }); },
+    };
+    const c = await specCase(t, { runtimeEnv: env, baseSnapshot: true, beforeCallback: () => assert.equal(reads, 0), mutateBaseAt: kind === 'mutation' ? 'native_stop' : undefined });
+    assert.equal(reads, 1); assert.equal(c.error, undefined); assert.equal(c.artifacts.get('BROWSER_RESULT.json').status, 'PASS');
+    assert.deepEqual(c.removals, [{ kind: 'root', args: ['/synthetic/root', { recursive: true }] }, { kind: 'parent', args: ['/synthetic/wi-c54-private-ABC123'] }]);
+    assert.equal(c.allocation.removed, true);
+  });
+});
+test('C67 actual registered callback rejects invalid runtime base before output or acquisition', async t => {
+  for (const value of [undefined, null, '', 'relative', '/bad\0base', '/bad\ud800base', '/synthetic/', '/synthetic/../synthetic', '/synthetic/other']) await t.test(String(value), async t => {
+    let reads = 0;
+    const env = { TMPDIR: '/synthetic', WI_C54_ALLOCATION_PARENT: JSON.stringify({ path: '/synthetic/wi-c54-private-ABC123', uid: process.getuid(), mode: 0o700, device: 1, inode: 2 }),
+      get WI_BROWSER_FIXTURE_PARENT() { reads++; return value; } };
+    const c = await specCase(t, { runtimeEnv: env, beforeCallback: () => assert.equal(reads, 0) });
+    assert.ok(c.error); assert.equal(reads, 1); assert.equal(c.artifacts.size, 0); assert.equal(c.allocation.identity, null);
+    for (const event of ['reserve', 'marker', 'nested-create', 'native-acquired', 'server-acquired', 'parent-rmdir']) assert.ok(!c.events.includes(event));
+  });
+});
+test('C67 child identity shape direct relationship and excluded overlap remain strict', async t => {
+  const outer = await allocationOuter(t), wrong = await allocationOuter(t), p = allocationProgress(); await allocateParent(outer, [], p);
+  for (const field of ['path', 'uid', 'mode', 'device', 'inode', 'extra', 'missing']) await t.test(field, async () => {
+    const value = { ...p.identity };
+    if (field === 'path') value.path = join(p.path, 'wi-c54-private-NESTED');
+    else if (field === 'extra') value.extra = 1;
+    else if (field === 'missing') delete value.device;
+    else value[field]++;
+    await assert.rejects(allocationProof(value, outer));
+  });
+  await assert.rejects(allocationProof(p.identity, wrong));
+  for (const defect of ['file', 'device']) await t.test(defect, async () => {
+    await assert.rejects(allocationProof(p.identity, outer, { ...fs, lstat: async path => {
+      const s = await fs.lstat(path); if (path === outer) return s;
+      return { ...s, dev: defect === 'device' ? s.dev + 1 : s.dev, isDirectory: () => defect !== 'file', isSymbolicLink: () => false };
+    } }));
+  });
+  for (const relation of ['same', 'ancestor', 'descendant']) await t.test(relation, async () => {
+    const progress = allocationProgress();
+    let excluded = p.path;
+    if (relation === 'ancestor') excluded = outer;
+    if (relation === 'descendant') excluded = join(p.path, 'nested');
+    await assert.rejects(allocateParent(outer, [excluded], progress, { ...fs, mkdtemp: async () => p.path }));
+    assert.equal(progress.path, p.path); assert.equal(progress.phase, 'path_returned'); assert.equal(progress.identity, null);
+  });
+  assert.equal(await allocationProof(p.identity, outer).then(() => true), true);
 });

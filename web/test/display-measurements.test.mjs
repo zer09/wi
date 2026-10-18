@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm as removeFixture } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { isAbsolute, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -10,7 +10,7 @@ import { transportTiming, transportSizes, measurementCollector, installColdObser
   sourceGuard, boundaries } from '../test-support/display-measurements.mjs';
 import { sid, previous, expectedPage, newRecord, newFaults } from '../test-support/upgrade-display-parity.mjs';
 import { CHILD_TEST } from '../test-support/fixture.mjs';
-import { workKeys, terminalProof } from '../test-support/restart-display.mjs';
+import { createRestartRoot, workKeys, terminalProof } from '../test-support/restart-display.mjs';
 
 const timing = { startTime: 123456, requestStart: 2, responseStart: 8, responseEnd: 10 };
 const sizes = { requestBodySize: 0, requestHeadersSize: 100, responseBodySize: 200, responseHeadersSize: 50 };
@@ -346,7 +346,10 @@ async function specCase(options = {}) {
   const fn = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name.text === 'nativeBinding').getText(ast).replace('export ', '');
   const script = source.replace(/^import[\s\S]*?;\n/gm, '').replaceAll('import.meta.url', JSON.stringify(new URL('../e2e/display-measurements.spec.mjs', import.meta.url).href));
   const events = [], saved = new Map(), synthetic = new Error('original synthetic failure'), publication = new Error('synthetic publication failure');
-  const fixturePath = '/synthetic/compiler', env = { WI_C3A_FIXTURE: fixturePath, ...options.env };
+  const fixturePath = '/synthetic/compiler', parentReads = [], forwarded = [], removed = [];
+  const env = new Proxy({ WI_C3A_FIXTURE: fixturePath, WI_BROWSER_FIXTURE_PARENT: '/synthetic/private-parent', ...options.env }, {
+    get(target, key) { if (key === 'WI_BROWSER_FIXTURE_PARENT') { parentReads.push(key); events.push('parent-read'); } return target[key]; },
+  });
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const files = new Map([[fixturePath, Buffer.from('synthetic executable')]]);
   for (const file of ['src/providers/openai_codex/tests/replay/http_api_joined/browser.rs', 'src/providers/openai_codex/tests/replay/http_api_joined/browser/restart.rs']) {
@@ -390,9 +393,18 @@ async function specCase(options = {}) {
       if (saved.has(name) || options.rejectPublication === name) throw publication;
       saved.set(name, JSON.parse(raw));
     },
-    rm: async () => { events.push('root-remove'); }, lstat: async () => { throw { code: 'ENOENT' }; }, join, isAbsolute,
+    rm: async (path, flags) => { events.push('root-remove'); removed.push(path); assert.equal(path, '/synthetic'); assert.deepEqual(flags, { recursive: true }); }, lstat: async () => { throw { code: 'ENOENT' }; }, join, isAbsolute,
     discoverFixture: async () => { events.push('discovery'); assert.equal(saved.get('C52.once.json').consumed, true); return fixturePath; },
-    nativeBinding: async path => { events.push('binding'); return bind(path); }, createRestartRoot: async () => { raise('root-acquire'); return { root: '/synthetic', owner }; },
+    nativeBinding: async path => { events.push('binding'); return bind(path); }, createRestartRoot: async (...args) => {
+      forwarded.push(args); raise('root-acquire');
+      if (options.allocator) {
+        const value = await options.allocator(...args);
+        // A broken forwarding regression must not leak its unexpected unit root.
+        await removeFixture(value.root, { recursive: true });
+        throw new Error('Invalid parent unexpectedly acquired root');
+      }
+      return { root: '/synthetic', owner };
+    },
     rootProof: async () => { raise('root-proof'); }, terminalProof: () => {},
     sid, head: '21', title: 'Title', facts: [{ run: 'A' }, { run: 'B' }], previous, digest: () => 'synthetic-digest', seedLegacy: async () => { raise('seed'); return {}; },
     snapshot: () => ({}), legacyProof: () => {}, upgradedProof: () => {}, catalogProof: () => {}, expectedPage, pageProof: () => {}, domProof: () => {}, sameDom: () => {},
@@ -413,13 +425,35 @@ async function specCase(options = {}) {
     }, sourceGuard: options.sourceMismatch ? () => { throw synthetic; } : sourceGuard };
   new Function(...Object.keys(values), script)(...Object.values(values));
   let error;
+  assert.equal(parentReads.length, 0); events.push('invoke');
   try { await callback({}, { outputPath: name => { events.push('output-path'); assert.equal(name, 'c52-evidence'); return output; } }); } catch (caught) { error = caught; }
   assert.equal(events.filter(e => e === 'collected').length, 1);
   assert.match(error.message, /^C52 measurement case failed; sanitized evidence saved$/);
   assert.equal(JSON.stringify([...saved.values()]).includes('synthetic-unlogged-control'), false);
   assert.equal(JSON.stringify([...saved.values()]).includes(synthetic.message), false);
-  return { events, saved, error, failure: cleanupResult.error, synthetic, publication, observer, env, f };
+  return { events, saved, error, failure: cleanupResult.error, synthetic, publication, observer, env, f, forwarded, parentReads, removed };
 }
+test('C52 actual callback requires a runtime parent only at root acquisition and forwards it without fallback', async t => {
+  const admitted = await specCase({ injected: 'seed', env: { WI_BROWSER_FIXTURE_PARENT: '/synthetic/designated-parent' } });
+  assert.deepEqual(admitted.forwarded, [['/synthetic/designated-parent']]); assert.equal(admitted.parentReads.length, 1);
+  assert.ok(admitted.events.indexOf('binding') < admitted.events.indexOf('parent-read'));
+  assert.ok(admitted.events.indexOf('parent-read') < admitted.events.indexOf('root-acquire'));
+  const missing = await specCase({ env: { WI_BROWSER_FIXTURE_PARENT: undefined } });
+  assert.equal(missing.failure.message, 'Browser fixture parent required'); assert.equal(missing.parentReads.length, 1);
+  assert.deepEqual(missing.forwarded, []); assert.ok(missing.events.includes('binding'));
+  for (const event of ['root-acquire', 'seed', 'native-acquire', 'launch', 'root-remove']) assert.equal(missing.events.includes(event), false);
+  for (const parent of ['', 'relative', '/synthetic/invalid\0', '\ud800']) await t.test('invalid parent has no root or native work', async () => {
+    const c = await specCase({ env: { WI_BROWSER_FIXTURE_PARENT: parent }, allocator: createRestartRoot });
+    assert.deepEqual(c.forwarded, [[parent]]); assert.equal(c.failure.message, 'Restart display rejected');
+    for (const event of ['seed', 'native-acquire', 'launch', 'root-remove']) assert.equal(c.events.includes(event), false);
+  });
+});
+test('C52 actual callback keeps safe body-failure removal and cleanup-failure refusal with a designated parent', async () => {
+  const body = await specCase(); assert.deepEqual(body.forwarded, [['/synthetic/private-parent']]);
+  assert.deepEqual(body.removed, ['/synthetic']); assert.equal(body.saved.get('BROWSER_RESULT.json').status, 'FAILED');
+  const cleanup = await specCase({ injected: 'context-close' }); assert.deepEqual(cleanup.forwarded, body.forwarded);
+  assert.equal(cleanup.events.includes('root-remove'), false); assert.equal(cleanup.saved.get('CLEANUP.json').pass, false);
+});
 test('C52 actual spec acquisition and cleanup rejection paths keep original facts and continue remaining ownership', async t => {
   for (const injected of ['seed', 'initialize', 'server-identity', 'connect', 'context', 'sampler-start', 'sample', 'sampler-stop', 'context-close', 'browser-close', 'server-close', 'native-stop']) await t.test(injected, async () => {
     const c = await specCase({ injected }); assert.equal(c.failure, c.synthetic);

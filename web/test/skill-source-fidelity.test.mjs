@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, rename, symlink, unlink, lstat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { mkdtemp, mkdir, writeFile, readFile, rm, rename, symlink, unlink, lstat, realpath, open, link } from 'node:fs/promises';
+import { join, dirname, basename, resolve, relative, sep } from 'node:path';
+import { readFileSync, constants } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { parseDisplayCursor } from '../dist/display-api.js';
@@ -136,6 +137,152 @@ test('root absence rejects unbound facts before probing',async()=>{
 });
 
 test('normal fixture path-only executable binding works; incorrect optional hash rejects',()=>isolated(async({sandbox})=>{const path=join(sandbox,'fixture');await writeFile(path,'synthetic executable');const b=await executableBinding(path);assert.equal(b.sha256,sha256('synthetic executable'));assert.deepEqual(await executableBinding(path,b.sha256),b);await assert.rejects(executableBinding(path,'0'.repeat(64)));await symlink(path,path+'.link');await assert.rejects(executableBinding(path+'.link'));}));
+
+const skillText=readFileSync(new URL('../test-support/skill-source-fidelity.mjs',import.meta.url),'utf8');
+const skillAst=ts.createSourceFile('skill-helper.mjs',skillText,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+const skillBindings=['reject','identity','equal'].map(name=>{
+  const statements=skillAst.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(skillAst)===name));
+  assert.equal(statements.length,1);return statements[0].getText(skillAst);
+}).join('\n');
+function actualSkill(io={}) {
+  return runInNewContext(`${skillBindings}\n${actualFunction(skillText,'ownedSkill')};ownedSkill`,{
+    process,Buffer,constants,dirname,basename,join,resolve,relative,sep,isDeepStrictEqual,TEMPLATE,CHANGED,sha256,
+    lstat,realpath,open,unlink,...io,
+  });
+}
+async function skillFixture(action) {
+  const higher=await mkdtemp(join(tmpdir(),'skill-control-')),shared=join(higher,'private');
+  await mkdir(shared,{mode:0o700});
+  const sandbox=await mkdtemp(join(shared,'wi-browser-'));
+  const workspace=join(sandbox,'.tmpC49control','workspace'),path=join(workspace,'.agents/skills/presentation/SKILL.md');
+  await mkdir(dirname(path),{recursive:true});await writeFile(path,TEMPLATE);
+  const live={pid:12345,ppid:process.pid,start:'123',alive:true,cwd:sandbox,tmpdir:sandbox,exe:'/synthetic/fixture'};
+  const input={fixture:{pid:live.pid},workspace,tmpdir:shared,executable:live.exe,finished:{completed:2,provider_stage:'finished',gate:null},probe:async()=>({...live})};
+  let guard;
+  try {await action({higher,shared,sandbox,workspace,path,live,input,bind:async(helper=ownedSkill)=>{guard=await helper(input);return guard;}});}
+  finally {try {if(guard)await guard.close();}finally {await rm(higher,{recursive:true,force:true});}}
+}
+const skillPhases=['acquisition','prechange','postsync','observed','predelete'];
+for(const level of ['shared','higher'])for(const delta of ['add','remove'])for(const phase of skillPhases)
+  test(`shared sibling ${delta} at ${level} survives ${phase}`,()=>skillFixture(async(value)=>{
+    const {input,live,bind,sandbox}=value,target=value[level];
+    const sibling=level==='shared'?sandbox+'-sibling':join(target,'sibling');
+    if(delta==='remove')await mkdir(sibling);
+    const before=await lstat(target,{bigint:true});let effects=0;
+    const effect=async()=>{
+      effects++;if(delta==='add')await mkdir(sibling);else await rm(sibling,{recursive:true});
+      const after=await lstat(target,{bigint:true});
+      for(const key of ['dev','ino','mode'])assert.equal(after[key],before[key]);
+      assert.equal(after.nlink,before.nlink+(delta==='add'?1n:-1n));
+    };
+    if(phase==='acquisition')input.probe=async()=>{if(effects===0)await effect();return {...live};};
+    let helper=ownedSkill;
+    if(phase==='postsync')helper=actualSkill({open:async(...args)=>{
+      const file=await open(...args);
+      return new Proxy(file,{get:(target,key)=>key==='sync'?async()=>{await target.sync();await effect();}:typeof target[key]==='function'?target[key].bind(target):target[key]});
+    }});
+    const g=await bind(helper);
+    if(phase==='prechange')await effect();
+    assert.equal((await g.change()).readback_exact,true);
+    if(phase==='observed')await effect();
+    await g.observed();
+    if(phase==='predelete')await effect();
+    assert.equal((await g.delete()).absent,true);assert.equal(effects,1);
+    assert.equal((await lstat(target,{bigint:true})).nlink,before.nlink+(delta==='add'?1n:-1n));
+  }));
+test('transient shared membership is only a neutral contrast',()=>skillFixture(async({shared,bind})=>{
+  const g=await bind(),sibling=join(shared,'transient');await mkdir(sibling);await rm(sibling,{recursive:true});
+  await g.change();await g.observed();assert.equal((await g.delete()).absent,true);
+}));
+for(const level of ['sandbox','invocation','workspace','agents','skills','presentation'])for(const delta of ['add','remove'])
+  test(`owned directory ${level} still rejects actual ${delta}`,()=>skillFixture(async({sandbox,workspace,path,bind})=>{
+    const target={sandbox,invocation:dirname(workspace),workspace,agents:join(workspace,'.agents'),skills:join(workspace,'.agents/skills'),presentation:dirname(path)}[level];
+    const child=join(target,'sibling');if(delta==='remove')await mkdir(child);
+    const before=await lstat(target,{bigint:true}),g=await bind();
+    if(delta==='add')await mkdir(child);else await rm(child,{recursive:true});
+    assert.equal((await lstat(target,{bigint:true})).nlink,before.nlink+(delta==='add'?1n:-1n));
+    await assert.rejects(g.change());assert.equal(await readFile(path,'utf8'),TEMPLATE);
+  }));
+for(const phase of skillPhases)test(`every ancestor keeps strict nonmembership checks at ${phase}`,()=>skillFixture(async(value)=>{
+  const {path,input,live}=value,dirs=[];
+  for(let p=dirname(path);;p=dirname(p)){dirs.unshift(p);if(p===sep)break;}
+  for(const directory of dirs)for(const field of ['dev','ino','mode','type','symlink','canonical',...(directory===value.sandbox||directory.startsWith(value.sandbox+sep)?['nlink']:[])]){
+    let armed=false,hits=0,closed=0,g;
+    const helper=actualSkill({
+      lstat:async(p,...args)=>{
+        const s=await lstat(p,...args);if(!armed||p!==directory||field==='canonical')return s;
+        hits++;return new Proxy(s,{get:(target,key)=>{
+          if(key===field&&['dev','ino','mode','nlink'].includes(field))return target[key]+1n;
+          if(field==='type'&&key==='isDirectory')return ()=>false;
+          if(field==='symlink'&&key==='isSymbolicLink')return ()=>true;
+          return typeof target[key]==='function'?target[key].bind(target):target[key];
+        }});
+      },
+      realpath:async p=>{if(armed&&p===directory&&field==='canonical'){hits++;return p+'-alias';}return realpath(p);},
+      open:async(...args)=>{
+        const file=await open(...args);
+        return new Proxy(file,{get:(target,key)=>{
+          if(key==='sync')return async()=>{await target.sync();if(phase==='postsync')armed=true;};
+          if(key==='close')return async()=>{closed++;await target.close();};
+          return typeof target[key]==='function'?target[key].bind(target):target[key];
+        }});
+      },
+    });
+    const probe=async()=>{if(phase==='acquisition')armed=true;return {...live};};
+    try {
+      if(phase==='acquisition')await assert.rejects(helper({...input,probe}));
+      else {
+        await writeFile(path,TEMPLATE);g=await helper(input);
+        if(phase==='prechange')armed=true;
+        if(['prechange','postsync'].includes(phase))await assert.rejects(g.change());
+        else {await g.change();if(phase==='observed')armed=true;
+          if(phase==='observed')await assert.rejects(g.observed());
+          else {await g.observed();armed=true;await assert.rejects(g.delete());}}
+      }
+      assert.ok(hits>0,`${field} observation reached`);
+    } finally {if(g)await g.close();}
+    assert.equal(closed,1);
+  }
+}));
+for(const phase of ['acquisition','prechange'])test(`skill hardlink rejects at ${phase}`,()=>skillFixture(async({path,bind})=>{
+  let g;if(phase==='prechange')g=await bind();await link(path,path+'.link');
+  if(g)await assert.rejects(g.change());else await assert.rejects(bind());
+  assert.equal(await readFile(path,'utf8'),TEMPLATE);
+}));
+test('identical-byte replacement rejects with original inode still held',()=>skillFixture(async({path,bind})=>{
+  const original=await lstat(path,{bigint:true}),g=await bind();await rename(path,path+'.original');await writeFile(path,TEMPLATE);
+  assert.notEqual((await lstat(path,{bigint:true})).ino,original.ino);
+  assert.equal((await lstat(path+'.original',{bigint:true})).ino,original.ino);
+  await assert.rejects(g.change());assert.equal(await readFile(path,'utf8'),TEMPLATE);assert.equal(await readFile(path+'.original','utf8'),TEMPLATE);
+}));
+test('same-length unexpected bytes reject before write',()=>skillFixture(async({path,bind})=>{
+  const g=await bind(),changed=TEMPLATE.replace('synthetic','Synthetic');assert.equal(Buffer.byteLength(changed),Buffer.byteLength(TEMPLATE));
+  await writeFile(path,changed);await assert.rejects(g.change());assert.equal(await readFile(path,'utf8'),changed);
+}));
+for(const fault of ['named-held','short-read','nofollow-race','short-write','truncate','sync'])test(`actual file boundary rejects ${fault} and closes`,()=>skillFixture(async({path,sandbox,input})=>{
+  let closed=0,g;
+  const helper=actualSkill({open:async(p,flags)=>{
+    assert.equal(p,path);assert.equal(flags,constants.O_RDWR|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+    if(fault==='nofollow-race'){
+      const target=join(sandbox,'target');await writeFile(target,TEMPLATE);await unlink(path);await symlink(target,path);
+      try {return await open(p,flags);}catch(error){assert.equal(error.code,'ELOOP');throw error;}
+    }
+    const file=await open(p,flags);
+    return new Proxy(file,{get:(target,key)=>{
+      if(key==='close')return async()=>{closed++;await target.close();};
+      if(fault==='named-held'&&key==='stat')return async(...args)=>{const s=await target.stat(...args);return new Proxy(s,{get:(s,k)=>k==='ino'?s.ino+1n:typeof s[k]==='function'?s[k].bind(s):s[k]});};
+      if(fault==='short-read'&&key==='read')return async(...args)=>({...await target.read(...args),bytesRead:0});
+      if(fault==='short-write'&&key==='write')return async()=>({bytesWritten:0});
+      if(fault===key&&['truncate','sync'].includes(key))return async()=>{throw Error('synthetic file failure');};
+      return typeof target[key]==='function'?target[key].bind(target):target[key];
+    }});
+  }});
+  try {
+    if(['named-held','short-read','nofollow-race'].includes(fault))await assert.rejects(helper(input));
+    else {g=await helper(input);await assert.rejects(g.change());}
+  } finally {if(g)await g.close();}
+  assert.equal(closed,fault==='nofollow-race'?0:1);
+}));
 
 const sourceText=readFileSync(new URL('../e2e/skill-source-fidelity.spec.mjs',import.meta.url),'utf8');
 function sourceGuard(text) {

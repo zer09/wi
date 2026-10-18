@@ -38,7 +38,11 @@ test('finite original cold warm older transport and qualified owned Linux memory
       process.env.WI_C3A_FIXTURE = executable;
     }
     binding = await nativeBinding(executable);
-    fixture = await acquireResource(owned, 'root', 90, createRestartRoot, async value => {
+    fixture = await acquireResource(owned, 'root', 90, () => {
+      const parent = process.env.WI_BROWSER_FIXTURE_PARENT;
+      if (parent === undefined) throw new Error('Browser fixture parent required');
+      return createRestartRoot(parent);
+    }, async value => {
       await rootProof(value, 'observe');
       if (owned.cleanupFailed() || fallback || handleFacts().active || handleFacts().opens !== handleFacts().closes
         || observer && (!nativeRetired.length || nativeRetired.some(i => !['absent', 'reused'].includes(i.retirement)))

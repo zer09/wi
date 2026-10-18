@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, mkdtemp, mkdir, readFile, readlink, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, join } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import { bounded, CHILD_TEST, ROOT } from './fixture.mjs';
@@ -165,8 +165,19 @@ export async function nativeBinding(executable) {
   ]) { sources[file] = sha(await readFile(join(ROOT, file))); if (sources[file] !== expected) reject(); }
   return { executable, sha256: hash, sources };
 }
-export async function createRestartRoot() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'wi-restart-')));
+export async function createRestartRoot(parent) {
+  if (arguments.length === 0) parent = tmpdir();
+  else {
+    // Explicit parents are caller-owned retention boundaries, never paths to create or repair.
+    try {
+      if (typeof parent !== 'string' || !parent.isWellFormed() || parent.includes('\0')
+        || !isAbsolute(parent) || resolve(parent) !== parent) reject();
+      const info = await lstat(parent);
+      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid()
+        || (info.mode & 0o7777) !== 0o700 || await realpath(parent) !== parent) reject();
+    } catch { reject(); }
+  }
+  const root = await realpath(await mkdtemp(join(parent, 'wi-restart-')));
   try {
     for (const name of ['workspace', 'private-skills', 'produce', 'observe']) await mkdir(join(root, name));
     for (const phase of ['produce', 'observe']) for (const name of ['home', 'xdg', 'codex', 'tmp']) await mkdir(join(root, phase, name));

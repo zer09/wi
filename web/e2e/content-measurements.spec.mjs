@@ -46,7 +46,11 @@ test('one genuine Load older content prepend with original public transport meta
     evidenceRoot=await reserveOutput(testInfo);
     sourceGuard(await readFile(new URL(import.meta.url),'utf8'),await readFile(new URL('../test-support/content-measurements.mjs',import.meta.url),'utf8'));
     binding=await resolveFixture(process.env, discoverFixture);
-    fixture=await acquireResource(owned,'root',90,createRestartRoot,async value=>{
+    fixture=await acquireResource(owned,'root',90,()=>{
+      const parent=process.env.WI_BROWSER_FIXTURE_PARENT;
+      if(parent===undefined)throw new Error('Browser fixture parent required');
+      return createRestartRoot(parent);
+    },async value=>{
       await rootProof(value,'observe');
       if(!removable(owned.cleanupFailed(),fallback,handleFacts(),nativeRetired,browserRetired))throw new Error('Root retained');
       if(!finalDiscovery)throw new Error('Root retained');collectorProof();

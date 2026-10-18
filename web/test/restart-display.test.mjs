@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { runInNewContext } from 'node:vm';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import ts from 'typescript';
 import * as f from '../test-support/display-fixtures.mjs';
 import { CHILD_TEST } from '../test-support/fixture.mjs';
@@ -205,9 +206,84 @@ test('normal observer completion requires drained=true, never fallback reap', ()
 test('owned synthetic root has exact isolated phases, skills, private owner mode and unchanged source', async () => {
   const fixture = await createRestartRoot();
   try {
+    assert.equal(dirname(fixture.root), await realpath(tmpdir()));
     assert.equal(await rootProof(fixture, 'produce'), true); assert.equal(await rootProof(fixture, 'observe'), true);
     await writeFile(`${fixture.workspace}/AGENTS.md`, 'synthetic changed source'); await assert.rejects(rootProof(fixture, 'observe'));
   } finally { await rm(fixture.root, { recursive: true }); }
+});
+test('explicit private parent keeps fresh roots isolated and preserves its identity and siblings', async () => {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'wi-parent-unit-')));
+  let fixture, other;
+  try {
+    await writeFile(join(parent, 'sibling'), 'synthetic sibling', { flag: 'wx', mode: 0o600 });
+    const before = await lstat(parent), sibling = await lstat(join(parent, 'sibling'));
+    fixture = await createRestartRoot(parent); other = await createRestartRoot(parent);
+    assert.notEqual(fixture.root, other.root);
+    for (const value of [fixture, other]) {
+      assert.deepEqual(Object.keys(value).sort(), ['owner', 'root', 'sourceHash', 'workspace']);
+      assert.equal(dirname(value.root), parent); assert.equal(await realpath(value.root), value.root);
+      const info = await lstat(value.root); assert.equal(info.uid, process.getuid()); assert.equal(info.mode & 0o7777, 0o700);
+      for (const phase of ['produce', 'observe']) {
+        assert.equal(await rootProof(value, phase), true);
+        for (const name of ['home', 'xdg', 'codex', 'tmp']) assert.equal(await realpath(join(value.root, phase, name)), join(value.root, phase, name));
+      }
+    }
+    await rm(fixture.root, { recursive: true });
+    assert.equal(await rootProof(other, 'observe'), true);
+    const after = await lstat(parent); assert.equal(after.ino, before.ino); assert.equal(after.dev, before.dev); assert.equal(after.mode, before.mode); assert.equal(after.uid, before.uid);
+    assert.deepEqual(await lstat(join(parent, 'sibling')), sibling);
+    assert.equal(readFileSync(join(parent, 'sibling'), 'utf8'), 'synthetic sibling');
+  } finally {
+    for (const value of [fixture, other]) if (value) await rm(value.root, { recursive: true, force: true });
+    await rm(parent, { recursive: true });
+  }
+});
+test('explicit invalid parents reject before root effects without correcting or adopting paths', async t => {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'wi-parent-unit-')));
+  try {
+    await mkdir(join(parent, 'private'), { mode: 0o700 }); await mkdir(join(parent, 'public'), { mode: 0o755 });
+    await writeFile(join(parent, 'file'), 'synthetic sibling', { mode: 0o600, flag: 'wx' });
+    await symlink(join(parent, 'private'), join(parent, 'alias'));
+    const privateParent = join(parent, 'private');
+    const variants = [undefined, null, 1, {}, new String(privateParent), '', 'relative', '\ud800', `${privateParent}\0`,
+      `${privateParent}/`, `${parent}//private`, `${parent}/./private`, `${privateParent}/../private`, join(parent, 'alias'),
+      `${parent}/alias/..`, join(parent, 'absent'), join(parent, 'file'), join(parent, 'public')];
+    const before = await readdir(parent), privateInfo = await lstat(privateParent), publicInfo = await lstat(join(parent, 'public'));
+    for (const [index, value] of variants.entries()) await t.test(`invalid parent ${index}`, async () => {
+      let fixture;
+      try { await assert.rejects(async () => { fixture = await createRestartRoot(value); }, { message: 'Restart display rejected' }); }
+      finally { if (fixture) await rm(fixture.root, { recursive: true }); }
+      assert.deepEqual(await readdir(parent), before); assert.deepEqual(await readdir(privateParent), []);
+      // Directory reads can change atime. Ownership, permissions and mutation times must not change.
+      for (const [path, info] of [[privateParent, privateInfo], [join(parent, 'public'), publicInfo]]) {
+        const after = await lstat(path);
+        for (const key of ['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'mtimeMs', 'ctimeMs', 'birthtimeMs']) assert.equal(after[key], info[key]);
+      }
+    });
+  } finally { await rm(parent, { recursive: true }); }
+});
+test('actual allocator rejects wrong owner before creation and keeps partial-acquisition cleanup inside the new root', async () => {
+  const source = ts.createSourceFile('helper.mjs', readFileSync(new URL('../test-support/restart-display.mjs', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const fn = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name.text === 'createRestartRoot').getText(source).replace('export ', '');
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'wi-parent-unit-')));
+  try {
+    await writeFile(join(parent, 'sibling'), 'synthetic sibling', { mode: 0o600, flag: 'wx' });
+    for (const wrongOwner of [true, false]) {
+      const created = [], removed = [];
+      const allocate = new Function('lstat', 'mkdtemp', 'realpath', 'mkdir', 'writeFile', 'rm', 'process', 'tmpdir', 'isAbsolute', 'resolve', 'join', 'reject', 'sha', 'readFile', 'randomBytes', 'data', `${fn};return createRestartRoot;`)(
+        async path => { const info = await lstat(path); return wrongOwner ? { ...info, isDirectory: () => info.isDirectory(), isSymbolicLink: () => info.isSymbolicLink(), uid: info.uid + 1 } : info; },
+        async prefix => { const root = await mkdtemp(prefix); created.push(root); return root; }, realpath, mkdir,
+        async () => { throw new Error('synthetic partial acquisition'); },
+        async (path, flags) => { removed.push(path); await rm(path, flags); }, process, tmpdir, isAbsolute, resolve, join,
+        () => { throw new Error('Restart display rejected'); });
+      try { await assert.rejects(allocate(parent), { message: 'Restart display rejected' }); }
+      finally { for (const root of created) await rm(root, { recursive: true, force: true }); }
+      assert.equal(created.length, wrongOwner ? 0 : 1); assert.deepEqual(removed, created);
+      if (created.length) assert.equal(dirname(created[0]), parent);
+      assert.deepEqual(await readdir(parent), ['sibling']);
+      assert.equal(readFileSync(join(parent, 'sibling'), 'utf8'), 'synthetic sibling');
+    }
+  } finally { await rm(parent, { recursive: true }); }
 });
 for (const [method, path, permission, expected] of [
   ['GET', '/v1/settings', 'none', true], ['GET', '/v1/sessions?limit=32', 'none', true],

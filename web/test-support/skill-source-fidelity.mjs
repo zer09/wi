@@ -77,7 +77,10 @@ export async function ownedSkill({ fixture, workspace, tmpdir, executable, finis
     for (const p of dirs) {
       const s = await lstat(p, { bigint:true });
       if (!s.isDirectory() || s.isSymbolicLink()) reject();
-      if (initial) originals.set(p, identity(s)); else equal(identity(s), originals.get(p));
+      const current = identity(s);
+      // Shared siblings above the sandbox do not change the fixture's path.
+      if (p !== sandbox && !p.startsWith(sandbox + sep)) delete current.nlink;
+      if (initial) originals.set(p, current); else equal(current, originals.get(p));
       if (await realpath(p) !== p) reject();
     }
   }

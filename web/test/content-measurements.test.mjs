@@ -282,7 +282,10 @@ async function specCase(options={}){
     getByRole:(role,options)=>options.name==='Load older'?{...locator,click:async()=>{events.push('content-click');clicked=true;renderedDom?.prepend();
       contentRequest=request(`/content?cursor=${encodeURIComponent(contentCursor(180000))}`);collected.network.request(contentRequest);collected.network.response(response(contentRequest));collected.network.finished(contentRequest);await collected.network.drain();
     }}:options.name==='Connect'?connectLocator:locator};
-  const env={WI_C3A_FIXTURE:'/synthetic/native',...options.env};const raise=step=>{events.push(step);if(options.injected===step)throw failure;};
+  const parentReads=[],forwarded=[],removed=[];
+  const env=new Proxy({WI_C3A_FIXTURE:'/synthetic/native',WI_BROWSER_FIXTURE_PARENT:'/synthetic/private-parent',...options.env},{
+    get(target,key){if(key==='WI_BROWSER_FIXTURE_PARENT'){parentReads.push(key);events.push('parent-read');}return target[key];},
+  });const raise=step=>{events.push(step);if(options.injected===step)throw failure;};
   const browserIdentity={...ident(901,process.pid)},nativeIdentity={...ident(900,process.pid),executable:'/synthetic/native',cwd:'/synthetic/observe'};
   const native={closed:false,input_ended:false,fallback:false,identity:nativeIdentity,samples:[],reaped:true,stderr_bytes:0,stdout_bytes:1,
     error:false,drained:true,expected_kill:false,same_start_alive:false,code:0,signal:null,cleanup_errors:[]};
@@ -309,10 +312,14 @@ async function specCase(options={}){
       return JSON.stringify(value,...args);
     }},
     readFile:async()=>source,writeFile:async(path,raw,opts)=>{const name=path.split('/').at(-1);events.push(`save:${name}`);assert.equal(opts.flag,'wx');assert.equal(opts.mode,0o600);
-      if(options.publication===name)throw publication;saved.set(name,JSON.parse(raw));},join,rm:async()=>{events.push('root-remove');if(options.cleanupSchedule==='rm-started')injectCleanup();},lstat:async()=>{throw {code:'ENOENT'};},
+      if(options.publication===name)throw publication;saved.set(name,JSON.parse(raw));},join,rm:async(path,flags)=>{events.push('root-remove');removed.push(path);assert.equal(path,'/synthetic');assert.deepEqual(flags,{recursive:true});if(options.cleanupSchedule==='rm-started')injectCleanup();},lstat:async()=>{throw {code:'ENOENT'};},
     discoverFixture:async()=>{events.push('discovery');return '/synthetic/native';},nativeBinding:async()=>{bindingReads++;if(cleanupCompleted)finalPreparation=true;
       if(disposing&&!cleanupCompleted)await cleanupAwait('binding');return options.bindingChanged&&bindingReads>=2?{...binding,sha256:'b'.repeat(64)}:binding;},
-    createRestartRoot:async()=>{raise('root');return {root:'/synthetic',owner};},rootProof:async()=>{disposing=true;events.push('root-proof');if(options.cleanupSchedule==='before-proof')injectCleanup();},terminalProof,sid,head:'21',title:'Title',
+    createRestartRoot:async(...args)=>{forwarded.push(args);raise('root');if(options.allocator){
+      const value=await options.allocator(...args);
+      // A broken forwarding regression must not leak its unexpected unit root.
+      await fs.rm(value.root,{recursive:true});throw new Error('Invalid parent unexpectedly acquired root');
+    }return {root:'/synthetic',owner};},rootProof:async()=>{disposing=true;events.push('root-proof');if(options.cleanupSchedule==='before-proof')injectCleanup();},terminalProof,sid,head:'21',title:'Title',
     seedLegacy:async()=>{raise('seed');return {};},snapshot:()=>({}),legacyProof:()=>{},catalogProof:()=>{},observerWork,contentWork,ownedFilesProof:async()=>{if(disposing)await cleanupAwait('files');},
     handleFacts:()=>options.handles?{active:1,opens:2,closes:1}:{active:0,opens:2,closes:2},boundary:async()=>{},newFaults,
     identity:async()=>{raise('identity');return options.rejectedIdentity?{...browserIdentity,ppid:1}:browserIdentity;},
@@ -333,15 +340,33 @@ async function specCase(options={}){
       if(options.sseSchedule==='held-discovery'&&calls===3){events.push('discovery-held');await new Promise(resolve=>queueMicrotask(()=>{injectSse();events.push('discovery-release');resolve();}));}
       events.push('tree-complete');return {members:[browserIdentity,...(calls>=2?[ident(902,901)]:[])],errors:{enumeration:0,stat:0,identity:0}};},
     retireTree:async members=>{events.push('retire-tree');if(options.retirement||!serverClosed)throw failure;return members.map(i=>({...i,retirement:'absent'}));},removable,sourceGuard:()=>true,
-    resolveFixture:(e,d)=>resolveFixture(e,d,async()=>binding),reserveOutput:info=>reserveOutput(info,{mkdir:async()=>{events.push('reserve');if(options.occupied)throw failure;},writeFile:async(path,raw,opts)=>{
+    resolveFixture:(e,d)=>{events.push('binding');return resolveFixture(e,d,async()=>binding);},reserveOutput:info=>reserveOutput(info,{mkdir:async()=>{events.push('reserve');if(options.occupied)throw failure;},writeFile:async(path,raw,opts)=>{
       events.push('marker');assert.equal(opts.flag,'wx');assert.equal(opts.mode,0o600);if(options.marker)throw publication;saved.set('C53.once.json',JSON.parse(raw));}}),process:{env,pid:process.pid},URL,
   };
   new Function(...Object.keys(values),script)(...Object.values(values));let error;
+  assert.equal(parentReads.length,0);events.push('invoke');
   try{await callback({}, {outputPath:name=>{assert.equal(name,'c53-evidence');events.push('output');return '/synthetic/evidence';}});}catch(caught){error=caught;}
   assert.equal(events.filter(e=>e==='collected').length,1);if(options.success&&!options.injected&&!options.badLabel&&!options.discovery&&!options.nativeDefect&&!options.publication&&!options.serializationArtifact&&!options.factsGetter&&!options.countsGetter&&!options.evidenceGetter&&options.sseSchedule!=='held-discovery'&&!options.cleanupSchedule&&!options.bindingChanged&&!options.handles&&!options.rejectedIdentity)assert.equal(error,undefined);else assert.ok(error);
   assert.ok(!JSON.stringify([...saved.values()]).includes(failure.message));
-  return {saved,events,error,first:cleanupResult.error,failure,publication,native,collected,serializationAttempts,packet:diagnostic.packet(),injection};
+  return {saved,events,error,first:cleanupResult.error,failure,publication,native,collected,serializationAttempts,packet:diagnostic.packet(),injection,forwarded,parentReads,removed};
 }
+test('C53 actual callback requires and forwards the designated runtime parent at the original root boundary',async t=>{
+  const admitted=await specCase({success:true,env:{WI_BROWSER_FIXTURE_PARENT:'/synthetic/designated-parent'}});
+  assert.deepEqual(admitted.forwarded,[['/synthetic/designated-parent']]);assert.equal(admitted.parentReads.length,1);
+  assert.ok(admitted.events.indexOf('marker')<admitted.events.indexOf('binding'));
+  assert.ok(admitted.events.indexOf('binding')<admitted.events.indexOf('parent-read'));
+  assert.ok(admitted.events.indexOf('parent-read')<admitted.events.indexOf('root'));
+  assert.deepEqual(admitted.removed,['/synthetic']);assert.equal(admitted.saved.get('BROWSER_RESULT.json').status,'PASS');
+  const missing=await specCase({env:{WI_BROWSER_FIXTURE_PARENT:undefined}});
+  assert.equal(missing.first.message,'Browser fixture parent required');assert.equal(missing.error,missing.first);
+  assert.deepEqual(missing.forwarded,[]);assert.equal(missing.parentReads.length,1);assert.ok(missing.events.includes('binding'));
+  for(const event of ['root','seed','initialize','launch','root-remove'])assert.equal(missing.events.includes(event),false);
+  for(const parent of ['', 'relative', '/synthetic/invalid\0', '\ud800'])await t.test('invalid parent has no root or native work',async()=>{
+    const c=await specCase({env:{WI_BROWSER_FIXTURE_PARENT:parent},allocator:createRestartRoot});
+    assert.deepEqual(c.forwarded,[[parent]]);assert.equal(c.first.message,'Restart display rejected');assert.equal(c.error,c.first);
+    for(const event of ['seed','initialize','launch','root-remove'])assert.equal(c.events.includes(event),false);
+  });
+});
 test('C53 actual callback successful seam performs exactly one accessible click after admission and publishes normal cleanup',async()=>{
   const c=await specCase({success:true});assert.equal(c.first,null);assert.equal(c.saved.get('BROWSER_RESULT.json').status,'PASS');
   assert.equal(c.events.filter(e=>e==='content-click').length,1);assert.ok(c.events.indexOf('armed')<c.events.indexOf('content-click'));

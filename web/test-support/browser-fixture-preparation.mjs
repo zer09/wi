@@ -53,7 +53,7 @@ export function preparationRedactor(env) {
   };
 }
 
-function sanitizeRecord(value, redact) {
+export function sanitizeRecord(value, redact) {
   if (typeof value === 'string') return redact(value);
   if (Array.isArray(value)) return value.map(item => sanitizeRecord(item, redact));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)

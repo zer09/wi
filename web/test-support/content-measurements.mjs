@@ -282,7 +282,10 @@ export async function browserTree(root, io = fs) {
   const stats=new Map(), members=[root], errors={ enumeration:0, stat:0, identity:0 };
   try {
     for (const name of await io.readdir('/proc')) if (/^[1-9][0-9]*$/.test(name)) {
-      const pid=Number(name); try { stats.set(pid,parseStat(await io.readFile(`/proc/${pid}/stat`,'utf8'),pid)); } catch { errors.stat++; }
+      const pid=Number(name); try { stats.set(pid,parseStat(await io.readFile(`/proc/${pid}/stat`,'utf8'),pid)); } catch (error) {
+        // A listed process may disappear before its first stat read; other failures remain fatal.
+        if (!['ENOENT','ESRCH'].includes(error?.code)) errors.stat++;
+      }
     }
   } catch { errors.enumeration++; }
   const anchor=await identity(root.pid,io); if (anchor.state !== 'present' || !same(anchor,root)) reject();
@@ -291,7 +294,10 @@ export async function browserTree(root, io = fs) {
     changed=false;
     for(const [pid,s] of stats) if(!known.has(pid)&&known.has(s.ppid)) {
       const parent=known.get(s.ppid), current=await identity(pid,io), parentNow=await identity(parent.pid,io);
-      if(current.state==='present'&&current.start_ticks===s.start_ticks&&current.ppid===parent.pid&&same(parentNow,parent)) {
+      if (same(parentNow,parent) && current.state === 'absent') {
+        // Confirmed absence is not membership, but it does not bypass the parent proof.
+        stats.delete(pid);
+      } else if(current.state==='present'&&current.start_ticks===s.start_ticks&&current.ppid===parent.pid&&same(parentNow,parent)) {
         known.set(pid,current);members.push(current);changed=true;
       } else { errors.identity++;stats.delete(pid); }
     }

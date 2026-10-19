@@ -223,6 +223,67 @@ test('C53 unvalidated ancestry and unknown retirement never authorize signals or
   let reads=0;const original=f.io.readFile;f.io.readFile=async p=>p==='/proc/3/stat'&&++reads>1?f.values.get(p).replace('S 2','S 9'):original(p);
   await assert.rejects(browserTree(ident(2,1),f.io));await assert.rejects(retireTree([{state:'unknown',pid:3}],f.io));
 });
+function absentChildFixture() {
+  const f=procFixture();f.add(2,1);f.add(3,2);let childStats=0;const read=f.io.readFile;
+  f.io.readFile=async p=>{if(p==='/proc/3/stat'&&++childStats===2){f.values.delete('/proc/3');throw {code:'ENOENT'};}return read(p);};return f;
+}
+function afterRootAnchor(f,mutate) {
+  let done=false;const readlink=f.io.readlink;
+  f.io.readlink=async p=>{const value=await readlink(p);if(p==='/proc/2/cwd'&&!done){done=true;mutate();}return value;};
+}
+test('C74A initial listed stat disappearance ignores ENOENT and ESRCH with exact stable members',async t=>{
+  for(const code of ['ENOENT','ESRCH'])await t.test(code,async()=>{
+    const f=procFixture();f.add(2,1);f.add(8,99);const read=f.io.readFile;
+    f.io.readFile=async p=>p==='/proc/8/stat'?(()=>{throw {code};})():read(p);
+    const tree=await browserTree(ident(2,1),f.io);assert.deepEqual(tree.members.map(i=>i.pid),[2]);assert.deepEqual(tree.errors,{enumeration:0,stat:0,identity:0});
+  });
+});
+test('C74A confirmed absent child is skipped only after parent identity proof',async()=>{
+  const tree=await browserTree(ident(2,1),absentChildFixture().io);assert.deepEqual(tree.members.map(i=>i.pid),[2]);assert.deepEqual(tree.errors,{enumeration:0,stat:0,identity:0});
+});
+test('C74A absent child never bypasses parent identity fields or state',async t=>{
+  const changes=[
+    ['pid',f=>f.values.set('/proc/2/stat',f.values.get('/proc/2/stat').replace('2 (name)','9 (name)'))],
+    ['ppid',f=>f.values.set('/proc/2/stat',f.values.get('/proc/2/stat').replace('S 1','S 9'))],
+    ['start_ticks',f=>f.values.set('/proc/2/stat',f.values.get('/proc/2/stat').replace(' 42 0 0',' 43 0 0'))],
+    ['executable',f=>f.values.set('/proc/2/exe','/changed')],
+    ['cwd',f=>f.values.set('/proc/2/cwd','/changed')],
+    ['absent',f=>{for(const p of ['/proc/2','/proc/2/stat','/proc/2/exe','/proc/2/cwd'])f.values.delete(p);}],
+  ];
+  for(const [name,change] of changes)await t.test(name,async()=>{const f=absentChildFixture();afterRootAnchor(f,()=>change(f));await assert.rejects(browserTree(ident(2,1),f.io));});
+  await t.test('unknown',async()=>{const f=absentChildFixture();let unknown=false;const read=f.io.readFile;f.io.readFile=async p=>unknown&&p==='/proc/2/stat'?(()=>{throw {code:'EIO'};})():read(p);afterRootAnchor(f,()=>{unknown=true;});await assert.rejects(browserTree(ident(2,1),f.io));});
+});
+test('C74A surviving proc directory remains unknown instead of confirming child absence',async t=>{
+  for(const kind of ['stat absent','zombie-like','ESRCH','EACCES','malformed'])await t.test(kind,async()=>{
+    const f=procFixture();f.add(2,1);f.add(3,2);let childStats=0;const read=f.io.readFile;
+    f.io.readFile=async p=>{
+      if(p==='/proc/3/stat'&&++childStats===2){
+        if(kind==='stat absent')throw {code:'ENOENT'};
+        if(kind==='ESRCH'||kind==='EACCES')throw {code:kind};
+        if(kind==='malformed')return 'malformed';
+        f.values.delete('/proc/3/exe');return (await read(p)).replace(' S ',' Z ');
+      }
+      return read(p);
+    };
+    await assert.rejects(browserTree(ident(2,1),f.io));assert.equal(f.values.has('/proc/3'),true);
+  });
+});
+test('C74A read, parse, enumeration, root and present-child identity failures stay fatal',async t=>{
+  for(const code of ['EACCES','EIO','UNKNOWN'])await t.test(`initial ${code}`,async()=>{const f=procFixture();f.add(2,1);f.add(8,99);const read=f.io.readFile;f.io.readFile=async p=>p==='/proc/8/stat'?(()=>{throw {code};})():read(p);await assert.rejects(browserTree(ident(2,1),f.io));});
+  await t.test('malformed stat',async()=>{const f=procFixture();f.add(2,1);f.add(8,99);const read=f.io.readFile;f.io.readFile=async p=>p==='/proc/8/stat'?'malformed':read(p);await assert.rejects(browserTree(ident(2,1),f.io));});
+  await t.test('enumeration',async()=>{const f=procFixture();f.add(2,1);f.io.readdir=async()=>{throw new Error('unavailable');};await assert.rejects(browserTree(ident(2,1),f.io));});
+  await t.test('root absent state',async()=>{const f=procFixture();f.add(2,1);await assert.rejects(browserTree({...ident(2,1),state:'absent'},f.io));});
+  await t.test('root unknown identity',async()=>{const f=procFixture();f.add(2,1);const read=f.io.readFile;f.io.readFile=async p=>p==='/proc/2/stat'?(()=>{throw {code:'EIO'};})():read(p);await assert.rejects(browserTree(ident(2,1),f.io));});
+  await t.test('root confirmed absent',async()=>{const f=procFixture();await assert.rejects(browserTree(ident(2,1),f.io));});
+  for(const [field,value] of [['pid',9],['start_ticks','43'],['ppid',9],['executable','/changed'],['cwd','/changed']])await t.test(`root ${field} mismatch`,async()=>{const f=procFixture();f.add(2,1);await assert.rejects(browserTree({...ident(2,1),[field]:value},f.io));});
+  for(const kind of ['reuse','reparent'])await t.test(`child ${kind}`,async()=>{const f=procFixture();f.add(2,1);f.add(3,2);let reads=0;const read=f.io.readFile;f.io.readFile=async p=>{if(p==='/proc/3/stat'&&++reads===2){const raw=await read(p);return kind==='reuse'?raw.replace(' 42 0 0',' 43 0 0'):raw.replace('S 2','S 9');}return read(p);};await assert.rejects(browserTree(ident(2,1),f.io));});
+});
+test('C74A valid child executable is admitted and omitted intermediates are a finite coverage gap',async()=>{
+  const f=procFixture();f.add(2,1);f.add(3,2);f.values.set('/proc/3/exe','/synthetic/worker');const stable=await browserTree(ident(2,1),f.io);assert.deepEqual(stable.members,[ident(2,1),{...ident(3,2),executable:'/synthetic/worker'}]);assert.deepEqual(stable.errors,{enumeration:0,stat:0,identity:0});
+  const gap=absentChildFixture();gap.add(4,3);gap.add(5,2);const tree=await browserTree(ident(2,1),gap.io);assert.deepEqual(tree.members,[ident(2,1),ident(5,2)]);assert.deepEqual(tree.errors,{enumeration:0,stat:0,identity:0});
+  const reparented=procFixture();reparented.add(2,1);reparented.add(4,1);const finite=await browserTree(ident(2,1),reparented.io);assert.deepEqual(finite.members,[ident(2,1)]);assert.deepEqual(finite.errors,{enumeration:0,stat:0,identity:0});
+  // A skipped intermediate or already-reparented grandchild is outside this finite ancestry proof.
+});
 test('C53 repaired acquireObserver owns input/close before initialization and rejected identities cannot grant signals',async t=>{
   for(const step of ['candidate','root','input','close'])await t.test(step,async()=>{
     const child=new EventEmitter(),events=[];child.pid=900;child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();

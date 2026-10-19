@@ -4,6 +4,59 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C74A: finite browser ancestry and later owner findings for C72
+
+**COMPLETED_OFFLINE_SCOPED_REVIEWED.** Source is `641ddc544740dcb1c85e316cd30c520d925d47d2` plus the two-file A repair. Both fresh complete source/evidence reviews PASS/no findings/0gate replays. Parent publication has a later cutoff. C74B cancellation convergence is deferred until this reviewed A checkpoint. No repaired-source browser proof, real suite launch or acceptance follows.
+
+### Owner-confirmed findings, later than the unchanged C72 records
+
+C72's sole guarded run remains FAILED:24reported passes,65reported did-not-run and a300second suite timeout. The25th begun task-recovery case lacks a recorded terminal status. The owner separately establishes that the current global budget is too short, not that task-recovery hung or an assertion failed. The owner diagnostic used a fresh existing preparation, manual0600C54 OUTER and the exact future command plus only `--global-timeout=1800000 --reporter=list,json`, with approved environment/buildjobs2. It is timing evidence, not a C69 gatepass:89cases ran,87PASS2FAIL,421seconds wall/407seconds summed durations. Task-recovery passed5.9seconds. The first24cases took approximately270seconds plus setup, consistent with C72. Presentation took80.3seconds under its own180second timeout, skill fidelity32.1seconds, rich parity15.7seconds, live commit14.7seconds, interrupted display11.8seconds and upgrade11.6seconds. The51display-app/view cases each took0.5-2.5seconds; six joined cases6.6-8.5seconds. These are one diagnostic's observations, not SLAs or a new global limit. The300second setting dates to a22-file suite; current collection has34files.
+
+The owner confirms installed Playwright1.58.2 uses the same already-expired deadline for suite teardown. TimeoutWatcher resolves immediately at nonpositive remaining time. Therefore the second C72 timeout message is automatic, not separate evidence of blocked teardown. The Playwright child exited about one second after the global deadline. Historical failed packets retain their original uncertainty and are not rewritten.
+
+At the owner's later metadata cutoff, no Wi/Playwright/Chromium/Cargo process or wi-browser temporary root remains. One Chromium temporary file remains for owner cleanup; agents leave it untouched. Task-recovery's precise start time and whether it created a root in C72 remain unknown. No agent process/root scan or scratch cleanup supplements the owner's facts.
+
+The diagnostic's content failure reached content_discovery after product observations resolved with faults0 and normal root-removal cleanup. The exact tree error branch was not retained. Cancellation failed checkpoint1display in1.8seconds before reconciliation; it passed C72 and the owner's five isolated repeats. Its exact failing source line remains unknown. Those two test-harness mechanisms are reproduced only with current-source synthetic schedules, not retrospectively attributed to a particular branch/line.
+
+### A implementation and preserved checks
+
+`web/test-support/content-measurements.mjs:280-306` changes only browserTree. Initial listed-PID stat handling ignores exactly ENOENT/ESRCH disappearance. Every other read/parse error and enumeration error remains fatal. A descendant becomes skippable only when the existing identity helper confirms state absent AND the parent still matches pid, ppid, start_ticks, executable and cwd. The skipped candidate is removed without admission or signal authority. Parent absence/unknown/reuse/reparenting/executable/cwd change still rejects, even if the child disappeared. Present-child/root identity and start/parent checks, unknown-state rejection and valid differing child executable remain. Shared identity, display sampling, API, retirement/removal refusal, specs/artifact contracts, production/Rust/reader, pins and deadlines do not change. No sleep, retry or rescan is added.
+
+`web/test/content-measurements.test.mjs:226-286` adds35counted actual-function controls, including nested/parent counts, using the existing in-memory procFixture. All243old counted controls are byte-equal, including the original changed-identity and discovery-failure negatives. Allowed stat codes and confirmed child absence assert exact members/zero errors. Parent field/state negatives mutate after the root anchor, so they exercise reproof. Surviving proc directories/zombie-like executable loss remain unknown and reject. Controls retain malformed/permission/unknown-code/enumeration/root/child-reuse/reparent negatives and a valid independent child executable.
+
+Finite discovery can omit an exited intermediate and surviving grandchildren or descendants reparented before enumeration. Explicit controls retain that limitation. Returned observed membership is not complete descendant discovery or a complete retirement census. Existing content and live-commit callers continue accumulating returned identities and use separate strict retirement/removal proofs. There is no historical diagnostic-branch attribution or repaired browser-success claim.
+
+### Current exact-byte offline checks
+
+All implementation/EOF edits finished before the sole final full run. Nine accepted gates capture the same complete810source hash/full-mode inventory before AND after execution, matching the final implementation cutoff. The later three-document publication has separate checks. Exact argv/cwd/approved-file/effective-six/direct-identity/terminal/sanitized streams agree. Final inherited umask is0022; no approved environment, build-job/test-thread, filter, scheduling, retry, deadline or browser-pin override.
+
+| Gate | Current result |
+| --- | --- |
+| `node --test web/test/content-measurements.test.mjs` |278PASS/0FAIL/cancelled/skipped/todo.|
+| Default-scheduled nine-file affected set |3605PASS/0FAIL/cancelled/skipped/todo.|
+| Exact default `npm --prefix web test` |7915PASS/0FAIL/cancelled/skipped/todo; ONE corrected-source full run.|
+| Two assigned JavaScript syntax checks |PASS.|
+| Typecheck |PASS.|
+| Nonmutating generated assets |8verified.|
+| Scope/privacy/old-test/outside-browserTree/whitespace |PASS.|
+| Registration only |89tests in34files; no browser bodies.|
+
+Affected argv contains content-measurements,live-commit-measurements,display-measurements,live-commit-native,restart-display,browser-suite-preparation,browser-suite-launch,browser-fixture-preparation,fixture-failure test modules under web/test, after Node --test. Counts overlap across gates and include parent/nested controls. Non-test counts stay null, not invented zero. Recorded direct identities are observed-retired; that is not a complete descendant/host proof. No real browser/native/productHTTP/Cargo/preparation, real attempt marker or consumed-suite access ran. Existing isolated Node synthetic fixture/marker/output/child lifecycle/owned cleanup remained authorized and unfiltered.
+
+Parent independently binds810current paths/808nonassigned,444native inputs,75nonassigned of76runtime files/3directory identities,140implementation files,111finite historical and5owner records, Git/index/refs/staged patch and approved JSON. The helper is the one intentionally changed runtime file. Complete diff equals its retained record; helper outside browserTree and all old tests remain byte-equal. Both reviews accept only this bounded source/offline evidence. Shared target/cache inventories, consumed/native failed trees, scratch, unrelated evidence/backups/disk state are excluded. Owner timing records are immutable.
+
+### Initial failures and procedure limits remain retained
+
+- Old-helper red:270total265PASS5FAIL, comprising four intended failing leaves and a parent summary. Eight later controls were added after repair; not all35are regression-first.
+- The external runner initially set umask0077. This changed an existing requested0755negative fixture to0700, causing affected3595PASS2FAIL3597total and unchanged restart diagnostic317PASS2FAIL319total, both invalid-parent17/Missing expected rejection. Removing only the recorder override restored inherited0022; no approved JSON/product source changed. Both initial failures remain failed. Earlier corrected affected3597PASS binds the earlier test cutoff, not current3605.
+- A300000ms recording observation ended without a terminal result/log/count/source-after or intended-child identity. It stays INCOMPLETE. Only the exact recorder identity was observed retired; complete descendants remain unknown. A longer external observation allowance did not change product/test deadlines.
+- An extra focused diagnostic omitted approved binding, changed reporter and discarded output. Its environment/terminal/count/identity/log proof is not adopted. Some early metadata also omitted binding. Current nine final receipts are independently complete; no strict universal invocation-compliance or independently pinned initial-checker claim follows.
+- Inline separator/null-schema/baseline-key/static-boundary/edit-match diagnostics and a rejected out-of-project file analysis remain disclosed. The parent performed a bounded new-review-directory lookup because review-b returned only its terminal marker; the actual completed PASS reports were then read and bound. No review was repeated and no product command followed that lookup.
+
+Three independent investigations completed. One oracle returned REVISE because an unqualified marker/cleanup ban conflicted with required existing Node unit fixtures. Parent verified the existing synthetic reservation/cleanup test and clarified that boundary before implementation; no test was filtered. Optional tree-error artifacts are deferred. Current source correctness and bounded tests are distinct from the initial recorder failures and historical runtime results.
+
+All98prior named-test objects and40official rows remain unchanged: all40PARTIAL/acceptedfalse/inventoryOPEN. C15/active1, reader/SSE/no-store/access, pins/release-to-DOM waiver/ledger/C61unknown/history remain. Both C55 handoffs stay staged outside this checkpoint. Next is C74B's exact awaited DOM convergence without normalized whitespace. The global timeout remains300seconds here; selecting a new suite budget and fresh preparation/guarded runtime gate are separate work. Platform/hosted/full-master/assertion closure and acceptance remain open. Supporting records retained (local record); no binary/source-tree/Git-store copies, push or acceptance. Parent publication/checkpoint follows document checks.
+
 ## C71: fresh preparation and read-only launch admission
 
 **COMPLETED_PREPARATION_SCOPED_REVIEWED.** Source is `efce1d9735f847b1da3ded780cf0f107f67e110f`, without implementation changes. Exactly one existing suite-preparation CLI and one registration-only collection PASS. Both fresh complete evidence reviews PASS/no findings/0runtime replays. Parent publication has a later documentation-only cutoff. Preparation, source-derived admission, executable presence and browser execution are separate evidence. Browser execution remains0; this is not full-suite or hosted proof.

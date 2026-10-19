@@ -4,6 +4,98 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## Unpublished-history privacy sanitation
+
+After C80, the owner authorized privacy sanitation of the45 unpublished commits above `318b7f0da7d503e2e3a8cf33be84e78ebbe8affb`. The pre-push gate found63 affected documentation blob versions:33 with a home-path prefix and30 with one redundant local record reference. These are blob-version counts, not files or tests. Home paths now use the established `~/` placeholder; the redundant record reference is removed. No product source, tests, assets, workflow, dependencies, limits or acceptance status changed.
+
+The rewrite preserves original authors, author/committer dates, messages and linear parent topology. 45 commit hashes change. Original history remains in a private local backup and is not pushed. The table maps original reported revisions to sanitized source-equivalent revisions; original test/review cutoffs and failed roles remain historical, not new executions. This later privacy/mapping publication was not included in C80 reviews.
+
+| Original revision | Sanitized source-equivalent revision |
+| --- | --- |
+| `6f9ac9f0273c7d9bb6c97c81037fddf039341b33` | `add8f939815a0cbd864cadc7606f21975203fd62` |
+| `816427fc7275d42320e27eedcab4c1ee1d6c345e` | `6244b692757af422530df43f4e30bc443db269b0` |
+| `f834599ebf6765db18ce0d0786d595e0dd4d00f5` | `720857ed0c3222875d791daf5a173fa501558076` |
+| `df7f3588b7efcff0f401923a077fab1b2b5e31c6` | `bebc5865e5b934b351800310e9a4cd637b8c08ed` |
+| `67c8be6b094c08093114acfe8fcd20d0070ce963` | `ca58b513567ab0253f711ba630ba712fa28403d9` |
+| `07cfcb49c7a58e932b9326f76fb3ba2e575d3c57` | `e1f518d6a506d11072daf17e244cf6a401606246` |
+| `50864fa3c30271b9526d3649adcd869fe08c0862` | `d66f03e18dc876d62dfcdcb98f685413dd542195` |
+| `ead012b499a9b819b4dcf9c92540722a2c637cf9` | `e1ceb6135cf1b6d0c9fba79d44ce87385bb47f6b` |
+| `c7fa641d7dfc18c60c76bff91bf523d9b9bbc2cc` | `b7dbabfbf2ff600cae7f0e5cc7efdde716953230` |
+| `b00144fe1c8a0e0a27917d10e0af424b76214512` | `480d83fa20a4aa532ec15e739de1e25c0e54fe7d` |
+| `999fb4d46f5ddc3ee2f1dd75220f2f0be7f979d3` | `ef9b4a987f736aa308b5a92a17b6ce7940e6252e` |
+| `528966025c721aa24ee764132e214c911000952f` | `3fc3593ed53d0432510bb0163866d2c1e1b1722c` |
+| `cddb7044bac8ad96347c82a6e80d60c23d1bd2d9` | `998946f32a777045b0ad382325049d3cba7252bd` |
+| `00be716db7b29704075bd1cd7dce02f02c07f963` | `57a313fe407d375654bce599cab7308679401c85` |
+| `c0746920b47cb906d1fb12984fec81e642421d0a` | `4af3ec46cb9368bbf21cbbd8d739b15c4587b90d` |
+| `9f1687cc12e293997c59a1764abeb3f9e7864fb3` | `d552cbc586fbe5c104176616d8ae57a33a961b5e` |
+| `6c99c9185c6b85566652a05d65d9967dc51bf1c1` | `9ba4cdea70667ce4bce931f8b51fc32c2e16157f` |
+| `785706ee93d870af61ed02fbf8b350251f9506aa` | `23ff382e8f5dfb4da52a532a8f900ccca3ede9c8` |
+| `910d8466e6c23630c099d9cee6b150fafa1e3802` | `100fd195086144bc0a2b7d5ef087a18f0bb6648e` |
+| `d6d7c84fe139e8cb2416d2d6950763fd8aeabea2` | `248a5e4db036546211d755a0f08de1e8f16f78ea` |
+| `81c19301e05c9dcc146b6cef62ececeb89ae49b2` | `8c43294287d014d9045502796fcd471819d432ad` |
+| `4c5ca93c4ed33d094439767667cc61c6d5f2192e` | `051a12038ef4a1afb39ada3011d71d68f5ecdba5` |
+| `cbd9c67cce4da13e8bd4b9087602be839718e455` | `77f7d01261e580ab4289bf276ee4a7ff5cf1a943` |
+| `0602161bc5dcae13adbd7f0b9761733ee75cf509` | `1509426370af50b0592a273b2af4dabeeb634ec8` |
+| `f5d899bdfd9125100f17ded1791b9960fdfd3ace` | `125fbed24bdb1aa623ab2378f4cc202e07b8dc4e` |
+| `6cf59f8e032cc5bf3df8e1045b92a97854311151` | `fc93c3643490d9539f8096e7fa12ffcbacf14b42` |
+| `029e2a118300aa0e1241afee112dad98fdc1b093` | `ce64e9ec31b3164ca27d6a4ef9c2974be3934fe8` |
+| `516177fe0523c6fa3f169b8dcec18610daaba1b5` | `e6742a141defab11c9870dd8b707b104276dd061` |
+| `cc243274b2fa16a7de718eb9d171ec36b70b798a` | `2bf9a434588867ede04c168a79b879eb5114f0d2` |
+| `53e1c809564601d170531a8d0cef8d76029e3ad3` | `7862b107fb03f27b1c5441ab07d684494f4f1a0a` |
+| `eb6c6108a7a1002ea5fe02cd56a3ba82c0d8f7c8` | `d6ab0e209c8d7dc4c76f4f810a6675361a2905f5` |
+| `ed19c0761fab8dcbf409eb894a96cb38babf7eac` | `a506173c6b6a2fe27cd82ee7b1409d00a65b0397` |
+| `b38e21882a878d4c5fd8219b329de0d27d73b0f9` | `214356d6885dd230abc6db9b59eeddbb728895e4` |
+| `fc8679d28ffaf90537ea1c52c5d1cd76abfdc8ed` | `99d6486c29fa86e6dd154615690be205419ab082` |
+| `8728fa725d04d36e458b647f0d825f0504caff6f` | `930384ba78444cd6150d60c2e7fd9d2062092b20` |
+| `efce1d9735f847b1da3ded780cf0f107f67e110f` | `935d4c1fa5faac687190bc1c96ecda6031c3a4ba` |
+| `641ddc544740dcb1c85e316cd30c520d925d47d2` | `104a78a3e6f87a0afe69eebd1bfc4d1ab8b389eb` |
+| `75d1a3fc97c5347b95a93c94f8d8f307b5ef0ee2` | `0b72450c7fddd5d7bc61f92a52aa45fc9fab1c41` |
+| `07eb1f7d2542a9751f1f266c4c2d2c81bad2a0aa` | `02875c8a34ebd705589c2060d2d8a4f0672ba5f9` |
+| `bc5b4f282845f2312141a0ccea3e948e8bdd206b` | `7623981d09fbeab22c60b87e261180701020b82c` |
+| `f8885c6fbddfec5ecd8b90fae778fc9cc260ce21` | `4b5c71d623d1b18cbe738b7fe622957b320e2f6f` |
+| `d1a394b2d53f39608f9411d01ba455a6f95eb94c` | `a5d9c6fa4e71675b98924b49c3926467251a84ed` |
+| `82e8180437857ce01ef2a5c4aff040d3db161d76` | `a2f0216c6641ae9cd2b6ab5aeb27492401cd0de8` |
+| `1b201631d3a0fbb58925290bedf87764144c602c` | `7365b1497fba35763a17a27036d524240a198fc4` |
+| `6a07a6847c6b36616c7fc90407300fc92159bd7a` | This privacy-publication commit |
+
+The last row identifies the containing commit instead of a self-referential hash. All40 requirements remain PARTIAL, accepted=false and inventory OPEN. Both staged C55 handoffs remain outside commits. This rewrite does not establish npm-ci, hosted execution, acceptance or a new local product result.
+
+## C80: three final local complete-diff reviews
+
+**COMPLETED_WITH_EXTERNAL_GATES_OPEN.** Three fresh isolated review runs completed PASS with no actionable findings and no product proof replay. All three reviewed accepted master `76bb32fd04fd4737c0efcceaabc7d10387453147`, unaccepted checkpoint `8f45dda2a2c168931735cf798560b8dfd02a1579` and current `1b201631d3a0fbb58925290bedf87764144c602c`. Both earlier commits are ancestors. The three no-rename comparisons contain203/471/505paths; their union has555paths, including50intermediate-only paths. Those are path counts, not test counts. Both additional owner-staged C55 handoffs were classified as historical inputs and remain outside commits.
+
+| Independent run | Result | Coverage and execution |
+| --- | --- | --- |
+|Final1, review-a|PASS,0 findings|All three comparisons and all40 requirements;0 proof replays.|
+|Final2, review-b|PASS,0 findings|All three comparisons and all40 requirements;0 proof replays.|
+|Final3, fresh review-a|PASS,0 findings|All three comparisons and all40 requirements;0 proof replays.|
+
+These are three independent fresh sessions, not three human reviews or a claim of three different model families. Earlier C78/C79 scoped reviews are not counted again as final reviews. Each final run includes complete change-inventory/disposition coverage and risk-based substantive source inspection. Generated assets and historical execution also use explicit source/result bindings. Not every changed line, test body or historical log was manually read. The review reports distinguish direct inspection from accepted bindings; no material omitted implementation area or new required local proof gap was identified.
+
+The review scope includes schemas/migrations, canonical/display transactions, identities/chunks/cursors, read retirement/lifecycle, HTTP/SSE/reconciliation/access, browser store/client/renderer/epochs, the identifier amendment, joined transports and actual tool data, source/generated assets, CI/tooling/examples/runtime docs, all40 assertion levels and intermediate retirements. Retired full-prefix/Window B mechanics are not restored or silently filtered. Native lower-level traversal and synthetic B/C cases are not promoted to browser J proof. The parent separately rechecked811 source hashes/full modes,444 native inputs,76 runtime files,1092 finite prior records and9 new review files.
+
+### Local evidence retained at its actual cutoff
+
+| Family | Supported local result | Qualification |
+| --- | --- | --- |
+|C78R1|Original-terminal full verifier, all six commands,1252 native PASS/12 ignored/0failed-filtered, platform PASS and doctest0|Actual optimization0 and approved binding; verifier arrays do not acquire absent locked/offline flags.|
+|C79|Twelve unique locked/offline ordinary mains once in order, original PASS terminals and source-defined completion|Not twelve new tests, benchmark or complete cleanup; never two_turns.|
+|C75/C76|8079 default Node plus typecheck/assets;89 actual Chromium cases/34files|Saved source-bound local executions, not fresh C80 runs or hosted/macOS proof.|
+|C35 CLI|152 fake-only historical checks with matching paired source/modes and configured Node version|No new CLI run or old binary-hash proof.|
+|C77 index|170 supplemental selected bindings plus98 legacy objects, with all40 assessments|Not268 unique tests; levels, source declarations and historical cutoffs remain distinct.|
+
+The latest statement is this C80 section. Historical root headers and earlier report entries retain their cutoffs. This later three-document publication was not part of the reviewed HEAD; its parent privacy/documentation/whitespace/preservation checks are separately recorded. It does not fabricate exact submitted-head review or CI closure. Review-tool option, parser, filename and full-mode comparator diagnostics were corrected and disclosed. No strict universal procedural-compliance, defect-absence, secret-detector, complete-descendant or global-cleanup guarantee follows. Supporting reports, finite coverage and bindings remain (local record).
+
+### Work that still needs external evidence or an owner decision
+
+- No adequate npm-ci receipt is bound in the examined evidence families. Installed packages and current browser PASS do not prove that command ran. The required later exact-head hosted job can supply install evidence without replacing local dependencies.
+- macOS native and hosted Ubuntu native/browser execution remain unproved. The existing workflow is source wiring, not a hosted result. A later owner-authorized push/submission and inspection must bind exact source, attempts, outcomes and skips.
+- C15/active1 remain owner-deferred despite current case passes. Undefined external/generic identifier policy and unrelated historical unknowns are not silently resolved. C61's intermittent request cause and the first R1 process-clock-reset cause remain unknown. Original failed/incomplete roles remain unchanged; only original C78's supervisor-idle cause is separately resolved.
+- Exact release-to-DOM stays WAIVED_BY_OWNER, not measured. No extra browser case, SQL trace, true peak, reader workaround, exclusion, automatic local reinstall or live-provider execution is justified by these reviews.
+- Final owner acceptance remains separate. All40 official rows stay PARTIAL, accepted=false and inventory OPEN; all98 legacy objects and prior40 matrix objects remain unchanged. Reader/SSE/no-store/access, pins, ledger and historical reports keep their established scope.
+
+No hosted mutation, push, merge, release, deployment or acceptance is authorized. The next external step requires owner authority to publish the branch and obtain exact-head CI evidence. The local documentation checkpoint excludes the two staged C55 handoffs.
+
 ## C79: current ordinary main executions
 
 **COMPLETED_SCOPED_REVIEWED.** At `82e8180437857ce01ef2a5c4aff040d3db161d76`, one recorded pipeline executes twelve unique ordinary main invocations once each. All twelve original terminals record PASS, exit0/null signal, no start/control error, one source-defined completion and successful pre/post preservation. This closes the current ordinary-main execution gap without replaying the accepted C78R1 native/verifier/platform gate, CLI or C75/C76 client/browser proof. No repository source changed.

@@ -24,23 +24,122 @@ jobs:
 
   browser:
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: ''
+      GIT_OPTIONAL_LOCKS: '0'
+      RUSTFLAGS: '--cfg a5b2_max01_biuto9e0'
+      CARGO_BUILD_JOBS: '2'
     defaults:
       run:
-        working-directory: web
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
           node-version: '24.18.0'
-      - run: cargo test --lib --no-run --locked
+      - name: Warm Cargo cache
+        run: cargo fetch --locked
         working-directory: .
       - run: npm ci
+        working-directory: web
       - run: npx --no-install playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm run verify:assets
-      - run: npm test
-      - name: Publish browser fixture executable
+        working-directory: web
+      - name: Provision private browser suite environment
+        id: suite_environment
+        working-directory: .
         run: |
-          node --input-type=module -e 'import { appendFileSync } from "node:fs"; import { discoverFixture } from "./test-support/fixture.mjs"; appendFileSync(process.env.GITHUB_ENV, `WI_C3A_FIXTURE=${await discoverFixture()}\n`);'
-      - run: npm run test:e2e
+          node --input-type=module <<'NODE'
+          try {
+            const io = await import('node:fs/promises');
+            const { constants } = await import('node:fs');
+            const { dirname, isAbsolute, join, resolve, sep } = await import('node:path');
+            const { preparationRedactor, sanitizeRecord } = await import('./web/test-support/browser-fixture-preparation.mjs');
+            const env = process.env;
+            const reject = () => { throw Error('rejected'); };
+            const text = value => typeof value === 'string' && value.isWellFormed() && !value.includes('\0');
+            const pathValue = value => {
+              if (!text(value) || !isAbsolute(value) || resolve(value) !== value || /[\r\n]/.test(value)) reject();
+              return value;
+            };
+            const owned = async (value, directory, mode) => {
+              pathValue(value);
+              const info = await io.lstat(value);
+              if (info.isSymbolicLink() || info.uid !== process.getuid() || await io.realpath(value) !== value
+                || (directory ? !info.isDirectory() : !info.isFile())
+                || (mode !== undefined && (info.mode & 0o7777) !== mode)) reject();
+              return info;
+            };
+            const within = (path, base) => path === base || path.startsWith(base + sep);
+            const root = pathValue(process.cwd());
+            if (pathValue(env.GITHUB_WORKSPACE) !== root) reject();
+            await owned(root, true);
+            const temp = pathValue(env.RUNNER_TEMP);
+            await owned(temp, true);
+            if (within(temp, root) || within(dirname(root), temp)) reject();
+            const output = pathValue(env.GITHUB_OUTPUT);
+            const outputInfo = await owned(output, false);
+            if (!text(env.PATH) || !env.PATH.split(':').every(p => p !== '' && isAbsolute(p))
+              || env.RUSTFLAGS !== '--cfg a5b2_max01_biuto9e0' || env.GIT_OPTIONAL_LOCKS !== '0'
+              || env.NODE_OPTIONS !== '' || env.CARGO_BUILD_JOBS !== '2') reject();
+            const parent = await io.mkdtemp(join(dirname(root), 'wi-browser-records-'));
+            await owned(parent, true, 0o700);
+            if (dirname(parent) !== dirname(root) || within(parent, root) || within(parent, temp)) reject();
+            const scratch = await io.mkdtemp(join(temp, 'wi-browser-scratch-'));
+            await owned(scratch, true, 0o700);
+            if (dirname(scratch) !== temp) reject();
+            const approved = { TMPDIR: scratch, CARGO_TARGET_DIR: join(root, 'target'),
+              RUSTFLAGS: '--cfg a5b2_max01_biuto9e0', GIT_OPTIONAL_LOCKS: '0', NODE_OPTIONS: '', PATH: env.PATH };
+            const controls = { env_file: join(parent, 'environment.json'), suite_output: join(parent, 'suite'),
+              bundle_file: join(parent, 'suite', 'control', 'suite-ready.json') };
+            for (const value of Object.values(controls)) pathValue(value);
+            try { await io.lstat(controls.suite_output); reject(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+            const redact = preparationRedactor(env);
+            // Required data must survive scrubbing unchanged before any bytes are saved.
+            for (const value of [approved, controls]) {
+              if (JSON.stringify(sanitizeRecord(value, redact)) !== JSON.stringify(value)) reject();
+            }
+            const bytes = JSON.stringify(approved) + '\n';
+            await io.writeFile(controls.env_file, bytes, { flag: 'wx', mode: 0o600 });
+            await owned(controls.env_file, false, 0o600);
+            if (await io.readFile(controls.env_file, 'utf8') !== bytes) reject();
+            const current = await owned(output, false);
+            if (current.dev !== outputInfo.dev || current.ino !== outputInfo.ino || current.mode !== outputInfo.mode) reject();
+            const handle = await io.open(output, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+            try {
+              const info = await handle.stat();
+              if (info.dev !== outputInfo.dev || info.ino !== outputInfo.ino || info.uid !== outputInfo.uid || info.mode !== outputInfo.mode) reject();
+              await handle.writeFile(Object.entries(controls).map(([key, value]) => `${key}=${value}\n`).join(''));
+            } finally { await handle.close(); }
+          } catch {
+            process.stderr.write('browser suite environment: rejected.\n');
+            process.exitCode = 1;
+          }
+          NODE
+      - name: Typecheck browser sources
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- npm --prefix web run typecheck
+      - name: Verify embedded assets
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- npm --prefix web run verify:assets
+      - name: Test browser units
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- npm --prefix web test
+      - name: Prepare private browser suite
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+          WI_CI_SUITE_OUTPUT: ${{ steps.suite_environment.outputs.suite_output }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/prepare-browser-suite.mjs --output "$WI_CI_SUITE_OUTPUT"
+      - name: Launch guarded browser suite
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+          WI_CI_BUNDLE_FILE: ${{ steps.suite_environment.outputs.bundle_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/launch-browser-suite.mjs --bundle "$WI_CI_BUNDLE_FILE"

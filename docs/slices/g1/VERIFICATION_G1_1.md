@@ -4,6 +4,35 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C78R1: current unchanged full verifier
+
+**COMPLETED_SCOPED_REVIEWED.** The tested revision is `d1a394b2d53f39608f9411d01ba455a6f95eb94c`. One fresh unchanged `scripts/verify.py` body completed with an original on-close PASS terminal. Actual Python admission records optimization0, the approved six values, explicit `CARGO_BUILD_JOBS=2` and `CARGO_NET_OFFLINE=true`, and absent `RUST_TEST_THREADS`. The uv-selected interpreter passes through the unchanged environment launcher before Python runs `runpy.run_path('scripts/verify.py', run_name='__main__')` with `sys.argv=['scripts/verify.py']`. This is not a claim that literal historical `uv run scripts/verify.py` argv was repeated.
+
+| Current execution | Observed result |
+| --- | --- |
+| Static assertions and inventory |423 Rust files,1232 authored test definitions,25 JSONL fixture events; inventory counts, not executed-test counts.|
+| Six original Cargo commands |`cargo fmt --all -- --check`; `cargo check --all-targets`; `cargo test --all-targets`; `cargo clippy --all-targets -- -D warnings`; `cargo build --all-targets`; `cargo test --doc`, all completed in that order.|
+| Native all-target summaries |1252 passed,0 failed,12 existing ignored,0 measured,0 filtered across23 harnesses.|
+| Platform and doctest |Named `first_party_native_windows_compatibility_is_removed` PASS inside the native total; one doctest harness with all counts0. No duplicate platform run.|
+| Original terminal |Actual child/Python exit0, null signal, no recorded start/control failure, null recorder first error and final verifier completion. Worker interval704576ms.|
+| Recorder controls |99 terminal checks,343 recorder checks,8 parser checks,10 syntax checks and setup-only admission PASS before the actual verifier. These are controls, not extra unique product tests.|
+
+Toolchain: Cargo/rustc1.98.1, Node24.18.0, uv0.12.21 and system Python3.13.14. The source and `Cargo.lock` remain unchanged; lock SHA256 is `069b9f5e3db8a82acd0157bd6cae1a3a8184215d070b7453a8461f622d0c37dc`. The unchanged verifier arrays contain no `--locked` or `--offline`. Offline environment and equal lock endpoints do not establish those flags or exclude transient writes. The source behavior is at `scripts/verify.py:16-67`; current runtime platform input is at `tests/platform_support.rs:60-76`. This fresh execution supplies the local dynamic-workflow observation that C77 could not infer from C62's compiled inputs alone.
+
+### Recording, review and historical failures
+
+The new external recorder uses an independently verified session/group, ignored stdin, private launcher output, incremental scrubbed UTF-8 lines, held trailing data and recognized multiline-fragment protection. A20s atomic heartbeat contains metadata only. Five identity-checked observation calls waited120/150/180/180/90seconds. The terminal projects seven meaningful proof fields into plain data while retaining strict sanitization equality. Both normal and interruption shapes have actual publication controls. No repository code, native deadline, test scheduling, filter, dependency, reader or Cargo array changed. No browser/client gate, real browser marker, ordinary example, install or hosted operation ran.
+
+Parent independently binds811 source hashes/full modes,444 native inputs,76 runtime files,775 finite prior records and82 current implementation files. Both fresh operational/integration reviews PASS with no findings or gate replay. A separate AFTER check preserves Git/index/refs/staged C55 patch, approved environment, lock and recorder inputs. Four recorded direct identities retired. Complete descendants, global cleanup and durable native failure roots are not proved. Sanitized stdout/stderr are160459/2732bytes; stderr is not claimed empty. Known-secret scrubbing is not universal secret detection. A current unwrapped read-only listing and a corrected review allocation diagnostic remain disclosed, not strict universal procedural compliance. Supporting receipts and hashes are retained (local record); later publication has its own cutoff.
+
+Original C78 remains FAILED. A new parent finding independently resolves its formerly unknown SIGTERM cause: an output-silent tool reached the supervisor's600s active-tool idle limit and triggered owned-command cleanup. The fallback report did not have that cause. This does not recover its missing verifier output or promote its result. The first R1 attempt remains incomplete: saved heartbeat/log prefixes survived an observed process-clock reset, but no terminal exists and the reset's exact cause remains unknown. A later R1 role remains FAILED despite a completed native child because class-prototype equality rejected its terminal publication. The current plain-data correction and successful new invocation do not rewrite those records or fabricate missing old first-error/terminal facts.
+
+### Remaining closure
+
+C35's152 fake-only CLI self-tests support qualified historical reuse because paired source/modes and configured Node version match; the old binary hash was not recorded and no fresh CLI execution is claimed. The nine ordinary dev mains and three additional HTTP modes still need their separate twelve-invocation increment; the dev/default HTTP call is counted once. Never run `two_turns`. No adequate npm-ci receipt is bound in the examined C21/C35/C62/C75/C76 families; this is not global nonexistence. The separately authorized exact-head hosted workflow can supply install evidence without replacing the local dependency tree.
+
+C75/C76 results remain cutoff-bound and were not replayed. macOS/hosted execution, three final complete-diff reviews, final assertion/report adequacy and owner acceptance remain open. The two current operational reviews do not replace final master reviews. All40 statuses remain PARTIAL, accepted=false and inventory OPEN. C15/active1 deferrals, reader/SSE/no-store/access, pins, release-to-DOM waiver, ledger and unrelated historical unknowns remain unchanged. No push or acceptance follows. C55 handoffs remain staged outside the authorized local checkpoint.
+
 ## C77: current assertion index and remaining closure
 
 **COMPLETED_SOURCE_AND_SAVED_EVIDENCE_ONLY.** At `f8885c6fbddfec5ecd8b90fae778fc9cc260ce21`, parent reconciles existing results without another product execution. [assertion-index-g1.1.json](assertion-index-g1.1.json) is the current structured supplement. It supplies exact names, source/declaration lines, evidence levels, command/observer/revision, saved PASS-line offsets and40current requirement assessments. Original98named records and40legacy row objects in verification-g1.1.json remain unchanged. Their long narratives retain historical cutoffs; they are not the latest open-task list. The global inventory remains OPEN pending final adequacy and closure.

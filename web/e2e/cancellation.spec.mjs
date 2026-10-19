@@ -140,13 +140,13 @@ test('one explicit Cancel retains running truth until native cancellation commit
       stage=`checkpoint ${number} display`;
       await exact(status,'connected; observation: streaming');
       await exact(page.getByRole('heading',{name:'Canonical session title',exact:true}),data.title);
-      const run=transcript.locator('.run');expect(await run.count()).toBe(1);
-      expect(await run.getAttribute('data-run') === command.run_id).toBe(true);
+      const run=transcript.locator('.run');await expect(run).toHaveCount(1);
+      await expect(run).toHaveAttribute('data-run',command.run_id);
       await exact(run.locator(':scope > .metadata'),`Execution: ${execution}. Final result ${cancelled ? 'recorded' : 'not recorded'}.`);
-      expect(isDeepStrictEqual(await run.locator('.entry > h4').allTextContents(),['Human'])).toBe(true);
-      expect(isDeepStrictEqual(await run.locator('.entry').evaluateAll(nodes => nodes.map(node => node.dataset.entry)),['e:2:0'])).toBe(true);
+      await expect.poll(async () => isDeepStrictEqual(await run.locator('.entry > h4').allTextContents(),['Human'])).toBe(true);
+      await expect.poll(async () => isDeepStrictEqual(await run.locator('.entry').evaluateAll(nodes => nodes.map(node => node.dataset.entry)),['e:2:0'])).toBe(true);
       await exact(run.locator('.entry > .metadata').first(),'Recorded state: accepted; Provisional: false');
-      expect(isDeepStrictEqual(await run.locator('[data-field] pre').allTextContents(),[data.task])).toBe(true);
+      await expect.poll(async () => isDeepStrictEqual(await run.locator('[data-field] pre').allTextContents(),[data.task])).toBe(true);
       await occurrences(run,data.task,1);
       // H7 holds the session mutex. Keep the H6 public RunView and make no additional read here.
       if(number !== 2) {

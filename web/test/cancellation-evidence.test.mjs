@@ -234,3 +234,161 @@ test('actual source replaces only raw display proof and retains native H6/H7/H9 
   assert.equal(text.includes('rebased === settled'),true);
   assert.equal(text.includes('await fixture?.stop()'),true);assert.equal(text.includes('test.setTimeout(150_000)'),true);
 });
+
+const checkpointHelper=helpers.find(node => node.name.text === 'checkpoint').getText(source);
+const joinedSource=ts.createSourceFile('joined.js',readFileSync(new URL('../test-support/joined.mjs',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true);
+const joinedHelpers=joinedSource.statements.filter(ts.isFunctionDeclaration).map(node => node.getText(joinedSource).replace(/^export /,'')).join('\n');
+const parityStatement=attempt.tryBlock.statements.find(node => ts.isExpressionStatement(node) && node.getText(source).includes('rebased === settled')).getText(source);
+
+async function checkpointCase({numbers=[1],condition,variant='stable',terminalFault=null}) {
+  return runInNewContext(String.raw`(async () => {
+    const data=${JSON.stringify(data)},command=${JSON.stringify(command)},receipt=${JSON.stringify(receipt)},sid=${JSON.stringify(f.SID)};
+    const running=${JSON.stringify(run('6'))},terminal=${JSON.stringify(run('9'))};
+    const samples={},effects=[],proofs=[],views=[];let stage,runView,number,observed={reads:0,verified:0};
+    const isDeepStrictEqual=(a,b) => {try {assert.deepEqual(a,b);return true;} catch {return false;}};
+    // Both operands live in this realm. A prototype mismatch must not masquerade as bad DOM.
+    assert.equal(isDeepStrictEqual(['Human'],['Human']),true);
+    assert.equal(isDeepStrictEqual([' Human'],['Human']),false);
+    assert.equal(isDeepStrictEqual(['e:2:0','other'],['other','e:2:0']),false);
+    const decodeJson=(...args) => JSON.parse(JSON.stringify(decodeReply(...args)));
+    async function retry(read,expected) {
+      for(let attempt=0;attempt<4;attempt++)if((await read()) === expected)return;
+      assert.fail('Synthetic assertion retries exhausted');
+    }
+    const expect=value => ({toBe:expected => assert.equal(value,expected),
+      toHaveCount:expected => retry(() => value.count(),expected),
+      toHaveAttribute:(key,expected) => retry(() => value.getAttribute(key),expected),
+      toBeDisabled:async () => assert.equal(value.disabled,true),toBeEnabled:async () => assert.equal(value.disabled,false)});
+    expect.poll=read => ({toBe:expected => retry(read,expected)});
+    ${joinedHelpers}
+    ${replyHelper}
+    ${checkpointHelper}
+    function sample(key,correct) {
+      samples[key]=(samples[key]??0)+1;
+      if(key !== condition || variant === 'stable' || (variant === 'delayed' && samples[key]>2))return correct;
+      if(variant === 'delayed' || variant === 'missing') {
+        if(key === 'count')return 0;
+        return Array.isArray(correct)?[]:null;
+      }
+      if(variant === 'duplicate')return Array.isArray(correct)?[...correct,...correct]:2;
+      if(variant === 'before')return ['other',...correct];
+      if(variant === 'after')return [...correct,'other'];
+      if(variant === 'leading')return correct.map(value => ' '+value);
+      if(variant === 'trailing')return correct.map(value => value+' ');
+      if(variant === 'trimmed')return correct.map(value => value.trim());
+      if(variant === 'newlines')return correct.map(value => value.replaceAll('\n',' '));
+      if(key === 'count')return 0;
+      if(key === 'run-id')return ${JSON.stringify(f.OTHER)};
+      return correct.map(() => 'wrong');
+    }
+    const leaf=(key,value) => ({count:async () => 1,textContent:async () => sample(key,[value])[0]});
+    const uuid=value => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value)
+      && value !== '00000000-0000-0000-0000-000000000000';
+    const fixture={origin:'http://127.0.0.1:1234'};
+    const status=leaf('status','connected; observation: streaming');
+    const cancelReply=leaf('cancel-reply','Cancel disposition: requested. Signal only, not terminal truth.');
+    const page={getByRole:(role,options) => {
+      if(role === 'heading'){assert.deepEqual(options,{name:'Canonical session title',exact:true});return leaf('title',data.title);}
+      assert.equal(role,'button');assert.deepEqual(options,{name:'Cancel current run',exact:true});return {disabled:number>=3};
+    },waitForResponse:async predicate => {
+      effects.push('wait');
+      const reply={url:() => fixture.origin+'/v1/sessions/'+sid+'/runs/reconcile',request:() => ({method:() => 'POST'}),
+        status:() => 200,headers:() => ({'content-type':'application/json'}),body:async () => {
+          const value={api_version:1,state:'accepted',acceptance:receipt,run:JSON.parse(JSON.stringify(number>=3?terminal:running))};
+          if(terminalFault === 'sequence')value.run.terminal_sequence='7';
+          if(terminalFault === 'summary')value.run.result.summary.turns_finished='0';
+          if(terminalFault === 'outcome')value.run.result.outcome.type='completed';
+          if(terminalFault === 'text')value.run.user_text=data.task.trim();
+          if(terminalFault === 'receipt')value.acceptance={...receipt,last_sequence:'4'};
+          return new TextEncoder().encode(JSON.stringify(value));
+        }};
+      assert.equal(predicate(reply),true);return reply;
+    }};
+    let detailsText,execution,originalOpen;
+    const runLocator={count:async () => sample('count',1),getAttribute:async key => {assert.equal(key,'data-run');return sample('run-id',command.run_id);},
+      locator:selector => {
+        if(selector === ':scope > .metadata')return leaf('execution','Execution: '+execution+'. Final result '+(number>=3?'recorded':'not recorded')+'.');
+        if(selector === '.entry > h4')return {allTextContents:async () => sample('headings',['Human'])};
+        if(selector === '.entry')return {evaluateAll:async fn => fn(sample('entries',['e:2:0']).map(entry => ({dataset:{entry}})))};
+        if(selector === '.entry > .metadata'){const value=leaf('entry-state','Recorded state: accepted; Provisional: false');return {first:() => value};}
+        if(selector === '[data-field] pre')return {allTextContents:async () => sample('fields',[data.task])};
+        if(selector === 'pre')return {evaluateAll:async (fn,value) => {effects.push('occurrences');return fn([{textContent:data.task}],value);}};
+        assert.equal(selector,':scope > details > pre');return leaf('details',detailsText);
+      },evaluate:async fn => {
+        effects.push('serialize');let open=originalOpen;
+        const clone={querySelectorAll:selector => {assert.equal(selector,'details');return [{removeAttribute:key => {assert.equal(key,'open');open=false;}}];},
+          get outerHTML(){return JSON.stringify({run:command.run_id,execution,headings:['Human'],entries:['e:2:0'],fields:[data.task],details:detailsText,open});}};
+        const proof=fn({cloneNode:deep => {assert.equal(deep,true);return clone;}});
+        assert.equal(originalOpen,number !== 4);return proof;
+      }};
+    const transcript={locator:selector => {assert.equal(selector,'.run');return runLocator;}};
+    const taskArticle={getByRole:(role,options) => {
+      assert.equal(role,'button');assert.deepEqual(options,{name:'Reconcile receipt (read only)',exact:true});
+      return {click:async () => {effects.push('click');}};
+    },locator:selector => {
+      if(selector === 'h3')return leaf('task-heading','task: accepted');
+      if(selector === 'details pre')return leaf('task-text',data.task);
+      assert.equal(selector,':scope > pre');return leaf('receipt','Accepted receipt (not completion)\nOperation: '+receipt.operation_id+'\nSession: '+sid+'\nRun: '+receipt.run_id+'\nSequences: '+receipt.first_sequence+' to '+receipt.last_sequence+'\n\nWarning: none; duplicate: false\n\nReconciliation: accepted\n\nAccepted is not completed.');
+    }};
+    let readView;
+    async function boundary(){effects.push('boundary');}
+    for(number of numbers) {
+      const start=effects.length,reads=observed.reads,verified=observed.verified;
+      for(const key of Object.keys(samples))delete samples[key];
+      execution=number>=3?'cancelled_locally':'running';originalOpen=number !== 4;
+      if(runView === undefined)runView=JSON.parse(JSON.stringify(running));
+      const current=number>=3?terminal:running,result=current.result;
+      detailsText=['Run: '+command.run_id,'Accepted sequence: 2','Outcome: '+(result?.outcome.type??'not recorded'),
+        'Events complete: '+(result?.events_complete??'not recorded'),'Sink error: none',
+        result === null?'Summary not recorded.':Object.entries(result.summary).map(([key,value]) => key+': '+value).join('\n')].join('\n');
+      readView=leaf('read-view','Read-only run view: '+command.run_id+'\nExecution: '+execution+'\nResult recorded: '+(number>=3)+'\nTerminal sequence: '+(number>=3?'8':'none')+'\nResult sequence: '+(number>=3?'9':'none'));
+      let failure,proof;
+      try {proof=await checkpoint(number);} catch(error){failure=error;}
+      const rejected=variant !== 'stable' && variant !== 'delayed' || terminalFault !== null;
+      if(rejected) {
+        assert.notEqual(failure,undefined);
+        assert.equal(observed.verified,verified);
+        assert.equal(effects.slice(start).includes('boundary'),false);
+        assert.equal(effects.slice(start).includes('serialize'),false);
+        if(terminalFault === null) {
+          assert.equal(observed.reads,reads);
+          assert.deepEqual(effects.slice(start),[]);
+          assert.equal(samples[condition]>0 && samples[condition]<=4,true);
+        }
+        return {rejected:true};
+      }
+      assert.equal(failure,undefined);
+      assert.equal(stage,'checkpoint '+number+' display');
+      if(condition !== undefined)assert.equal(samples[condition],variant === 'delayed'?3:1);
+      assert.equal(samples.title,1);assert.equal(samples['task-text'],1);
+      assert.equal(observed.reads,reads+(number===2?0:1));assert.equal(observed.verified,verified+1);
+      assert.deepEqual(effects.slice(start),number===2?['occurrences','boundary','serialize']:['occurrences','wait','click','boundary','serialize']);
+      assert.deepEqual(runView,current);views.push(JSON.stringify(runView));proofs.push(proof);
+    }
+    if(numbers.length === 4) {
+      assert.equal(observed.reads,3);assert.equal(observed.verified,4);
+      assert.equal(views[0],views[1]);assert.equal(views[2],views[3]);
+      const settled=proofs[2],rebased=proofs[3];${parityStatement}
+      assert.equal(effects.filter(value => value === 'click').length,3);
+    }
+    return {rejected:false};
+  })()`,{assert,decodeReply:decodeJson,validateTaskReconciliation,TextDecoder,TextEncoder,numbers,condition,variant,terminalFault},{timeout:1000});
+}
+
+for(const number of [1,2,3,4]) {
+  test(`actual full checkpoint ${number} accepts stable raw DOM`,() => checkpointCase({numbers:[number]}));
+  for(const condition of ['count','run-id','headings','entries','fields'])test(`actual full checkpoint ${number} awaits independent ${condition} delivery`,
+    () => checkpointCase({numbers:[number],condition,variant:'delayed'}));
+  for(const [condition,variants] of [
+    ['count',['missing','wrong','duplicate']],['run-id',['missing','wrong']],
+    ['headings',['missing','wrong','duplicate','before','after','leading','trailing']],
+    ['entries',['missing','wrong','duplicate','before','after','leading','trailing']],
+    ['fields',['missing','wrong','duplicate','before','after','leading','trailing','trimmed','newlines']],
+    ['title',['trimmed','leading','trailing']],
+  ])for(const variant of variants)test(`actual full checkpoint ${number} rejects ${condition}/${variant} before reconciliation or later actions`,
+    () => checkpointCase({numbers:[number],condition,variant}));
+}
+for(const condition of [undefined,'count','run-id','headings','entries','fields'])test(`actual four-checkpoint sequence preserves H7 no-read and exact terminal/rebase parity: ${condition??'stable'}`,
+  () => checkpointCase({numbers:[1,2,3,4],condition,variant:condition === undefined?'stable':'delayed'}));
+for(const number of [3,4])for(const terminalFault of ['sequence','summary','outcome','text','receipt'])test(`actual full checkpoint ${number} rejects substituted terminal ${terminalFault}`,
+  () => checkpointCase({numbers:[number],terminalFault}));

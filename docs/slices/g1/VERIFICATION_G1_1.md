@@ -4,6 +4,59 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C74B: exact cancellation DOM convergence, accumulated A+B reviewed
+
+**COMPLETED_OFFLINE_SCOPED_REVIEWED.** A is locally checkpointed at `75d1a3fc97c5347b95a93c94f8d8f307b5ef0ee2`. B tests that checkpoint plus two then-uncommitted files. Both fresh complete accumulated A+B source/evidence reviews PASS/no findings/0gate replays. Review-b's raw verdict is COMPLETEDPASS; the parent records that as a completed passing review, not a new acceptance label. This is not a final master review, repaired-source browser gate or G1.1 acceptance. Parent publication has a later three-document cutoff.
+
+### Five exact observations, no repeated effects
+
+`web/e2e/cancellation.spec.mjs:143-149` changes only five reads: awaited toHaveCount1, awaited exact data-run attribute, and strict Boolean expect.poll over the original isDeepStrictEqual expressions for headings['Human'], entry IDs['e:2:0'] and field text[data.task]. Reversing those five exact replacements reconstructs every old spec byte. No normalized string-array toHaveText proof, whole-checkpoint poll, new runtime helper/import, sleep/timer/timeout parameter or repeated native/HTTP/UI action.
+
+The native pending control proves a storage commit, not browser SSE application. Existing status/title can already be true before Send. These checks therefore await the same exact eventual browser state instead of sampling once. The actual fixture preserves leading/trailing spaces and newlines. Raw string bytes, array length/order, run identity, occurrences, RunView/receipts/data, native controls, traffic/privacy and reconciliation sequence1,0,1,1 remain unchanged. H7 checkpoint2 performs no reconcile/read; checkpoints3/4 retain exact terminal and rebase equality. First-error catch, cleanup and environment restoration are byte-preserved. The unchanged default case timeout is60seconds; the beforeAll/discovery timeout is150seconds; global remains300seconds. Parent does not adopt reviewer prose that conflates the discovery limit with the default case limit, or attributes the unknown diagnostic assertion line to C72. The unknown cancellation line belongs to the owner's timing diagnostic; C72's confirmed failure is suite budget exhaustion.
+
+### Actual checkpoint controls
+
+`web/test/cancellation-evidence.test.mjs:238-394` appends164counted controls to70unchanged original tests. It extracts and executes the full current checkpoint, actual reconciliation reply helper, actual joined exact/occurrences helpers and the actual settled/rebased assertion. All synthetic observations/expected data occupy one VM realm. node:assert/strict equality has positive, whitespace and order self-controls. Actual reply decoding/validation precedes cloning validated data into that realm. This avoids cross-realm scaffolds without weakening runtime comparisons.
+
+Controls contain5stable,25delayed,124permanent DOM negatives and10terminal/receipt substitutions. Bounded fake assertions observe at most four times; independently delayed values arrive on observation3. No browser, native event, HTTP request, sleep or real timer simulates delivery. Wrong/missing/duplicate/extra/order/whitespace data, trimmed title/task and changed newlines reject before occurrence proof, reconciliation, privacy boundary, serialization or later checkpoint progression. Successful four-checkpoint sequences assert three total reconcile reads/clicks, zero at2, the same running view through H7 and equal terminal/rebased state at3/4. Existing reply/privacy/cleanup/controller/source tests remain unfiltered.
+
+Regression-first uses the final234-test file with the original spec:209PASS25FAIL/0cancelled-skipped-todo, code1/signalnull. Exactly20independent delayed positives and5delayed four-checkpoint sequences fail. Stable, permanent-invalid, terminal-negative and all70old tests pass. No scaffold failures. A narrow234PASS follows the repair; the final focused234PASS is recorded separately. These controls reproduce the current synchronization mechanism, not the owner's exact historical failing line or real browser timing.
+
+### Final offline evidence and preservation
+
+All implementation/EOF edits finish before the nine accepted final gates. Every gate captures the same810path SHA/full-mode source inventory before AND after execution and matches the final implementation cutoff; later documentation publication is separate. Exact target/agent_env wrapper argv, cwd, approved-file hash/effective six/default0022, source, closed-code-signal and sanitized streams are retained. Outer build-jobs/test-threads and eight suite/three WI_CI inputs remain absent. No test filtering, serialization, reporter, concurrency, deadline, environment or pin override.
+
+| Gate | Current B result |
+| --- | --- |
+| `node --test web/test/cancellation-evidence.test.mjs` |234PASS/0FAIL/cancelled/skipped/todo.|
+| Default nine-file affected vector |2699PASS/0FAIL/cancelled/skipped/todo.|
+| Exact default `npm --prefix web test` |8079PASS/0FAIL/cancelled/skipped/todo; exactly ONE final full invocation.|
+| Two assigned JavaScript syntax checks |PASS.|
+| Typecheck /nonmutating assets |PASS/8verified.|
+| Corrected external static checker |PASS five replacements, old prefix, AST/scope/privacy/whitespace.|
+| Registration only |89tests in34files, no callbacks/browser bodies.|
+
+The affected vector contains cancellation-evidence,cancellation-artifacts,cancellation-protocol,display-client,fixture-protocol,fixture-failure,browser-suite-preparation,browser-suite-launch,restart-display modules under web/test after Node --test. Counts overlap, not unique product proofs. Non-test count fields remain unreported rather than zero. The1200000ms tool observation allowance avoids interrupting command observation; it changes no product timeout. Direct identity/retirement records cover the agent_env launcher. Its target terminal is reflected by the helper; every nested Node/npm target/grandchild is not independently sampled. No complete descendant census is claimed.
+
+Parent binds810current paths/808nonassigned,444native inputs,75nonassigned of76runtime files/3directory identities,84Bfiles including its seal,261finite prior and5owner records, accepted A's exact two files, approved JSON and Git/index/refs/staged patch. The261prior set includes A records, so overlapping counts are not a sum of independent proofs. Accepted A's35controls/278focused/3605affected/7915full and both earlier reviews retain their earlier cutoff. The current8079run includes A+B, with no A code drift. All old B test bytes remain an exact prefix; every other spec byte is unchanged.
+
+Initial oversized baseline-schema, refs trailing-newline and incorrectly excluded tracked-asset comparisons are corrected before edits. The first external static scaffold wrongly demanded another separator LF after the intact old prefix and FAILED. A new corrected checker passes without repository changes or full rerun; the queued registration runs once after that diagnostic. Twelve executions retain their exact receipts: red, narrow, first static and nine accepted gates. Parent initially guessed FINAL_RESULT.json; the actual result is RESULT.json, located by a bounded filename lookup without replay. No strict universal procedural-compliance or independently pinned initial-checker claim. A's earlier failed/INCOMPLETE/unbound runs remain unchanged in their records and the previous section.
+
+No real browser/native/productHTTP/Cargo/preparation/attempt marker or prepared-suite consumption runs. Existing isolated Node synthetic fixtures, markers/control/output, test-owned Node children/direct metadata and owned cleanup remain authorized and unfiltered. No other spec, reader/backend, dependency/config/pin/deadline or accepted A file changes. Owner scratch/native failed trees remain untouched. No new process/root/cache/disk scan, cleanup/adoption, credential/auth/private-skill/live/ledger/hosted operation, binary/source-tree/Git-store copy or push.
+
+### Optional other-spec source inventory, no changes or defect claims
+
+Parent checks the other33spec files with a bounded AST pass: up to20following statements after literal fixture.request wait_* controls and one named-helper call level, excluding expect.poll callbacks. Initial four-statement scope finds no candidates; the widened source-only pass finds the following. This is not exhaustive interprocedural analysis or proof of a race. Existing web-first prerequisites can make later one-shot observations appropriate.
+
+| Spec/control and call site | One-shot observations and existing guards |
+| --- | --- |
+| `web/e2e/lifecycle-failure.spec.mjs:225-245` | checkpoint has count/run-ID reads at139-140 and ID-array read144. The latter follows headings polling143. Request-ID read169 precedes exact recording proof173. The same helper follows native model pauses and the wait_lifecycle_failure/release/inspect sequence. No failing schedule is established.|
+| `web/e2e/task-active-conflict.spec.mjs:228-244` | privateBoundary's forbidden-element count at131 follows earlier web-first command checks. It is a privacy snapshot, not itself a run-render readiness gate. No change is proposed here.|
+
+Other one-shot reads may exist beyond these bounds or behind fixture.wait/other helpers. Neither candidate becomes a confirmed defect or authorization to expand C74. Both source files remain byte-equal.
+
+All98prior named-test objects and40official rows remain unchanged: all40PARTIAL/acceptedfalse/inventoryOPEN. C15/active1, reader/SSE/no-store/access, pins/release-to-DOM waiver/ledger/C61unknown/history remain. Both C55 handoffs stay staged outside the checkpoint. C72 remains FAILED; the owner's87PASS2FAIL421second diagnostic remains timing-only. The global300second budget remains knowingly insufficient. Next requires a separate global-budget decision and fresh preparation/one-use guarded browser scope; never reuse the consumed C72 bundle. Full runtime/platform/hosted/assertion/final-master closure and acceptance remain open. Decisive results inline; supporting records retained (local record). Parent publication/checkpoint follows document checks; no push or acceptance.
+
 ## C74A: finite browser ancestry and later owner findings for C72
 
 **COMPLETED_OFFLINE_SCOPED_REVIEWED.** Source is `641ddc544740dcb1c85e316cd30c520d925d47d2` plus the two-file A repair. Both fresh complete source/evidence reviews PASS/no findings/0gate replays. Parent publication has a later cutoff. C74B cancellation convergence is deferred until this reviewed A checkpoint. No repaired-source browser proof, real suite launch or acceptance follows.

@@ -25,6 +25,29 @@ const environment = env => ({ values: Object.fromEntries(six.map(key => [key, en
 const overlaps = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
 const identity = (path, s) => ({ path, uid: s.uid, mode: s.mode & 0o7777, device: s.dev, inode: s.ino });
 
+export async function browserSuiteManifest(sourceRoot = ROOT, io = fs) {
+  const files = [], directories = [];
+  async function visit(relative) {
+    const path = join(sourceRoot, relative), s = await io.lstat(path);
+    if (s.isSymbolicLink() || await io.realpath(path) !== path) reject();
+    if (['web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json'].includes(relative) && !s.isFile()) reject();
+    if (['web/e2e', 'web/test-support', 'web/scripts'].includes(relative) && !s.isDirectory()) reject();
+    const facts = { path: relative, type: s.isDirectory() ? 'directory' : 'file', mode: s.mode & 0o7777,
+      device: s.dev, inode: s.ino };
+    if (s.isDirectory()) {
+      directories.push(facts);
+      for (const name of (await io.readdir(path)).sort()) await visit(join(relative, name));
+    } else {
+      if (!s.isFile() || s.nlink !== 1) reject();
+      const bytes = await io.readFile(path), after = await io.lstat(path);
+      if (after.ino !== s.ino || after.dev !== s.dev || after.mode !== s.mode || after.nlink !== 1 || after.size !== bytes.length) reject();
+      files.push({ ...facts, bytes: bytes.length, sha256: hash(bytes) });
+    }
+  }
+  for (const name of ['web/e2e', 'web/test-support', 'web/scripts', 'web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json']) await visit(name);
+  return { files, directories };
+}
+
 export async function prepareBrowserSuite({ output }, overrides = {}) {
   // Seams keep offline controls on owned synthetic files, without a native build.
   const io = { ...fs, ...overrides.io };
@@ -57,28 +80,7 @@ export async function prepareBrowserSuite({ output }, overrides = {}) {
     return { ...identity(path, s), type: 'file', bytes: bytes.length, sha256: hash(bytes) };
   };
   const load = async path => { await file(path); return JSON.parse(await io.readFile(path, 'utf8')); };
-  const manifest = async () => {
-    const files = [], directories = [];
-    async function visit(relative) {
-      const path = join(sourceRoot, relative), s = await io.lstat(path);
-      if (s.isSymbolicLink() || await io.realpath(path) !== path) reject();
-      if (['web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json'].includes(relative) && !s.isFile()) reject();
-      if (['web/e2e', 'web/test-support', 'web/scripts'].includes(relative) && !s.isDirectory()) reject();
-      const facts = { path: relative, type: s.isDirectory() ? 'directory' : 'file', mode: s.mode & 0o7777,
-        device: s.dev, inode: s.ino };
-      if (s.isDirectory()) {
-        directories.push(facts);
-        for (const name of (await io.readdir(path)).sort()) await visit(join(relative, name));
-      } else {
-        if (!s.isFile() || s.nlink !== 1) reject();
-        const bytes = await io.readFile(path), after = await io.lstat(path);
-        if (after.ino !== s.ino || after.dev !== s.dev || after.mode !== s.mode || after.nlink !== 1 || after.size !== bytes.length) reject();
-        files.push({ ...facts, bytes: bytes.length, sha256: hash(bytes) });
-      }
-    }
-    for (const name of ['web/e2e', 'web/test-support', 'web/scripts', 'web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json']) await visit(name);
-    return required({ files, directories });
-  };
+  const manifest = async () => required(await browserSuiteManifest(sourceRoot, io));
   let created = false, stage = 'entry';
   try {
     if (!process.versions.node.startsWith('24.') || env.CARGO_TARGET_DIR !== join(ROOT, 'target') || TARGET !== env.CARGO_TARGET_DIR

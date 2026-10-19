@@ -2,6 +2,22 @@
   "contract": "g1.1",
   "accepted": false,
   "status": "C3B54D5_CASE_REVIEWED_BROWSER_ARM_ONLY_ALL40_PARTIAL",
+  "c77_assertion_index": {
+    "status":"COMPLETED_SOURCE_AND_SAVED_EVIDENCE_ONLY",
+    "inspected_revision":"f8885c6fbddfec5ecd8b90fae778fc9cc260ce21",
+    "current_supplement":"docs/slices/g1/assertion-index-g1.1.json",
+    "legacy_tests_and_matrix":"Original98testobjects and40legacyrowobjects remain unchanged at their cutoffs; current40assessments and named tuples are in the linked supplement",
+    "binding_records":{"legacy_preserved":98,"native_C62_selected":54,"client_C75_selected":27,"browser_C76":89,"supplemental":170,"current_requirements":40,"limit":"Not268unique tests; variants/helpers/repeated/overlapping proof do not inflate unique counts"},
+    "native_reuse_limit":"444compiled inputs matchC62, but platform_support reads later-changedci.yml; its old PASS is recorded-only, not blanketcurrent-native-runtimeproof",
+    "C76_scope":"Exact89cases/34files/currentproductbindings/one guardedPASS, no replay ormarker-derivedcounts",
+    "preservation":{"source":811,"nonassigned":806,"native":444,"runtime":76,"finite_prior":540,"Git_index_refs_C55patch_approved_six":"UNCHANGED_BEFORE_CHECKPOINT"},
+    "new_product_executions":0,"new_delegates":0,
+    "remaining":"Final per-assertion/amendment adequacy; currentlocalauxiliary/install/platform binding andunboundgates;ownerC15active1dispositions;3freshcomplete-diffreviews;separatelyauthorizedexactheadhostedCI;owneracceptance",
+    "browser_budget":"Zeroextra localbrowser/markers forindex/reviews; futurehostedrequiredjob separate/fresh/actualattemptstages, not retrypermission",
+    "accepted":false,"official_status":"All40PARTIAL","inventory":"OPEN",
+    "unchanged":"Reader/SSE/no-store/access/pins/waiver/ledger/C61unknown/C72FAILED/C73diagnostic/history;C55stagedoutsidecommit",
+    "evidence":"Exactnames/source-lines/levels/commands/observers/resultcutoffs inline in supplement; privatebindings retained (local record); no push/acceptance"
+  },
   "c76_full_local_browser": {
     "status":"COMPLETED_SCOPED_REVIEWED",
     "source_head":"bc5b4f282845f2312141a0ccea3e948e8bdd206b",
@@ -1099,7 +1115,7 @@
     {"name":"actual listeners retain first8 duplicate events, count every failure and freeze scalar snapshots","evidence_id":"C61-C2","requirement_id":"G11-31","evidence_level":"C","observer":"C61R2 implementation actual-source deterministic Node control; reviews inspect saved evidence","result":"PASS_LOCAL_SCOPED_REVIEWED","path":"web/test/catalog-pagination.test.mjs:380"},
     {"name":"catalog_keyset_is_as_of_and_rename_refresh_preserve_exact_titles","evidence_id":"C61-H1","requirement_id":"G11-31","evidence_level":"H","observer":"Prior C60 actual HTTP/SQLite native gate,444-input revalidation only in C61R2","result":"PASS_LOCAL_SCOPED_REVIEWED_UNCHANGED_INPUT_REUSE","path":"src/http_api/router/tests/metadata_tests.rs:144-241"}
   ],
-  "test_inventory_status": "OPEN: exact named tests, evidence levels and observers must be populated before closure; filter/rerun counts are not unique tests.",
+  "test_inventory_status": "OPEN: 98 legacy records remain at their cutoffs; assertion-index-g1.1.json adds 170 named C62/C75/C76 bindings and all40current assessments. Final assertion adequacy/dispositions/platform/CI/reviews/acceptance remain open; binding and variant counts are not unique tests.",
   "migration": {
     "observer": "A4_implementation_delegate",
     "review_status": "PASS_INCREMENT_AFTER_REMEDIATION",

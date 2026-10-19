@@ -4,6 +4,81 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C77: current assertion index and remaining closure
+
+**COMPLETED_SOURCE_AND_SAVED_EVIDENCE_ONLY.** At `f8885c6fbddfec5ecd8b90fae778fc9cc260ce21`, parent reconciles existing results without another product execution. [assertion-index-g1.1.json](assertion-index-g1.1.json) is the current structured supplement. It supplies exact names, source/declaration lines, evidence levels, command/observer/revision, saved PASS-line offsets and40current requirement assessments. Original98named records and40legacy row objects in verification-g1.1.json remain unchanged. Their long narratives retain historical cutoffs; they are not the latest open-task list. The global inventory remains OPEN pending final adequacy and closure.
+
+### What is newly indexed, not newly executed
+
+| Binding family | Records / observed result | Cutoff and limits |
+| --- | --- | --- |
+| C76-B01..B89 |89exact browser progress identities in34files, completed89passed(7.0m), last-runpassed/failedTests[] |Actual single guarded run atbc5b4f2; all89names/source lines match. Unprinted individual timings/nonpass counters remain unknown. B/C app/view/catalog fixtures are synthetic DTO transport, not Rust projection or J.|
+| C62-N01..N54 |54selected named native PASS lines from the1252PASS/12existingignored/0failed-filtered recorded all-target gate |Actual `cargo test --locked --offline --all-targets` at6cf59f8/default concurrency. All444compiled inputs and selected declaration files match; no C77 execution. N54 has a changed runtime dependency and is recorded-only.|
+| C75-C01..C27 |27selected exact store/client/framing PASS labels within8079default unfiltered Node passes |Actual C75/R1 final implementation cutoff; relevant selected tests and their recorded source inputs match. No new unit run.|
+
+170supplemental records plus98legacy objects are **not268unique tests**. Browser variants, helpers, parameterizations, overlapping assertions and repeated evidence do not create new unique proofs. The six joined C76cases are six named runtime cases with two explicit Tasks each. The three native S2 functions N51..N53 each include native/recovered variants; they are three named functions, not six extra named tests or browser J proofs. Account case B18 has one actual first producer chain; its second accepted identity failure is not a second successful generation. Saved-skill B15 changes/deletes source after completed Tasks; pre-next-task mutation remains the separate native S2 layer.
+
+Each native/client tuple contains its exact saved stdout line. Shared command metadata identifies the saved stream by SHA256. Each browser tuple matches the C76 progress identity plus completed89-of-89 summary; no individual terminal or duration is invented. Source/command/observer facts are inline so remote readers do not need private paths. Supporting hashes and receipts remain (local record).
+
+### All40 current assessments
+
+All official statuses below remain **PARTIAL** and acceptedfalse. N means C62-N, C means C75-C and B means C76-B from the supplement. Additional legacy records and report families remain linked there. These are supporting named assertions, not an assertion that every rare subcase has been exhaustively re-indexed or accepted. Final adequacy includes the October identifier amendment; undefined external/generic identifier policy is not silently filled in.
+
+| Requirement / level | Current supporting named assertions | Remaining qualification or closure |
+| --- | --- | --- |
+| G11-00 /audit |C77 actual Git/source/evidence baseline; preserved C55/C62/C76 boundaries |Final submitted revision and authority/acceptance closure.|
+| G11-01 /platform audit |N54 Windows-removal inventory; actual current platform-check/workflow source |N54 reads a later-changed workflow; final runtime-platform/macOS/CI audit.|
+| G11-02 /S |N01..03: exact human, stable source identity/generations and cross-run call isolation |Final assertion adequacy and accumulated review.|
+| G11-03 /S |N04..06 exact interleaved scalar bytes/tail-only counters; B09 append supplement |Final adequacy; no new SQL trace inferred.|
+| G11-04 /S |N02,N04,N07,N08 same-entry replacement/sections/native-recovered terminal fallback |Final adequacy, not a missing replacement design.|
+| G11-05 /S+H |N03,N09,N10 exact tools/is_error/uncertainty/reuse; B15,B30,B84..89 |Final layered fidelity adequacy; DTOs are not real effects.|
+| G11-06 /S |N11,N12 actual atomicity barriers and whole-batch/table rollback |Final rollback/amendment mapping; timings are not rollback proof.|
+| G11-07 /S |N12..14 writer/duplicate/invalid-summary guards; B08 effect-versus-recording failure |Final write-path and identifier-amendment adequacy/policy limits.|
+| G11-08 /S |N15,N16 additive exact DDL and corruption/future-store refusal |Final schema/constraint review.|
+| G11-09 /S+P |N17..19 genuine1/2 preservation, bounded backfill, death/reopen; B31 browser layer |Final migration/amendment adequacy, not physical power-loss proof.|
+| G11-10 /S+H |N16,N17,N20,N21 integrity/legacy-header/cold-warm; B06 finite measurements |Final availability adequacy; no new warm SQL-trace harness.|
+| G11-11 /S |N05,N22..25 scalar chunks/empty fields/exact cursor reconstruction; B04 one prepend |Final native traversal adequacy; prepend is not full reconstruction.|
+| G11-12 /S |N06,N26,N27 indexed bounded100/10000work |Final plan/work adequacy; no browser-scale/constant-memory claim.|
+| G11-13 /S+H |N28,N29 page/live parity; B07..09,B21,B84..89 supply browser states |Final committed-barrier/normalization map; levels remain distinct.|
+| G11-14 /H |N30..32 LatestB/BeforeA/Within/empty metadata/head/read retirement |Final HTTP and owned-read adequacy.|
+| G11-15 /S+H |N33,N34 compatible versus stale/future/resource/missing cursor behavior |Final validation classifications and retained rare-case map.|
+| G11-16 /H |N14,N20,N25,N35,N36 encoded caps/huge-human/content progress/legacy refusal |Final encoded-bound/amendment adequacy, no truncation or quota.|
+| G11-17 /H |N37,N38 matching-H attach/private watermark/header boundary; C10 deterministic layer |Final attach/header adequacy; no original Fetch-body requirement added.|
+| G11-18 /S+H |N27,N39,N40 bounded current-entity ordering/ties/convergence; retained B2 split evidence |Final split/cursor adequacy, not every raw event delivery.|
+| G11-19 /H |N32,N41..43 stalled/drop/drain/fault-recipient controls; preserved C60S01..09 |Current recorded default-concurrency passes do not explain old timeout phase/recipient.|
+| G11-20 /H+B |N38,N44,N45 real access/loopback; C11 and B05,B10,B32..42/B51/B56..66 as tagged |Final accumulated access/privacy review, not broad security certification.|
+| G11-21 /H |N46,N47 active/off-screen proof/integrity-versus-absence plus retained17B3cases; B25 |Final complete reconcile-case adequacy.|
+| G11-22 /B+H |B15,B31..34,B41..45,B47,B52 and C09, layered with H page N30 |Current B-before-A/serial fill/pixel-boundary gap has named results; final combined adequacy.|
+| G11-23 /B |B04,B35,B46,B50 content/activity/A and affected-entry refresh |Final UX adequacy; native full traversal remains separate.|
+| G11-24 /B |B34,B35,B48,B49,B53/B60..83 as tagged:2px/upward96/focus/no cascade |Final current integration adequacy; no Home-from-bottom requirement added.|
+| G11-25 /C |C01..08,C10,C26,C27 immutable generic revisions/ranges/epochs; controlled focus/conflict B cases |Final active import/disposition audit; no browser raw reconstruction.|
+| G11-26 /C |C13..15,C17..25 retained byte framing/EOF plus actual controller whole-frame atomicity |Final framing/application adequacy; Window B remains superseded.|
+| G11-27 /B+C |C01,C09,C12; B20,B21,B26,B27,B36..39,B50,B55 |C15 remains OPEN_OWNER_DEFERRED despite current B26PASS; owner disposition/final epoch adequacy.|
+| G11-28 /B+H |C16 plus B01,B05,B08,B11,B14,B16..19/B22..25/B28/B29/B36/B51/B54/B59/B79 |active1 remains OPEN_OWNER_DEFERRED despite current B19PASS; final command/error adequacy.|
+| G11-29 /B |B03,B07..10,B12,B13,B15,B21,B30,B31,B84..89 rich partial/terminal/interrupted/upgraded parity |Final barrier/source/result adequacy; no additional case established.|
+| G11-30 /B |B10,B32,B33,B41,B42,B49,B51/B68..83 as tagged: inert content/keyboard/layout/focus |Final specified accessibility/content adequacy, not universal certification.|
+| G11-31 /B+H |N31,N48,N49; B02 pagination/refresh, B14 active Rename+absent path, B40/B47 empty session, B58 empty catalog |NOT_LOCATED action gaps now have current bindings. C61 old request-fault cause remains UNVERIFIED.|
+| G11-32 /disposition audit |DISPOSITION and retained retirement reports; unfiltered C758079/C7689, old failed objects preserved |Three final reviews must inspect complete original/checkpoint/current obligations and generated/untracked work.|
+| G11-33 /J |B84..89 six actual joined transport cases; B25 is separate one-Task lost-reply chain |Final replay/transport adequacy; lower-level native and DTO cases do not replace J.|
+| G11-34 /J |B15 saved mainSKILL, B18 first-chain/account failure, B30 real reuse; N51..53 lower variants |Final layered source-change/identity adequacy, not six mandatory new browser variants.|
+| G11-35 /J+P |B03,B07,B12,B13,B20,B26,B31; N29,N50 and retained native restart evidence |Final integrated interruption/no-resume adequacy; read-only recovery performs no new generation.|
+| G11-36 /measurements |N17,N26; B04,B06,B09,B10; retained C37-C42/C52-C54 qualified values |Final qualified measurement index. Exact release-to-DOM stays WAIVED_BY_OWNER; no new SQL trace/true-peak/SLA case.|
+| G11-37 /native/build/auxiliary |C62 six recorded gates/444matching compiled inputs; N54 runtime exception; historical C35auxiliary |Current runtime/auxiliary input reconciliation; execute only unbound required local gates.|
+| G11-38 /browser+review gates |C75 typecheck/assets/8079 and C7689actualChromium; C70 Ubuntu job source |Bound npm-ci receipt not located in C62/C75/C76 inputs; retained-platform/hosted and three final complete-diff reviews.|
+| G11-39 /reports+exact-head closure |Current linked40-row named/level/command/observer supplement and98legacy records |Final adequacy/report review, separately authorized submitted-head CI and owner acceptance.|
+
+### Important distinctions and next work
+
+- `tests/platform_support.rs:64-76` scans first-party source and reads the workflow. All444compiled C62inputs match, but `.github/workflows/ci.yml` changed later. N54's old PASS is not new execution. Other selected native assertions keep their recorded revision/matching-source limits; this reconciliation does not declare the whole old runtime gate current.
+- Empty-catalog binding is concrete: `web/e2e/display-view.spec.mjs:363-390` refreshes to zero buttons and asserts the empty-observation label. B58 executes in C76. Catalog B02 still uses synthetic DTO destinations, with real catalog H N48 kept separate. Active Rename/absent-path B14 and empty session B40/B47 now have current-source whole-file execution bindings rather than C59's older helper/server drift.
+- The C76 reload/active-conflict cases pass, but C15/active1 deferrals remain owner decisions. C61's intermittent request identity/cause remains unknown; C61R2/C76 passing schedules do not reproduce it. No reader workaround, exclusion, timeout change, automatic new browser case or acceptance waiver follows.
+- Install/prerequisite presence and synthetic CI bootstrap controls are not an actual npm-ci receipt. No bound npm-ci execution is located in the three examined C62/C75/C76 input families. This is a bounded evidence limit, not proof that no historical receipt exists or permission for an automatic reinstall.
+- Native/verifier/CLI/retained examples/dev-release-loaded HTTP have historical evidence, but current runtime and auxiliary bindings still need reconciliation. This work runs on Linux; no new macOS or hosted evidence is invented. Preserve existing Windows-removal evidence rather than repeat its audit as a new test.
+
+Ordered continuation is: current local auxiliary/install/platform input reconciliation and only still-unbound required local gates; owner disposition of C15/active1 and retained unknowns; three fresh complete original-master/checkpoint/current reviews; then, after separate push/hosted authority, exact submitted-head Ubuntu/macOS native and Ubuntu browser CI with attempts/skips inspected; final reports and owner acceptance. The index/reviews need **zero additional local browser invocations or real markers**. A future required hosted browser job is a separate invocation with fresh controls; up to7reservation controls may be reached per attempt, with actual stage counts retained. No retry authority is inferred. No extra measurement, scale or SQL-trace case is established by missing stronger claims.
+
+This is parent-owned research/publication, not implementation or independent review. No implementation/review/remediation delegate or new test/build/fixture/native/browser/HTTP/install/collection/marker/hosted/live operation runs. Parent binds811current paths/806nonassigned after adding the supplement,444native/76runtime/540finite prior records, selected saved streams and Git/index/refs/C55staged patch. Only documentation/schema/link/source-citation/privacy/whitespace checks are new. C76's consumed bundle and old failure roots are not entered or replayed. All40PARTIAL/acceptedfalse/inventoryOPEN/reader/SSE/no-store/access/pins/waiver/ledger/history stay unchanged. C55 handoffs remain staged outside the checkpoint. Parent publication checks/local checkpoint follow; no push or acceptance.
+
 ## C76: full current-source local Chromium gate
 
 **COMPLETED_SCOPED_REVIEWED.** Source `bc5b4f282845f2312141a0ccea3e948e8bdd206b` passes ONE fresh preparation and ONE guarded full browser invocation. The unchanged line reporter says **89 passed (7.0m)**. It lists89distinct progress cases across34files, with all expected cases covered. The independent last-run record says passed/failedTests[]. Actual Playwright-child wall time is419816ms; this is not total preparation or outer-wrapper time. Both fresh complete operational/integration reviews PASS/no findings/0product-verification replays. Later three-document publication has a separate cutoff; no browser rerun follows it.

@@ -4,6 +4,43 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C79: current ordinary main executions
+
+**COMPLETED_SCOPED_REVIEWED.** At `82e8180437857ce01ef2a5c4aff040d3db161d76`, one recorded pipeline executes twelve unique ordinary main invocations once each. All twelve original terminals record PASS, exit0/null signal, no start/control error, one source-defined completion and successful pre/post preservation. This closes the current ordinary-main execution gap without replaying the accepted C78R1 native/verifier/platform gate, CLI or C75/C76 client/browser proof. No repository source changed.
+
+| # | Actual command |
+| ---: | --- |
+|1|`cargo run --locked --offline --example run_offline`|
+|2|`cargo run --locked --offline --example skills_offline`|
+|3|`cargo run --locked --offline --example skill_loading_offline`|
+|4|`cargo run --locked --offline --example storage_offline`|
+|5|`cargo run --locked --offline --example persisted_run_offline`|
+|6|`cargo run --locked --offline --example conversation_offline`|
+|7|`cargo run --locked --offline --example host_offline`|
+|8|`cargo run --locked --offline --example http_api_offline`|
+|9|`cargo run --locked --offline --example conversation_view_offline`|
+|10|`cargo run --locked --offline --example http_api_offline -- --loaded`|
+|11|`cargo run --release --locked --offline --example http_api_offline`|
+|12|`cargo run --release --locked --offline --example http_api_offline -- --loaded`|
+
+HTTP dev/default is counted once. These are twelve invocations, not twelve newly defined tests. `two_turns` never ran. All examples use existing synthetic skills, tools, providers, workspaces and stores; the four HTTP variants use existing loopback/scripted transport. They are ordinary native demonstrations, not browser J proof or live provider generations. The actual Cargo launches bind the approved six, sole extra `CARGO_BUILD_JOBS=2`, absent `RUST_TEST_THREADS`, inherited0022umask and shared target. No `CARGO_NET_OFFLINE` override was added because each command already uses `--offline`. Cargo/rustc1.98.1 and Node24.18.0 remain. The lock and source are unchanged.
+
+### Completion and cleanup attribution
+
+Run/skill mains assert their completed results, tool/request counts and provider lifecycle before printing completion. Storage/persisted/conversation mains close and reopen their stores and verify saved data or zero new work. Host completion includes orderly shutdown and provider4/4. `conversation_view_offline` proves latest-before ordering, interrupted/same-H reopened parity and repeated warm reads; it explicitly closes its temporary root before printing retirement (`examples/conversation_view_offline.rs:396-495`). Ordinary TempDir drop in the other examples is not independent filesystem-deletion proof.
+
+Each HTTP mode prints and asserts awaited HTTP/host drain,3 tracked TCP closures, listener refusal,2 provider opens/2 closes and reopened-store closure (`examples/http_api_offline.rs:810-849`). Default/loaded retain finite4/40-record samples and1/4readers. The existing printed timing, payload, probe and backlog values are finite demonstration observations, not new benchmarks, SLAs, true peaks, quotas or global SQL/cleanup counts. Release compilation is included in the actual292353ms pipeline interval, so that interval is not application latency.
+
+The new recorder retains original plain-data per-command and pipeline terminals, incrementally scrubbed UTF-8 lines, held trailers, recognized multiline-fragment protection, strict structured equality, safe signal handling and20s content-free atomic progress. Current81 core/signal/sequential controls,51 parser/actual-terminal controls and11 syntax checks pass before the real commands. Synthetic controls are not new product tests. No actual command failed or was retried.
+
+### Review, preservation and remaining work
+
+Parent independently binds811 source hashes/full modes,444 native inputs,76 runtime files,870 finite prior records and208 current implementation files. Each main has separate pre/post gate comparisons, approved environment/lock/recorder input bindings and original sanitized stream hashes. Thirteen known worker/direct Cargo identities retired. This is not complete descendants or global cleanup. Both fresh scoped operational/integration reviews PASS with no findings or product replay. They do not replace final complete original-master reviews. Supporting text records remain (local record); publication is a later cutoff.
+
+Two initial unwrapped read-only diagnostics had unproved read ordering. A fake-signal escape correction occurred before controls or product execution. The parent corrected a guessed record filename without changing source or replaying a main. These limits remain disclosed, not strict universal procedural compliance or failed product commands. No old retained fixture, binary, consumed suite or historical record was adopted or changed.
+
+All98 legacy test objects and40 matrix row objects remain unchanged. All40 official statuses stay PARTIAL, accepted=false and inventory OPEN. C78's original failed/incomplete roles remain preserved, including their separately resolved or unknown causes. C15/active1 deferrals, reader/SSE/no-store/access, pins, release-to-DOM waiver, ledger and unrelated historical unknowns remain unchanged. Npm-ci evidence, macOS/hosted execution, three final complete-diff reviews, final assertion/report adequacy and owner acceptance remain open. No local reinstall, push or acceptance follows. The authorized local checkpoint excludes the staged C55 handoffs.
+
 ## C78R1: current unchanged full verifier
 
 **COMPLETED_SCOPED_REVIEWED.** The tested revision is `d1a394b2d53f39608f9411d01ba455a6f95eb94c`. One fresh unchanged `scripts/verify.py` body completed with an original on-close PASS terminal. Actual Python admission records optimization0, the approved six values, explicit `CARGO_BUILD_JOBS=2` and `CARGO_NET_OFFLINE=true`, and absent `RUST_TEST_THREADS`. The uv-selected interpreter passes through the unchanged environment launcher before Python runs `runpy.run_path('scripts/verify.py', run_name='__main__')` with `sys.argv=['scripts/verify.py']`. This is not a claim that literal historical `uv run scripts/verify.py` argv was repeated.

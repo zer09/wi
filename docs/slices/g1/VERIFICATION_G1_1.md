@@ -4,6 +4,39 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C82: canonical workspace fixtures with an owned-alias regression
+
+**COMPLETED_SCOPED_REVIEWED**, local Linux source/native evidence only. Source cutoff is `ce361f5e345f0d6031fc9ef668b90a2b648bef07` plus the two test edits below. The owner supplied initial investigation; three read-only investigations and one fresh oracle VALID preceded the ordered C82/C83 contract.
+
+- `src/providers/openai_codex/tests/replay/http_api_joined/browser/cancellation/tests.rs:127-131`
+- `src/providers/openai_codex/tests/replay/http_api_joined/browser/lifecycle_failure/tests.rs:141-145`
+
+Each test adds five lines: an owned sibling symlink, canonicalization once, an explicit unequal-spelling assertion and a why-comment. The original workspace remains the target. The canonical value supplies instruction setup, settings and the existing POST. Removing the five inserted lines reproduces the original file bytes. No test definition, original assertion, worker count, control, deadline, helper or product behavior changed.
+
+The product intentionally canonicalizes the configured allowlist and compares request strings exactly (`src/http_api/config.rs:78-92,132-137`; `src/http_api/router.rs:378-391`). The tests must post that canonical spelling. The owned alias forces this mismatch on Linux too, independently of the operating system's temporary-directory spelling. Access remains strict; the request route does not start probing or normalizing unapproved paths.
+
+| Recorded check | Actual result |
+| --- | --- |
+|Alias-only cancellation and lifecycle regressions, before canonicalization|Each executes1 original case and fails at unchanged `http_api_joined.rs:73`,403 versus201; exit101/null signal.|
+|Canonicalized cancellation and lifecycle cases|Each executes1 case/PASS with all original body and cleanup assertions.|
+|Existing `canonical_workspaces_deduplicate_and_reject_alias_replacement`|1PASS, unchanged source and alias-replacement rejection.|
+|Six native gates in CI order|fmt, all-target check, all-target test, warning-denied Clippy, all-target build and doc PASS.|
+|Full native test result|1252PASS/0failed/12existingignored/0filtered across23 harnesses; doctest0.|
+
+Focused commands use `cargo test --locked --offline --lib NAME -- --exact` with the source-declared `providers::openai_codex::tests::replay_loopback_tests::http_api_joined::browser` module and original case names, plus the existing `http_api::config::tests` regression. Five native Cargo gates use actual locked/offline flags; fmt uses `cargo fmt --all -- --check`. The exact remaining gates are `cargo check --locked --offline --all-targets`, `cargo test --locked --offline --all-targets`, `cargo clippy --locked --offline --all-targets -- -D warnings`, `cargo build --locked --offline --all-targets` and `cargo test --locked --offline --doc`. The unchanged approved six, shared target, child jobs2/offline extras and default scheduling apply. Cargo/rustc1.98.1 and Node24.18.0 are recorded. The all-target command's707859ms includes actual execution and is not a benchmark. Focused/native counts overlap; no new unique tests are claimed.
+
+Parent independent binding covers811 source hashes/full modes,809 nonassigned paths,444 native inputs/442 nonassigned,76 runtime files,33 prior C81 records,132 implementation files and11 qualifying original terminals. Both fresh independent scoped reviews PASS/no findings/0proof replays through the exact openai-codex provider. They cover the complete two-file delta and prior-work integration, not a new original-master final review. This later three-document publication has separate parent checks. Supporting records remain (local record).
+
+The initial wrong recorder selector exited0 with0executed/986filtered and remainsFAILED, not red proof. Corrected source-declared selectors supply both required reds and all greens. Data-URL import resolution rejected before Cargo, then file-URL correction preceded intended execution. Oversized metadata projections, guessed result paths, review lookup/ref-format diagnostics remain disclosed. No strict universal procedure-compliance claim follows. Red stops before explicit normal drain/reader/TempDir-close assertions, so red cleanup is unavailable. Green preserves and passes those assertions. Recorded direct identities are not complete-descendant/global cleanup proof.
+
+### CI and remaining scope
+
+Original ce361f5 attempt1 push39384467151 and PR39384472060 remainFAILED. Their Ubuntu native gates and npm-ci/typecheck/assets passed. Their macOS two status assertions and browser synthetic `version` subtest failed; browser preparation and launch were skipped. The PR merge checkout tree equaled the submitted head. These saved install receipts are exact-cutoff hosted evidence, not a C82 reinstall or full browser pass.
+
+C82 demonstrates the alias mechanism under controlled Linux conditions. It does not recover the original macOS response body/raw path, independently verify the owner's older-run attribution, or prove the repaired source passed macOS. C83 separately corrects the browser test's suite/producer environment alignment and forces non-vacuous `version` progression in an isolated synthetic child. That work is deferred until this checkpoint; no browser, Node full gate, actual suite preparation/launch, ignored fixture body, two_turns main, new push or hosted rerun occurred for C82.
+
+All40 official requirements remain PARTIAL, accepted=false and inventory OPEN. The98 legacy objects and40 original matrix objects are unchanged. C15/active1, reader/SSE/no-store/access, redaction, pins, waiver, ledger and original failed/incomplete histories retain their cutoffs. Both C55 handoffs remain staged outside the local checkpoint. Fresh hosted confirmation and owner acceptance remain separate.
+
 ## Unpublished-history privacy sanitation
 
 After C80, the owner authorized privacy sanitation of the45 unpublished commits above `318b7f0da7d503e2e3a8cf33be84e78ebbe8affb`. The pre-push gate found63 affected documentation blob versions:33 with a home-path prefix and30 with one redundant local record reference. These are blob-version counts, not files or tests. Home paths now use the established `~/` placeholder; the redundant record reference is removed. No product source, tests, assets, workflow, dependencies, limits or acceptance status changed.
@@ -56,9 +89,9 @@ The rewrite preserves original authors, author/committer dates, messages and lin
 | `d1a394b2d53f39608f9411d01ba455a6f95eb94c` | `a5d9c6fa4e71675b98924b49c3926467251a84ed` |
 | `82e8180437857ce01ef2a5c4aff040d3db161d76` | `a2f0216c6641ae9cd2b6ab5aeb27492401cd0de8` |
 | `1b201631d3a0fbb58925290bedf87764144c602c` | `7365b1497fba35763a17a27036d524240a198fc4` |
-| `6a07a6847c6b36616c7fc90407300fc92159bd7a` | This privacy-publication commit |
+| `6a07a6847c6b36616c7fc90407300fc92159bd7a` | `ce361f5e345f0d6031fc9ef668b90a2b648bef07` |
 
-The last row identifies the containing commit instead of a self-referential hash. All40 requirements remain PARTIAL, accepted=false and inventory OPEN. Both staged C55 handoffs remain outside commits. This rewrite does not establish npm-ci, hosted execution, acceptance or a new local product result.
+The final row now records the published privacy commit explicitly; its original publication used a containing-commit label to avoid a self-referential hash. All40 requirements remain PARTIAL, accepted=false and inventory OPEN. Both staged C55 handoffs remain outside commits. This rewrite does not establish npm-ci, hosted execution, acceptance or a new local product result.
 
 ## C80: three final local complete-diff reviews
 

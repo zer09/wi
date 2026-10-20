@@ -138,6 +138,11 @@ async fn lifecycle_real_http_rollback_audit_and_corruption() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
+    // Force an alias/canonical spelling mismatch even on Linux.
+    let workspace_alias = temp.path().join("workspace-alias");
+    std::os::unix::fs::symlink(&workspace, &workspace_alias).unwrap();
+    let workspace = std::fs::canonicalize(&workspace_alias).unwrap();
+    assert_ne!(workspace_alias, workspace);
     std::fs::write(workspace.join("AGENTS.md"), "private-project-browser\r\n").unwrap();
     let token = temp.path().join("owner");
     std::fs::write(&token, OWNER).unwrap();

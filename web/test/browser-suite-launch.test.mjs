@@ -2,12 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { spawn, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
+import { constants } from 'node:fs';
+import { isUtf8 } from 'node:buffer';
+import { compileFunction } from 'node:vm';
+import { createRequire } from 'node:module';
+import { preparationRedactor, sanitizeRecord } from '../test-support/browser-fixture-preparation.mjs';
 import { prepareBrowserSuite } from '../test-support/browser-suite-preparation.mjs';
 import { recordPreparationCommand } from '../test-support/browser-fixture-preparation.mjs';
 import { ROOT, TARGET, CHILD } from '../test-support/live-commit-native.mjs';
@@ -89,7 +94,7 @@ function diagnosticLine(result) {
   const { consumed, first_failure, child } = result.outcome;
   return diagnosticPrefix + JSON.stringify({ version: 1, scope: 'invocation observations only', consumed, first_failure,
     child: { spawned: child.spawned, closed: child.closed, error_observed: child.error_observed, code: child.code, signal: child.signal },
-    terminal: { code: result.code, signal: result.signal } }) + '\n';
+    terminal: { code: result.code, signal: result.signal }, reporter_text: null }) + '\n';
 }
 function captureDiagnostic() {
   let text = '', writes = 0;
@@ -110,6 +115,283 @@ async function cliFailure(f) {
   assert.equal(output.stderr.listenerCount('error'), 0); listeners(f);
   return result;
 }
+
+// Execute the unchanged CLI body in this realm, replacing imports only at its private test boundary.
+async function diagnosticCLI(launch, io = fs, env = process.env) {
+  const source = await fs.readFile(new URL('../scripts/launch-browser-suite.mjs', import.meta.url), 'utf8');
+  const body = source.replace(/^import .+;\n/gm, '').replace('export async function run', 'async function run')
+    .replace('if (import.meta.main) process.exitCode = await run(process.argv.slice(2));', '');
+  const bindings = { basename, dirname, isAbsolute, resolve, join, isDeepStrictEqual,
+    fs: io, constants, isUtf8, launchBrowserSuite: launch, preparationRedactor, sanitizeRecord,
+    process: Object.assign(Object.create(process), { env }) };
+  return compileFunction(body + '\nreturn {run, parser: typeof parseReporterText === "function" ? parseReporterText : null, reader: typeof readReporterText === "function" ? readReporterText : null};',
+    Object.keys(bindings), { filename: 'launch-browser-suite-control.mjs' })(...Object.values(bindings));
+}
+const require = createRequire(import.meta.url);
+const { TerminalReporter, terminalScreen } = require('../node_modules/playwright/lib/reporters/base.js');
+function reporterText({ failed = [], interrupted = [], flaky = [], passed = 0, skipped = 0, didNotRun = 0, fatal = 0 } = {}) {
+  const reporter = new TerminalReporter({ screen: { ...terminalScreen, resolveFiles: 'cwd' } });
+  reporter.onConfigure({ rootDir: join(ROOT, 'web/e2e'), tags: [] }); reporter.result = { duration: 1200 };
+  const declaration = name => ({ location: { file: join(process.cwd(), 'web/e2e', name), line: 17, column: 3 },
+    titlePath: () => ['', '', name, 'synthetic private title'], tags: [] });
+  return reporter.generateSummaryMessage({ unexpected: failed.map(declaration), interrupted: interrupted.map(declaration),
+    flaky: flaky.map(declaration), expected: passed, skipped, didNotRun, fatalErrors: Array(fatal).fill({}) }) + '\n';
+}
+const reporterObservation = (declarations, counts = {}) => ({ scope: 'reporter text only; unauthenticated',
+  counts: { failed: 0, interrupted: 0, flaky: 0, skipped: 0, did_not_run: 0, passed: 0, fatal_errors: 0, ...counts },
+  declarations, truncated: false });
+const coordinate = (file, category = 'failed') => ({ category, file: `web/e2e/${file}`, line: 17, column: 3 });
+
+test('C87 actual CLI default launch reads a private failed-child reporter summary without accepting its failed receipt', async t => {
+  const f = await fixture(t), original = await fs.readFile(f.bundle);
+  const text = reporterText({ failed: ['cancellation.spec.mjs'], passed: 88 });
+  assert.match(text.replace(/\x1b\[[0-9;]*m/g, ''), /web\/e2e\/cancellation\.spec\.mjs:17:3/);
+  during(f, c => c.stdout.write(text), 7);
+  let result, launches = 0;
+  const cli = await diagnosticCLI(async input => { launches++; result = await launchBrowserSuite(input, f.io); return result; });
+  const output = captureDiagnostic(); assert.equal(await cli.run(['--bundle', f.bundle], undefined, output.stderr), 7);
+  assert.equal(launches, 1); assert.equal(f.calls.length, 1); assert.equal(output.writes(), 1);
+  const projection = JSON.parse(output.text().slice(diagnosticPrefix.length));
+  assert.deepEqual(projection.reporter_text, reporterObservation([coordinate('cancellation.spec.mjs')], { failed: 1, passed: 88 }));
+  assert.equal(projection.child.code, 7); assert.equal(projection.child.closed, true); assert.equal(projection.first_failure, 'child');
+  assert.ok(!output.text().includes('synthetic private title')); assert.ok(Buffer.byteLength(output.text()) <= 1024);
+  assert.equal((await load(join(f.output, 'control/launch.command.json'))).code, 7);
+  assert.equal(result.outcome.test_counts, null); assert.equal(result.outcome.browser_executions, null);
+  assert.deepEqual(await fs.readFile(f.bundle), original); listeners(f);
+});
+
+test('C87 pinned formatter and closed allowlist bind every current declaration filename', async t => {
+  assert.equal(require('../node_modules/playwright/package.json').version, '1.58.2');
+  assert.equal(terminalScreen.resolveFiles, 'cwd');
+  const { parser } = await diagnosticCLI(() => assert.fail('Parser must not launch.'));
+  const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
+  assert.equal(files.length, 34);
+  for (const file of files) await t.test(file, async () => {
+    assert.ok((await fs.lstat(new URL('../e2e/' + file, import.meta.url))).isFile());
+    const text = reporterText({ failed: [file], passed: 88 });
+    assert.deepEqual(parser(text), reporterObservation([coordinate(file)], { failed: 1, passed: 88 }));
+  });
+});
+
+test('C87 actual formatter categories include omitted zeros and fatal errors alongside passing tests', async t => {
+  const { parser } = await diagnosticCLI(() => {});
+  const a = 'cancellation.spec.mjs', b = 'joined.spec.mjs', c = 'restart-display.spec.mjs';
+  const cases = [
+    [{ failed: [a] }, [coordinate(a)], { failed: 1 }],
+    [{ interrupted: [a] }, [coordinate(a, 'interrupted')], { interrupted: 1 }],
+    [{ flaky: [a] }, [coordinate(a, 'flaky')], { flaky: 1 }],
+    [{ skipped: 2 }, [], { skipped: 2 }],
+    [{ didNotRun: 3 }, [], { did_not_run: 3 }],
+    [{ passed: 89 }, [], { passed: 89 }],
+    [{ passed: 89, fatal: 1 }, [], { passed: 89, fatal_errors: 1 }],
+    [{ passed: 88, fatal: 2 }, [], { passed: 88, fatal_errors: 2 }],
+    [{ failed: [a, b] }, [coordinate(a), coordinate(b)], { failed: 2 }],
+    [{ failed: [a], interrupted: [b], flaky: [c], skipped: 1, didNotRun: 2, passed: 83, fatal: 2 },
+      [coordinate(a), coordinate(b, 'interrupted')], { failed: 1, interrupted: 1, flaky: 1, skipped: 1, did_not_run: 2, passed: 83, fatal_errors: 2 }],
+  ];
+  for (const [i, [input, declarations, counts]] of cases.entries()) await t.test(String(i), () => {
+    const expected = reporterObservation(declarations, counts); expected.truncated = (input.flaky?.length ?? 0) + (input.failed?.length ?? 0) + (input.interrupted?.length ?? 0) > 2;
+    assert.deepEqual(parser(reporterText(input)), expected);
+  });
+  for (const [name, text] of [['empty', reporterText()], ['fatal-only', reporterText({ fatal: 1 })],
+    ['partial', 'Running 89 tests using 1 worker\n'], ['error-only', 'Error: synthetic private message\n']]) await t.test(name, () => assert.equal(parser(text), null));
+  const ansi = '\x1b[1A\x1b[2K\x1b[31m' + reporterText({ failed: [a], passed: 88 }).replaceAll('\n', '\x1b[0m\r\n\x1b[31m') + '\x1b[0m';
+  assert.deepEqual(parser(ansi), reporterObservation([coordinate(a)], { failed: 1, passed: 88 }));
+});
+
+test('C87 validates the whole final summary including headers beyond the coordinate cap', async t => {
+  const { parser } = await diagnosticCLI(() => {});
+  const text = reporterText({ failed: ['cancellation.spec.mjs', 'joined.spec.mjs', 'restart-display.spec.mjs'], passed: 86 });
+  const plain = text.replace(/\x1b\[[0-9;]*m/g, '');
+  const edits = {
+    unknown: s => s.replace('web/e2e/restart-display.spec.mjs', 'web/e2e/unknown.spec.mjs'),
+    traversal: s => s.replace('web/e2e/restart-display.spec.mjs', 'web/e2e/../restart-display.spec.mjs'),
+    absolute: s => s.replace('web/e2e/restart-display.spec.mjs', '/private/restart-display.spec.mjs'),
+    wrong_prefix: s => s.replace('web/e2e/restart-display.spec.mjs', 'e2e/restart-display.spec.mjs'),
+    project: s => s.replace('web/e2e/restart-display.spec.mjs', '[other] › web/e2e/restart-display.spec.mjs'),
+    zero: s => s.replace(':17:3', ':0:3'), negative: s => s.replace(':17:3', ':-1:3'),
+    leading_zero: s => s.replace(':17:3', ':017:3'), huge: s => s.replace(':17:3', ':1000001:3'),
+    column: s => s.replace(':17:3', ':17:1000001'), float: s => s.replace(':17:3', ':17.2:3'),
+    partial_header: s => s.replace(/    web\/e2e\/restart-display[^\n]*\n/, ''),
+    extra_header: s => s + '    web/e2e/tool-fidelity.spec.mjs:17:3 › forged\n',
+    duplicate_header: s => s.replace('restart-display.spec.mjs', 'joined.spec.mjs'),
+    mismatch: s => s.replace('3 failed', '2 failed'), duplicate_summary: s => s + s,
+    missing_first_count: s => s.replace('  3 failed\n', ''),
+    damaged_first_count: s => s.replace('  3 failed', '  failed'),
+    duplicate_category: s => s + '  1 passed (1s)\n',
+    category_order: s => '  1 skipped\n' + s,
+    zero_count: s => s.replace('3 failed', '0 failed'), huge_count: s => s.replace('3 failed', '1000001 failed'),
+    invalid_duration: s => s.replace('(1.2s)', '(Infinitys)'),
+    unknown_format: s => s + '  1 timed out\n', unknown_escape: s => s + '\x1b]private\x07',
+    trailing_error: s => s + 'synthetic private fatal message\n',
+    plural_fatal: s => s + '  1 errors were not a part of any test, see above for details\n',
+    malformed_count_before_valid: s => '  -1 failed\n' + s,
+  };
+  for (const [name, edit] of Object.entries(edits)) await t.test(name, () => {
+    const changed = edit(plain); assert.notEqual(changed, plain, 'Negative control must change its input.');
+    assert.equal(parser(changed), null);
+  });
+  const parsed = parser(text); assert.equal(parsed.declarations.length, 2); assert.equal(parsed.truncated, true);
+  // Test output can forge this exact text. Recognition is deliberately not case-execution proof.
+  assert.equal(parser('synthetic stdout preamble\n' + text).scope, 'reporter text only; unauthenticated');
+  const privateText = 'synthetic-secret/非公開 quote"';
+  const variants = [privateText, JSON.stringify(privateText), encodeURIComponent(privateText), Buffer.from(privateText).toString('base64')];
+  const malicious = plain.replaceAll('synthetic private title', variants.join(' '));
+  const projected = JSON.stringify(parser(malicious));
+  for (const value of variants) assert.ok(!projected.includes(value), 'Titles and encoded private values cannot leave the parser.');
+});
+
+async function diagnosticLog(t, text = reporterText({ failed: ['cancellation.spec.mjs'], passed: 88 })) {
+  const parent = await fs.mkdtemp(join(tmpdir(), 'wi-reporter-unit-'));
+  t.after(() => fs.rm(parent, { recursive: true, force: true }));
+  const root = join(parent, 'root'), control = join(root, 'control');
+  await fs.mkdir(control, { recursive: true, mode: 0o700 });
+  const path = join(control, 'launch.stdout'); await privateWrite(path, text);
+  return { parent, root, control, path, bundle: join(control, 'suite-ready.json') };
+}
+const eligibleResult = () => ({ code: 7, signal: null, outcome: { scope: 'one-use suite launch observation only', consumed: true,
+  first_failure: 'child', child: { spawned: true, closed: true, error_observed: false, code: 7, signal: null } } });
+
+test('C87 bounded private reader rejects unsupported files and directories without entering fixtures or receipts', async t => {
+  for (const kind of ['ordinary', 'missing', 'mode', 'root-mode', 'parent-mode', 'control-mode', 'symlink', 'hardlink',
+    'directory', 'fifo', 'invalid-utf8', 'oversized', 'root-alias', 'control-alias', 'parent-alias', 'owner', 'directory-owner']) await t.test(kind, async t => {
+    const f = await diagnosticLog(t); let bundle = f.bundle, opens = 0, closed = 0;
+    if (kind === 'missing') await fs.unlink(f.path);
+    if (kind === 'mode') await fs.chmod(f.path, 0o644);
+    for (const [name, p] of [['root-mode', f.root], ['parent-mode', f.parent], ['control-mode', f.control]]) if (kind === name) await fs.chmod(p, 0o755);
+    if (kind === 'symlink') { await fs.rename(f.path, f.path + '.original'); await fs.symlink(f.path + '.original', f.path); }
+    if (kind === 'hardlink') await fs.link(f.path, f.path + '.link');
+    if (kind === 'directory' || kind === 'fifo') {
+      await fs.unlink(f.path);
+      if (kind === 'directory') await fs.mkdir(f.path, { mode: 0o700 });
+      else { const child = spawnSync('mkfifo', ['-m', '600', f.path], { env: { ...process.env }, encoding: 'utf8' }); assert.equal(child.status, 0); }
+    }
+    if (kind === 'invalid-utf8') await privateWrite(f.path, Buffer.from([0xff, 0xfe]));
+    if (kind === 'oversized') { const h = await fs.open(f.path, 'r+'); try { await h.truncate(8 * 1024 * 1024 + 1); } finally { await h.close(); } }
+    if (kind.endsWith('-alias')) {
+      const actual = { 'root-alias': f.root, 'control-alias': f.control, 'parent-alias': f.parent }[kind];
+      const alias = actual + '-alias'; await fs.symlink(actual, alias);
+      if (kind === 'parent-alias') { t.after(() => fs.unlink(alias)); bundle = join(alias, 'root/control/suite-ready.json'); }
+      else bundle = kind === 'root-alias' ? join(alias, 'control/suite-ready.json') : join(alias, 'suite-ready.json');
+    }
+    const io = { ...fs, lstat: async p => {
+      assert.ok(p !== f.bundle && !p.endsWith('.command.json') && !p.includes('/retained/'));
+      const s = await fs.lstat(p);
+      if (kind === 'owner' && p === f.path || kind === 'directory-owner' && p === f.root) s.uid++;
+      return s;
+    }, open: async (p, flags) => {
+      opens++; assert.equal(p, f.path); assert.ok(flags & constants.O_NOFOLLOW); assert.ok(flags & constants.O_NONBLOCK);
+      const h = await fs.open(p, flags);
+      return { stat: () => h.stat(), read: (...args) => h.read(...args), close: async () => { closed++; await h.close(); } };
+    } };
+    const { reader } = await diagnosticCLI(() => {}, io);
+    const result = await reader(bundle);
+    if (kind === 'ordinary') assert.deepEqual(result, reporterObservation([coordinate('cancellation.spec.mjs')], { failed: 1, passed: 88 }));
+    else assert.equal(result, null);
+    assert.equal(closed, opens);
+    if (!['ordinary', 'invalid-utf8'].includes(kind)) assert.equal(opens, 0);
+  });
+});
+
+test('C87 held descriptor stays bounded during growth and closes after every rejected observation', async t => {
+  for (const kind of ['ordinary', 'at-cap', 'growing', 'open-fifo-race', 'open-error', 'read-error', 'stat-error', 'after-stat-error', 'opened-type', 'opened-identity',
+    'after-identity', 'after-mode', 'after-uid', 'after-links', 'after-size', 'path-replaced', 'parent-replaced', 'realpath-error', 'close-error']) await t.test(kind, async t => {
+    const f = await diagnosticLog(t); let opens = 0, closes = 0, reads = 0, bytesRead = 0, stats = 0, after = false;
+    const limit = 8 * 1024 * 1024;
+    if (kind === 'at-cap') { const summary = await fs.readFile(f.path); await privateWrite(f.path, Buffer.concat([Buffer.alloc(limit - summary.length, 0x0a), summary])); }
+    const io = { ...fs, realpath: async p => { if (kind === 'realpath-error') throw Error('synthetic'); return fs.realpath(p); },
+      lstat: async p => {
+        const s = await fs.lstat(p);
+        if (after && kind === 'path-replaced' && p === f.path) s.ino++;
+        if (after && kind === 'parent-replaced' && p === f.root) s.ino++;
+        return s;
+      },
+      open: async (p, flags) => {
+        assert.equal(p, f.path); assert.ok(flags & constants.O_NOFOLLOW); assert.ok(flags & constants.O_NONBLOCK);
+        if (kind === 'open-error') throw Error('synthetic');
+        if (kind === 'open-fifo-race') {
+          await fs.unlink(f.path); assert.equal(spawnSync('mkfifo', ['-m', '600', f.path], { env: { ...process.env } }).status, 0);
+        }
+        const h = await fs.open(p, flags); opens++;
+        return { stat: async () => {
+          const s = await h.stat(); stats++;
+          if (kind === 'stat-error' || kind === 'after-stat-error' && stats > 1) throw Error('synthetic stat');
+          if (kind === 'opened-type') s.isFile = () => false;
+          if (kind === 'opened-identity' || stats > 1 && kind === 'after-identity') s.ino++;
+          if (stats > 1 && kind === 'after-mode') s.mode ^= 0o040;
+          if (stats > 1 && kind === 'after-uid') s.uid++;
+          if (stats > 1 && kind === 'after-links') s.nlink++;
+          if (stats > 1 && kind === 'after-size') s.size++;
+          return s;
+        }, read: async (buffer, offset, length, position) => {
+          reads++; assert.ok(length > 0 && length <= 64 * 1024);
+          if (kind === 'read-error') throw Error('synthetic');
+          if (kind === 'growing') { buffer.fill(0x0a); bytesRead += length; return { bytesRead: length }; }
+          const r = await h.read(buffer, offset, length, position); bytesRead += r.bytesRead;
+          if (r.bytesRead === 0) after = true;
+          return r;
+        }, close: async () => { closes++; await h.close(); if (kind === 'close-error') throw Error('synthetic'); } };
+      } };
+    const { reader } = await diagnosticCLI(() => {}, io), value = await reader(f.bundle);
+    if (['ordinary', 'at-cap'].includes(kind)) assert.ok(value?.declarations.length === 1);
+    else assert.equal(value, null);
+    assert.equal(closes, opens); assert.ok(bytesRead <= limit);
+    if (kind === 'growing') { assert.equal(bytesRead, limit); assert.equal(reads, 128); assert.equal(stats, 2); }
+    if (kind === 'open-fifo-race') assert.equal(reads, 0);
+  });
+});
+
+test('C87 eligibility keeps generic injected writers and non-suite failures free of filesystem waits', async t => {
+  for (const kind of ['injected', 'success', 'admission', 'reuse', 'open-child', 'not-spawned', 'zero-child', 'unknown-child', 'wrong-scope', 'getter']) await t.test(kind, async () => {
+    const result = eligibleResult(); let calls = 0;
+    if (kind === 'success') { result.code = 0; result.outcome.child.code = 0; }
+    if (kind === 'admission') result.outcome.first_failure = 'admission';
+    if (kind === 'reuse') result.outcome.consumed = false;
+    if (kind === 'open-child') result.outcome.child.closed = false;
+    if (kind === 'not-spawned') result.outcome.child.spawned = false;
+    if (kind === 'zero-child') result.outcome.child.code = 0;
+    if (kind === 'unknown-child') result.outcome.child.code = null;
+    if (kind === 'wrong-scope') result.outcome.scope = 'unsupported';
+    if (kind === 'getter') Object.defineProperty(result.outcome, 'scope', { get() { throw Error('synthetic private'); } });
+    const { run: controlled } = await diagnosticCLI(async () => result, { ...fs, lstat: () => { calls++; return new Promise(() => {}); } });
+    const output = captureDiagnostic();
+    assert.equal(await controlled(['--bundle', '/private/control/suite-ready.json'], kind === 'injected' ? async () => result : undefined, output.stderr), result.code);
+    assert.equal(calls, 0); assert.equal(output.writes(), kind === 'success' ? 0 : 1);
+    if (kind !== 'success') assert.equal(JSON.parse(output.text().slice(diagnosticPrefix.length)).reporter_text, null);
+  });
+});
+
+test('C87 actual eligible projection preserves terminals, privacy and the 1024 UTF8 byte cap', async t => {
+  for (const kind of ['maximum', 'malformed-third', 'unavailable', 'signal', 'key-collision', 'file-collision', 'safe']) await t.test(kind, async t => {
+    let text = reporterText({ failed: ['saved-history-active-rename.spec.mjs', 'skill-source-fidelity.spec.mjs', 'task-acceptance-warning.spec.mjs'],
+      passed: 1_000_000, skipped: 1_000_000, didNotRun: 1_000_000, fatal: 1_000_000 }).replaceAll(':17:3', ':1000000:1000000');
+    if (kind === 'malformed-third') text = text.replace('task-acceptance-warning.spec.mjs', 'unknown.spec.mjs');
+    const f = await diagnosticLog(t, text), result = eligibleResult(), env = { ...process.env };
+    const descriptors = Object.getOwnPropertyDescriptors(process), before = { ...process.env }, global = Object.getOwnPropertyDescriptor(globalThis, 'process');
+    if (kind === 'maximum') result.code = result.outcome.child.code = Number.MAX_SAFE_INTEGER;
+    if (kind === 'signal') { result.code = result.outcome.child.code = null; result.signal = result.outcome.child.signal = 'SIGTERM'; }
+    if (kind === 'key-collision') env.SYNTHETIC_TOKEN = 'declarations';
+    if (kind === 'file-collision') env.SYNTHETIC_TOKEN = 'web/e2e/saved-history-active-rename.spec.mjs';
+    if (kind === 'safe') env.SYNTHETIC_TOKEN = 'synthetic-nonoverlap-private-value';
+    if (kind === 'unavailable') await fs.unlink(f.path);
+    const { run: controlled } = await diagnosticCLI(async () => result, fs, env), output = captureDiagnostic(), terminated = [];
+    assert.equal(await controlled(['--bundle', f.bundle], undefined, output.stderr, s => terminated.push(s)), result.signal ? 1 : result.code);
+    assert.deepEqual(terminated, result.signal ? ['SIGTERM'] : []);
+    assert.equal(output.writes(), 1); assert.equal(output.stderr.listenerCount('error'), 0);
+    assert.ok(Buffer.byteLength(output.text(), 'utf8') <= 1024); assert.equal(output.text().split('\n').length, 2);
+    if (kind.endsWith('-collision')) assert.equal(output.text(), diagnosticFallback);
+    else {
+      const p = JSON.parse(output.text().slice(diagnosticPrefix.length)); assert.deepEqual(p.terminal, { code: result.code, signal: result.signal });
+      if (['malformed-third', 'unavailable'].includes(kind)) assert.equal(p.reporter_text, null);
+      else { assert.equal(p.reporter_text.declarations.length, 2); assert.equal(p.reporter_text.truncated, true); assert.equal(p.reporter_text.counts.fatal_errors, 1_000_000); }
+    }
+    assert.ok(isDeepStrictEqual({ ...process.env }, before), 'Real environment is unchanged.');
+    const currentDescriptors = Object.getOwnPropertyDescriptors(process), own = Reflect.ownKeys(descriptors);
+    assert.ok(Reflect.ownKeys(currentDescriptors).length === own.length && own.every(k => Object.hasOwn(currentDescriptors, k)
+      && isDeepStrictEqual(currentDescriptors[k], descriptors[k])), 'All own keys and symbols are unchanged.');
+    assert.ok(isDeepStrictEqual(Object.getOwnPropertyDescriptor(globalThis, 'process'), global), 'Global descriptor is unchanged.');
+  });
+});
 
 test('actual C68/C65 fake recorder and C67 allocation compose one immutable synthetic launch', async t => {
   const f = await fixture(t), original = await fs.readFile(f.bundle), before = { ...process.env };
@@ -776,7 +1058,8 @@ test('C85 projection excludes dynamic private data and maps unsupported observat
     if (['getter', 'no-outcome'].includes(kind)) assert.equal(text, diagnosticFallback);
     else {
       const actual = JSON.parse(text.slice(diagnosticPrefix.length));
-      assert.deepEqual(Object.keys(actual), ['version', 'scope', 'consumed', 'first_failure', 'child', 'terminal']);
+      assert.deepEqual(Object.keys(actual), ['version', 'scope', 'consumed', 'first_failure', 'child', 'terminal', 'reporter_text']);
+      assert.equal(actual.reporter_text, null);
       assert.deepEqual(actual.terminal, { code: 7, signal: null });
       if (['missing', 'unsupported'].includes(kind)) {
         assert.equal(actual.consumed, null); assert.equal(actual.first_failure, null);

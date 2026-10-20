@@ -429,20 +429,139 @@ test('pending corruption, missing records, arbitrary aliases, final occupation a
   });
 });
 
+function collisionScenario(collision, context = 'controlled') {
+  // Keep the real child environment intact. Only userland calls see this synthetic process.
+  const script = `import assert from 'node:assert/strict';
+    import * as fs from 'node:fs/promises'; import {tmpdir} from 'node:os';
+    import {join} from 'node:path'; import {createHash} from 'node:crypto';
+    import {EventEmitter} from 'node:events'; import {PassThrough} from 'node:stream';
+    import {isDeepStrictEqual} from 'node:util';
+    import {prepareBrowserSuite} from './web/test-support/browser-suite-preparation.mjs';
+    import {recordPreparationCommand} from './web/test-support/browser-fixture-preparation.mjs';
+    import {ROOT,TARGET,CHILD} from './web/test-support/live-commit-native.mjs';
+    async function scenario() {
+    const hash=${hash}, clone=${clone}, fixture=${fixture}, walk=${walk};
+    const real=globalThis.process, descriptor=Object.getOwnPropertyDescriptor(globalThis,'process');
+    const before={...real.env}, fields=Object.getOwnPropertyDescriptors(real), cleanups=[];
+    const collision=real.argv[1], context=real.argv[2];
+    const six=['TMPDIR','CARGO_TARGET_DIR','RUSTFLAGS','GIT_OPTIONAL_LOCKS','NODE_OPTIONS','PATH'];
+    const env={...Object.fromEntries(six.map(key=>[key,real.env[key]])),PATH:'/synthetic/bin'};
+    let execPath='/synthetic/bin/node';
+    if(context==='nvm-like') {
+      execPath='/synthetic/.nvm/versions/node/v24/bin/node';
+      env.PATH='/synthetic/.nvm/versions/node/v24/bin:/synthetic/bin';
+    }
+    const facade=Object.create(real);
+    Object.defineProperties(facade,{env:{value:env},execPath:{value:execPath}});
+    let f, result;
+    try {
+      // Use a fresh data descriptor, not accessor fields combined with a value.
+      Object.defineProperty(globalThis,'process',{configurable:descriptor.configurable,enumerable:descriptor.enumerable,writable:true,value:facade});
+      f=await fixture({after:fn=>cleanups.push(fn)});
+      env.SYNTHETIC_TOKEN=collision;
+      f.env.SYNTHETIC_TOKEN=collision;
+      const command=f.io.command, accepted=[];
+      f.io.command=async (...args)=>{const value=await command(...args);accepted.push(args[2].name);return value};
+      let resolved=false, fixed=false, bundlePath;
+      try { bundlePath=await prepareBrowserSuite({output:f.output},f.io);resolved=true; }
+      catch(error) { fixed=error.message==='Browser suite preparation failed.'; }
+      const output=await fs.lstat(f.output).catch(error=>{if(error.code!=='ENOENT')throw error;return null});
+      let safe=true, files=0;
+      if(output) for(const {path,s} of await walk(f.output)) if(s.isFile()) {
+        files++;
+        // Scan the original retained bytes, never a scrubbed copy of the receipt.
+        if((await fs.readFile(path)).includes(Buffer.from(collision))) safe=false;
+      }
+      const exists=async path=>{try{await fs.lstat(path);return true}catch(error){if(error.code==='ENOENT')return false;throw error}};
+      const ready=await exists(join(f.output,'control/suite-ready.json'));
+      const map=await exists(join(f.output,'artifact/environment.json'));
+      const pending=await exists(join(f.output,'artifact/environment.pending.json'));
+      const suitePending=await exists(join(f.output,'control/suite-ready.pending.json'));
+      let third=false, thirdScrubbed=false, diagnostic=false, publication=false;
+      if(context==='controlled'&&collision==='version') {
+        const artifact=join(f.output,'artifact');
+        const facts=JSON.parse(await fs.readFile(join(artifact,'cargo-version.command.json'),'utf8'));
+        const stdout=await fs.readFile(join(artifact,'cargo-version.stdout'));
+        const stderr=await fs.readFile(join(artifact,'cargo-version.stderr'));
+        third=facts.program==='cargo'&&facts.closed===true&&facts.code===0&&facts.signal===null
+          &&facts.spawn_error===null&&facts.stdout_redacted===false&&facts.pid===null
+          &&facts.identity===null&&facts.identity_observation==='unavailable'&&facts.direct_identity_retired===null
+          &&typeof facts.started_at==='string'&&typeof facts.ended_at==='string'
+          &&facts.sanitized_stdout_bytes===stdout.length&&facts.sanitized_stdout_sha256===hash(stdout)
+          &&facts.sanitized_stderr_bytes===stderr.length&&facts.sanitized_stderr_sha256===hash(stderr);
+        thirdScrubbed=isDeepStrictEqual(facts.argv,['--','--verbose'])
+          &&facts.stdout===join(artifact,'cargo-.stdout')&&facts.stderr===join(artifact,'cargo-.stderr');
+        const failure=JSON.parse(await fs.readFile(join(f.output,'suite-failure.json'),'utf8'));
+        diagnostic=isDeepStrictEqual(failure,{stage:'producer',ready:false,launch:'pending'});
+      }
+      if(resolved) {
+        const bundle=JSON.parse(await fs.readFile(bundlePath,'utf8'));
+        publication=bundlePath===join(f.output,'control/suite-ready.json')&&bundle.version===1
+          &&bundle.scope==='browser suite preparation only'&&bundle.launch==='pending'&&bundle.full_readiness===false
+          &&bundle.browser_executions===0&&bundle.case_markers===0&&bundle.execution_guard_reserved===false;
+      }
+      const noExecution=(await Promise.all(['c52-evidence','playwright-output','control/execution-guard.json','control/c54-outer.json']
+        .map(name=>exists(join(f.output,name))))).every(value=>!value);
+      result={resolved,fixed,safe,files,output:!!output,ready,map,pending,suitePending,third,thirdScrubbed,diagnostic,publication,noExecution,commands:f.calls,accepted};
+    } finally {
+      Object.defineProperty(globalThis, 'process', descriptor);
+      for(const cleanup of cleanups.reverse())await cleanup();
+    }
+    result.restored=isDeepStrictEqual(Object.getOwnPropertyDescriptor(globalThis,'process'),descriptor);
+    const current=Object.getOwnPropertyDescriptors(real), fieldKeys=Reflect.ownKeys(fields);
+    result.unchanged=isDeepStrictEqual({...real.env},before)&&Reflect.ownKeys(current).length===fieldKeys.length
+      &&fieldKeys.every(key=>Object.hasOwn(current,key)&&isDeepStrictEqual(current[key],fields[key]));
+    result.removed=!!f&&await fs.lstat(f.parent).then(()=>false,error=>{if(error.code==='ENOENT')return true;throw error});
+    console.log(JSON.stringify(result));
+    }
+    await scenario().catch(()=>{throw Error('Synthetic suite control failed.');});`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, collision, context], { cwd: ROOT, env: { ...process.env }, encoding: 'utf8' });
+  assert.ok(child.status === 0 && child.stderr === '', 'Isolated suite control must finish without scaffold failures.');
+  const result = JSON.parse(child.stdout);
+  assert.ok(result.restored && result.unchanged && result.removed && result.noExecution,
+    'Restore the full global descriptor and preserve the real process and environment; remove only the owned fixture.');
+  return result;
+}
+
 test('structured scrubber handles keys values collisions and fixed-point deletion before persistence', async t => {
   const redact = preparationRedactor({ API_TOKEN: 'xy', SECRET_KEY: 'ab' });
   const value = { ab: 'ax yb'.replaceAll(' ', ''), keep: ['axyb', 'xy'] };
   const safe = sanitizeRecord(value, redact);
   assert.deepEqual(safe, { '': '', keep: ['', ''] });
   for (const collision of ['output', 'PATH', 'environment', 'version', 'scope', 'sha256']) await t.test(collision, async t => {
-    const f = await fixture(t); f.env.SYNTHETIC_TOKEN = collision;
-    await fails(f);
-    if (await fs.lstat(f.output).catch(() => null)) {
-      for (const { path, s } of await walk(f.output)) if (s.isFile()) {
-        assert.equal((await fs.readFile(path, 'utf8')).includes(collision), false, 'Sensitive matches must not be persisted.');
-      }
+    const result = collisionScenario(collision);
+    t.diagnostic(JSON.stringify(result));
+    assert.ok(!result.resolved && result.fixed && !result.ready && !result.map && !result.suitePending,
+      'Colliding provenance must reject without publishing ready preparation data.');
+    // Rejected scope provenance can retain sanitized producer pending data, not a ready map.
+    if (collision !== 'scope') assert.equal(result.pending, false);
+    if (collision === 'version') {
+      assert.deepEqual(result.commands, ['revision', 'worktree', 'cargo-version'], 'Third command must be attempted, not accepted.');
+      assert.ok(result.third && result.diagnostic && result.files > 0, 'Inspect the actual typed third receipt and fixed producer-stage failure.');
+    }
+    assert.equal(result.safe, true, 'Sensitive matches must not be persisted.');
+    if (collision === 'version') {
+      assert.ok(result.thirdScrubbed, 'Sensitive receipt string data must be scrubbed without changing terminal types.');
+      assert.deepEqual(result.accepted, ['revision', 'worktree'], 'The recorder must reject the third command before receipt registration.');
     }
   });
+});
+
+test('nvm-like executable and PATH collisions reject before output or commands', t => {
+  const result = collisionScenario('version', 'nvm-like');
+  t.diagnostic(JSON.stringify(result));
+  assert.ok(!result.resolved && result.fixed && !result.output && !result.ready && !result.map && result.files === 0,
+    'Entry rejection must not be mistaken for command persistence coverage.');
+  assert.deepEqual(result.commands, []);
+});
+
+test('noncollision preparation-data control publishes after exactly five fake commands', t => {
+  const result = collisionScenario('synthetic-nonoverlap-81973');
+  t.diagnostic(JSON.stringify(result));
+  assert.ok(result.resolved && !result.fixed && result.ready && result.map && result.publication && result.safe,
+    'The actual suite and default producer must publish preparation data in the controlled context.');
+  assert.deepEqual(result.commands, ['revision', 'worktree', 'cargo-version', 'rustc-version', 'build']);
+  assert.deepEqual(result.accepted, result.commands);
 });
 
 test('CLI is fixed, inert on import, rejects passthrough and never prints private values', async t => {

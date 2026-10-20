@@ -4,6 +4,55 @@ Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER
 
 This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
 
+## C83: aligned synthetic collision controls and nonvacuous version coverage
+
+**COMPLETED_SCOPED_REVIEWED**, local synthetic Node evidence only. The tested cutoff is `eb296d3be274663b38d00f38b503c4b3c0d312fa` plus `web/test/browser-suite-preparation.test.mjs`, SHA-256 `b7c023942beaec5c9426d7e6d5a74debda8f10453380a0b8c8666d5bd500e0c2`. The accumulated test delta is125insertions/6deletions. Three completed investigations and oracle VALID previously covered ordered C82/C83; this continuation did not repeat them. Parent documentation has a later cutoff.
+
+### Actual module path and preserved assertions
+
+`web/test/browser-suite-preparation.test.mjs:432-523` runs each collision in a separate child that inherits the approved environment. Only awaited userland calls see a synthetic process facade. The suite override and facade environment receive the same token. The actual default producer snapshots that environment, and the actual recorder uses the original options identity and private WeakMap registration. No shared module, producer seam, receipt, native artifact or product behavior changed.
+
+The test restores the complete original global process descriptor in `finally` before awaited owned cleanup. It compares plain environment snapshots and every own process descriptor, including the complete symbol-key set. The original strict child exit0/empty-stderr guard remains. The error branch no longer assigns the real process exitCode; that branch was corrected by source inspection, not a separate forced-error execution.
+
+The controlled `version` case at `web/test/browser-suite-preparation.test.mjs:480-498,538-547` attempts exactly revision/worktree/cargo-version and accepts only revision/worktree. It reads the actual third persisted receipt and streams. Typed terminal/identity facts, scrubbed argv/path strings, stream lengths/digests and fixed producer-stage failure pass. All13original retained file buffers are byte-safe, and ready/map/producer-pending/suite-pending data are absent. The third command is attempted but rejected before receipt registration. This is not an entry-only refusal or a manufactured receipt.
+
+All six original labels and strict original-byte scans remain. The nvm-like contrast proves zero commands/no output. The noncollision control proves actual preparation-data publication after exactly five fake commands. All eight synthetic scenarios assert restoration, unchanged real process/environment, owned-fixture removal and no execution artifacts.
+
+### Verified F1 correction and failed history
+
+One fresh independent verification confirmed the incorrect blanket producer-pending absence assertion using current source and original saved evidence, with no runtime replay. The original committed collision contract did not forbid safe partials. The producer writes pending data before required-record revalidation and publishes the final map only through the later link (`web/test-support/browser-fixture-preparation.mjs:208-220,234-244`). The correction at `web/test/browser-suite-preparation.test.mjs:534-537` permits producer pending only for `scope`. It never permits a final map or suite-ready data, and it does not require pending existence or late rejection. The retained pending file remains subject to the original strict byte scan. No producer defect or change is established. The exact inner scope rejection branch remains source inference, not an instrumented observation.
+
+| Original failed attempt | Preserved result and limit |
+| --- | --- |
+|Initial scaffold|928tests/919PASS/9FAIL; aggregate preservation comparison hid scenario assertions.|
+|Corrected scaffold, divergent wiring|928/925PASS/3FAIL; version reaches the third receipt with unsafe retained bytes, unscrubbed strings and three accepted commands; scope pending also fails.|
+|Aligned token before F1|928/926PASS/2FAIL; version passes, scope and enclosing parent fail the blanket pending assertion.|
+
+All three original terminals remainFAILED. The oldest recorder lacked spec-count parsing, so its counts remain a separate saved-stdout projection. The divergent recorder expected two failures; its separate qualification projection does not promote the original FAILED terminal. Version string/acceptance diagnostics are witnesses; assertions after the first byte-safety failure were not reached. The saved aligned failure supplies F1 regression evidence. No unchanged failed-source case or version red was replayed after the narrow F1 correction.
+
+### Corrected-source gates and reviews
+
+| Actual command | Original result |
+| --- | --- |
+|Node `--test web/test/browser-suite-preparation.test.mjs`|928/928PASS|
+|Node `--test web/test/browser-fixture-preparation.test.mjs web/test/browser-suite-preparation.test.mjs web/test/browser-suite-launch.test.mjs web/test/restart-display.test.mjs`|2306/2306PASS|
+|`npm --prefix web test`|8081/8081PASS; exactly one final default unfiltered run|
+|Node `--check web/test/browser-suite-preparation.test.mjs`|PASS|
+|`npm --prefix web run typecheck`|PASS|
+|`npm --prefix web run verify:assets`|PASS8generated assets, nonmutating|
+|External static scope/privacy/inverse-F1/preservation check; `git diff --check`|Both PASS|
+|Node `-- web/node_modules/@playwright/test/cli.js test --config=web/playwright.config.mjs --list`|89tests/34files; registration only|
+
+All nine original terminals have exit0/null signal and no start/control/interruption error. Node summaries have0failed/cancelled/skipped/todo. Counts overlap and are not additional unique tests. The configured absolute Node24 and approved six apply to all real gates, with default scheduling and unchanged selectors, retries, deadlines and reporter. Detached own-session recorders scrub complete UTF-8 lines before persistence and publish20second atomic content-free heartbeats. Original plain terminals and spec summaries remain separate from metadata projections.
+
+Parent independently binds813source hashes/full modes,812nonassigned paths,444native inputs,76runtime files,248finite prior records,117remediation files and all nine original terminals. Both fresh independent complete accumulated-C83 scoped reviews PASS/no actionable findings/0proof replays through exact openai-codex. They include C65/C68/C69/restart integration, not a new original-master final review or hosted result. Parent separately binds nine review files. Eighteen known worker/direct identities are absent; synthetic cleanup assertions and these identities are not complete-descendant/global cleanup proof.
+
+Initial scaffold, expected-count/parser, record-mode, external metadata/path-representation and read-only review diagnostics remain disclosed. Review-b's two initial metadata calls preceded the approved environment read and launcher; they supplied no gate proof or mutation. The current remediation corrected an asset caption before target execution, not by rerunning a failed gate. No strict universal procedure-compliance, same-user sandbox or universal secret-detection claim follows. Supporting records remain (local record).
+
+This later three-document publication has parent privacy/whitespace/preservation checks before the authorized local checkpoint. Both staged C55 files and both untracked transfer files stay outside that checkpoint. No Cargo/native/discovery, browser body, product HTTP, actual suite preparation/launch, real guard/OUTER/case marker, install/version command, live/auth/provider/private-skill work, old retained-root access or hosted operation ran. C82's1252PASS/12ignored/23harnesses/doc0 is unchanged444-input reuse only.
+
+All40official requirements remainPARTIAL, accepted=false and inventoryOPEN. The98legacy objects,40matrix objects and170supplemental bindings remain unchanged. C15/active1, reader/SSE/no-store/access/auth, redaction, pins, release-to-DOM waiver, ledger and historical failures retain their cutoffs. Original ce361f5 hosted attempts remainFAILED. The owner's reported eb296d3 pass has no bound new run IDs here. Fresh exact-head hosted/macOS confirmation and owner acceptance remain separate; no push or hosted action is authorized by this result.
+
 ## C82: canonical workspace fixtures with an owned-alias regression
 
 **COMPLETED_SCOPED_REVIEWED**, local Linux source/native evidence only. Source cutoff is `ce361f5e345f0d6031fc9ef668b90a2b648bef07` plus the two test edits below. The owner supplied initial investigation; three read-only investigations and one fresh oracle VALID preceded the ordered C82/C83 contract.

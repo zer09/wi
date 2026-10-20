@@ -214,7 +214,8 @@ for (const boundary of ['Disconnect','HTTP401']) test(`active ${boundary} clears
 test('active empty session and invalid hash never invent messages or mutate; catalog navigation opens display Latest', async ({ page }) => {
   const catalog = { session_id: f.SID, title: 'Open synthetic session', workspace: '/synthetic/project', created_at_ms: '1', updated_at_ms: '2', observed_head_sequence: '102', view: 'catalog', availability: 'ready', fault_code: null, last_run_id: null, last_run_state: null };
   const h = await setup(page, latest('', { block: null, entries: [], previous_block: null }), { catalog: () => ({ api_version: 1, entries: [catalog], next_after_id: f.SID, has_more: false }) }, '#invalid');
-  await h.connect(); await expect(h.root).toContainText('Invalid session fragment ignored.'); expect(h.calls).toHaveLength(2);
+  await h.connect(); await expect(h.root).toContainText('Invalid session fragment ignored.');
+  await expect(h.root.getByRole('button', { name: 'Open synthetic session', exact: true })).toBeVisible(); expect(h.calls).toHaveLength(2);
   await h.root.getByRole('button', { name: 'Open synthetic session', exact: true }).click();
   await expect(h.transcript).toContainText('No messages yet.'); await expect.poll(() => h.streams).toBe(1);
   expect(new URL(page.url()).hash).toBe(`#session=${f.SID}`); expect(await h.transcript.locator('h4').count()).toBe(0); expect(h.admitted).toHaveLength(0);

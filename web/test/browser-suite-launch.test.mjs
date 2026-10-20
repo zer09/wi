@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { spawn, spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { prepareBrowserSuite } from '../test-support/browser-suite-preparation.mjs';
@@ -82,6 +82,34 @@ function during(f, action, code = 0, signal = null) {
   };
 }
 function listeners(f) { for (const s of signals) assert.equal(f.bus.listenerCount(s), 0); }
+
+const diagnosticPrefix = 'browser_suite_launch: failure ';
+const diagnosticFallback = 'browser_suite_launch: failure diagnostics unavailable.\n';
+function diagnosticLine(result) {
+  const { consumed, first_failure, child } = result.outcome;
+  return diagnosticPrefix + JSON.stringify({ version: 1, scope: 'invocation observations only', consumed, first_failure,
+    child: { spawned: child.spawned, closed: child.closed, error_observed: child.error_observed, code: child.code, signal: child.signal },
+    terminal: { code: result.code, signal: result.signal } }) + '\n';
+}
+function captureDiagnostic() {
+  let text = '', writes = 0;
+  const stderr = new Writable({ write(chunk, encoding, done) { text += chunk.toString(); writes++; done(); } });
+  return { stderr, text: () => text, writes: () => writes };
+}
+async function cliFailure(f) {
+  const output = captureDiagnostic(), terminated = [];
+  let result, launches = 0;
+  const code = await run(['--bundle', f.bundle], async input => {
+    launches++; result = await launchBrowserSuite(input, f.io); return result;
+  }, output.stderr, signal => { listeners(f); terminated.push(signal); });
+  assert.equal(launches, 1); assert.equal(code, result.signal === null ? result.code : 1);
+  assert.deepEqual(terminated, result.signal === null ? [] : [result.signal]);
+  assert.equal(output.text(), diagnosticLine(result)); assert.equal(output.writes(), 1);
+  assert.ok(Buffer.byteLength(output.text()) <= 1024);
+  assert.equal(output.text().split('\n').length, 2);
+  assert.equal(output.stderr.listenerCount('error'), 0); listeners(f);
+  return result;
+}
 
 test('actual C68/C65 fake recorder and C67 allocation compose one immutable synthetic launch', async t => {
   const f = await fixture(t), original = await fs.readFile(f.bundle), before = { ...process.env };
@@ -550,16 +578,19 @@ test('CLI is import-inert, fixed --bundle only, no passthrough or environment mu
     assert.equal(await run(args, async () => { calls++; }, { write: s => { text += s; } }), 2); assert.equal(calls, 0);
     assert.equal(text, 'browser_suite_launch: invalid invocation.\n');
   }
-  let terminated = null;
+  let terminated = null, signalDiagnostic = '';
   assert.equal(await run(['--bundle', '/private/control/suite-ready.json'], async () => ({ code: null, signal: 'SIGTERM' }),
-    { write() {} }, signal => { terminated = signal; }), 1);
+    { write(text, done) { signalDiagnostic += text; done(); } }, signal => { terminated = signal; }), 1);
+  assert.equal(signalDiagnostic, diagnosticFallback);
   assert.equal(terminated, 'SIGTERM');
   let diagnostic = '';
   assert.equal(await run(['--bundle', '/private/control/suite-ready.json'], async () => { throw Error('synthetic private failure'); },
     { write: text => { diagnostic += text; } }), 1);
   assert.equal(diagnostic, 'browser_suite_launch: launch control failed; consumed records are retained.\n');
-  const before = { ...process.env }; let selected;
-  assert.equal(await run(['--bundle', '/private/control/suite-ready.json'], async input => { selected = input; return { code: 7, signal: null }; }), 7);
+  const before = { ...process.env }; let selected, missingDiagnostic = '';
+  assert.equal(await run(['--bundle', '/private/control/suite-ready.json'], async input => { selected = input; return { code: 7, signal: null }; },
+    { write(text, done) { missingDiagnostic += text; done(); } }), 7);
+  assert.equal(missingDiagnostic, diagnosticFallback);
   assert.deepEqual(selected, { bundle: '/private/control/suite-ready.json' });
   assert.ok(isDeepStrictEqual({ ...process.env }, before), 'CLI preserves global environment.');
   const p = spawnSync(process.execPath, ['--input-type=module', '-e', "await import('./web/scripts/launch-browser-suite.mjs')"], { cwd: ROOT, encoding: 'utf8', env: { ...process.env } });
@@ -587,8 +618,8 @@ test('outcome-only redaction collisions reject publication without losing primar
     }, code, signal);
     const cli = await run(['--bundle', f.bundle], async input => {
       launchCalls++; result = await launchBrowserSuite(input, f.io); return result;
-    }, { write: text => { diagnostic += text; } }, s => { listeners(f); terminated.push(s); });
-    assert.equal(launchCalls, 1); assert.equal(f.calls.length, 1); assert.equal(diagnostic, '');
+    }, { write(text, done) { diagnostic += text; done(); } }, s => { listeners(f); terminated.push(s); });
+    assert.equal(launchCalls, 1); assert.equal(f.calls.length, 1); assert.equal(diagnostic, diagnosticLine(result));
     assert.deepEqual(terminated, signal === null ? [] : [signal]);
     assert.equal(cli, kind === 'nonzero' ? 17 : 1);
     assert.deepEqual({ code: result.code, signal: result.signal }, { code: signal === null ? cli : null, signal });
@@ -624,9 +655,10 @@ test('outcome-only redaction collisions reject publication without losing primar
     // A failed nonzero/signal receipt already selected child; final publication must not replace it.
     assert.equal(result.outcome.first_failure, kind === 'zero' ? 'outcome_record' : 'child');
     const retainedBefore = await Promise.all(retained.map(pin));
-    let reused;
+    let reused, reuseDiagnostic = '';
     assert.equal(await run(['--bundle', f.bundle], async input => { reused = await launchBrowserSuite(input, f.io); return reused; },
-      { write() { assert.fail('Reuse must return a bounded result.'); } }, () => assert.fail('Reuse must not terminate.')), 1);
+      { write(text, done) { reuseDiagnostic += text; done(); } }, () => assert.fail('Reuse must not terminate.')), 1);
+    assert.equal(reuseDiagnostic, diagnosticLine(reused));
     assert.equal(reused.outcome.first_failure, 'admission'); assert.equal(reused.outcome.consumed, false);
     assert.equal(f.calls.length, 1); assert.deepEqual(await Promise.all(retained.map(pin)), retainedBefore);
     assert.deepEqual(await Promise.all(immutable.map(pin)), originals); await absent(outcomePath); listeners(f);
@@ -656,6 +688,219 @@ test('ordinary and nonoverlapping redaction retain the exact complete outcome sc
     assert.deepEqual(await fs.readFile(path), before); assert.deepEqual(await fs.readFile(f.bundle), original);
     assert.equal(f.calls.length, 1); listeners(f);
   });
+});
+
+test('C85 actual CLI reports child terminals without inferring case results and reuse without new consumption', async t => {
+  for (const kind of ['one', 'seven', 'signal', 'error', 'unknown', 'throw', 'no-spawn']) await t.test(kind, async t => {
+    const f = await fixture(t), original = await fs.readFile(f.bundle);
+    if (kind === 'throw') f.io.spawn = () => { throw Error('synthetic start'); };
+    else if (kind === 'no-spawn') f.io.spawn = () => {
+      const c = new EventEmitter(); c.stdout = new PassThrough(); c.stderr = new PassThrough();
+      queueMicrotask(() => c.emit('close', null, null)); return c;
+    };
+    else during(f, c => { if (kind === 'error') c.emit('error', Error('synthetic child')); },
+      { one: 1, seven: 7, signal: null, error: 0, unknown: null }[kind], kind === 'signal' ? 'SIGTERM' : null);
+    const result = await cliFailure(f);
+    assert.equal(result.code, { one: 1, seven: 7, signal: null, error: 1, unknown: 1, throw: 1, 'no-spawn': 1 }[kind]);
+    assert.equal(result.outcome.first_failure, 'child');
+    assert.equal(result.outcome.consumed, true);
+    assert.equal(result.outcome.child.closed, kind !== 'throw');
+    assert.equal(result.outcome.child.spawned, !['throw', 'no-spawn'].includes(kind));
+    assert.equal(result.outcome.child.error_observed, kind === 'error');
+    const guard = await fs.readFile(f.data.planned.guard), count = f.calls.length;
+    const reused = await cliFailure(f);
+    assert.equal(reused.outcome.consumed, false); assert.equal(reused.outcome.first_failure, 'admission');
+    assert.equal(f.calls.length, count); assert.deepEqual(await fs.readFile(f.data.planned.guard), guard);
+    assert.deepEqual(await fs.readFile(f.bundle), original);
+  });
+});
+
+test('C85 actual CLI reports admission and consumed control failures with child-zero late failures', async t => {
+  for (const kind of ['admission', 'guard', 'outer', 'stop', 'readback', 'marker', 'outcome']) await t.test(kind, async t => {
+    const f = await fixture(t); let acquired = false;
+    if (kind === 'admission') f.env.WI_C3A_FIXTURE = 'synthetic invalid';
+    f.io.io = {
+      open: async (p, ...args) => {
+        if (kind === 'guard' && p === f.data.planned.guard || kind === 'outer' && p === f.data.planned.outer) throw Error('synthetic control');
+        const h = await fs.open(p, ...args);
+        if (p === f.data.planned.guard) acquired = true;
+        if (kind === 'stop' && p === f.data.planned.outer) f.bus.emit('SIGINT');
+        return h;
+      },
+      lstat: async p => {
+        if (kind === 'readback' && f.calls.length && p === f.output) throw Error('synthetic readback');
+        return fs.lstat(p);
+      },
+      writeFile: async (p, ...args) => {
+        if (kind === 'outcome' && p.endsWith('launch-outcome.json')) throw Error('synthetic outcome');
+        return fs.writeFile(p, ...args);
+      },
+    };
+    if (kind === 'marker') during(f, () => marker(f, 'case/c57/CASE.once', 'wrong\n'));
+    const r = await cliFailure(f);
+    assert.equal(r.code, 1); assert.equal(r.outcome.consumed, acquired);
+    assert.equal(r.outcome.first_failure, { admission: 'admission', guard: 'guard', outer: 'outer', stop: 'stop_before_dispatch',
+      readback: 'post_readback', marker: 'markers', outcome: 'outcome_record' }[kind]);
+    const dispatched = ['readback', 'marker', 'outcome'].includes(kind);
+    assert.equal(r.outcome.child.spawned, dispatched); assert.equal(r.outcome.child.closed, dispatched);
+    assert.equal(r.outcome.child.code, dispatched ? 0 : null); assert.equal(f.calls.length, dispatched ? 1 : 0);
+    if (acquired) assert.ok(await fs.lstat(f.data.planned.guard)); else await absent(f.data.planned.guard);
+  });
+});
+
+test('C85 projection excludes dynamic private data and maps unsupported observations to null or unknown', async t => {
+  const secret = createHash('sha256').update(String(performance.now())).digest('base64') + '/\n私';
+  const variants = [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret), Buffer.from(secret).toString('base64')];
+  const base = () => ({ code: 7, signal: null, outcome: { consumed: true, first_failure: 'child',
+    child: { spawned: true, closed: true, error_observed: false, code: 7, signal: null } } });
+  for (const kind of ['ordinary', 'missing', 'unsupported', 'unknown-signal', 'large', 'getter', 'changing-stage', 'no-outcome']) await t.test(kind, async () => {
+    const r = base(); let reads = 0;
+    r.private = { path: secret, pid: 123, argv: variants, streams: variants, assertion: secret };
+    r.outcome.markers = variants; r.outcome.child.identity = secret;
+    Object.defineProperty(r.outcome, 'neverRead', { enumerable: true, get() { throw Error('Projection must not enumerate outcome.'); } });
+    if (kind === 'missing') { delete r.outcome.consumed; delete r.outcome.first_failure; delete r.outcome.child; }
+    if (kind === 'unsupported') {
+      r.outcome.consumed = 0; r.outcome.first_failure = secret;
+      r.outcome.child = { spawned: 1, closed: 'true', error_observed: {}, code: -1, signal: 42 };
+    }
+    if (kind === 'unknown-signal') r.outcome.child.signal = secret;
+    if (kind === 'large') { r.outcome.first_failure = secret.repeat(10000); r.outcome.child.code = Number.MAX_SAFE_INTEGER; }
+    if (kind === 'getter') Object.defineProperty(r.outcome, 'consumed', { get() { throw Error(secret); } });
+    if (kind === 'changing-stage') Object.defineProperty(r.outcome, 'first_failure', { get() { return ++reads === 1 ? 'child' : secret; } });
+    if (kind === 'no-outcome') delete r.outcome;
+    const output = captureDiagnostic(); let launches = 0;
+    assert.equal(await run(['--bundle', '/private/control/suite-ready.json'], async () => { launches++; return r; }, output.stderr), 7);
+    assert.equal(launches, 1); assert.equal(output.writes(), 1); assert.equal(output.stderr.listenerCount('error'), 0);
+    const text = output.text(); assert.ok(Buffer.byteLength(text) <= 1024); assert.equal(text.split('\n').length, 2);
+    for (const value of variants) assert.ok(!text.includes(value), 'No dynamic fixture secret or its encodings may pass projection.');
+    if (['getter', 'no-outcome'].includes(kind)) assert.equal(text, diagnosticFallback);
+    else {
+      const actual = JSON.parse(text.slice(diagnosticPrefix.length));
+      assert.deepEqual(Object.keys(actual), ['version', 'scope', 'consumed', 'first_failure', 'child', 'terminal']);
+      assert.deepEqual(actual.terminal, { code: 7, signal: null });
+      if (['missing', 'unsupported'].includes(kind)) {
+        assert.equal(actual.consumed, null); assert.equal(actual.first_failure, null);
+        assert.deepEqual(actual.child, { spawned: null, closed: null, error_observed: null, code: null, signal: null });
+      } else if (kind === 'unknown-signal') assert.equal(actual.child.signal, 'unknown');
+      else if (kind === 'large') { assert.equal(actual.first_failure, null); assert.equal(actual.child.code, Number.MAX_SAFE_INTEGER); }
+      else if (kind === 'changing-stage') { assert.equal(actual.first_failure, 'child'); assert.equal(reads, 1); }
+      else assert.equal(text, diagnosticLine(r));
+    }
+  });
+});
+
+function diagnosticCollision(kind) {
+  const script = `import assert from 'node:assert/strict'; import * as fs from 'node:fs/promises';
+    import {tmpdir} from 'node:os'; import {basename,dirname,join} from 'node:path';
+    import {createHash} from 'node:crypto'; import {EventEmitter} from 'node:events';
+    import {PassThrough,Writable} from 'node:stream'; import {isDeepStrictEqual} from 'node:util';
+    import {prepareBrowserSuite} from './web/test-support/browser-suite-preparation.mjs';
+    import {recordPreparationCommand} from './web/test-support/browser-fixture-preparation.mjs';
+    import {launchBrowserSuite} from './web/test-support/browser-suite-launch.mjs';
+    import {run} from './web/scripts/launch-browser-suite.mjs';
+    import {ROOT,TARGET,CHILD} from './web/test-support/live-commit-native.mjs';
+    const hash=${hash},clone=${clone},load=${load},fixture=${fixture},privateWrite=${privateWrite},during=${during};
+    const diagnosticFallback=${JSON.stringify(diagnosticFallback)},diagnosticPrefix=${JSON.stringify(diagnosticPrefix)},diagnosticLine=${diagnosticLine};
+    const real=globalThis.process,descriptor=Object.getOwnPropertyDescriptor(globalThis,'process');
+    const before={...real.env},fields=Object.getOwnPropertyDescriptors(real),cleanups=[];
+    const env=Object.fromEntries(['TMPDIR','CARGO_TARGET_DIR','RUSTFLAGS','GIT_OPTIONAL_LOCKS','NODE_OPTIONS','PATH'].map(k=>[k,real.env[k]]));
+    env.PATH='/synthetic/bin'; const facade=Object.create(real);
+    Object.defineProperties(facade,{env:{value:env},execPath:{value:'/synthetic/bin/node'}});
+    let f,result,text='',status,launches=0,terminated=[],removed=false;
+    try {
+      Object.defineProperty(globalThis,'process',{configurable:descriptor.configurable,enumerable:descriptor.enumerable,writable:true,value:facade});
+      f=await fixture({after:fn=>cleanups.push(fn)});
+      const kind=real.argv[1],secret={key:'error_observed',value:'invocation observations only',encoded:'\\x191',safe:'synthetic-nonoverlap-secret'}[kind];
+      env.SYNTHETIC_TOKEN=secret; f.env.SYNTHETIC_TOKEN=secret;
+      during(f,()=>{},kind==='encoded'?null:7,kind==='encoded'?'SIGTERM':null);
+      const stderr=new Writable({write(chunk,encoding,done){text+=chunk.toString();done()}});
+      status=await run(['--bundle',f.bundle],async input=>{launches++;result=await launchBrowserSuite(input,f.io);return result},stderr,s=>terminated.push(s));
+      assert.equal(status,kind==='encoded'?1:7);assert.equal(launches,1);assert.equal(f.calls.length,1);
+      assert.equal(result.outcome.consumed,true);assert.equal(result.outcome.child.closed,true);
+      assert.ok(!text.includes(secret));assert.ok(Buffer.byteLength(text)<=1024);
+      assert.deepEqual(terminated,kind==='encoded'?['SIGTERM']:[]);
+      assert.equal(stderr.listenerCount('error'),0);
+      for(const s of ['SIGINT','SIGTERM','SIGHUP'])assert.equal(f.bus.listenerCount(s),0);
+    } finally {
+      Object.defineProperty(globalThis,'process',descriptor);
+      for(const cleanup of cleanups.reverse())await cleanup();
+    }
+    const current=Object.getOwnPropertyDescriptors(real),own=Reflect.ownKeys(fields);
+    const restored=isDeepStrictEqual(Object.getOwnPropertyDescriptor(globalThis,'process'),descriptor);
+    const unchanged=isDeepStrictEqual({...real.env},before)&&Reflect.ownKeys(current).length===own.length
+      &&own.every(k=>Object.hasOwn(current,k)&&isDeepStrictEqual(current[k],fields[k]));
+    removed=await fs.lstat(f.parent).then(()=>false,e=>{if(e.code!=='ENOENT')throw e;return true});
+    assert.ok(restored&&unchanged&&removed);
+    console.log(JSON.stringify({restored,unchanged,removed,launches,status,fallback:text===diagnosticFallback,exact:text===diagnosticLine(result)}));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, kind], { cwd: ROOT, env: { ...process.env }, encoding: 'utf8' });
+  assert.ok(child.status === 0 && child.stderr === '', 'Isolated CLI collision must finish without scaffold errors.');
+  return JSON.parse(child.stdout);
+}
+
+test('C85 actual CLI and launcher share isolated key value and encoded collision environments', async t => {
+  for (const kind of ['key', 'value', 'encoded', 'safe']) await t.test(kind, () => {
+    const r = diagnosticCollision(kind);
+    assert.ok(r.restored && r.unchanged && r.removed); assert.equal(r.launches, 1);
+    assert.equal(r.fallback, kind !== 'safe'); assert.equal(r.exact, kind === 'safe');
+  });
+});
+
+test('C85 stderr write completion and failures preserve the original terminal and remove temporary listeners', async t => {
+  for (const kind of ['success', 'throw', 'callback', 'event', 'event-only', 'delayed-success', 'delayed-callback', 'delayed-event']) {
+    for (const code of [1, 7, null]) await t.test(`${kind}-${code ?? 'SIGTERM'}`, async () => {
+      const signal = code === null ? 'SIGTERM' : null;
+      const r = { code, signal, outcome: { consumed: true, first_failure: 'child',
+        child: { spawned: true, closed: true, error_observed: false, code, signal } } };
+      let started = false, finished = false, release, writes = 0, launches = 0, observedListener = false;
+      const terminated = [];
+      const ready = new Promise(resolve => { release = resolve; });
+      let finishWrite;
+      const stderr = new Writable({ highWaterMark: 1, write(chunk, encoding, done) {
+        started = true; writes++; release(); observedListener = this.listenerCount('error') === 2;
+        const complete = () => {
+          finished = true;
+          if (kind === 'event-only') { this.emit('error', Error('synthetic private stream')); return; }
+          if (kind.endsWith('event')) { this.emit('error', Error('synthetic private stream')); done(); }
+          else done(kind.endsWith('callback') ? Error('synthetic private callback') : undefined);
+        };
+        if (kind.startsWith('delayed-')) finishWrite = complete; else complete();
+      } });
+      const originalWrite = stderr.write;
+      if (kind === 'throw') stderr.write = function () {
+        writes++; started = true; release(); observedListener = this.listenerCount('error') === 2;
+        throw Error('synthetic private write');
+      };
+      const errors = [], observer = () => { errors.push(stderr.listenerCount('error')); }; stderr.on('error', observer);
+      const before = stderr.listeners('error'); let completed = false;
+      const pending = run(['--bundle', '/private/control/suite-ready.json'], async () => { launches++; return r; }, stderr,
+        s => { terminated.push({ signal: s, finished }); }).then(value => { completed = true; return value; });
+      // An event-loop turn also lets the original silent CLI finish, so expected-red never hangs waiting for a write.
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(started, true, 'A returned failure must attempt a diagnostic write.');
+      await ready;
+      if (kind.startsWith('delayed-')) {
+        assert.equal(stderr.writableNeedDrain, true); assert.equal(completed, false); assert.deepEqual(terminated, []);
+        finishWrite();
+      }
+      assert.equal(await pending, signal === null ? code : 1); assert.equal(launches, 1); assert.equal(writes, 1);
+      assert.deepEqual(terminated, signal === null ? [] : [{ signal, finished: kind !== 'throw' }]);
+      assert.equal(observedListener, true); assert.deepEqual(stderr.listeners('error'), before);
+      assert.deepEqual(errors, ['callback', 'event', 'event-only', 'delayed-callback', 'delayed-event'].includes(kind) ? [2] : []);
+      stderr.removeListener('error', observer); stderr.write = originalWrite; stderr.destroy();
+    });
+  }
+});
+
+test('C85 default self-signal follows a real delayed stderr completion in an isolated Node child', () => {
+  const result = { code: null, signal: 'SIGTERM', outcome: { consumed: true, first_failure: 'child',
+    child: { spawned: true, closed: true, error_observed: false, code: null, signal: 'SIGTERM' } } };
+  const script = `import {Writable} from 'node:stream'; import {run} from './web/scripts/launch-browser-suite.mjs';
+    const stderr=new Writable({highWaterMark:1,write(chunk,encoding,done){setImmediate(()=>process.stderr.write(chunk,done))}});
+    await run(['--bundle','/private/control/suite-ready.json'],async()=>(${JSON.stringify(result)}),stderr);
+    process.exitCode=99;`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: ROOT, env: { ...process.env }, encoding: 'utf8' });
+  assert.equal(child.error, undefined); assert.equal(child.status, null); assert.equal(child.signal, 'SIGTERM');
+  assert.equal(child.stdout, ''); assert.equal(child.stderr, diagnosticLine(result));
 });
 
 test('prepared-scope and producer-signal redaction collisions are early admission contrasts, not outcome failures', async t => {

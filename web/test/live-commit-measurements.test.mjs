@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
+import { appendMeasurementAnnotation, annotationType, livePhases, cleanupSteps } from '../test-support/browser-case-diagnostics.mjs';
 import { allocationProgress, outerProof, allocateParent, allocationProof, resolveAllocation, removeAllocation, prepareInvocation, browserProgram, browserProof, phaseDrive, liveCollector, diagnostics, newFaults, resolveBinding, reserveOutput, modesProof, sourceGuard } from '../test-support/live-commit-measurements.mjs';
 import { texts, digest, workKeys, protocol, savedProof, telemetryProof, terminalProof, removeRoot, createRoot, rootProof, nativeFailureProof, nativeCleanupProof } from '../test-support/live-commit-native.mjs';
 import { resources, acquireResource } from '../test-support/display-measurements.mjs';
@@ -455,12 +456,14 @@ async function specCase(t, options = {}) {
           return action();
         }); } catch (error) { firstOperationError ??= error; firstPacket ??= d.packet(); throw error; }
       } }; },
-    newFaults: () => faults, sourceGuard, process: { env: runtimeEnv, pid: process.pid }, URL,
+    appendMeasurementAnnotation, newFaults: () => faults, sourceGuard, process: { env: runtimeEnv, pid: process.pid }, URL,
   };
   new Function(...Object.keys(values), script)(...Object.values(values)); options.beforeCallback?.(); let error;
-  try { await callback({}, { outputPath: name => { assert.equal(name, 'c54-evidence'); return '/synthetic/output/evidence'; } }); } catch (caught) { error = caught; }
+  const annotations = [], info = { outputPath: name => { assert.equal(name, 'c54-evidence'); return '/synthetic/output/evidence'; },
+    get annotations() { events.push('annotation'); if (options.annotationAccess) throw publication; return options.annotationAppend ? Object.freeze(annotations) : annotations; } };
+  try { await callback({}, info); } catch (caught) { error = caught; }
   assert.equal(typeof callback, 'function'); assert.ok(!JSON.stringify([...artifacts.values()]).includes(failure.message));
-  return { artifacts, events, error, cleanupResult, failure, publication, network, facts, allocation, firstOperationError, firstPacket, ownedError, digestCalls, removals };
+  return { artifacts, events, error, cleanupResult, failure, publication, network, facts, allocation, firstOperationError, firstPacket, ownedError, digestCalls, removals, annotations };
 }
 test('D1 actual registered callbacks preserve both Node callback orders and later native close without causal claims', async t => {
   for (const nativeOrder of ['browser-first', 'native-first']) for (const readerUnavailable of [false, true]) await t.test(`${nativeOrder} readers ${readerUnavailable}`, async t => {
@@ -1148,4 +1151,29 @@ test('C67 child identity shape direct relationship and excluded overlap remain s
     assert.equal(progress.path, p.path); assert.equal(progress.phase, 'path_returned'); assert.equal(progress.identity, null);
   });
   assert.equal(await allocationProof(p.identity, outer).then(() => true), true);
+});
+
+test('C89 live actual callback appends one result-level checkpoint only after all artifact attempts', async t => {
+  for (const options of [{ fail: 'privacy' }, { fail: 'context-close' }, { write: 'MEASUREMENTS.json' }]) await t.test(JSON.stringify(options), async t => {
+    const c = await specCase(t, options);
+    assert.equal(c.annotations.length, 1); assert.equal(c.annotations[0].type, annotationType);
+    const tuple = JSON.parse(c.annotations[0].description);
+    assert.equal(tuple[0], 1); assert.equal(tuple[1], 1);
+    assert.equal(livePhases[tuple[2] - 1], c.artifacts.get('BROWSER_RESULT.json').first_failure.first_operation);
+    assert.equal(tuple[3], !options.fail || options.fail === 'context-close');
+    assert.equal(tuple[4], c.artifacts.get('CLEANUP.json').pass);
+    const failed = c.cleanupResult.steps.find(s => !s.ok);
+    assert.equal(tuple[5], failed ? cleanupSteps.indexOf(failed.name) + 1 : null);
+    assert.equal(c.error, c.cleanupResult.error);
+    assert.ok(c.events.indexOf('annotation') > c.events.indexOf('save:BROWSER_RESULT.json'));
+  });
+  const success = await specCase(t); assert.deepEqual(success.annotations, []); assert.equal(success.error, undefined);
+});
+test('C89 live actual callback contains TestInfo access and append failures without changing first error or artifacts', async t => {
+  for (const option of ['annotationAccess', 'annotationAppend']) await t.test(option, async t => {
+    const c = await specCase(t, { fail: 'privacy', [option]: true });
+    assert.equal(c.error, c.failure); assert.equal(c.cleanupResult.error, c.failure); assert.deepEqual(c.annotations, []);
+    assert.deepEqual(c.artifacts.get('BROWSER_RESULT.json').first_failure, c.firstPacket);
+    assert.equal(c.artifacts.get('BROWSER_RESULT.json').status, 'FAILED'); assert.equal(c.cleanupResult.steps.length, 12);
+  });
 });

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { EventEmitter } from 'node:events';
 import ts from 'typescript';
+import { appendMeasurementAnnotation, annotationType } from '../test-support/browser-case-diagnostics.mjs';
 import { contentFacts, knownText, totalBytes, suffix, contentCursor, customProjection, partialDom, partialDomProof, resolveFixture, reserveOutput,
   contentCollector, contentWork, contentDiagnostics, contentPhases, browserTree, retireTree, removable, sourceGuard } from '../test-support/content-measurements.mjs';
 import { facts, sid, expectedPage, seedLegacy, snapshot, legacyProof, ownedFilesProof, handleFacts, sessionPath, digest, newFaults, projectionTables } from '../test-support/upgrade-display-parity.mjs';
@@ -400,16 +401,19 @@ async function specCase(options={}){
     browserTree:async()=>{events.push('tree');const calls=events.filter(e=>e==='tree').length;if(options.discovery&&calls>=2)throw failure;
       if(options.sseSchedule==='held-discovery'&&calls===3){events.push('discovery-held');await new Promise(resolve=>queueMicrotask(()=>{injectSse();events.push('discovery-release');resolve();}));}
       events.push('tree-complete');return {members:[browserIdentity,...(calls>=2?[ident(902,901)]:[])],errors:{enumeration:0,stat:0,identity:0}};},
+    appendMeasurementAnnotation,
     retireTree:async members=>{events.push('retire-tree');if(options.retirement||!serverClosed)throw failure;return members.map(i=>({...i,retirement:'absent'}));},removable,sourceGuard:()=>true,
     resolveFixture:(e,d)=>{events.push('binding');return resolveFixture(e,d,async()=>binding);},reserveOutput:info=>reserveOutput(info,{mkdir:async()=>{events.push('reserve');if(options.occupied)throw failure;},writeFile:async(path,raw,opts)=>{
       events.push('marker');assert.equal(opts.flag,'wx');assert.equal(opts.mode,0o600);if(options.marker)throw publication;saved.set('C53.once.json',JSON.parse(raw));}}),process:{env,pid:process.pid},URL,
   };
   new Function(...Object.keys(values),script)(...Object.values(values));let error;
   assert.equal(parentReads.length,0);events.push('invoke');
-  try{await callback({}, {outputPath:name=>{assert.equal(name,'c53-evidence');events.push('output');return '/synthetic/evidence';}});}catch(caught){error=caught;}
+  const annotations=[],info={outputPath:name=>{assert.equal(name,'c53-evidence');events.push('output');return '/synthetic/evidence';},
+    get annotations(){events.push('annotation');if(options.annotationAccess)throw publication;return options.annotationAppend?Object.freeze(annotations):annotations;}};
+  try{await callback({},info);}catch(caught){error=caught;}
   assert.equal(events.filter(e=>e==='collected').length,1);if(options.success&&!options.injected&&!options.badLabel&&!options.discovery&&!options.nativeDefect&&!options.publication&&!options.serializationArtifact&&!options.factsGetter&&!options.countsGetter&&!options.evidenceGetter&&options.sseSchedule!=='held-discovery'&&!options.cleanupSchedule&&!options.bindingChanged&&!options.handles&&!options.rejectedIdentity)assert.equal(error,undefined);else assert.ok(error);
   assert.ok(!JSON.stringify([...saved.values()]).includes(failure.message));
-  return {saved,events,error,first:cleanupResult.error,failure,publication,native,collected,serializationAttempts,packet:diagnostic.packet(),injection,forwarded,parentReads,removed};
+  return {saved,events,error,first:cleanupResult.error,failure,publication,native,collected,serializationAttempts,packet:diagnostic.packet(),injection,forwarded,parentReads,removed,annotations};
 }
 test('C53 actual callback requires and forwards the designated runtime parent at the original root boundary',async t=>{
   const admitted=await specCase({success:true,env:{WI_BROWSER_FIXTURE_PARENT:'/synthetic/designated-parent'}});
@@ -698,4 +702,22 @@ test('C53 specific static privacy guards bind the actual sources without assignm
   for(const old of ["context.on('requestfailed', network.failed)","reserveOutput(testInfo)","name: 'Load older', exact: true","host: '127.0.0.1'"])
     assert.throws(()=>sourceGuard(spec.replace(old,''),helper));
   assert.ok(!spec.includes('/home/'));assert.ok(!spec.includes('WI_C53_EVIDENCE'));assert.ok(!spec.includes('upgradedProof'));
+});
+
+test('C89 content actual callback appends a result checkpoint after artifact attempts and keeps exact original throws',async t=>{
+  for(const options of [{success:true,injected:'session_title'},{success:true,injected:'context-close'},{success:true,publication:'MEASUREMENTS.json'}])await t.test(JSON.stringify(options),async()=>{
+    const c=await specCase(options);assert.equal(c.annotations.length,1);assert.equal(c.annotations[0].type,annotationType);
+    const tuple=JSON.parse(c.annotations[0].description);assert.equal(tuple[0],1);assert.equal(tuple[1],2);
+    assert.equal([...contentPhases,'outside_path'][tuple[2]-1],c.packet.first_operation);
+    assert.equal(tuple[4],c.saved.get('CLEANUP.json').pass);assert.equal(c.error,c.first);
+    assert.ok(c.events.indexOf('annotation')>c.events.indexOf('save:BROWSER_RESULT.json'));
+  });
+  const success=await specCase({success:true});assert.deepEqual(success.annotations,[]);assert.equal(success.error,undefined);
+});
+test('C89 content actual callback contains annotation access and append rejection without changing first packet or cleanup',async t=>{
+  for(const option of ['annotationAccess','annotationAppend'])await t.test(option,async()=>{
+    const c=await specCase({success:true,injected:'session_title',[option]:true});assert.equal(c.error,c.failure);assert.equal(c.first,c.failure);
+    assert.deepEqual(c.annotations,[]);assert.deepEqual(c.saved.get('BROWSER_RESULT.json').first_failure,c.packet);
+    assert.equal(c.saved.get('BROWSER_RESULT.json').status,'FAILED');assert.equal(c.saved.get('CLEANUP.json').steps.length,11);
+  });
 });

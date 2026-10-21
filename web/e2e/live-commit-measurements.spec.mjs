@@ -1,4 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
+import { appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 import { readFile, writeFile, rm, rmdir, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRoot, rootProof, launchNative, nativeBinding, terminalProof, removeRoot, texts, telemetryProof } from '../test-support/live-commit-native.mjs';
@@ -222,6 +223,10 @@ test('one genuine Task live append, authoritative replacement and terminal commi
       }],
     ]) {
       try { await save(name, build()); } catch (error) { cleanup.error ??= error; diagnostic.freeze('publication'); }
+    }
+    if (cleanup.error || !bodySucceeded || !cleanupSafe || preparationFailures.length || publicationFailures.length) {
+      appendMeasurementAnnotation(() => ({ info: testInfo, family: 1, packet: diagnostic.packet(),
+        body_success: bodySucceeded, cleanup: cleanupSafe, steps: cleanup.steps }));
     }
     if (cleanup.error) throw cleanup.error;
     if (!bodySucceeded || !cleanupSafe || preparationFailures.length || publicationFailures.length) throw new Error('Live measurement failed; sanitized evidence saved');

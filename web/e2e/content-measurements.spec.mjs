@@ -1,4 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
+import { appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 import { readFile, writeFile, rm, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { discoverFixture } from '../test-support/fixture.mjs';
@@ -190,6 +191,10 @@ test('one genuine Load older content prepend with original public transport meta
       }]
     ]) {
       try{await save(name,build());}catch(error){cleanup.error??=error;firstFailure??=freeze();}
+    }
+    if(cleanup.error||!bodySucceeded||!cleanupSafe||preparationFailures.length||publicationFailures.length){
+      appendMeasurementAnnotation(()=>({info:testInfo,family:2,packet:firstFailure,
+        body_success:bodySucceeded,cleanup:cleanupSafe,steps:cleanup.steps}));
     }
     if(cleanup.error)throw cleanup.error;
     if(!bodySucceeded||!cleanupSafe||preparationFailures.length||publicationFailures.length)throw new Error('C53 content case failed; sanitized evidence saved');

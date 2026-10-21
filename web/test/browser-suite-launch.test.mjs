@@ -12,6 +12,7 @@ import { constants } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { compileFunction } from 'node:vm';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { preparationRedactor, sanitizeRecord } from '../test-support/browser-fixture-preparation.mjs';
 import { prepareBrowserSuite } from '../test-support/browser-suite-preparation.mjs';
 import { recordPreparationCommand } from '../test-support/browser-fixture-preparation.mjs';
@@ -122,13 +123,13 @@ async function diagnosticCLI(launch, io = fs, env = process.env) {
   const body = source.replace(/^import .+;\n/gm, '').replace('export async function run', 'async function run')
     .replace('if (import.meta.main) process.exitCode = await run(process.argv.slice(2));', '');
   const bindings = { basename, dirname, isAbsolute, resolve, join, isDeepStrictEqual,
-    fs: io, constants, isUtf8, launchBrowserSuite: launch, preparationRedactor, sanitizeRecord,
+    fs: io, constants, isUtf8, ROOT, pathToFileURL, launchBrowserSuite: launch, preparationRedactor, sanitizeRecord,
     process: Object.assign(Object.create(process), { env }) };
   return compileFunction(body + '\nreturn {run, parser: typeof parseReporterText === "function" ? parseReporterText : null, reader: typeof readReporterText === "function" ? readReporterText : null};',
     Object.keys(bindings), { filename: 'launch-browser-suite-control.mjs' })(...Object.values(bindings));
 }
 const require = createRequire(import.meta.url);
-const { TerminalReporter, terminalScreen } = require('../node_modules/playwright/lib/reporters/base.js');
+const { TerminalReporter, terminalScreen, formatError } = require('../node_modules/playwright/lib/reporters/base.js');
 function reporterText({ failed = [], interrupted = [], flaky = [], passed = 0, skipped = 0, didNotRun = 0, fatal = 0 } = {}) {
   const reporter = new TerminalReporter({ screen: { ...terminalScreen, resolveFiles: 'cwd' } });
   reporter.onConfigure({ rootDir: join(ROOT, 'web/e2e'), tags: [] }); reporter.result = { duration: 1200 };
@@ -140,7 +141,315 @@ function reporterText({ failed = [], interrupted = [], flaky = [], passed = 0, s
 const reporterObservation = (declarations, counts = {}) => ({ scope: 'reporter text only; unauthenticated',
   counts: { failed: 0, interrupted: 0, flaky: 0, skipped: 0, did_not_run: 0, passed: 0, fatal_errors: 0, ...counts },
   declarations, truncated: false });
-const coordinate = (file, category = 'failed') => ({ category, file: `web/e2e/${file}`, line: 17, column: 3 });
+const coordinate = (file, category = 'failed') => ({ category, file: `web/e2e/${file}`, line: 17, column: 3,
+  reported_source_frame: null, reported_stored_handoff: null });
+const wireObservation = (declarations, counts, files) => ({ ...reporterObservation([], counts), version: 2, source_map: 1,
+  declarations: declarations.map(d => [['failed', 'interrupted', 'flaky'].indexOf(d.category) + 1,
+    files.indexOf(basename(d.file)) + 1, d.line, d.column, null, null]) });
+
+function failureReport(files, errorsFor = () => [{ message: 'Error: synthetic private failure' }], attachments = [], locationFor = () => ({ line: 17, column: 3 }), titleFor = () => 'synthetic private title') {
+  const reporter = new TerminalReporter({ screen: { ...terminalScreen, resolveFiles: 'cwd' } });
+  reporter.onConfigure({ rootDir: join(ROOT, 'web/e2e'), tags: [] }); reporter.result = { duration: 1200 };
+  const tests = files.map((name, index) => ({ location: { file: join(process.cwd(), 'web/e2e', name), ...locationFor(index) },
+    titlePath: () => ['', '', name, titleFor(index)], tags: [], expectedStatus: 'passed',
+    results: [{ status: 'failed', retry: 0, errors: errorsFor(name, index), steps: [], attachments }] }));
+  return tests.map((value, index) => reporter.formatFailure(value, index + 1)).join('\n') + '\n'
+    + reporter.generateSummaryMessage({ unexpected: tests, interrupted: [], flaky: [], expected: 89 - files.length,
+      skipped: 0, didNotRun: 0, fatalErrors: [] }) + '\n';
+}
+const representativeFiles = ['cancellation', 'client-close-handoff', 'content-measurements', 'display-app',
+  'display-view', 'joined', 'lifecycle-failure', 'live-commit-measurements'].map(n => n + '.spec.mjs');
+
+test('C88 eight actual formatter failures survive the actual CLI instead of the old two declaration cap', async t => {
+  for (const count of [7, 8]) await t.test(String(count), async t => {
+    const f = await diagnosticLog(t, failureReport(representativeFiles.slice(0, count)));
+    const output = captureDiagnostic(), { run: controlled } = await diagnosticCLI(async () => eligibleResult());
+    assert.equal(await controlled(['--bundle', f.bundle], undefined, output.stderr), 7);
+    assert.equal(output.writes(), 1); assert.ok(Buffer.byteLength(output.text()) <= 1024);
+    assert.ok(!output.text().includes('synthetic private'), 'Private formatter input cannot enter diagnostics.');
+    const observed = JSON.parse(output.text().slice(diagnosticPrefix.length)).reporter_text;
+    assert.equal(observed.declarations.length, count);
+    assert.equal(observed.version, 2); assert.equal(observed.source_map, 1); assert.equal(observed.truncated, false);
+    assert.equal(observed.counts.failed, count); assert.equal(observed.counts.passed, 89 - count);
+  });
+});
+
+function privateObservation(value, canary = '') {
+  const text = JSON.stringify(value);
+  const variants = canary ? [canary, JSON.stringify(canary).slice(1, -1), encodeURIComponent(canary), Buffer.from(canary).toString('base64')] : [];
+  assert.ok(!variants.some(v => text.includes(v)) && !/\/home\/|file:|https?:|syntheticPrivateFunction|Error:/.test(text),
+    'Only closed observations can leave the formatter boundary.');
+}
+const reportedError = (file, message = 'synthetic private failure', prefix = ROOT + '/', line = 214, column = 9) => ({
+  message: 'Error: ' + message,
+  stack: `Error: ${message}\n    at syntheticPrivateFunction (${prefix}web/e2e/${file}:${line}:${column})`,
+});
+async function observedCLI(t, text, env = process.env, result = eligibleResult()) {
+  const f = await diagnosticLog(t, text), output = captureDiagnostic(), terminated = [];
+  const { run: controlled } = await diagnosticCLI(async () => result, fs, env);
+  assert.equal(await controlled(['--bundle', f.bundle], undefined, output.stderr, s => terminated.push(s)), result.signal ? 1 : result.code);
+  assert.equal(output.writes(), 1); assert.equal(output.stderr.listenerCount('error'), 0);
+  assert.deepEqual(terminated, result.signal ? [result.signal] : []);
+  assert.ok(Buffer.byteLength(output.text()) <= 1024); assert.equal(output.text().split('\n').length, 2);
+  return output.text();
+}
+
+test('C88 R1 long and boundary-width pinned headers retain uniquely associated observations', async t => {
+  const ts = require('typescript'), { parser } = await diagnosticCLI(() => {});
+  const cases = [];
+  for (const [file, declarationLine, frameLine, frameColumn, id] of [
+    ['client-close-handoff.spec.mjs', 51, 247, 15, 3], ['display-app.spec.mjs', 214, 218, 108, 6],
+    ['live-commit-measurements.spec.mjs', 11, 23, 5, 12],
+  ]) {
+    const source = await fs.readFile(new URL('../e2e/' + file, import.meta.url), 'utf8');
+    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const calls = ast.statements.filter(ts.isExpressionStatement).map(s => s.expression)
+      .filter(e => ts.isCallExpression(e) && e.expression.getText(ast) === 'test');
+    const call = calls.find(e => ast.getLineAndCharacterOfPosition(e.getStart(ast)).line + 1 === declarationLine);
+    assert.ok(call && ts.isStringLiteral(call.arguments[0]), 'The actual declaration must supply the title.');
+    // Bind synthetic frames to the current source, without importing or executing an E2E body.
+    assert.ok(source.split('\n')[frameLine - 1].length >= frameColumn);
+    cases.push({ file, line: declarationLine, column: 1, title: call.arguments[0].text, frame: [frameLine, frameColumn], id });
+  }
+  const handoff = cases[0], short = { ...cases[1], title: 'short' };
+  const prefix = `  1) web/e2e/${handoff.file}:${handoff.line}:1 › `;
+  const width = n => ({ ...handoff, title: 'x'.repeat(n - prefix.length - 1) });
+  const scenarios = [...cases.map(c => [c]), ...cases.map(c => [{ ...c, title: 'short' }]),
+    [width(99)], [width(100)], [handoff, short]];
+  for (const [index, declarations] of scenarios.entries()) await t.test(String(index), async t => {
+    const text = failureReport(declarations.map(c => c.file), (file, i) => [reportedError(file,
+      file === handoff.file ? 'Client handoff failed: stage=close-a; check=native' : 'synthetic private failure', '', ...declarations[i].frame)],
+    [], i => ({ line: declarations[i].line, column: declarations[i].column }), i => declarations[i].title);
+    const headers = text.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(line => /^  [0-9]+\) /.test(line));
+    assert.equal(headers.length, declarations.length);
+    const decorations = headers.map(line => /─*$/.exec(line)[0].length);
+    if (index < 3 || index === 7 || index === 8) assert.equal(decorations[0], 0);
+    if (index >= 3 && index <= 6) assert.ok(decorations[0] > 0);
+    const parsed = parser(text); privateObservation(parsed);
+    const wire = await observedCLI(t, text); privateObservation(wire);
+    const observation = JSON.parse(wire.slice(diagnosticPrefix.length));
+    assert.equal(observation.reporter_text.counts.failed, declarations.length);
+    assert.equal(observation.reporter_text.counts.passed, 89 - declarations.length);
+    assert.deepEqual(observation.terminal, { code: 7, signal: null });
+    assert.equal(observation.reporter_text.truncated, false);
+    for (const [i, c] of declarations.entries()) {
+      assert.deepEqual(parsed.declarations[i].reported_source_frame, { file: 'web/e2e/' + c.file, line: c.frame[0], column: c.frame[1] });
+      assert.deepEqual(observation.reporter_text.declarations[i], [1, c.id, c.line, c.column, c.frame, c.file === handoff.file ? [4, 3] : null]);
+    }
+  });
+});
+
+test('C88 R1 only a supported single error region can supply optional observations', async t => {
+  const { parser } = await diagnosticCLI(() => {}), file = 'display-app.spec.mjs';
+  const canary = hash(String(performance.now())) + '/非公開';
+  for (const prefix of ['AssertionError', 'TimeoutError', 'locator.click']) {
+    for (const arrangement of ['after', 'before', 'frameless-first', 'handoff']) await t.test(`${prefix}/${arrangement}`, async t => {
+      const name = arrangement === 'handoff' ? 'client-close-handoff.spec.mjs' : file;
+      const first = reportedError(name, arrangement === 'handoff' ? 'Client handoff failed: stage=close-a; check=native' : canary, '', 214, 9);
+      const second = reportedError(name, canary, '', 247, 19);
+      second.message = second.message.replace('Error:', prefix + ':'); second.stack = second.stack.replace('Error:', prefix + ':');
+      if (arrangement === 'frameless-first') delete first.stack;
+      const errors = arrangement === 'before' ? [second, first] : [first, second];
+      const text = failureReport([name], () => errors), parsed = parser(text); privateObservation(parsed, canary);
+      const wire = await observedCLI(t, text); privateObservation(wire, canary);
+      assert.deepEqual([parsed.declarations[0].reported_source_frame, parsed.declarations[0].reported_stored_handoff], [null, null]);
+      const observation = JSON.parse(wire.slice(diagnosticPrefix.length));
+      assert.deepEqual(observation.reporter_text.declarations[0], [1, arrangement === 'handoff' ? 3 : 6, 17, 3, null, null]);
+      assert.deepEqual(observation.terminal, { code: 7, signal: null });
+      assert.equal(observation.reporter_text.counts.failed, 1); assert.equal(observation.reporter_text.counts.passed, 88);
+    });
+  }
+  for (const [index, continuation] of ['plain continuation', 'arbitrary.operation: another failure', 'CustomFailure: another failure',
+    '        at unfinished (', '    214 | unsupported placement'].entries()) await t.test(`unsupported/${index}`, async t => {
+    const error = reportedError(file, canary, '');
+    error.stack += '\n' + continuation;
+    const text = failureReport([file], () => [error]), parsed = parser(text); privateObservation(parsed, canary);
+    const wire = await observedCLI(t, text); privateObservation(wire, canary);
+    assert.deepEqual([parsed.declarations[0].reported_source_frame, parsed.declarations[0].reported_stored_handoff], [null, null]);
+    assert.deepEqual(JSON.parse(wire.slice(diagnosticPrefix.length)).reporter_text.declarations[0].slice(4), [null, null]);
+  });
+});
+
+test('C88 R1 exact byte boundaries require an actual whole-tuple omission for truncated true', async t => {
+  for (const k of [2, 3, 4]) await t.test(String(1022 + k), async t => {
+    const declarations = Array.from({ length: 26 }, (_, i) => [1, 1, 17 + i, i < k ? 10 : 3, null, null]);
+    const text = failureReport(Array(26).fill('cancellation.spec.mjs'), undefined, [], i => ({ line: 17 + i, column: i < k ? 10 : 3 }));
+    const full = JSON.parse(diagnosticLine(eligibleResult()).slice(diagnosticPrefix.length));
+    full.reporter_text = { version: 2, source_map: 1, scope: 'reporter text only; unauthenticated',
+      counts: { failed: 26, interrupted: 0, flaky: 0, skipped: 0, did_not_run: 0, passed: 63, fatal_errors: 0 }, declarations, truncated: false };
+    assert.equal(Buffer.byteLength(diagnosticPrefix + JSON.stringify(full) + '\n'), 1022 + k);
+    const wire = await observedCLI(t, text); privateObservation(wire);
+    const observation = JSON.parse(wire.slice(diagnosticPrefix.length));
+    const retained = k === 2 ? 26 : 25;
+    assert.equal(Buffer.byteLength(wire), k === 2 ? 1024 : 1000 + k);
+    assert.deepEqual(observation.reporter_text.declarations, declarations.slice(0, retained));
+    assert.equal(observation.reporter_text.truncated, retained < declarations.length);
+    full.reporter_text.declarations = declarations.slice(0, retained); full.reporter_text.truncated = retained < declarations.length;
+    assert.deepEqual(observation, full);
+  });
+});
+
+test('C88 versioned source IDs follow all 34 actual tracked declaration identities in order', async t => {
+  const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
+  assert.equal(files.length, 34);
+  for (const [index, file] of files.entries()) await t.test(file, async t => {
+    const text = await observedCLI(t, failureReport([file])); privateObservation(text);
+    const observation = JSON.parse(text.slice(diagnosticPrefix.length)).reporter_text;
+    assert.deepEqual(observation, wireObservation([coordinate(file)], { failed: 1, passed: 88 }, files));
+    assert.equal(observation.declarations[0][1], index + 1);
+  });
+});
+
+test('C88 actual formatError and numbered formatFailure bind the first reported same-spec frame, not the declaration', async t => {
+  const { parser } = await diagnosticCLI(() => {}), file = 'display-app.spec.mjs';
+  const canary = hash(String(performance.now())) + '/非公開';
+  for (const [name, prefix] of [['absolute', ROOT + '/'], ['uri', pathToFileURL(ROOT + '/').href], ['relative', '']]) await t.test(name, async t => {
+    const error = reportedError(file, canary, prefix);
+    error.snippet = `  212 | private ${canary}\n> 214 | throw privateError;\n      |       ^`;
+    error.stack = error.stack.replace('\n', `\n    at syntheticPrivateFunction (${prefix}web/e2e/joined.spec.mjs:31:7)\n`);
+    error.stack += `\n    at syntheticPrivateFunction (${prefix}web/e2e/${file}:247:19)`;
+    const formatted = formatError(terminalScreen, error).message;
+    assert.ok(formatted.includes(canary) && formatted.includes(':214:9'), 'Pinned formatError must process the private stack and snippet.');
+    const text = failureReport([file], () => [error]), parsed = parser(text); privateObservation(parsed, canary);
+    assert.deepEqual(parsed.declarations[0].reported_source_frame, { file: 'web/e2e/' + file, line: 214, column: 9 });
+    assert.deepEqual([parsed.declarations[0].line, parsed.declarations[0].column], [17, 3]);
+    const wire = await observedCLI(t, text); privateObservation(wire, canary);
+    assert.deepEqual(JSON.parse(wire.slice(diagnosticPrefix.length)).reporter_text.declarations[0], [1, 6, 17, 3, [214, 9], null]);
+  });
+});
+
+test('C88 unsupported or ambiguous formatter bodies keep optional observations null without inventing declaration frames', async t => {
+  const { parser } = await diagnosticCLI(() => {}), file = 'display-app.spec.mjs', canary = hash(String(performance.now()));
+  const kinds = ['missing', 'unknown', 'other-spec', 'alias', 'traversal', 'url', 'zero', 'huge', 'column', 'multiple-errors',
+    'nested-cause', 'attachment', 'snippet-only', 'unmatched', 'duplicate-block', 'duplicate-number', 'malformed-block', 'title-injection'];
+  for (const kind of kinds) await t.test(kind, () => {
+    let error = reportedError(file, canary), attachments = [], extra = [];
+    if (kind === 'missing') error = { message: 'Error: ' + canary };
+    if (kind === 'unknown') error = reportedError(file, canary, '/synthetic/private/');
+    if (kind === 'other-spec') error = reportedError('joined.spec.mjs', canary);
+    if (kind === 'alias') error = reportedError(file, canary, ROOT + '-alias/');
+    if (kind === 'traversal') error = reportedError(file, canary, ROOT + '/other/../');
+    if (kind === 'url') error = reportedError(file, canary, 'https://synthetic.invalid/');
+    if (kind === 'zero') error = reportedError(file, canary, ROOT + '/', 0);
+    if (kind === 'huge') error = reportedError(file, canary, ROOT + '/', 1_000_001);
+    if (kind === 'column') error = reportedError(file, canary, ROOT + '/', 214, 1_000_001);
+    if (kind === 'multiple-errors') extra = [reportedError(file, canary, '', 247, 19)];
+    if (kind === 'nested-cause') error.cause = reportedError(file, canary, '', 247, 19);
+    if (kind === 'attachment') attachments = [{ name: 'private-' + canary, contentType: 'text/plain', body: Buffer.from('    at ' + ROOT + '/web/e2e/' + file + ':247:19') }];
+    if (kind === 'snippet-only') error = { message: 'Error: ' + canary, location: { file: join(ROOT, 'web/e2e', file), line: 214, column: 9 },
+      snippet: '  214 |        at ' + ROOT + '/web/e2e/' + file + ':247:19' };
+    let text = failureReport([file], () => [error, ...extra], attachments);
+    const header = text.split('\n').find(line => /^  1\) /.test(line));
+    if (kind === 'unmatched') text = text.replace(header, header.replace(':17:3', ':18:3'));
+    if (kind === 'duplicate-block') text = text.replace(header, header + '\n' + header.replace('1)', '2)'));
+    if (kind === 'duplicate-number') text = text.replace(header, header + '\n' + header);
+    if (kind === 'malformed-block') text = text.replace(header, header.replace('web/e2e/', 'e2e/'));
+    if (kind === 'title-injection') text = text.replace(header, header + '\n  2) private-' + canary);
+    const parsed = parser(text); privateObservation(parsed, canary); assert.ok(parsed !== null);
+    assert.equal(parsed.declarations[0].reported_source_frame, null);
+    assert.equal(parsed.declarations[0].reported_stored_handoff, null);
+    assert.deepEqual([parsed.declarations[0].line, parsed.declarations[0].column], [17, 3]);
+  });
+});
+
+test('C88 handoff reports only source-bound stored stage/check literals, which can describe an earlier check', async t => {
+  const stageNames = ['startup', 'create', 'first-send', 'close-a', 'observer-connect', 'first-completion', 'later-explicit-send', 'reopened-a'];
+  const checkNames = ['outside', 'receipt', 'native', 'dto', 'handshake', 'order', 'assets', 'requests'];
+  const source = await fs.readFile(new URL('../e2e/client-close-handoff.spec.mjs', import.meta.url), 'utf8');
+  assert.deepEqual([...new Set([...source.matchAll(/\bstage = '([^']+)'/g)].map(m => m[1]))], stageNames);
+  assert.deepEqual([...new Set([...source.matchAll(/\bcheck = '([^']+)'/g)].map(m => m[1]))], checkNames);
+  assert.ok(source.includes('failure = new Error(`Client handoff failed: stage=${stage}; check=${check}`);'));
+  const { parser } = await diagnosticCLI(() => {}), file = 'client-close-handoff.spec.mjs';
+  for (const [s, stage] of stageNames.entries()) for (const [c, check] of checkNames.entries()) await t.test(`${s + 1}/${c + 1}`, async t => {
+    const text = failureReport([file], () => [reportedError(file, `Client handoff failed: stage=${stage}; check=${check}`, '', 247, 19)]);
+    const parsed = parser(text); privateObservation(parsed);
+    assert.deepEqual(parsed.declarations[0].reported_stored_handoff, { stage, check });
+    const wire = await observedCLI(t, text); privateObservation(wire);
+    assert.deepEqual(JSON.parse(wire.slice(diagnosticPrefix.length)).reporter_text.declarations[0], [1, 3, 17, 3, [247, 19], [s + 1, c + 1]]);
+  });
+  for (const [kind, message, name] of [
+    ['unknown-stage', 'Client handoff failed: stage=unknown; check=native', file],
+    ['unknown-check', 'Client handoff failed: stage=close-a; check=unknown', file],
+    ['trailing', 'Client handoff failed: stage=close-a; check=native private', file],
+    ['prefix', 'Private Client handoff failed: stage=close-a; check=native', file],
+    ['cleanup', 'Client handoff cleanup failed: fixture', file],
+    ['other-spec', 'Client handoff failed: stage=close-a; check=native', 'joined.spec.mjs'],
+  ]) await t.test(kind, () => {
+    const parsed = parser(failureReport([name], () => [reportedError(name, message)])); privateObservation(parsed);
+    assert.equal(parsed.declarations[0].reported_stored_handoff, null);
+  });
+});
+
+test('C88 eight maximum tuples fit; larger summaries lose only whole tuples after full validation', async t => {
+  const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
+  const eight = ['client-close-handoff.spec.mjs', ...files.slice(-7)];
+  const maximum = failureReport(eight, file => [reportedError(file, file === eight[0]
+    ? 'Client handoff failed: stage=reopened-a; check=requests' : 'synthetic private failure', '', 1_000_000, 1_000_000)])
+    .replaceAll(':17:3', ':1000000:1000000').replace('  81 passed', '  1000000 skipped\n  1000000 did not run\n  1000000 passed')
+    + '  1000000 errors were not a part of any test, see above for details\n';
+  const result = eligibleResult(); result.code = result.outcome.child.code = Number.MAX_SAFE_INTEGER;
+  const maxLine = await observedCLI(t, maximum, process.env, result); privateObservation(maxLine);
+  const max = JSON.parse(maxLine.slice(diagnosticPrefix.length));
+  assert.equal(max.reporter_text.declarations.length, 8); assert.equal(max.reporter_text.truncated, false);
+  assert.ok(max.reporter_text.declarations.every(d => d[2] === 1_000_000 && d[3] === 1_000_000 && d[4]?.every(n => n === 1_000_000)));
+  assert.deepEqual(max.reporter_text.declarations[0][5], [8, 8]); assert.equal(max.reporter_text.counts.fatal_errors, 1_000_000);
+  t.diagnostic(`Maximum eight-entry diagnostic UTF8 bytes including prefix/newline: ${Buffer.byteLength(maxLine)}`);
+  const large = failureReport(files), { parser } = await diagnosticCLI(() => {}), parsed = parser(large);
+  assert.equal(parsed.declarations.length, 34); assert.equal(parsed.truncated, false);
+  const many = failureReport(Array.from({ length: 89 }, (_, i) => files[i % files.length]), undefined, [], i => ({ line: 17 + i, column: 3 }));
+  assert.equal(parser(many).declarations.length, 89);
+  const manyLine = await observedCLI(t, many); privateObservation(manyLine);
+  const manyWire = JSON.parse(manyLine.slice(diagnosticPrefix.length));
+  assert.equal(manyWire.reporter_text.counts.failed, 89); assert.equal(manyWire.reporter_text.truncated, true);
+  const line = await observedCLI(t, large); privateObservation(line);
+  const wire = JSON.parse(line.slice(diagnosticPrefix.length)); assert.equal(wire.reporter_text.truncated, true);
+  assert.ok(wire.reporter_text.declarations.length >= 8 && wire.reporter_text.declarations.length < 34);
+  assert.ok(wire.reporter_text.declarations.every(d => d.length === 6));
+  assert.deepEqual(wire.reporter_text.counts, parsed.counts); assert.deepEqual(wire.terminal, { code: 7, signal: null });
+  const oneMore = structuredClone(wire); oneMore.reporter_text.declarations.push([1, wire.reporter_text.declarations.length + 1, 17, 3, null, null]);
+  assert.ok(Buffer.byteLength(diagnosticPrefix + JSON.stringify(oneMore) + '\n') > 1024, 'No whole tuple is dropped before the budget requires it.');
+  for (const kind of ['unknown-last', 'missing-last', 'invalid-last', 'extra-last', 'duplicate-last', 'missing-summary']) await t.test(kind, async t => {
+    let changed = large;
+    if (kind === 'unknown-last') changed = changed.replaceAll(files.at(-1), 'unknown.spec.mjs');
+    if (kind === 'missing-last') changed = changed.replace(/^    web\/e2e\/upgrade-display-parity[^\n]*\n/m, '');
+    if (kind === 'invalid-last') changed = changed.replace(/^    web\/e2e\/upgrade-display-parity[^\n]*/m, s => s.replace(':17:3', ':0:3'));
+    if (kind === 'extra-last') changed += '    web/e2e/joined.spec.mjs:19:3 › extra\n';
+    if (kind === 'duplicate-last') changed = changed.replace(/^    web\/e2e\/upgrade-display-parity[^\n]*/m, s => s.replace('upgrade-display-parity', 'tool-fidelity'));
+    if (kind === 'missing-summary') changed = changed.replace('  34 failed\n', '');
+    assert.ok(changed !== large); assert.equal(parser(changed), null);
+    const observed = await observedCLI(t, changed); privateObservation(observed);
+    assert.equal(JSON.parse(observed.slice(diagnosticPrefix.length)).reporter_text, null);
+  });
+});
+
+test('C88 compact category IDs and optional reporter observations preserve one seven and signal terminals', async t => {
+  for (const [category, id] of [['failed', 1], ['interrupted', 2], ['flaky', 3]]) for (const terminal of [1, 7, 'SIGTERM']) await t.test(`${category}/${terminal}`, async t => {
+    const result = eligibleResult();
+    if (terminal === 'SIGTERM') { result.code = result.outcome.child.code = null; result.signal = result.outcome.child.signal = terminal; }
+    else result.code = result.outcome.child.code = terminal;
+    const text = await observedCLI(t, reporterText({ [category]: ['cancellation.spec.mjs'], passed: 88 }), process.env, result);
+    privateObservation(text); const wire = JSON.parse(text.slice(diagnosticPrefix.length));
+    assert.deepEqual(wire.reporter_text.declarations, [[id, 1, 17, 3, null, null]]);
+    assert.equal(wire.reporter_text.counts[category], 1); assert.equal(wire.first_failure, 'child');
+    assert.deepEqual(wire.terminal, { code: result.code, signal: result.signal });
+    assert.equal(wire.child.closed, true); assert.equal(wire.child.code, result.code); assert.equal(wire.child.signal, result.signal);
+  });
+});
+
+test('C88 complete internal and fresh public projections reject collisions before IDs and byte omissions', async t => {
+  const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
+  const text = failureReport(files, file => [reportedError(file, file === 'client-close-handoff.spec.mjs'
+    ? 'Client handoff failed: stage=reopened-a; check=requests' : 'synthetic private failure', '')]);
+  for (const [kind, value] of [['filename', 'web/e2e/cancellation.spec.mjs'], ['omitted-filename', 'web/e2e/upgrade-display-parity.spec.mjs'],
+    ['stage', 'reopened-a'], ['check', 'requests'], ['internal-key', 'reported_stored_handoff'], ['public-key', 'source_map'],
+    ['public-value', 'reporter text only; unauthenticated'], ['safe', 'synthetic-private-nonoverlap']]) await t.test(kind, async t => {
+    const env = { ...process.env, SYNTHETIC_TOKEN: value }, before = { ...process.env };
+    const line = await observedCLI(t, text, env); privateObservation(line);
+    assert.ok(isDeepStrictEqual({ ...process.env }, before));
+    if (kind === 'safe') assert.equal(JSON.parse(line.slice(diagnosticPrefix.length)).reporter_text.truncated, true);
+    else assert.equal(line, diagnosticFallback);
+  });
+});
 
 test('C87 actual CLI default launch reads a private failed-child reporter summary without accepting its failed receipt', async t => {
   const f = await fixture(t), original = await fs.readFile(f.bundle);
@@ -152,7 +461,8 @@ test('C87 actual CLI default launch reads a private failed-child reporter summar
   const output = captureDiagnostic(); assert.equal(await cli.run(['--bundle', f.bundle], undefined, output.stderr), 7);
   assert.equal(launches, 1); assert.equal(f.calls.length, 1); assert.equal(output.writes(), 1);
   const projection = JSON.parse(output.text().slice(diagnosticPrefix.length));
-  assert.deepEqual(projection.reporter_text, reporterObservation([coordinate('cancellation.spec.mjs')], { failed: 1, passed: 88 }));
+  const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
+  assert.deepEqual(projection.reporter_text, wireObservation([coordinate('cancellation.spec.mjs')], { failed: 1, passed: 88 }, files));
   assert.equal(projection.child.code, 7); assert.equal(projection.child.closed, true); assert.equal(projection.first_failure, 'child');
   assert.ok(!output.text().includes('synthetic private title')); assert.ok(Buffer.byteLength(output.text()) <= 1024);
   assert.equal((await load(join(f.output, 'control/launch.command.json'))).code, 7);
@@ -187,10 +497,10 @@ test('C87 actual formatter categories include omitted zeros and fatal errors alo
     [{ passed: 88, fatal: 2 }, [], { passed: 88, fatal_errors: 2 }],
     [{ failed: [a, b] }, [coordinate(a), coordinate(b)], { failed: 2 }],
     [{ failed: [a], interrupted: [b], flaky: [c], skipped: 1, didNotRun: 2, passed: 83, fatal: 2 },
-      [coordinate(a), coordinate(b, 'interrupted')], { failed: 1, interrupted: 1, flaky: 1, skipped: 1, did_not_run: 2, passed: 83, fatal_errors: 2 }],
+      [coordinate(a), coordinate(b, 'interrupted'), coordinate(c, 'flaky')], { failed: 1, interrupted: 1, flaky: 1, skipped: 1, did_not_run: 2, passed: 83, fatal_errors: 2 }],
   ];
   for (const [i, [input, declarations, counts]] of cases.entries()) await t.test(String(i), () => {
-    const expected = reporterObservation(declarations, counts); expected.truncated = (input.flaky?.length ?? 0) + (input.failed?.length ?? 0) + (input.interrupted?.length ?? 0) > 2;
+    const expected = reporterObservation(declarations, counts);
     assert.deepEqual(parser(reporterText(input)), expected);
   });
   for (const [name, text] of [['empty', reporterText()], ['fatal-only', reporterText({ fatal: 1 })],
@@ -231,7 +541,7 @@ test('C87 validates the whole final summary including headers beyond the coordin
     const changed = edit(plain); assert.notEqual(changed, plain, 'Negative control must change its input.');
     assert.equal(parser(changed), null);
   });
-  const parsed = parser(text); assert.equal(parsed.declarations.length, 2); assert.equal(parsed.truncated, true);
+  const parsed = parser(text); assert.equal(parsed.declarations.length, 3); assert.equal(parsed.truncated, false);
   // Test output can forge this exact text. Recognition is deliberately not case-execution proof.
   assert.equal(parser('synthetic stdout preamble\n' + text).scope, 'reporter text only; unauthenticated');
   const privateText = 'synthetic-secret/非公開 quote"';
@@ -383,7 +693,7 @@ test('C87 actual eligible projection preserves terminals, privacy and the 1024 U
     else {
       const p = JSON.parse(output.text().slice(diagnosticPrefix.length)); assert.deepEqual(p.terminal, { code: result.code, signal: result.signal });
       if (['malformed-third', 'unavailable'].includes(kind)) assert.equal(p.reporter_text, null);
-      else { assert.equal(p.reporter_text.declarations.length, 2); assert.equal(p.reporter_text.truncated, true); assert.equal(p.reporter_text.counts.fatal_errors, 1_000_000); }
+      else { assert.equal(p.reporter_text.declarations.length, 3); assert.equal(p.reporter_text.truncated, false); assert.equal(p.reporter_text.counts.fatal_errors, 1_000_000); }
     }
     assert.ok(isDeepStrictEqual({ ...process.env }, before), 'Real environment is unchanged.');
     const currentDescriptors = Object.getOwnPropertyDescriptors(process), own = Reflect.ownKeys(descriptors);

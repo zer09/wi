@@ -300,7 +300,12 @@ export default class BrowserCaseDiagnostics {
     const rawErrors=result.errors,error_count=Array.isArray(rawErrors)&&integer(rawErrors.length)?rawErrors.length:null,errors=[];
     if(error_count===null)this.incomplete=true;
     if(error_count!==null)for(let i=0;i<error_count;i++){
-      let e;try{const error=rawErrors[i],stored=storedObservation(d.file,error.message);e={ordinal:i+1,location:location(error.location,d.file),stored,reason:stored===null?'unsupported_error':null};}
+      let e;try{
+        const error=rawErrors[i],message=error.message;
+        // The pinned SDK prefixes ordinary Error messages; keep the bare parser strict.
+        const stored=typeof message==='string'&&message.length<=1_000_000&&message.startsWith('Error: ')?storedObservation(d.file,message.slice(7)):null;
+        e={ordinal:i+1,location:location(error.location,d.file),stored,reason:stored===null?'unsupported_error':null};
+      }
       catch{e={ordinal:i+1,location:null,stored:null,reason:'malformed_error'};}
       this.protect(e);if(i<8)errors.push(e);else this.omitted[1]++;
     }

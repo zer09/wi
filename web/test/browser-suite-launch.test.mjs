@@ -132,6 +132,7 @@ async function diagnosticCLI(launch, io = fs, env = process.env, redactor = prep
 }
 const require = createRequire(import.meta.url);
 const { TerminalReporter, terminalScreen, formatError } = require('../node_modules/playwright/lib/reporters/base.js');
+const { serializeError } = require('../node_modules/playwright/lib/util.js');
 function reporterText({ failed = [], interrupted = [], flaky = [], passed = 0, skipped = 0, didNotRun = 0, fatal = 0 } = {}) {
   const reporter = new TerminalReporter({ screen: { ...terminalScreen, resolveFiles: 'cwd' } });
   reporter.onConfigure({ rootDir: join(ROOT, 'web/e2e'), tags: [] }); reporter.result = { duration: 1200 };
@@ -181,8 +182,8 @@ async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
   ];
   const r = new Reporter(); r.onBegin({ projects: [{ outputDir: output }] }, { allTests: () => tests });
   for (const [i, q] of tests.entries()) {
-    const errors = i < count ? [{ message: messages[i], location: { ...q.location, line: i < 2 ? 450 : 275, column: 9 } }] : [];
-    if (i === 3 && i < count) errors.push({ message: 'secondary private error' });
+    const errors = i < count ? [{ ...serializeError(new Error(messages[i])), location: { ...q.location, line: i < 2 ? 450 : 275, column: 9 } }] : [];
+    if (i === 3 && i < count) errors.push(serializeError(new Error('secondary private error')));
     const info = { annotations: [] };
     if ([3, 4].includes(i) && i < count) appendMeasurementAnnotation(() => ({ info, family: i === 3 ? 2 : 1,
       packet: Object.freeze({ first_operation: i === 3 ? 'partial_dom_poll' : 'first_dom' }),
@@ -194,7 +195,14 @@ async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
   }
   await r.onEnd({ status: 'failed' });
   const path = join(output, reportName), bytes = await fs.readFile(path), encoded = JSON.parse(bytes);
-  decodeReport(encoded);
+  const decoded = decodeReport(encoded);
+  if (count === 8) {
+    assert.equal(decoded.cases[0].errors[0].stored.stored_line, 254);
+    assert.equal(decoded.cases[1].errors[0].stored.stage, 'task 2 exact authoritative answer and tool output');
+    assert.equal(decoded.cases[5].errors[0].stored.check, 'dto');
+    assert.equal(decoded.cases[6].errors[0].stored.entry, 2);
+    assert.deepEqual(decoded.cases[7].errors[0].stored.body_classes, ['get_response_body_no_resource']);
+  }
   return { ...f, output, typedPath: path, typedBytes: bytes, encoded };
 }
 async function typedCLI(f, { io = fs, env = process.env, result = eligibleResult(), injected = false, redactor = preparationRedactor } = {}) {
@@ -465,7 +473,9 @@ test('C89 I2 actual CLI complete envelope enforces exact 1024, 1025, 1026 and ov
     for (const [i, c] of v.cases.entries()) { c[4] = 1_000_000 - i; c[1] = c[2] = 1_000_000; }
     v.cases[2][11][0][1] = [1_000_000, 1_000_000]; v.counts[3] = 1_000_000;
     await privateWrite(f.typedPath, JSON.stringify(v));
+    assert.deepEqual(decodeReport(v).cases[7].errors[0].stored.body_classes, ['get_response_body_no_resource']);
     const expected = publicSummary(v, envelope); assert.ok(expected.value.case_observations.cases.length < 8);
+    assert.ok(!expected.value.case_observations.cases.some(c => c[0] === 29));
     assert.equal(await typedCLI(f, { result, env: { ...process.env, SYNTHETIC_TOKEN: 'get_response_body_no_resource' } }), diagnosticFallback);
   });
 });
@@ -491,7 +501,7 @@ function privateObservation(value, canary = '') {
     'Only closed observations can leave the formatter boundary.');
 }
 const reportedError = (file, message = 'synthetic private failure', prefix = ROOT + '/', line = 214, column = 9) => ({
-  message: 'Error: ' + message,
+  message: serializeError(new Error(message)).message,
   stack: `Error: ${message}\n    at syntheticPrivateFunction (${prefix}web/e2e/${file}:${line}:${column})`,
 });
 async function observedCLI(t, text, env = process.env, result = eligibleResult()) {

@@ -13,6 +13,7 @@ import { preparationRedactor, sanitizeRecord } from '../test-support/browser-fix
 import { phases } from '../test-support/live-commit-measurements.mjs';
 import { contentPhases as actualContentPhases } from '../test-support/content-measurements.mjs';
 
+const {serializeError}=createRequire(import.meta.url)('../node_modules/playwright/lib/util.js');
 const ROOT=fileURLToPath(new URL('../..',import.meta.url));
 const quiet=preparationRedactor({});
 const clone=v=>structuredClone(v);
@@ -44,7 +45,7 @@ function realistic() {
   ];
   const results=errors.map((errors,i)=>{
     let annotations=[];if(i===3)annotations=packet(2,'partial_dom_poll');else if(i===4)annotations=packet();
-    return result({errors,status:i===2?'timedOut':'failed',annotations});
+    return result({errors:errors.map(e=>({...serializeError(new Error(e.message)),location:e.location})),status:i===2?'timedOut':'failed',annotations});
   });
   const allTests=[...tests,...Array.from({length:81},(_,i)=>declaration(1,'registered '+i,100+i,1))];
   const r=emit(allTests,[...results,...Array.from({length:81},()=>result({status:'passed'}))],89);
@@ -134,6 +135,88 @@ test('C89 actual source-owned prefix grammars retain only closed stage/check/cla
   assert.equal(unknown.stage,null);assert.equal(unknown.matcher,null);assert.equal(unknown.stored_line,null);
   assert.equal(storedObservation(sourceFiles[2],'Client handoff failed: stage=create; check=dto; private tail'),null);
 });
+test('C90 installed serializer carries all nine ordinary Error wrappers through reporter callbacks',async t=>{
+  const controls=[
+    [9,'Interrupted parity failed: stage=connect-observer; check=handshake',{stage:'connect-observer',check:'handshake'}],
+    [13,'Presentation failed: label=long-selected; stage=final-item; check=fields; kind=TypeError',{stage:'final-item',check:'fields',kind:'TypeError',presentation:'long-selected'}],
+    [24,'Fixed head failed: terminal; kind=TimeoutError; check=bytes; capture={}; faults={}',{stage:'terminal',check:'bytes',kind:'TimeoutError'}],
+    [30,'Selection epoch failed: actual session-list switch retires A display; kind=ProtocolError line=268; capture={"creates":[],"task":{"body_rejection_class":"target_closed"},"latest":[]}; delay={}',{stage:'actual session-list switch retires A display',kind:'ProtocolError',stored_line:268,body_classes:['target_closed']}],
+    [3,'Client handoff failed: stage=first-completion; check=dto',{stage:'first-completion',check:'dto'}],
+    [10,'Joined browser assertion failed: task 2 final supplied display state; toHaveCount; line=339',{stage:'task 2 final supplied display state',matcher:'toHaveCount',stored_line:339}],
+    [11,'Lifecycle failure failed: checkpoint 4 read-only reconcile; kind=Error; check=reconcile-reply; entry=3; capture={}',{stage:'checkpoint 4 read-only reconcile',kind:'Error',check:'reconcile-reply',entry:3}],
+    [29,'Reload epoch failed: actual full reload retires the accepted first document; capture={"create":{},"task":{},"latest":[{"body_rejection_class":"method_io_read"}]}; disconnectedView=null',{stage:'actual full reload retires the accepted first document',body_classes:['method_io_read']}],
+    [33,'Tool fidelity failed: first reuse privacy; kind=SyntaxError; faults={}; posts={}',{stage:'first reuse privacy',kind:'SyntaxError'}],
+  ];
+  for(const [i,[sourceID,message,expected]]of controls.entries())await t.test(String(i+1),()=>{
+    const q=declaration(sourceID,sourceID===10?joinedScenarios[2]:'synthetic',61,4);
+    const error=Object.freeze({...serializeError(new Error(message)),location:Object.freeze({...q.location,line:222,column:8})});
+    assert.equal(error.message,'Error: '+message);
+    const before=Object.getOwnPropertyDescriptors(error);
+    const r=emit([q,q],[result({errors:[error]}),result({errors:[serializeError(new Error('private first')),error]})]);
+    const c=decodeReport(report(r),quiet).cases[1];
+    assert.deepEqual(c.errors[1].stored,{family:i+1,stage:null,check:null,kind:null,matcher:null,stored_line:null,presentation:null,entry:null,body_classes:null,...expected});
+    assert.equal(c.file,sourceFiles[sourceID-1]);assert.deepEqual(c.declaration,[61,4]);
+    assert.equal(c.scenario,sourceID===10?joinedScenarios[2]:null);
+    assert.deepEqual([c.begin,c.end,c.result,c.errors[1].ordinal],[2,2,2,2]);assert.deepEqual(c.errors[1].location,[222,8]);
+    const row=publicSummary(report(r),envelope,quiet).value.case_observations.cases[1];
+    assert.deepEqual(row.slice(0,4),[sourceID,61,4,sourceID===10?3:null]);assert.deepEqual(row[9].slice(0,3),[2,2,i+1]);assert.equal(row[7],2);assert.equal(row[9][7],expected.stored_line??null);
+    assert.deepEqual(Object.getOwnPropertyDescriptors(error),before);
+  });
+});
+test('C90 callback envelopes reject alternate names, nested prefixes, preludes and malformed inputs',async t=>{
+  const bare='Client handoff failed: stage=create; check=dto',canonical=serializeError(new Error(bare)).message;
+  assert.equal(storedObservation(sourceFiles[2],bare).stage,'create');
+  assert.equal(storedObservation(sourceFiles[2],canonical),null);
+  const alternate=new TypeError(bare),renamed=new Error(bare);renamed.name='TimeoutError';
+  const controls=[bare,serializeError(alternate).message,serializeError(renamed).message,
+    'Error: '+canonical,' '+canonical,'\t'+canonical,'\n'+canonical,'\uFEFF'+canonical,'\u001b[31m'+canonical,
+    'private prelude '+canonical,'Error:\t'+bare,'Error:  '+bare,'Error:'+bare,'Error: private prelude '+bare,
+    'Error: '+bare+'; private tail','Error: '+bare+'\n'+canonical,new String(canonical),null,undefined,23,{},
+    serializeError(new Error('Presentation failed: label=long-selected; stage=final-item; check=fields; kind=Error')).message,
+    ...['Rich parity failed: startup','Skill fidelity failed: startup','Stale history failed: startup','Account mismatch failed: startup'].map(message=>serializeError(new Error(message)).message)];
+  for(const [i,message]of controls.entries())await t.test(String(i),()=>{
+    let reads=0;const q=declaration(),error={get message(){reads++;return message;},location:q.location};
+    for(const key of ['name','stack','cause','snippet','value'])Object.defineProperty(error,key,{get(){assert.fail('excluded callback field');}});
+    const r=emit([q],[result({errors:[error]})]),e=r.cases[0].errors[0];
+    assert.equal(reads,1);assert.equal(e.stored,null);assert.equal(e.reason,'unsupported_error');assert.deepEqual(e.location,[56,3]);
+    assert.deepEqual(publicSummary(report(r),envelope,quiet).value.case_observations.cases[0][9],[1,1,56,3]);
+  });
+  for(const mode of ['missing','throwing'])await t.test(mode,()=>{
+    let reads=0;const error={};if(mode==='throwing')Object.defineProperty(error,'message',{get(){reads++;throw Error('synthetic getter');}});
+    const e=emit([declaration()],[result({errors:[error]})]).cases[0].errors[0];
+    assert.equal(reads,Number(mode==='throwing'));assert.equal(e.stored,null);assert.equal(e.reason,mode==='missing'?'unsupported_error':'malformed_error');
+  });
+  const q=declaration(),unknown=serializeError(new Error('Client handoff failed: stage=private; check=private'));
+  const e=emit([q],[result({errors:[unknown]})]).cases[0].errors[0];
+  assert.equal(e.stored.family,5);assert.equal(e.stored.stage,null);assert.equal(e.stored.check,null);
+  const wrong=declaration();wrong.location.file='/unknown/source';
+  assert.equal(emit([wrong],[result({errors:[serializeError(new Error(bare))]})]).cases[0].errors[0].stored,null);
+});
+test('C90 original serialized primitive string length is capped before removing its one envelope',async t=>{
+  const prefix='Fixed head failed: terminal; kind=TimeoutError; check=bytes; capture=';
+  for(const length of [999_999,1_000_000,1_000_001,1_000_007])for(const unicode of [false,true])await t.test(length+' '+unicode,()=>{
+    const room=length-7-prefix.length,tail=unicode?'😀'.repeat(Math.floor(room/2))+'x'.repeat(room%2):'x'.repeat(room);
+    const original=new Error(prefix+tail);
+    // The length guard does not depend on the SDK scanning a million-character stack header.
+    original.stack='';const error=serializeError(original);assert.equal(error.message.length,length);
+    const e=emit([declaration(24)],[result({errors:[error]})]).cases[0].errors[0];
+    if(length<=1_000_000){assert.equal(e.stored.family,3);assert.equal(e.stored.stage,'terminal');assert.equal(e.stored.check,'bytes');assert.equal(e.stored.kind,'TimeoutError');}
+    else {assert.equal(e.stored,null);assert.equal(e.reason,'unsupported_error');}
+    // The tail stays opaque, and the original bare API retains its own independent cap.
+    assert.equal(storedObservation(sourceFiles[23],prefix+tail)?.stage??null,length-7<=1_000_000?'terminal':null);
+    assert.ok(!JSON.stringify(e).includes('capture='));
+  });
+});
+test('C90 passed and skipped serializer-backed stored fields collide before public filtering',async t=>{
+  for(const status of ['passed','skipped'])await t.test(status,()=>{
+    const q=declaration(),x=result({status,errors:[serializeError(new Error('Client handoff failed: stage=create; check=receipt'))]});
+    const r=emit([q],[x]),encoded=report(r);assert.equal(r.cases[0].errors[0].stored.check,'receipt');
+    assert.deepEqual(publicSummary(encoded,envelope,quiet).value.case_observations.cases,[]);
+    assert.deepEqual(publicSummary(encoded,envelope,preparationRedactor({SYNTHETIC_TOKEN:'receipt'})),{value:null,reason:'privacy_collision'});
+    const guarded=new Reporter();guarded.redact=preparationRedactor({SYNTHETIC_TOKEN:'receipt'});
+    guarded.onBegin({projects:[]},{allTests:()=>[q]});guarded.onTestBegin(q,x);guarded.onTestEnd(q,x);assert.equal(guarded.collision,true);
+  });
+});
 test('C89 reporter counts callbacks, not bodies; synthesized unexecuted callbacks and worker -1 remain explicit',()=>{
   const tests=[declaration(),declaration()],results=[result({status:'skipped',workerIndex:-1,duration:0}),result({status:'interrupted',workerIndex:-1})];
   const r=emit(tests,results);const value=decodeReport(report(r),quiet);
@@ -142,14 +225,16 @@ test('C89 reporter counts callbacks, not bodies; synthesized unexecuted callback
   assert.equal(value.cases[1].status,'interrupted');assert.equal(r.printsToStdio(),false);
 });
 test('C89 errors array is counted once and the first-error alias and excluded getters are never accessed',()=>{
-  const q=declaration(),e={message:'Client handoff failed: stage=create; check=receipt',location:{...q.location,line:247,column:15}};
+  const q=declaration(),e={...serializeError(new Error('Client handoff failed: stage=create; check=receipt')),location:{...q.location,line:247,column:15}};
+  delete e.stack;delete e.cause;
+  let reads=0;const message=e.message;Object.defineProperty(e,'message',{get(){reads++;return reads===1?message:'private later read';}});
   const trap=()=>assert.fail('excluded field read');
-  for(const key of ['stack','snippet','value','cause'])Object.defineProperty(e,key,{get:trap});
+  for(const key of ['name','stack','snippet','value','cause'])Object.defineProperty(e,key,{get:trap});
   const x=result({errors:[e,e]});for(const key of ['error','stdout','stderr','attachments','startTime'])Object.defineProperty(x,key,{get:trap});
   for(const key of ['id','annotations','parent','results'])Object.defineProperty(q,key,{get:trap});
   Object.defineProperty(q,'title',{get:trap});const r=emit([q],[x]);
   assert.equal(r.cases[0].error_count,2);assert.deepEqual(r.cases[0].errors.map(e=>e.ordinal),[1,2]);
-  assert.deepEqual(r.cases[0].errors[0].location,[247,15]);assert.equal(r.cases[0].errors[0].stored.stage,'create');
+  assert.deepEqual(r.cases[0].errors[0].location,[247,15]);assert.equal(r.cases[0].errors[0].stored.stage,'create');assert.equal(reads,2);
 });
 test('C89 unknown titles/sources/statuses, foreign locations and malformed errors never become guessed facts',()=>{
   const q=declaration(10,'private unknown scenario'),x=result({status:'timedout',workerIndex:-1,duration:Infinity,errors:[{message:'private',location:{file:'/unknown/source',line:1,column:1}},null]});
@@ -203,7 +288,9 @@ test('C89 actual annotation function VM contains encode/stringify failures insid
   }
 });
 test('C89 eight realistic failed callbacks include shared joined coordinates, timedOut, multiple errors and both measurements within terminal 1024',()=>{
-  const {encoded}=realistic(),out=publicSummary(encoded,envelope,quiet);assert.equal(out.reason,null);
+  const {encoded}=realistic(),decoded=decodeReport(encoded,quiet),out=publicSummary(encoded,envelope,quiet);assert.equal(out.reason,null);
+  assert.equal(decoded.cases[0].errors[0].stored.stored_line,254);assert.equal(decoded.cases[1].errors[0].stored.stored_line,345);
+  assert.equal(decoded.cases[7].errors[0].stored.body_classes[0],'get_response_body_no_resource');
   assert.ok(Buffer.byteLength('browser_suite_launch: failure '+JSON.stringify(out.value)+'\n')<=1024);
   const rows=out.value.case_observations.cases;assert.equal(rows.length,8);assert.equal(out.value.case_observations.counts[0],89);
   assert.deepEqual(rows[0].slice(0,3),rows[1].slice(0,3));assert.notEqual(rows[0][3],rows[1][3]);
@@ -213,17 +300,21 @@ test('C89 eight realistic failed callbacks include shared joined coordinates, ti
 });
 test('C89 compact codec checks labels before IDs and omission, including a secondary error beyond private retention',()=>{
   const {encoded}=realistic();
+  assert.equal(decodeReport(encoded,quiet).cases[1].errors[0].stored.stage,'task 2 exact authoritative answer and tool output');
+  assert.deepEqual(decodeReport(encoded,quiet).cases[7].errors[0].stored.body_classes,['get_response_body_no_resource']);
   for(const text of ['web/e2e/joined.spec.mjs','WS recovered','task 2 exact authoritative answer and tool output','get_response_body_no_resource','timedOut']){
     const redact=preparationRedactor({SYNTHETIC_TOKEN:text});assert.equal(publicSummary(encoded,envelope,redact,400).value,null);
     assert.throws(()=>decodeReport(encoded,redact));
   }
   const r=new Reporter();r.redact=preparationRedactor({SYNTHETIC_TOKEN:'receipt'});
-  const q=declaration();r.onBegin({projects:[]},{allTests:()=>[q]});const x=result({errors:Array.from({length:9},(_,i)=>({message:'Client handoff failed: stage=create; check='+(i===8?'receipt':'dto')}))});
+  const q=declaration();r.onBegin({projects:[]},{allTests:()=>[q]});const x=result({errors:Array.from({length:9},(_,i)=>serializeError(new Error('Client handoff failed: stage=create; check='+(i===8?'receipt':'dto'))))});
+  assert.equal(emit([q],[result({errors:[x.errors[8]]})]).cases[0].errors[0].stored.check,'receipt');
   r.onTestBegin(q,x);r.onTestEnd(q,x);assert.equal(r.collision,true);assert.equal(r.cases[0].errors.length,8);assert.equal(r.omitted[1],1);
 });
 test('C89 case retention and duplicate annotation omission still check every known closed label for collision',()=>{
   const tests=Array.from({length:257},(_,i)=>declaration(3,'synthetic '+i,100+i));
-  const results=tests.map((_,i)=>result({errors:[{message:'Client handoff failed: stage=create; check='+(i===256?'receipt':'dto')}]}));
+  const results=tests.map((_,i)=>result({errors:[serializeError(new Error('Client handoff failed: stage=create; check='+(i===256?'receipt':'dto')))]}));
+  assert.equal(emit([tests[256]],[results[256]]).cases[0].errors[0].stored.check,'receipt');
   const r=new Reporter();r.redact=preparationRedactor({SYNTHETIC_TOKEN:'receipt'});r.onBegin({projects:[]},{allTests:()=>tests});
   for(let i=0;i<tests.length;i++){r.onTestBegin(tests[i],results[i]);r.onTestEnd(tests[i],results[i]);}
   assert.equal(r.cases.length,256);assert.equal(r.omitted[0],1);assert.equal(r.collision,true);
@@ -251,7 +342,7 @@ test('C89 private codec rejects unknown enums, malformed tuples, duplicate ordin
 });
 test('C89 F5 actual known error counts retain the complete capped prefix and honest omissions',async t=>{
   for(const n of [0,1,2,8,9])await t.test('known '+n,()=>{
-    const errors=Array.from({length:n},()=>({message:'Client handoff failed: stage=create; check=dto'}));
+    const errors=Array.from({length:n},()=>serializeError(new Error('Client handoff failed: stage=create; check=dto')));
     const r=emit([declaration()],[result({errors})]),encoded=report(r),decoded=decodeReport(encoded,quiet);
     const retained=Math.min(n,8),overflow=Math.max(n-8,0),c=decoded.cases[0];
     assert.equal(c.error_count,n);assert.equal(c.errors.length,retained);
@@ -267,7 +358,7 @@ test('C89 F5 actual known error counts retain the complete capped prefix and hon
 test('C89 F5 rejects removed errors, fake omissions and short known prefixes before public filtering or byte omission',async t=>{
   const samples=new Map();
   for(const n of [0,1,2,8,9]){
-    const errors=Array.from({length:n},()=>({message:'Client handoff failed: stage=create; check=dto'}));
+    const errors=Array.from({length:n},()=>serializeError(new Error('Client handoff failed: stage=create; check=dto')));
     samples.set(n,report(emit([declaration()],[result({errors})])));
   }
   const controls=[
@@ -295,7 +386,7 @@ test('C89 F5 rejects removed errors, fake omissions and short known prefixes bef
 test('C89 F5 unknown counts stay unknown and omitted cases permit only the known retained overflow floor',async t=>{
   for(const mixed of [false,true])await t.test(mixed?'mixed known and unknown':'unknown count',()=>{
     const tests=mixed?[declaration(),declaration()]:[declaration()];
-    const results=mixed?[result({errors:Array.from({length:9},()=>({message:'Client handoff failed: stage=create; check=dto'}))}),result({errors:undefined})]:[result({errors:undefined})];
+    const results=mixed?[result({errors:Array.from({length:9},()=>serializeError(new Error('Client handoff failed: stage=create; check=dto')))}),result({errors:undefined})]:[result({errors:undefined})];
     const r=emit(tests,results),encoded=report(r);assert.equal(r.incomplete,true);encoded.completion=2;
     const decoded=decodeReport(encoded,quiet),unknown=decoded.cases.at(-1),knownOverflow=Number(mixed);
     assert.equal(unknown.error_count,null);assert.deepEqual(unknown.errors,[]);assert.equal(decoded.completion,'incomplete');
@@ -316,7 +407,7 @@ test('C89 F5 unknown counts stay unknown and omitted cases permit only the known
     const tests=Array.from({length:257},(_,i)=>declaration(3,'synthetic omitted '+i,100+i,1));
     const results=tests.map((_,i)=>{
       let n=0;if(i===0)n=9;else if(i===256)n=tail;
-      return result({status:i===0||i===256?'failed':'passed',errors:n===null?undefined:Array.from({length:n},()=>({message:'Client handoff failed: stage=create; check=dto'}))});
+      return result({status:i===0||i===256?'failed':'passed',errors:n===null?undefined:Array.from({length:n},()=>serializeError(new Error('Client handoff failed: stage=create; check=dto')))});
     });
     const r=emit(tests,results),encoded=report(r);if(tail===null){assert.equal(r.incomplete,true);encoded.completion=2;}
     const decoded=decodeReport(encoded,quiet);assert.equal(decoded.cases.length,256);assert.equal(decoded.cases[0].error_count,9);
@@ -478,7 +569,8 @@ test('C89 import/list/no-result/ambiguous-root reporter callbacks write nothing 
   assert.deepEqual(await fs.readdir(parent),[]);
 });
 test('C89 privacy rejection publishes no partial facts and distinguishes collision from missing transport',async t=>{
-  const parent=await temporary(t),output=join(parent,'playwright-output'),q=declaration(),x=result({errors:[{message:'Client handoff failed: stage=create; check=receipt'}]});
+  const parent=await temporary(t),output=join(parent,'playwright-output'),q=declaration(),x=result({errors:[serializeError(new Error('Client handoff failed: stage=create; check=receipt'))]});
+  assert.equal(emit([q],[x]).cases[0].errors[0].stored.check,'receipt');
   const r=new Reporter();r.redact=preparationRedactor({SYNTHETIC_TOKEN:'receipt'});
   r.onBegin({projects:[{outputDir:output}]},{allTests:()=>[q]});r.onTestBegin(q,x);r.onTestEnd(q,x);await r.onEnd({status:'failed'});
   const unavailable=JSON.parse(await fs.readFile(join(output,reportName),'utf8'));
@@ -531,11 +623,11 @@ function cutoffCallbacks(api,output,count=2,ended=count-1,errors=[],sourceID=12)
   return {r,tests,results};
 }
 test('C89 F4 encoded tuples own counters, omissions and every nested mutable array',()=>{
-  const q=declaration(),r=emit([q],[result({errors:[{message:'Client handoff failed: stage=create; check=dto',location:q.location}]})]);
+  const q=declaration(),r=emit([q],[result({errors:[{...serializeError(new Error('Client handoff failed: stage=create; check=dto')),location:q.location}]})]);
   const encoded=report(r),expected=clone(encoded);
   r.counts[3]++;r.omitted[0]++;r.cases[0].declaration[0]++;r.cases[0].errors[0].location[0]++;
   assert.deepEqual(encoded,expected);assert.equal(publicSummary(encoded,envelope,quiet).reason,null);
-  const rr=emit([declaration(30)],[result({errors:[{message:'Selection epoch failed: startup; kind=Error line=12; capture={"task":{"body_rejection_class":"timeout"}}; delay={}'}]})]);
+  const rr=emit([declaration(30)],[result({errors:[serializeError(new Error('Selection epoch failed: startup; kind=Error line=12; capture={"task":{"body_rejection_class":"timeout"}}; delay={}'))]})]);
   const nested=report(rr),before=clone(nested);rr.cases[0].errors[0].stored.body_classes.push('other');
   assert.deepEqual(nested,before);
 });
@@ -585,7 +677,8 @@ test('C89 F4 before-cutoff collisions reject all facts including an omitted case
     const {r,tests,results}=cutoffCallbacks(w.api,w.output,count,count-1,[],mode==='ninth-error'?3:12);
     if(mode==='ninth-error'){
       r.redact=preparationRedactor({SYNTHETIC_TOKEN:'receipt'});
-      results.at(-1).errors=Array.from({length:9},(_,i)=>({message:'Client handoff failed: stage=create; check='+(i===8?'receipt':'dto')}));
+      results.at(-1).errors=Array.from({length:9},(_,i)=>serializeError(new Error('Client handoff failed: stage=create; check='+(i===8?'receipt':'dto'))));
+      assert.equal(emit([tests.at(-1)],[result({errors:[results.at(-1).errors[8]]})]).cases[0].errors[0].stored.check,'receipt');
     }else results.at(-1).annotations=[{type:annotationType,description:'[1,0]'}];
     r.onTestEnd(tests.at(-1),results.at(-1));assert.equal(r.collision,true);
     const pending=r.onEnd({get status(){assert.fail('collision must not inspect terminal status');}});await w.reached;
@@ -623,6 +716,8 @@ test('C89 installed pinned Playwright Node-only smoke delivers actual callbacks,
   const code=`import {test,expect} from ${JSON.stringify(pathToFileURL(pw).href)};
 import {compileFunction} from 'node:vm';
 import {appendMeasurementAnnotation} from ${JSON.stringify(pathToFileURL(reporter).href)};
+compileFunction(\`test('synthetic strict',async()=>{test.fail();throw new Error('Client handoff failed: stage=create; check=receipt');});\`,['test'],{filename:${JSON.stringify(join(ROOT,sourceFiles[2]))},lineOffset:20})(test);
+compileFunction(\`test('synthetic capture',async()=>{test.fail();throw new Error('Selection epoch failed: startup; kind=ProtocolError line=268; capture={"task":{"body_rejection_class":"target_closed"}}; delay={}');});\`,['test'],{filename:${JSON.stringify(join(ROOT,sourceFiles[29]))},lineOffset:30})(test);
 compileFunction(\`test('synthetic live',async({},info)=>{append(()=>({info,family:1,packet:Object.freeze({first_operation:'first_dom'}),body_success:false,cleanup:false,steps:[]}));expect.soft(1).toBe(2);expect(3).toBe(4);});\`,['test','expect','append'],{filename:${JSON.stringify(join(ROOT,sourceFiles[11]))},lineOffset:10})(test,expect,appendMeasurementAnnotation);
 test('synthetic local timeout',async()=>{test.setTimeout(1000);await new Promise(()=>{});});
 test('synthetic global timeout',async()=>{test.setTimeout(20000);await new Promise(()=>{});});
@@ -637,10 +732,24 @@ test('synthetic unexecuted',async()=>{});
   const encoded=JSON.parse(await fs.readFile(join(output,reportName),'utf8'));
   t.diagnostic(JSON.stringify({synthetic_transport:true,completion:encoded.completion,counts:encoded.counts,omitted:encoded.omitted,statuses:encoded.cases.map(c=>c[7])}));
   const value=decodeReport(encoded,quiet);
-  assert.equal(value.run,'timedout');assert.equal(value.counts[0],5);assert.ok(value.counts[2]>=3&&value.counts[2]<=5);
+  assert.equal(value.run,'timedout');assert.equal(value.counts[0],7);assert.ok(value.counts[2]>=5&&value.counts[2]<=7);
   t.diagnostic(JSON.stringify({synthetic_node_only:true,run:value.run,completion:value.completion,counts:value.counts,statuses:value.cases.map(c=>c.status),workers:value.cases.map(c=>c.worker)}));
   assert.ok(value.cases.some(c=>c.status==='timedOut'));assert.ok(value.cases.some(c=>c.worker===null&&c.status==='skipped'));
   const measured=value.cases.find(c=>c.file===sourceFiles[11]);assert.equal(measured.measurement.checkpoint,'first_dom');assert.equal(measured.error_count,2);
   assert.equal(measured.errors.length,2);assert.ok(stdout.length<4096);assert.ok(stderr.length<4096);
+  const summary=publicSummary(encoded,envelope,quiet);assert.equal(summary.reason,null);
+  for(const [sourceID,expected,tuple]of [
+    [3,{family:5,stage:'create',check:'receipt',kind:null,matcher:null,stored_line:null,presentation:null,entry:null,body_classes:null},[2,1,5,2,2,null,null,null,null]],
+    [30,{family:4,stage:'startup',check:null,kind:'ProtocolError',matcher:null,stored_line:268,presentation:null,entry:null,body_classes:['target_closed']},[2,1,4,1,null,5,null,268,2]],
+  ]){
+    const c=value.cases.find(c=>c.file===sourceFiles[sourceID-1]);assert.ok(c);assert.equal(c.status,'failed');
+    assert.deepEqual(c.errors[0].stored,expected);assert.equal(c.error_count,1);assert.equal(c.errors[0].ordinal,1);assert.equal(c.result,1);
+    assert.ok(c.worker!==null);assert.ok(c.declaration.every(n=>n>0));assert.ok(c.errors[0].location.every(n=>n>0));
+    const row=summary.value.case_observations.cases.find(row=>row[0]===sourceID);
+    assert.deepEqual(row.slice(1,3),c.declaration);assert.equal(row[5],c.begin);assert.equal(row[6],c.end);assert.equal(row[7],c.result);assert.deepEqual(row[9],tuple);
+  }
+  const measuredRow=summary.value.case_observations.cases.find(row=>row[0]===12);
+  assert.equal(measuredRow[8],2);assert.deepEqual(measuredRow[9],[3,1,18,false,false,null]);
+  assert.throws(()=>process.kill(child.pid,0),{code:'ESRCH'});
   assert.equal((await fs.lstat(join(output,reportName))).mode&0o7777,0o600);
 });

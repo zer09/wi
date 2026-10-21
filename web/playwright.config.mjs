@@ -8,7 +8,7 @@ export default defineConfig({
   timeout: 60_000,
   globalTimeout: 900_000,
   expect: { timeout: 10_000 },
-  reporter: [['line']],
+  reporter: [['line'], ['./test-support/browser-case-diagnostics.mjs']],
   use: {
     browserName: 'chromium',
     headless: true,

@@ -19,6 +19,7 @@ import { recordPreparationCommand } from '../test-support/browser-fixture-prepar
 import { ROOT, TARGET, CHILD } from '../test-support/live-commit-native.mjs';
 import { launchBrowserSuite } from '../test-support/browser-suite-launch.mjs';
 import { run } from '../scripts/launch-browser-suite.mjs';
+import Reporter, { decodeReport, encodeReport, publicSummary, reportName, sourceFiles, joinedScenarios, appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const clone = value => structuredClone(value);
@@ -118,14 +119,15 @@ async function cliFailure(f) {
 }
 
 // Execute the unchanged CLI body in this realm, replacing imports only at its private test boundary.
-async function diagnosticCLI(launch, io = fs, env = process.env) {
+async function diagnosticCLI(launch, io = fs, env = process.env, redactor = preparationRedactor) {
   const source = await fs.readFile(new URL('../scripts/launch-browser-suite.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .+;\n/gm, '').replace('export async function run', 'async function run')
     .replace('if (import.meta.main) process.exitCode = await run(process.argv.slice(2));', '');
   const bindings = { basename, dirname, isAbsolute, resolve, join, isDeepStrictEqual,
-    fs: io, constants, isUtf8, ROOT, pathToFileURL, launchBrowserSuite: launch, preparationRedactor, sanitizeRecord,
+    fs: io, constants, isUtf8, ROOT, pathToFileURL, launchBrowserSuite: launch, preparationRedactor: redactor, sanitizeRecord,
+    decodeReport, publicSummary, reportName,
     process: Object.assign(Object.create(process), { env }) };
-  return compileFunction(body + '\nreturn {run, parser: typeof parseReporterText === "function" ? parseReporterText : null, reader: typeof readReporterText === "function" ? readReporterText : null};',
+  return compileFunction(body + '\nreturn {run, parser: typeof parseReporterText === "function" ? parseReporterText : null, reader: typeof readReporterText === "function" ? readReporterText : null, typedReader: typeof readCaseObservations === "function" ? readCaseObservations : null};',
     Object.keys(bindings), { filename: 'launch-browser-suite-control.mjs' })(...Object.values(bindings));
 }
 const require = createRequire(import.meta.url);
@@ -159,6 +161,314 @@ function failureReport(files, errorsFor = () => [{ message: 'Error: synthetic pr
 }
 const representativeFiles = ['cancellation', 'client-close-handoff', 'content-measurements', 'display-app',
   'display-view', 'joined', 'lifecycle-failure', 'live-commit-measurements'].map(n => n + '.spec.mjs');
+
+// Build the private wire through the accepted reporter callbacks, not a guessed schema.
+async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
+  const f = await diagnosticLog(t), output = join(f.root, 'playwright-output');
+  await fs.mkdir(output, { mode: outputMode });
+  const ids = [10, 10, 30, 4, 12, 3, 11, 29];
+  const tests = Array.from({ length: 89 }, (_, i) => ({
+    location: { file: join(ROOT, sourceFiles[(ids[i] ?? 1) - 1]), line: i < 2 ? 56 : 100 + i, column: 3 },
+    title: i < 2 ? joinedScenarios[i] : 'synthetic private title',
+  }));
+  const messages = [
+    'Joined browser assertion failed: task 1 before-commit acceptance; toBe; line=254',
+    'Joined browser assertion failed: task 2 exact authoritative answer and tool output; toHaveText; line=345',
+    'private timeout details', 'private body error', 'private native boundary',
+    'Client handoff failed: stage=first-completion; check=dto',
+    'Lifecycle failure failed: checkpoint 2 display; kind=TimeoutError; check=entry-fields; entry=2; capture={}; faults={}; posts={}',
+    'Reload epoch failed: explicit Connect reads retained A exactly once without command recovery or resubmission; capture={"create":{},"task":{"body_rejection_class":"get_response_body_no_resource"},"latest":[]}; disconnectedView=null; faults={}; network={}; h20Progress=null',
+  ];
+  const r = new Reporter(); r.onBegin({ projects: [{ outputDir: output }] }, { allTests: () => tests });
+  for (const [i, q] of tests.entries()) {
+    const errors = i < count ? [{ message: messages[i], location: { ...q.location, line: i < 2 ? 450 : 275, column: 9 } }] : [];
+    if (i === 3 && i < count) errors.push({ message: 'secondary private error' });
+    const info = { annotations: [] };
+    if ([3, 4].includes(i) && i < count) appendMeasurementAnnotation(() => ({ info, family: i === 3 ? 2 : 1,
+      packet: Object.freeze({ first_operation: i === 3 ? 'partial_dom_poll' : 'first_dom' }),
+      body_success: false, cleanup: false, steps: [{ name: 'root', ok: false }] }));
+    let status = 'passed';
+    if (i < count) status = i === 2 ? 'timedOut' : 'failed';
+    const x = { status, workerIndex: 0, duration: 200, errors, annotations: info.annotations };
+    r.onTestBegin(q, x); r.onTestEnd(q, x);
+  }
+  await r.onEnd({ status: 'failed' });
+  const path = join(output, reportName), bytes = await fs.readFile(path), encoded = JSON.parse(bytes);
+  decodeReport(encoded);
+  return { ...f, output, typedPath: path, typedBytes: bytes, encoded };
+}
+async function typedCLI(f, { io = fs, env = process.env, result = eligibleResult(), injected = false, redactor = preparationRedactor } = {}) {
+  const output = captureDiagnostic(), terminated = [], launch = async () => result;
+  const { run: controlled } = await diagnosticCLI(launch, io, env, redactor);
+  const status = await controlled(['--bundle', f.bundle], injected ? async () => result : undefined, output.stderr, s => terminated.push(s));
+  assert.equal(status, result.signal ? 1 : result.code); assert.equal(output.writes(), result.code === 0 && result.signal === null ? 0 : 1);
+  assert.deepEqual(terminated, result.signal ? [result.signal] : []); assert.equal(output.stderr.listenerCount('error'), 0);
+  if (output.writes()) { assert.ok(Buffer.byteLength(output.text()) <= 1024); assert.equal(output.text().split('\n').length, 2); }
+  return output.text();
+}
+
+test('C89 I2 actual eligible default branch prefers eight actionable callback witnesses over line text', async t => {
+  const f = await typedLog(t), before = await fs.readFile(f.path), line = await typedCLI(f);
+  const p = JSON.parse(line.slice(diagnosticPrefix.length));
+  assert.equal(p.reporter_text, null); assert.match(p.scope, /onEnd-entry callback snapshot; unauthenticated/);
+  assert.deepEqual(p.terminal, { code: 7, signal: null }); assert.equal(p.first_failure, 'child');
+  const s = p.case_observations; assert.equal(s.version, 1); assert.equal(s.source_map, 1);
+  assert.deepEqual(s.counts, [89, 89, 89, 0, 81, 7, 1, 0, 0, 0]); assert.equal(s.completion, 1);
+  assert.equal(s.cases.length, 8); assert.equal(s.omitted[0], 0); assert.ok(s.omitted[1] >= 2);
+  assert.deepEqual(s.cases[0].slice(0, 3), s.cases[1].slice(0, 3)); assert.notEqual(s.cases[0][3], s.cases[1][3]);
+  for (const c of s.cases) { assert.equal(c.length, 10); assert.ok(c.slice(0, 3).every(n => n > 0)); assert.ok(c.slice(4, 9).every(n => n > 0)); assert.ok(c[9]); }
+  assert.equal(s.cases[2][4], 3); assert.deepEqual(s.cases[2][9], [1, 1, 275, 9]);
+  assert.deepEqual(s.cases[0][9].slice(0, 3), [2, 1, 6]); assert.equal(s.cases[0][9][7], 254);
+  assert.equal(s.cases[3][8], 2); assert.deepEqual(s.cases[3][9].slice(0, 2), [3, 2]); assert.deepEqual(s.cases[4][9].slice(0, 2), [3, 1]);
+  for (const c of s.cases.filter(c => c[9][0] === 3)) assert.equal(c[9].length, 6, 'Measurement is result-level, without an error ordinal.');
+  assert.ok(!line.includes('private')); assert.deepEqual(await fs.readFile(f.typedPath), f.typedBytes); assert.deepEqual(await fs.readFile(f.path), before);
+  assert.deepEqual((await fs.readdir(f.control)).sort(), ['launch.stdout']);
+  t.diagnostic('Actual eight-case CLI line UTF8 bytes: ' + Buffer.byteLength(line));
+});
+
+test('C89 I2 fixed reader accepts private and framework output modes and never reads other artifacts', async t => {
+  for (const outputMode of [0o700, 0o755]) await t.test(outputMode.toString(8), async t => {
+    const f = await typedLog(t, { outputMode }); let opens = 0, closes = 0, closed = false;
+    const allowed = [f.parent, f.root, f.control, f.output, f.typedPath], before = await fs.readdir(f.root);
+    const io = { ...fs, lstat: p => { assert.ok(allowed.includes(p)); return fs.lstat(p); },
+      realpath: p => { assert.ok(allowed.includes(p)); return fs.realpath(p); },
+      open: async (p, flags) => {
+        assert.equal(p, f.typedPath); assert.equal(flags, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); opens++;
+        const h = await fs.open(p, flags);
+        return { stat: () => h.stat(), read: (...a) => h.read(...a), close: async () => { await h.close(); closes++; closed = true; } };
+      } };
+    const redact = env => { const actual = preparationRedactor(env); return text => { assert.ok(closed, 'Privacy/publication waits for close.'); return actual(text); }; };
+    const line = await typedCLI(f, { io, redactor: redact }); assert.ok(JSON.parse(line.slice(diagnosticPrefix.length)).case_observations);
+    assert.equal(opens, 1); assert.equal(closes, 1); assert.deepEqual(await fs.readFile(f.typedPath), f.typedBytes);
+    assert.deepEqual(await fs.readdir(f.root), before);
+  });
+});
+
+test('C89 I2 whole typed privacy rejection cannot fall back to valid legacy text or publish partial rows', async t => {
+  const f = await typedLog(t), originalEnv = { ...process.env }, descriptors = Object.getOwnPropertyDescriptors(process);
+  const globalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'process');
+  const collisions = ['case_observations', 'counts', 'web/e2e/joined.spec.mjs', 'WS recovered', 'timedOut',
+    'task 2 exact authoritative answer and tool output', 'get_response_body_no_resource', 'partial_dom_poll', 'first_dom',
+    'onEnd-entry callback snapshot', 'omitted'];
+  for (const label of collisions) await t.test(label, async () => {
+    let legacyReads = 0;
+    const io = { ...fs, open: (p, flags) => { if (p === f.path) legacyReads++; return fs.open(p, flags); } };
+    const line = await typedCLI(f, { io, env: { ...process.env, SYNTHETIC_TOKEN: label } });
+    assert.equal(line, diagnosticFallback); assert.equal(legacyReads, 0);
+  });
+  await t.test('non-environment sanitizer collision in a late case before omission', async () => {
+    // The real sanitizer and decoder must also honor a caller's non-environment redactor.
+    const redactor = () => text => text.replaceAll('get_response_body_no_resource', '[REDACTED]');
+    assert.equal(await typedCLI(f, { redactor }), diagnosticFallback);
+  });
+  await t.test('explicit producer privacy rejection marker', async () => {
+    await privateWrite(f.typedPath, JSON.stringify({ version: 1, source_map: 1, unavailable: 9 }) + '\n');
+    assert.equal(await typedCLI(f), diagnosticFallback);
+    await privateWrite(f.typedPath, f.typedBytes);
+  });
+  assert.ok(isDeepStrictEqual({ ...process.env }, originalEnv));
+  const current = Object.getOwnPropertyDescriptors(process), own = Reflect.ownKeys(descriptors);
+  assert.ok(Reflect.ownKeys(current).length === own.length && own.every(k => Object.hasOwn(current, k)
+    && isDeepStrictEqual(current[k], descriptors[k])));
+  assert.ok(isDeepStrictEqual(Object.getOwnPropertyDescriptor(globalThis, 'process'), globalDescriptor));
+});
+
+test('C89 I2 missing and unsupported nonprivacy typed transport keeps strict legacy fallback', async t => {
+  const changes = {
+    missing: async f => fs.unlink(f.typedPath),
+    json: async f => privateWrite(f.typedPath, '{'),
+    version: async f => { const v = clone(f.encoded); v.version++; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    enum: async f => { const v = clone(f.encoded); v.cases[0][7] = 99; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    counts: async f => { const v = clone(f.encoded); v.counts[5]++; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    ordinals: async f => { const v = clone(f.encoded); v.cases[1][5] = v.cases[0][5]; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    bounds: async f => { const v = clone(f.encoded); v.cases[0][1] = 1_000_001; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    retention: async f => { const v = clone(f.encoded); v.omitted[0]++; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    errors: async f => { const v = clone(f.encoded); v.cases[3][11].pop(); await privateWrite(f.typedPath, JSON.stringify(v)); },
+    extra: async f => privateWrite(f.typedPath, JSON.stringify({ ...f.encoded, private: 'synthetic-canary' })),
+    utf8: async f => privateWrite(f.typedPath, Buffer.from([0xff, 0xfe])),
+    oversized: async f => { const h = await fs.open(f.typedPath, 'r+'); try { await h.truncate(1024 * 1024 + 1); } finally { await h.close(); } },
+  };
+  for (const [name, change] of Object.entries(changes)) await t.test(name, async t => {
+    const f = await typedLog(t); await change(f); const original = await fs.readFile(f.path), line = await typedCLI(f);
+    const p = JSON.parse(line.slice(diagnosticPrefix.length)); assert.equal(p.case_observations, undefined);
+    assert.equal(p.reporter_text.version, 2); assert.equal(p.reporter_text.counts.failed, 1);
+    assert.deepEqual(await fs.readFile(f.path), original);
+    await privateWrite(f.path, '  2 failed\n    web/e2e/joined.spec.mjs:56:3 › synthetic\n    web/e2e/joined.spec.mjs:56:3 › synthetic\n');
+    const ambiguous = JSON.parse((await typedCLI(f)).slice(diagnosticPrefix.length)); assert.equal(ambiguous.reporter_text, null);
+  });
+});
+
+test('C89 I2 malformed file ownership, links, modes and canonical ancestors reject without write effects', async t => {
+  const kinds = ['mode', 'output-mode', 'root-mode', 'parent-mode', 'control-mode', 'symlink', 'hardlink', 'directory', 'fifo',
+    'owner', 'output-owner', 'opened-links', 'output-alias', 'root-alias', 'control-alias', 'parent-alias'];
+  for (const kind of kinds) await t.test(kind, async t => {
+    const f = await typedLog(t); let bundle = f.bundle, opens = 0, closes = 0;
+    if (kind === 'mode') await fs.chmod(f.typedPath, 0o644);
+    for (const [name, path] of [['output-mode', f.output], ['root-mode', f.root], ['parent-mode', f.parent], ['control-mode', f.control]]) {
+      if (kind === name) await fs.chmod(path, name === 'output-mode' ? 0o777 : 0o755);
+    }
+    if (kind === 'symlink') { await fs.rename(f.typedPath, f.typedPath + '.original'); await fs.symlink(f.typedPath + '.original', f.typedPath); }
+    if (kind === 'hardlink') await fs.link(f.typedPath, f.typedPath + '.link');
+    if (['directory', 'fifo'].includes(kind)) {
+      await fs.unlink(f.typedPath);
+      if (kind === 'directory') await fs.mkdir(f.typedPath, { mode: 0o700 });
+      else assert.equal(spawnSync('mkfifo', ['-m', '600', f.typedPath], { env: { ...process.env } }).status, 0);
+    }
+    if (kind === 'output-alias') { await fs.rename(f.output, f.output + '.original'); await fs.symlink(f.output + '.original', f.output); }
+    if (['root-alias', 'control-alias', 'parent-alias'].includes(kind)) {
+      const path = { 'root-alias': f.root, 'control-alias': f.control, 'parent-alias': f.parent }[kind], alias = path + '-alias';
+      await fs.symlink(path, alias);
+      if (kind === 'parent-alias') t.after(() => fs.unlink(alias));
+      bundle = join(alias, { 'root-alias': 'control/suite-ready.json', 'control-alias': 'suite-ready.json', 'parent-alias': 'root/control/suite-ready.json' }[kind]);
+    }
+    const io = { ...fs, lstat: async p => {
+      assert.ok(p !== bundle && !p.includes('/retained/') && !p.endsWith('.command.json'));
+      const s = await fs.lstat(p); if (kind === 'owner' && p === f.typedPath || kind === 'output-owner' && p === f.output) s.uid++; return s;
+    }, open: async (p, flags) => {
+      assert.equal(p, f.typedPath); opens++; const h = await fs.open(p, flags);
+      return { stat: async () => { const s = await h.stat(); if (kind === 'opened-links') s.nlink++; return s; },
+        read: (...a) => h.read(...a), close: async () => { closes++; await h.close(); } };
+    } };
+    const { typedReader } = await diagnosticCLI(() => {}, io);
+    assert.deepEqual(await typedReader(bundle), { value: null, reason: 'schema_unavailable' });
+    assert.equal(closes, opens); assert.equal(opens, kind === 'opened-links' ? 1 : 0);
+  });
+});
+
+test('C89 I2 bounded stable descriptor rejects races, same-identity changes and close failure', async t => {
+  const kinds = ['ordinary', 'at-cap', 'growing', 'open-error', 'open-fifo-race', 'read-error', 'opened-stat-error', 'after-stat-error',
+    'opened-type', 'opened-identity', 'after-identity', 'after-mode', 'after-owner', 'after-links', 'after-size', 'after-mtime', 'after-ctime',
+    'path-replaced', 'parent-replaced', 'output-replaced', 'realpath-error', 'close-error', 'short-read', 'same-identity-write', 'actual-path-replaced'];
+  for (const kind of kinds) await t.test(kind, async t => {
+    const f = await typedLog(t), limit = 1024 * 1024; let opens = 0, closes = 0, reads = 0, total = 0, stats = 0, after = false;
+    if (kind === 'at-cap') await privateWrite(f.typedPath, Buffer.concat([f.typedBytes, Buffer.alloc(limit - f.typedBytes.length, 0x20)]));
+    const io = { ...fs, realpath: async p => { if (kind === 'realpath-error') throw Error('synthetic'); return fs.realpath(p); },
+      lstat: async p => {
+        const s = await fs.lstat(p);
+        if (after && (kind === 'path-replaced' && p === f.typedPath || kind === 'parent-replaced' && p === f.root || kind === 'output-replaced' && p === f.output)) s.ino++;
+        return s;
+      }, open: async (p, flags) => {
+        assert.equal(p, f.typedPath); assert.ok(flags & constants.O_NONBLOCK); assert.ok(flags & constants.O_NOFOLLOW);
+        if (kind === 'open-error') throw Error('synthetic');
+        if (kind === 'open-fifo-race') { await fs.unlink(p); assert.equal(spawnSync('mkfifo', ['-m', '600', p], { env: { ...process.env } }).status, 0); }
+        const h = await fs.open(p, flags); opens++;
+        return { stat: async () => {
+          const s = await h.stat(); stats++;
+          if (kind === 'opened-stat-error' || kind === 'after-stat-error' && stats > 1) throw Error('synthetic');
+          if (kind === 'opened-type') s.isFile = () => false;
+          if (kind === 'opened-identity' || stats > 1 && kind === 'after-identity') s.ino++;
+          if (stats > 1) {
+            if (kind === 'after-mode') s.mode ^= 0o040;
+            if (kind === 'after-owner') s.uid++;
+            if (kind === 'after-links') s.nlink++;
+            if (kind === 'after-size') s.size++;
+            if (kind === 'after-mtime') s.mtimeMs++;
+            if (kind === 'after-ctime') s.ctimeMs++;
+          }
+          return s;
+        }, read: async (buffer, offset, length, position) => {
+          reads++; assert.ok(length <= 64 * 1024 && length > 0);
+          if (kind === 'read-error') throw Error('synthetic');
+          if (kind === 'growing') { total += length; buffer.fill(0x20); return { bytesRead: length }; }
+          if (kind === 'short-read') { after = true; return { bytesRead: 0 }; }
+          const r = await h.read(buffer, offset, length, position); total += r.bytesRead;
+          if (kind === 'actual-path-replaced' && reads === 1) {
+            await fs.rename(p, p + '.original'); await privateWrite(p, f.typedBytes);
+          }
+          if (kind === 'same-identity-write' && reads === 1) {
+            // Keep the same inode and byte length. Stable timestamps must still reject this change.
+            const before = await fs.lstat(p); await privateWrite(p, Buffer.alloc(f.typedBytes.length, 0x20));
+            const current = await fs.lstat(p); assert.equal(before.ino, current.ino); assert.equal(before.size, current.size);
+            await fs.utimes(p, before.atime, new Date(before.mtimeMs + 1000));
+          }
+          if (r.bytesRead === 0 || total === limit) after = true;
+          return r;
+        }, close: async () => { closes++; await h.close(); if (kind === 'close-error') throw Error('synthetic'); } };
+      } };
+    const { typedReader } = await diagnosticCLI(() => {}, io), observed = await typedReader(f.bundle);
+    if (['ordinary', 'at-cap'].includes(kind)) { assert.deepEqual(observed.value, f.encoded); assert.equal(observed.reason, null); }
+    else assert.deepEqual(observed, { value: null, reason: 'schema_unavailable' });
+    assert.equal(closes, opens); assert.ok(total <= limit);
+    if (kind === 'growing') { assert.equal(reads, 16); assert.equal(total, limit); }
+    if (kind === 'open-fifo-race') assert.equal(reads, 0);
+  });
+});
+
+test('C89 I2 generic injections and ineligible terminals never wait on typed or legacy files', async t => {
+  const changes = {
+    injected: () => {}, success: r => { r.code = r.outcome.child.code = 0; },
+    scope: r => { r.outcome.scope = 'unsupported'; }, admission: r => { r.outcome.first_failure = 'admission'; },
+    receipt: r => { r.outcome.first_failure = 'launch_receipt'; }, reuse: r => { r.outcome.consumed = false; },
+    unspawned: r => { r.outcome.child.spawned = false; }, unclosed: r => { r.outcome.child.closed = false; },
+    zero: r => { r.outcome.child.code = 0; }, unknown: r => { r.outcome.child.code = null; },
+  };
+  for (const [name, change] of Object.entries(changes)) await t.test(name, async () => {
+    const result = eligibleResult(); change(result); let calls = 0;
+    const io = { ...fs, lstat: () => { calls++; return new Promise(() => {}); } };
+    const line = await typedCLI({ bundle: '/private/control/suite-ready.json' }, { result, io, injected: name === 'injected' });
+    assert.equal(calls, 0); if (name !== 'success') assert.equal(JSON.parse(line.slice(diagnosticPrefix.length)).reporter_text, null);
+  });
+});
+
+test('C89 I2 empty, incomplete, unavailable and signalled callback snapshots keep their exact meaning', async t => {
+  for (const kind of ['empty', 'incomplete', 'unknown-count', 'signal', 'global-error', 'nonenv-canary']) await t.test(kind, async t => {
+    const f = await typedLog(t, { count: kind === 'empty' ? 0 : 8 }), v = clone(f.encoded), result = eligibleResult();
+    if (kind === 'incomplete') { v.completion = 2; v.counts[0]++; }
+    if (kind === 'unknown-count') { v.completion = 2; v.counts[0] = null; }
+    if (kind === 'global-error') v.counts[3] = 2;
+    if (kind === 'signal') { result.code = result.outcome.child.code = null; result.signal = result.outcome.child.signal = 'SIGTERM'; }
+    if (kind === 'nonenv-canary') {
+      const q = { location: { file: join(ROOT, sourceFiles[2]), line: 51, column: 1 }, title: 'nonenv-canary-private' };
+      const r = new Reporter(); r.onBegin({ projects: [] }, { allTests: () => [q] });
+      const x = { status: 'failed', workerIndex: -1, duration: 0, errors: [{ message: 'nonenv-canary-private', stack: 'nonenv-canary-private' }], annotations: [] };
+      r.onTestBegin(q, x); r.onTestEnd(q, x);
+      // Use the real callback projection while keeping onEnd publication in the existing fixture.
+      const encoded = encodeReport({ completion: 'complete', run: 'failed', counts: r.counts, cases: r.cases, omitted: r.omitted });
+      await privateWrite(f.typedPath, JSON.stringify(encoded));
+    } else await privateWrite(f.typedPath, JSON.stringify(v));
+    const line = await typedCLI(f, { result }), p = JSON.parse(line.slice(diagnosticPrefix.length)), s = p.case_observations;
+    assert.equal(p.reporter_text, null); assert.deepEqual(p.terminal, { code: result.code, signal: result.signal });
+    assert.match(p.scope, /onEnd-entry callback snapshot; unauthenticated/);
+    assert.ok(!line.includes('nonenv-canary-private'));
+    if (kind === 'empty') { assert.deepEqual(s.cases, []); assert.deepEqual(s.counts, [89, 89, 89, 0, 89, 0, 0, 0, 0, 0]); }
+    if (kind === 'incomplete') { assert.equal(s.completion, 2); assert.equal(s.counts[0], 90); }
+    if (kind === 'unknown-count') assert.equal(s.counts[0], null);
+    if (kind === 'global-error') assert.equal(s.counts[3], 2);
+    if (kind === 'nonenv-canary') { assert.equal(s.cases[0][9], null); assert.equal(s.cases[0][8], 1); }
+  });
+});
+
+test('C89 I2 actual CLI complete envelope enforces exact 1024, 1025, 1026 and overflow boundaries', async t => {
+  const f = await typedLog(t), initial = JSON.parse((await typedCLI(f)).slice(diagnosticPrefix.length));
+  const envelope = { ...initial }; delete envelope.case_observations;
+  const result = eligibleResult(); result.code = result.outcome.child.code = Number.MAX_SAFE_INTEGER;
+  envelope.child.code = envelope.terminal.code = result.code;
+  for (const target of [1024, 1025, 1026]) await t.test(String(target), async () => {
+    const v = clone(f.encoded); v.completion = 2; v.counts[0] = v.counts[1] = 1_000_000;
+    for (const [i, c] of v.cases.entries()) c[4] = 1_000_000 - i;
+    const size = () => Buffer.byteLength(diagnosticPrefix + JSON.stringify(publicSummary(v, envelope, undefined, 100_000).value) + '\n');
+    const fields = v.cases.slice(0, 8).flatMap(c => [[c, 1], [c, 2]]);
+    fields.push([v.cases[2][11][0][1], 0], [v.cases[2][11][0][1], 1]);
+    for (const [row, field] of fields) {
+      while (row[field] < 1_000_000 && size() < target) row[field] = Math.min(row[field] * 10, 1_000_000);
+    }
+    assert.equal(size(), target, 'The valid callback-derived wire must exercise this exact full envelope size.');
+    await privateWrite(f.typedPath, JSON.stringify(v));
+    const line = await typedCLI(f, { result }), p = JSON.parse(line.slice(diagnosticPrefix.length));
+    assert.deepEqual(p, publicSummary(v, envelope).value, 'No fields may appear after shared codec budgeting.');
+    assert.equal(p.case_observations.omitted[0], 8 - p.case_observations.cases.length);
+    if (target === 1024) { assert.equal(Buffer.byteLength(line), 1024); assert.equal(p.case_observations.cases.length, 8); }
+    else assert.ok(p.case_observations.cases.length < 8);
+  });
+  await t.test('collision in an omitted last case rejects the entire projection', async () => {
+    const v = clone(f.encoded); v.completion = 2; v.counts[0] = v.counts[1] = 1_000_000;
+    for (const [i, c] of v.cases.entries()) { c[4] = 1_000_000 - i; c[1] = c[2] = 1_000_000; }
+    v.cases[2][11][0][1] = [1_000_000, 1_000_000]; v.counts[3] = 1_000_000;
+    await privateWrite(f.typedPath, JSON.stringify(v));
+    const expected = publicSummary(v, envelope); assert.ok(expected.value.case_observations.cases.length < 8);
+    assert.equal(await typedCLI(f, { result, env: { ...process.env, SYNTHETIC_TOKEN: 'get_response_body_no_resource' } }), diagnosticFallback);
+  });
+});
 
 test('C88 eight actual formatter failures survive the actual CLI instead of the old two declaration cap', async t => {
   for (const count of [7, 8]) await t.test(String(count), async t => {
@@ -199,7 +509,7 @@ test('C88 R1 long and boundary-width pinned headers retain uniquely associated o
   const cases = [];
   for (const [file, declarationLine, frameLine, frameColumn, id] of [
     ['client-close-handoff.spec.mjs', 51, 247, 15, 3], ['display-app.spec.mjs', 214, 218, 108, 6],
-    ['live-commit-measurements.spec.mjs', 11, 23, 5, 12],
+    ['live-commit-measurements.spec.mjs', 12, 24, 5, 12],
   ]) {
     const source = await fs.readFile(new URL('../e2e/' + file, import.meta.url), 'utf8');
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);

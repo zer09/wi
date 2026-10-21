@@ -515,7 +515,11 @@ async function cutoffWriter(t) {
   new Function('require','module','exports',compiled)(name=>{
     if(name==='node:fs/promises')return facade;
     if(name==='./browser-fixture-preparation.mjs')return {preparationRedactor,sanitizeRecord};
-    return require(name);
+    if(name==='node:fs')return require('node:fs');
+    if(name==='node:path')return require('node:path');
+    if(name==='node:url')return require('node:url');
+    if(name==='node:util')return require('node:util');
+    throw Error('Unsupported synthetic import');
   },module,module.exports);
   return {api:module.exports,parent,output,reached:reached.promise,release:release.resolve,writes,closed:()=>closed};
 }

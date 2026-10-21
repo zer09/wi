@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { ROOT } from '../test-support/live-commit-native.mjs';
 import { launchBrowserSuite } from '../test-support/browser-suite-launch.mjs';
 import { preparationRedactor, sanitizeRecord } from '../test-support/browser-fixture-preparation.mjs';
+import { decodeReport, publicSummary, reportName } from '../test-support/browser-case-diagnostics.mjs';
 
 const fallback = 'browser_suite_launch: failure diagnostics unavailable.\n';
 const stages = ['admission', 'guard', 'guard_recheck', 'outer', 'dispatch_recheck', 'stop_before_dispatch',
@@ -157,18 +158,73 @@ async function readReporterText(bundle) {
   } catch { return null; }
   finally { try { await handle?.close(); } catch { return null; } }
 }
-function failureDiagnostic(result, reporterText) {
+async function readCaseObservations(bundle) {
+  const unavailable = { value: null, reason: 'schema_unavailable' };
+  const limit = 1024 * 1024;
+  let handle, bytes;
+  try {
+    const control = dirname(bundle), root = dirname(control), output = join(root, 'playwright-output');
+    const parents = [dirname(root), root, control, output];
+    const directory = async path => {
+      const s = await fs.lstat(path), mode = s.mode & 0o7777;
+      if (!s.isDirectory() || s.isSymbolicLink() || s.uid !== process.getuid() || await fs.realpath(path) !== path
+        || (path === output ? ![0o700, 0o755].includes(mode) : mode !== 0o700)) throw Error();
+      return [s.dev, s.ino, s.mode, s.uid];
+    };
+    const parentsBefore = await Promise.all(parents.map(directory));
+    const path = join(output, reportName);
+    const regular = s => s.isFile() && !s.isSymbolicLink() && s.uid === process.getuid()
+      && (s.mode & 0o7777) === 0o600 && s.nlink === 1 && Number.isSafeInteger(s.size) && s.size >= 0 && s.size <= limit;
+    const pin = s => [s.dev, s.ino, s.mode, s.uid, s.nlink, s.size, s.mtimeMs, s.ctimeMs];
+    const before = await fs.lstat(path);
+    if (!regular(before) || await fs.realpath(path) !== path) return unavailable;
+    // A path swapped for a FIFO must not block the failed child's diagnostics.
+    handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const opened = await handle.stat();
+    if (!regular(opened) || !isDeepStrictEqual(pin(before), pin(opened))) return unavailable;
+    const chunks = []; let total = 0;
+    while (total < limit) {
+      const buffer = Buffer.alloc(Math.min(64 * 1024, limit - total));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (!Number.isSafeInteger(bytesRead) || bytesRead < 0 || bytesRead > buffer.length) return unavailable;
+      total += bytesRead;
+      if (bytesRead === 0) break;
+      chunks.push(buffer.subarray(0, bytesRead));
+    }
+    const after = await handle.stat(), current = await fs.lstat(path);
+    if (!regular(after) || !regular(current) || !isDeepStrictEqual(pin(before), pin(after))
+      || !isDeepStrictEqual(pin(before), pin(current)) || total !== before.size || await fs.realpath(path) !== path
+      || !isDeepStrictEqual(parentsBefore, await Promise.all(parents.map(directory)))) return unavailable;
+    bytes = Buffer.concat(chunks, total);
+  } catch { return unavailable; }
+  finally { try { await handle?.close(); } catch { return unavailable; } }
+  // No observation can publish until descriptor closure also succeeds.
+  try {
+    if (!isUtf8(bytes)) return unavailable;
+    const encoded = JSON.parse(bytes.toString('utf8'));
+    decodeReport(encoded, preparationRedactor(process.env));
+    return { value: encoded, reason: null };
+  } catch (error) { return { value: null, reason: error.code === 'privacy_collision' ? 'privacy_collision' : 'schema_unavailable' }; }
+}
+function failureDiagnostic(result, reporterText, typed = null) {
   try {
     const outcome = result.outcome;
     if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) return fallback;
     const child = outcome.child, firstFailure = outcome.first_failure;
     // Project observations only. Never enumerate the private outcome or infer case results.
-    const internal = { version: 1, scope: 'invocation observations only', consumed: boolean(outcome.consumed),
+    const internal = { version: 1, scope: typed?.value
+      ? 'invocation observations; onEnd-entry callback snapshot; unauthenticated' : 'invocation observations only', consumed: boolean(outcome.consumed),
       first_failure: stages.includes(firstFailure) ? firstFailure : null,
       child: { spawned: boolean(child?.spawned), closed: boolean(child?.closed), error_observed: boolean(child?.error_observed),
         code: code(child?.code), signal: signal(child?.signal) },
       terminal: { code: code(result.code), signal: signal(result.signal) }, reporter_text: reporterText };
     const redact = preparationRedactor(process.env);
+    if (typed?.reason === 'privacy_collision') return fallback;
+    if (typed?.value) {
+      // Budget the complete terminal envelope. Add no fields after this call.
+      const summary = publicSummary(typed.value, internal, redact);
+      return summary.value === null ? fallback : 'browser_suite_launch: failure ' + JSON.stringify(summary.value) + '\n';
+    }
     // Check every allowlisted name before IDs or byte omissions could hide a collision.
     if (!isDeepStrictEqual(sanitizeRecord(internal, redact), internal)) return fallback;
     const projection = { ...internal, reporter_text: reporterText === null ? null : {
@@ -223,15 +279,18 @@ export async function run(argv, launch = launchBrowserSuite, stderr = process.st
   try {
     const result = await launch({ bundle: argv[1] });
     if (result.code !== 0 || result.signal !== null) {
-      let reporterText = null;
+      let reporterText = null, typed = null;
       try {
         const outcome = result.outcome, child = outcome?.child;
         // Generic injected writer controls must not wait on filesystem work.
         if (launch === launchBrowserSuite && outcome?.scope === 'one-use suite launch observation only'
           && outcome.consumed === true && outcome.first_failure === 'child' && child?.spawned === true && child.closed === true
-          && (code(child.code) > 0 || signal(child.signal) !== null)) reporterText = await readReporterText(argv[1]);
+          && (code(child.code) > 0 || signal(child.signal) !== null)) {
+          typed = await readCaseObservations(argv[1]);
+          if (typed.value === null && typed.reason !== 'privacy_collision') reporterText = await readReporterText(argv[1]);
+        }
       } catch { /* Optional observations cannot replace the primary terminal. */ }
-      await writeDiagnostic(stderr, failureDiagnostic(result, reporterText));
+      await writeDiagnostic(stderr, failureDiagnostic(result, reporterText, typed));
     }
     if (result.signal !== null) {
       // The launcher has finished safe recording and removed its temporary signal listeners.

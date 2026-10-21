@@ -509,7 +509,7 @@ function ciWorkflowProof(workflow, pkg = ciPackage(), config = ciConfig()) {
   const value = runInNewContext(configAst.statements[1].getText(configAst).replace('export default ', ''), { defineConfig: v => v });
   assert.equal(isDeepStrictEqual(JSON.parse(JSON.stringify(value)), {
     testDir: './e2e', fullyParallel: false, workers: 1, retries: 0, timeout: 60_000, globalTimeout: 900_000,
-    expect: { timeout: 10_000 }, reporter: [['line']], use: { browserName: 'chromium', headless: true,
+    expect: { timeout: 10_000 }, reporter: [['line'], ['./test-support/browser-case-diagnostics.mjs']], use: { browserName: 'chromium', headless: true,
       viewport: { width: 1440, height: 900 }, actionTimeout: 10_000, navigationTimeout: 10_000,
       trace: 'off', screenshot: 'off', video: 'off', serviceWorkers: 'block' },
   }), true);
@@ -704,7 +704,14 @@ for (const [name, change] of Object.entries(ciMutations)) test(`CI workflow sour
   const original = ciWorkflow(); ciWorkflowProof(original); const changed = change(original); assert.notEqual(changed, original);
   assert.throws(() => ciWorkflowProof(changed));
 });
-for (const [name, change] of Object.entries({ filter: s => s.replace('fullyParallel: false', "grep: /one/, fullyParallel: false"), timeout: s => s.replace('900_000', '600_000'), retries: s => s.replace('retries: 0', 'retries: 1') }))
+for (const [name, change] of Object.entries({
+  filter: s => s.replace('fullyParallel: false', "grep: /one/, fullyParallel: false"),
+  timeout: s => s.replace('900_000', '600_000'), retries: s => s.replace('retries: 0', 'retries: 1'),
+  'missing typed reporter': s => s.replace(", ['./test-support/browser-case-diagnostics.mjs']", ''),
+  'missing line reporter': s => s.replace("['line'], ", ''),
+  'reordered reporters': s => s.replace("[['line'], ['./test-support/browser-case-diagnostics.mjs']]", "[['./test-support/browser-case-diagnostics.mjs'], ['line']]"),
+  'extra reporter': s => s.replace("reporter: [[", "reporter: [['json'], ["),
+}))
   test(`CI config sensitivity rejects ${name}`, () => { ciWorkflowProof(ciWorkflow()); assert.throws(() => ciWorkflowProof(ciWorkflow(), ciPackage(), change(ciConfig()))); });
 for (const [name, change] of Object.entries({ extra: s => s.replace('TMPDIR: scratch,', "EXTRA: '', TMPDIR: scratch,"), missing: s => s.replace('NODE_OPTIONS: \'\',', ''), changed: s => s.replace('PATH: env.PATH', "PATH: '/changed'") }))
   test(`executed bootstrap source sensitivity rejects environment schema ${name}`, async t => {

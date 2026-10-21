@@ -35,7 +35,7 @@ export const kinds = Object.freeze(['Error', 'TypeError', 'SyntaxError', 'Timeou
 export const matchers = Object.freeze(['toBe', 'toEqual', 'toHaveCount', 'toHaveText', 'toContainText', 'toHaveValue', 'toBeVisible', 'toBeEnabled', 'action or control']);
 export const bodyClasses = Object.freeze(['method_get_response_body', 'target_closed', 'target_crashed', 'timeout', 'other', 'get_response_body_no_resource',
   'get_response_body_no_data', 'get_response_body_evicted', 'method_load_network_resource', 'method_io_read', 'method_io_close', 'collected', 'redirect_body_unavailable']);
-// IDs are versioned with source_map 1. These are stored labels, not assertion attribution.
+// IDs are versioned with source_map 2. These are stored labels, not assertion attribution.
 export const families = Object.freeze([
   { source: 9, prefix: 'Interrupted parity failed:', stages: ['binding','produce','connect-a','create','task','partial','close-a','kill','observe','connect-observer','parity','close-observers','drain','cleanup'], checks: ['identity','reply','work','fields','handshake','privacy','assets','requests','cleanup'] },
   { source: 13, prefix: 'Presentation failed:', stages: ['startup','connect','create','rename','catalog','keyboard','acceptance','partial','items','tools','final-deltas','final-item','disconnect-reader','completion','rebase','older','abort','navigation-seed','navigation-selected','navigation','cleanup'],
@@ -50,6 +50,10 @@ export const families = Object.freeze([
     checks: ['outside','status','run-count','run-identity','execution','headings','entry-ids-read','entry-ids','entry-metadata','entry-fields','tool-open','tool-click','tool-visible','tool-output','task-occurrences','argument-occurrences','output-occurrences','partial-occurrences','request-id-read','request-id','recording','storage-error-absent','reconcile-action','reconcile-reply','reconcile-acceptance','reconcile-run','run-view','task-state','task-body','task-receipt','privacy','parity-dom'] },
   { source: 29, prefix: 'Reload epoch failed:', stages: ['startup','UI creation and matching head-one display observation','actual Task202 accepted before full reload at provider gate one','actual full reload retires the accepted first document','disconnected second document stays API-idle through real tools and final durable recording','token entry alone cannot authorize retained-hash reads','explicit Connect reads retained A exactly once without command recovery or resubmission','unchanged durable task audit after explicit Connect'], checks: [] },
   { source: 33, prefix: 'Tool fidelity failed:', stages: ['startup','connect and create','first explicit submission','second explicit submission','first committed results privacy','second committed result privacy','first reuse privacy','first closed audit','second closed audit','first supplied display and DOM','second supplied display and DOM','stable results and public assets','disconnect and privacy'], checks: [] },
+  { source: 16, prefix: 'Rich parity failed:', stages: ['startup','connect','create','task','partial','fresh','parity','close-b','drain','cleanup'], checks: ['outside','reply','identity','native','fields','handshake','privacy','assets','requests','cleanup'] },
+  { source: 18, prefix: 'Skill fidelity failed:', stages: ['startup','create','task-1','task-2','fixed-boundary','change-source','delete-source','changed-observer','deleted-observer'], checks: ['outside','fill-task','accepted-response','accepted-dto','paused-1','paused-2','paused-3','paused-4','paused-5','paused-6','paused-7','paused-8','paused-9','paused-10','paused-11','paused-12','drive-1','drive-2','drive-3','drive-4','drive-5','drive-6','drive-7','drive-8','drive-9','drive-10','drive-11','drive-12','finished-1','finished-2','gate11-diagnostic','provider-finished','native','complete-dto','complete-dom','ownership','handshake','newest-dom','setup-top','transcript-focus','layout-settled','pre-key-sample','pre-key-focus','pre-key-geometry','setup-reads','key-dispatch','older-request-wait','older-request-route','older-request-cursor','older-dto','older-dom','privacy','native-unchanged','assets'] },
+  { source: 31, prefix: 'Stale history failed:', stages: ['startup','real browser creation and selection','one explicit Send paused after replay-head capture','one real browser rename commits before task release','release and exact stale-history rejection','draft edit preserves immutable rejected command and truthful rename','embedded asset integrity and Disconnect clearing'], checks: [] },
+  { source: 21, prefix: 'Account mismatch failed:', stages: ['startup','real browser creation and selection','first normal acceptance and real tool completion','one-shot private rotation after audited completion','finite no-auto-action interval and stable canonical failure','Disconnect clears without cancel or retry'], checks: [] },
 ].map(f => Object.freeze({ ...f, stages: Object.freeze(f.stages), checks: Object.freeze(f.checks) })));
 const labels = ['short-selected', 'long-selected', 'disconnected-reader'];
 const testStatuses = ['passed', 'failed', 'timedOut', 'skipped', 'interrupted'];
@@ -85,13 +89,14 @@ export function storedObservation(file, message) {
   if (!message.startsWith(f.prefix + ' ')) return null;
   const text = message.slice(f.prefix.length + 1);
   let m, stage, check = null, kind = null, matcher = null, stored_line = null, presentation = null, entry = null;
-  if ([1,5].includes(family)) { m = /^stage=([^;\r\n]+); check=([^;\r\n]+)$/.exec(text); if (!m) return null; [,stage,check] = m; }
+  if ([1,5,10,11].includes(family)) { m = /^stage=([^;\r\n]+); check=([^;\r\n]+)$/.exec(text); if (!m) return null; [,stage,check] = m; }
   else if (family === 2) { m = /^label=([^;\r\n]+); stage=([^;\r\n]+); check=([^;\r\n]+); kind=([^;\r\n]+)$/.exec(text); if (!m) return null; [,presentation,stage,check,kind] = m; }
   else if (family === 3) { m = /^([^;\r\n]+); kind=([^;\r\n]+); check=([^;\r\n]+); capture=/.exec(text); if (!m) return null; [,stage,kind,check] = m; }
   else if (family === 4) { m = /^([^;\r\n]+); kind=([^;\r\n]+) line=([1-9][0-9]{0,6}|none); capture=/.exec(text); if (!m) return null; [,stage,kind] = m; stored_line = positive(Number(m[3])) ? Number(m[3]) : null; }
   else if (family === 6) { m = /^([^;\r\n]+); ([^;\r\n]+); line=([1-9][0-9]{0,6}|unknown)$/.exec(text); if (!m) return null; [,stage,matcher] = m; stored_line = positive(Number(m[3])) ? Number(m[3]) : null; }
   else if (family === 7) { m = /^([^;\r\n]+); kind=([^;\r\n]+); check=([^;\r\n]+); entry=(none|other|[0-3]); capture=/.exec(text); if (!m) return null; [,stage,kind,check] = m; entry = /^[0-3]$/.test(m[4]) ? Number(m[4]) : null; }
   else if (family === 8) { m = /^([^;\r\n]+); capture=/.exec(text); if (!m) return null; stage = m[1]; }
+  else if ([12,13].includes(family)) { m = /^([^;\r\n]+); kind=([^;\r\n]+) line=([1-9][0-9]{0,6}|none); capture=/.exec(text); if (!m) return null; [,stage,kind] = m; stored_line = positive(Number(m[3])) ? Number(m[3]) : null; }
   else { m = /^([^;\r\n]+); kind=([^;\r\n]+); faults=/.exec(text); if (!m) return null; [,stage,kind] = m; }
   const value = { family, stage: f.stages.includes(stage) ? stage : null, check: f.checks.includes(check) ? check : null,
     kind: kinds.includes(kind) ? kind : null, matcher: matchers.includes(matcher) ? matcher : null, stored_line,
@@ -166,22 +171,22 @@ function measurement(annotations, file, protect, collision) {
 }
 export function encodeReport(report, redact = preparationRedactor(process.env)) {
   clean(report,redact);
-  const encoded = {version:1,source_map:1,completion:report.completion === 'complete' ? 1 : 2,run:id(runStatuses,report.run),counts:[...report.counts],
+  const encoded = {version:1,source_map:2,completion:report.completion === 'complete' ? 1 : 2,run:id(runStatuses,report.run),counts:[...report.counts],
     cases:report.cases.map(c => [id(sourceFiles,c.file),...c.declaration,id(joinedScenarios,c.scenario),c.begin,c.end,c.result,id(testStatuses,c.status),c.worker,c.duration,c.error_count,
       c.errors.map(e => [e.ordinal,e.location===null?null:[...e.location],encodeStored(e.stored),id(reasons,e.reason)]),encodeMeasurement(c.measurement),id(reasons,c.reason)]),omitted:[...report.omitted]};
   clean(encoded,redact); return encoded;
 }
 // Reconstruct every allowlisted label before privacy checking or public byte omission.
 function collisionRecord(encoded, redact) {
-  if (encoded && Object.keys(encoded).sort().join() === 'source_map,unavailable,version' && encoded.version === 1 && encoded.source_map === 1 && encoded.unavailable === id(reasons,'privacy_collision')) {
-    clean({version:1,source_map:1,unavailable:'privacy_collision'},redact);clean(encoded,redact);return true;
+  if (encoded && Object.keys(encoded).sort().join() === 'source_map,unavailable,version' && encoded.version === 1 && encoded.source_map === 2 && encoded.unavailable === id(reasons,'privacy_collision')) {
+    clean({version:1,source_map:2,unavailable:'privacy_collision'},redact);clean(encoded,redact);return true;
   }
   return false;
 }
 export function decodeReport(encoded, redact = preparationRedactor(process.env)) {
   if (collisionRecord(encoded,redact)) reject('privacy_collision');
   const keys = ['version','source_map','completion','run','counts','cases','omitted'];
-  if (!encoded || Object.keys(encoded).sort().join() !== keys.sort().join() || encoded.version !== 1 || encoded.source_map !== 1 || ![1,2].includes(encoded.completion)
+  if (!encoded || Object.keys(encoded).sort().join() !== keys.sort().join() || encoded.version !== 1 || encoded.source_map !== 2 || ![1,2].includes(encoded.completion)
     || encoded.run !== null && !label(runStatuses,encoded.run) || !Array.isArray(encoded.counts) || encoded.counts.length !== 10 || encoded.counts.some(n=>n!==null&&!integer(n))
     || encoded.counts.slice(1).some(n=>n===null) || !Array.isArray(encoded.cases) || encoded.cases.length > 256 || !Array.isArray(encoded.omitted) || encoded.omitted.length !== 2 || encoded.omitted.some(n=>!integer(n))) reject();
   const nullable = (table,n) => { if (n === null) return null; const v=label(table,n);if(v===null)reject();return v; };
@@ -228,7 +233,7 @@ export function publicSummary(encoded, envelope, redact = preparationRedactor(pr
   try {
     const report=decodeReport(encoded,redact);clean(envelope,redact);
     const rows=report.cases.filter(c=>c.status!=='passed'&&c.status!=='skipped');
-    const summary={version:1,source_map:1,completion:encoded.completion,run:encoded.run,counts:encoded.counts,cases:[],omitted:[encoded.omitted[0]+rows.length,encoded.omitted[1]+rows.reduce((n,c)=>n+c.errors.length,0)]};
+    const summary={version:1,source_map:2,completion:encoded.completion,run:encoded.run,counts:encoded.counts,cases:[],omitted:[encoded.omitted[0]+rows.length,encoded.omitted[1]+rows.reduce((n,c)=>n+c.errors.length,0)]};
     const projection={...envelope,case_observations:summary};
     const size=()=>Buffer.byteLength('browser_suite_launch: failure '+JSON.stringify(projection)+'\n');
     for(const c of rows) {
@@ -327,7 +332,7 @@ export default class BrowserCaseDiagnostics {
     }catch(error){
       // A collision rejects all facts. The separate marker reports only that rejection.
       if(error.code==='privacy_collision'&&this.counts[2]>0&&this.output!==null)try{
-        const unavailable={version:1,source_map:1,unavailable:id(reasons,'privacy_collision')};
+        const unavailable={version:1,source_map:2,unavailable:id(reasons,'privacy_collision')};
         collisionRecord(unavailable,this.redact);await writeReport(this.output,unavailable);
       }catch{}
       // Reporter failure cannot change the suite's terminal status.

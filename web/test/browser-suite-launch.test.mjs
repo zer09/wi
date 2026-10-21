@@ -164,15 +164,16 @@ const representativeFiles = ['cancellation', 'client-close-handoff', 'content-me
   'display-view', 'joined', 'lifecycle-failure', 'live-commit-measurements'].map(n => n + '.spec.mjs');
 
 // Build the private wire through the accepted reporter callbacks, not a guessed schema.
-async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
+async function typedLog(t, { outputMode = 0o755, count = 8, mixed = false } = {}) {
   const f = await diagnosticLog(t), output = join(f.root, 'playwright-output');
   await fs.mkdir(output, { mode: outputMode });
-  const ids = [10, 10, 30, 4, 12, 3, 11, 29];
+  let ids = [10, 10, 30, 4, 12, 3, 11, 29];
+  if (mixed) ids = [16, 18, 31, 21, 10, 10, 4, 12];
   const tests = Array.from({ length: 89 }, (_, i) => ({
-    location: { file: join(ROOT, sourceFiles[(ids[i] ?? 1) - 1]), line: i < 2 ? 56 : 100 + i, column: 3 },
-    title: i < 2 ? joinedScenarios[i] : 'synthetic private title',
+    location: { file: join(ROOT, sourceFiles[(ids[i] ?? 1) - 1]), line: ids[i] === 10 ? 56 : 100 + i, column: 3 },
+    title: ids[i] === 10 ? joinedScenarios[mixed ? i - 4 : i] : 'synthetic private title',
   }));
-  const messages = [
+  let messages = [
     'Joined browser assertion failed: task 1 before-commit acceptance; toBe; line=254',
     'Joined browser assertion failed: task 2 exact authoritative answer and tool output; toHaveText; line=345',
     'private timeout details', 'private body error', 'private native boundary',
@@ -180,13 +181,21 @@ async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
     'Lifecycle failure failed: checkpoint 2 display; kind=TimeoutError; check=entry-fields; entry=2; capture={}; faults={}; posts={}',
     'Reload epoch failed: explicit Connect reads retained A exactly once without command recovery or resubmission; capture={"create":{},"task":{"body_rejection_class":"get_response_body_no_resource"},"latest":[]}; disconnectedView=null; faults={}; network={}; h20Progress=null',
   ];
+  if (mixed) messages = [
+    'Rich parity failed: stage=fresh; check=handshake',
+    'Skill fidelity failed: stage=task-2; check=paused-12',
+    'Stale history failed: release and exact stale-history rejection; kind=TimeoutError line=295; capture=capture-canary',
+    'Account mismatch failed: one-shot private rotation after audited completion; kind=ProtocolError line=297; capture=capture-canary',
+    messages[0], messages[1], 'private body error', 'private native boundary',
+  ];
   const r = new Reporter(); r.onBegin({ projects: [{ outputDir: output }] }, { allTests: () => tests });
   for (const [i, q] of tests.entries()) {
     const errors = i < count ? [{ ...serializeError(new Error(messages[i])), location: { ...q.location, line: i < 2 ? 450 : 275, column: 9 } }] : [];
     if (i === 3 && i < count) errors.push(serializeError(new Error('secondary private error')));
     const info = { annotations: [] };
-    if ([3, 4].includes(i) && i < count) appendMeasurementAnnotation(() => ({ info, family: i === 3 ? 2 : 1,
-      packet: Object.freeze({ first_operation: i === 3 ? 'partial_dom_poll' : 'first_dom' }),
+    const contentIndex = mixed ? 6 : 3, liveIndex = mixed ? 7 : 4;
+    if ([contentIndex, liveIndex].includes(i) && i < count) appendMeasurementAnnotation(() => ({ info, family: i === contentIndex ? 2 : 1,
+      packet: Object.freeze({ first_operation: i === contentIndex ? 'partial_dom_poll' : 'first_dom' }),
       body_success: false, cleanup: false, steps: [{ name: 'root', ok: false }] }));
     let status = 'passed';
     if (i < count) status = i === 2 ? 'timedOut' : 'failed';
@@ -196,7 +205,7 @@ async function typedLog(t, { outputMode = 0o755, count = 8 } = {}) {
   await r.onEnd({ status: 'failed' });
   const path = join(output, reportName), bytes = await fs.readFile(path), encoded = JSON.parse(bytes);
   const decoded = decodeReport(encoded);
-  if (count === 8) {
+  if (count === 8 && !mixed) {
     assert.equal(decoded.cases[0].errors[0].stored.stored_line, 254);
     assert.equal(decoded.cases[1].errors[0].stored.stage, 'task 2 exact authoritative answer and tool output');
     assert.equal(decoded.cases[5].errors[0].stored.check, 'dto');
@@ -220,7 +229,7 @@ test('C89 I2 actual eligible default branch prefers eight actionable callback wi
   const p = JSON.parse(line.slice(diagnosticPrefix.length));
   assert.equal(p.reporter_text, null); assert.match(p.scope, /onEnd-entry callback snapshot; unauthenticated/);
   assert.deepEqual(p.terminal, { code: 7, signal: null }); assert.equal(p.first_failure, 'child');
-  const s = p.case_observations; assert.equal(s.version, 1); assert.equal(s.source_map, 1);
+  const s = p.case_observations; assert.equal(s.version, 1); assert.equal(s.source_map, 2);
   assert.deepEqual(s.counts, [89, 89, 89, 0, 81, 7, 1, 0, 0, 0]); assert.equal(s.completion, 1);
   assert.equal(s.cases.length, 8); assert.equal(s.omitted[0], 0); assert.ok(s.omitted[1] >= 2);
   assert.deepEqual(s.cases[0].slice(0, 3), s.cases[1].slice(0, 3)); assert.notEqual(s.cases[0][3], s.cases[1][3]);
@@ -231,9 +240,56 @@ test('C89 I2 actual eligible default branch prefers eight actionable callback wi
   for (const c of s.cases.filter(c => c[9][0] === 3)) assert.equal(c[9].length, 6, 'Measurement is result-level, without an error ordinal.');
   assert.ok(!line.includes('private')); assert.deepEqual(await fs.readFile(f.typedPath), f.typedBytes); assert.deepEqual(await fs.readFile(f.path), before);
   assert.deepEqual((await fs.readdir(f.control)).sort(), ['launch.stdout']);
+  assert.equal(Buffer.byteLength(line), 857);
   t.diagnostic('Actual eight-case CLI line UTF8 bytes: ' + Buffer.byteLength(line));
 });
 
+test('C91 actual eligible CLI retains all eight mixed map2 witnesses through the actual writer and fixed reader', async t => {
+  const f = await typedLog(t, { mixed: true }), decoded = decodeReport(f.encoded), before = await fs.readFile(f.path);
+  for (const [i, family, stage, check, kind, line] of [
+    [0, 10, 'fresh', 'handshake', null, null], [1, 11, 'task-2', 'paused-12', null, null],
+    [2, 12, 'release and exact stale-history rejection', null, 'TimeoutError', 295],
+    [3, 13, 'one-shot private rotation after audited completion', null, 'ProtocolError', 297],
+  ]) {
+    const c = decoded.cases[i], s = c.errors[0].stored;
+    assert.deepEqual([s.family, s.stage, s.check, s.kind, s.stored_line, s.body_classes], [family, stage, check, kind, line, null]);
+    assert.equal(c.file, sourceFiles[[16, 18, 31, 21][i] - 1]);assert.equal(c.result, 1);assert.equal(c.errors[0].ordinal, 1);
+  }
+  const line = await typedCLI(f), p = JSON.parse(line.slice(diagnosticPrefix.length)), s = p.case_observations;
+  assert.equal(p.reporter_text, null);assert.equal(s.version, 1);assert.equal(s.source_map, 2);assert.equal(s.completion, 1);
+  assert.deepEqual(s.counts, [89, 89, 89, 0, 81, 7, 1, 0, 0, 0]);assert.deepEqual(p.terminal, { code: 7, signal: null });
+  assert.equal(s.cases.length, 8);assert.equal(s.omitted[0], 0);assert.deepEqual(s.cases.map(c => c[0]), [16, 18, 31, 21, 10, 10, 4, 12]);
+  for (const [i, c] of s.cases.entries()) {
+    assert.equal(c.length, 10);assert.equal(c[7], 1);assert.ok(c[9]);assert.deepEqual(c.slice(1, 3), decoded.cases[i].declaration);
+    assert.deepEqual(c.slice(5, 7), [decoded.cases[i].begin, decoded.cases[i].end]);
+    assert.equal(c[9][0], i < 6 ? 2 : 3);
+  }
+  assert.deepEqual(s.cases.slice(0, 4).map(c => c[9]), [
+    [2, 1, 10, 6, 6, null, null, null, null], [2, 1, 11, 4, 16, null, null, null, null],
+    [2, 1, 12, 5, null, 4, null, 295, null], [2, 1, 13, 4, null, 5, null, 297, null],
+  ]);
+  assert.equal(s.cases[2][4], 3);assert.equal(s.cases[3][8], 2);assert.equal(decoded.cases[3].errors.length, 2);
+  assert.deepEqual(s.cases[4].slice(0, 3), s.cases[5].slice(0, 3));assert.notEqual(s.cases[4][3], s.cases[5][3]);
+  assert.equal(s.cases[4][9][7], 254);assert.equal(s.cases[5][9][7], 345);
+  assert.deepEqual(s.cases[6][9], [3, 2, 14, false, false, 12]);assert.deepEqual(s.cases[7][9], [3, 1, 18, false, false, 12]);
+  assert.ok(Buffer.byteLength(line) <= 1024);assert.ok(!line.includes('private') && !line.includes('capture-canary'));
+  assert.deepEqual(await fs.readFile(f.typedPath), f.typedBytes);assert.deepEqual(await fs.readFile(f.path), before);
+  assert.equal((await fs.lstat(f.typedPath)).mode & 0o7777, 0o600);assert.deepEqual((await fs.readdir(f.control)).sort(), ['launch.stdout']);
+  t.diagnostic('Actual mixed eight-case CLI line UTF8 bytes: ' + Buffer.byteLength(line));
+});
+test('C91 actual CLI new closed-field collisions reject every typed fact without legacy fallback', async t => {
+  const f = await typedLog(t, { mixed: true }), control = await typedCLI(f);
+  assert.equal(JSON.parse(control.slice(diagnosticPrefix.length)).case_observations.cases.length, 8);
+  const decoded = decodeReport(f.encoded);
+  for (let i = 0; i < 4; i++) assert.ok(decoded.cases[i].errors[0].stored.stage);
+  assert.equal(await typedCLI(f, { env: { ...process.env, SYNTHETIC_TOKEN: 'capture-canary' } }), control);
+  for (const token of ['stage', 'check', 'kind', 'family', 'stored_line', 'fresh', 'handshake', 'task-2', 'paused-12',
+    'release and exact stale-history rejection', 'one-shot private rotation after audited completion']) await t.test(token, async () => {
+    let legacyReads = 0;const io = { ...fs, open: (p, flags) => { if (p === f.path) legacyReads++;return fs.open(p, flags); } };
+    assert.equal(await typedCLI(f, { io, env: { ...process.env, SYNTHETIC_TOKEN: token } }), diagnosticFallback);assert.equal(legacyReads, 0);
+  });
+  assert.deepEqual(await fs.readFile(f.typedPath), f.typedBytes);
+});
 test('C89 I2 fixed reader accepts private and framework output modes and never reads other artifacts', async t => {
   for (const outputMode of [0o700, 0o755]) await t.test(outputMode.toString(8), async t => {
     const f = await typedLog(t, { outputMode }); let opens = 0, closes = 0, closed = false;
@@ -270,7 +326,7 @@ test('C89 I2 whole typed privacy rejection cannot fall back to valid legacy text
     assert.equal(await typedCLI(f, { redactor }), diagnosticFallback);
   });
   await t.test('explicit producer privacy rejection marker', async () => {
-    await privateWrite(f.typedPath, JSON.stringify({ version: 1, source_map: 1, unavailable: 9 }) + '\n');
+    await privateWrite(f.typedPath, JSON.stringify({ version: 1, source_map: 2, unavailable: 9 }) + '\n');
     assert.equal(await typedCLI(f), diagnosticFallback);
     await privateWrite(f.typedPath, f.typedBytes);
   });
@@ -286,6 +342,8 @@ test('C89 I2 missing and unsupported nonprivacy typed transport keeps strict leg
     missing: async f => fs.unlink(f.typedPath),
     json: async f => privateWrite(f.typedPath, '{'),
     version: async f => { const v = clone(f.encoded); v.version++; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    oldmap: async f => { const v = clone(f.encoded); v.source_map = 1; await privateWrite(f.typedPath, JSON.stringify(v)); },
+    unknownmap: async f => { const v = clone(f.encoded); v.source_map = 3; await privateWrite(f.typedPath, JSON.stringify(v)); },
     enum: async f => { const v = clone(f.encoded); v.cases[0][7] = 99; await privateWrite(f.typedPath, JSON.stringify(v)); },
     counts: async f => { const v = clone(f.encoded); v.counts[5]++; await privateWrite(f.typedPath, JSON.stringify(v)); },
     ordinals: async f => { const v = clone(f.encoded); v.cases[1][5] = v.cases[0][5]; await privateWrite(f.typedPath, JSON.stringify(v)); },

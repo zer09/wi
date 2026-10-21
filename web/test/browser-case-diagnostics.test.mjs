@@ -6,6 +6,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import ts from 'typescript';
 import Reporter, { sourceFiles, joinedScenarios, families, livePhases, contentPhases, cleanupSteps, annotationType, reportName,
   storedObservation, appendMeasurementAnnotation, encodeReport, decodeReport, publicSummary, writeReport, kinds, matchers, bodyClasses } from '../test-support/browser-case-diagnostics.mjs';
@@ -25,6 +26,12 @@ function packet(family=1,checkpoint='first_dom') {
 }
 const envelope={version:1,scope:'invocation observations only',consumed:true,first_failure:'child',
   child:{spawned:true,closed:true,error_observed:false,code:1,signal:null},terminal:{code:1,signal:null}};
+const c91Wrappers=[
+  [16,10,'Rich parity failed: stage=fresh; check=handshake',{stage:'fresh',check:'handshake'},[10,6,6,null,null,null,null,null,null]],
+  [18,11,'Skill fidelity failed: stage=task-2; check=paused-12',{stage:'task-2',check:'paused-12'},[11,4,16,null,null,null,null,null,null]],
+  [31,12,'Stale history failed: release and exact stale-history rejection; kind=TimeoutError line=295; capture=private-tail',{stage:'release and exact stale-history rejection',kind:'TimeoutError',stored_line:295},[12,5,null,4,null,295,null,null,null]],
+  [21,13,'Account mismatch failed: one-shot private rotation after audited completion; kind=ProtocolError line=297; capture=private-tail',{stage:'one-shot private rotation after audited completion',kind:'ProtocolError',stored_line:297},[13,4,null,5,null,297,null,null,null]],
+];
 function emit(tests,results,registered=tests.length) {
   const r=new Reporter();r.onBegin({projects:[]},{allTests:()=>Array.from({length:registered},(_,i)=>tests[i]??declaration(1,'registered '+i))});
   for(let i=0;i<tests.length;i++){r.onTestBegin(tests[i],results[i]);r.onTestEnd(tests[i],results[i]);}
@@ -64,7 +71,7 @@ test('C89 maps bind the actual 34-source inventory, legacy ID order and six join
   assert.deepEqual(livePhases,phases);assert.deepEqual(contentPhases,[...actualContentPhases,'outside_path']);
 });
 test('C89 closed family vocabularies bind literal and template stage/check assignments in all nine actual sources',async t=>{
-  for(const family of families)await t.test(sourceFiles[family.source-1],async()=>{
+  for(const family of families.slice(0,9))await t.test(sourceFiles[family.source-1],async()=>{
     const text=await fs.readFile(join(ROOT,sourceFiles[family.source-1]),'utf8');assert.ok(text.includes(family.prefix));
     const ast=ts.createSourceFile('source.mjs',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
     const stages=new Set(),checks=new Set();
@@ -88,6 +95,76 @@ test('C89 closed family vocabularies bind literal and template stage/check assig
     for(const s of checks)if(s!=='unknown')assert.ok(family.checks.includes(s),'missing check: '+s);
     for(const s of family.stages)assert.ok(stages.has(s)||text.includes("fatal(label, '"+s+"'"),'stale stage: '+s);
     for(const s of family.checks)assert.ok(checks.has(s)||text.includes("'"+s+"'"),'stale check: '+s);
+  });
+});
+test('C91 appends four families without changing the reviewed source and family dictionaries',()=>{
+  const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+  assert.equal(digest(sourceFiles),'9bdf81ed7a07b1de20ff3f7d5e96efa31f38361aebc8f03b40eeb8d1c6ca32f1');
+  assert.equal(digest(families.slice(0,9)),'a7196db54e5b197a1ac00bcc8a0aa17cfcbca5e16573636876220209ae77b206');
+  assert.equal(digest(kinds),'ac68313482d32433eacf8cebfebc39811bfc6baf7535e10f17cdcd42df3a9bea');
+  assert.equal(digest(matchers),'fd14bd2a654aee81e48026c3bde30b2b33204f5a30f4318393441e2ac272ab2d');
+  assert.equal(digest(bodyClasses),'f106079606a00e2e425a80523440ac761f3de37f5cbf5b2ee3715a86ad3b2766');
+  assert.equal(families.length,13);assert.deepEqual(families.slice(9).map(f=>f.source),[16,18,31,21]);
+  const encoded=report(emit([declaration()],[result()]));assert.equal(encoded.version,1);assert.equal(encoded.source_map,2);
+  assert.equal(reportName,'case-observations.v1.json');assert.equal(publicSummary(encoded,envelope,quiet).value.case_observations.source_map,2);
+});
+test('C91 actual constructors and exact closed vocabularies bind all four source grammars and finite skill loops',async t=>{
+  for(const family of families.slice(9))await t.test(family.prefix,async()=>{
+    const text=await fs.readFile(join(ROOT,sourceFiles[family.source-1]),'utf8');
+    const ast=ts.createSourceFile('source.mjs',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+    const stages=new Set(),checks=new Set(),constructors=[],loops=[],dynamic=[];
+    const compact=n=>n.getText(ast).replace(/\s+/g,'');
+    const tasks=[0,1],gates=tasks.flatMap(task=>Array.from({length:6},(_,i)=>task*6+i+1));
+    const forms=new Map([
+      ['`task-${task+1}`',tasks.map(task=>'task-'+(task+1))],
+      ["index===1?'changed-observer':'deleted-observer'",['changed-observer','deleted-observer']],
+      ['`paused-${task*6+1}`',tasks.map(task=>'paused-'+(task*6+1))],
+      ['`drive-${gate}`',gates.map(gate=>'drive-'+gate)],
+      ['gate<task*6+6?`paused-${gate+1}`:`finished-${task+1}`',tasks.flatMap(task=>Array.from({length:6},(_,i)=>{
+        const gate=task*6+i+1;return gate<task*6+6?'paused-'+(gate+1):'finished-'+(task+1);
+      }))],
+    ]);
+    function take(node,set){
+      if(ts.isStringLiteral(node)){set.add(node.text);return;}
+      assert.equal(family.source,18,'Only the inventoried skill forms are dynamic.');
+      const form=compact(node);assert.ok(forms.has(form),'Unexpected dynamic label: '+form);dynamic.push(form);
+      for(const value of forms.get(form))set.add(value);
+    }
+    function visit(n){
+      if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.initializer){
+        if(n.name.text==='stage')take(n.initializer,stages);if(n.name.text==='check')take(n.initializer,checks);
+      }
+      if(ts.isBinaryExpression(n)&&n.operatorToken.kind===ts.SyntaxKind.EqualsToken&&ts.isIdentifier(n.left)){
+        if(n.left.text==='stage')take(n.right,stages);if(n.left.text==='check')take(n.right,checks);
+      }
+      if(ts.isNewExpression(n)&&n.expression.getText(ast)==='Error'&&ts.isTemplateExpression(n.arguments?.[0])&&n.arguments[0].head.text.startsWith(family.prefix))constructors.push(n.arguments[0]);
+      if(ts.isForOfStatement(n)&&['consttask','constindex'].includes(compact(n.initializer)))loops.push(compact(n.initializer)+'of'+compact(n.expression));
+      if(ts.isForStatement(n)&&n.initializer?.getText(ast).startsWith('let gate'))loops.push([n.initializer,n.condition,n.incrementor].map(compact).join(';'));
+      ts.forEachChild(n,visit);
+    }
+    visit(ast);assert.equal(constructors.length,1);
+    const constructor=constructors[0];
+    if(family.source===16){
+      assert.equal(compact(constructor),"`Richparityfailed:stage=${stages.includes(stage)?stage:'unknown'};check=${checks.includes(check)?check:'unknown'}`");
+      for(const [name,values]of [['stages',family.stages],['checks',family.checks]]){
+        const variable=ast.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(n=>n.name.getText(ast)===name);
+        assert.ok(ts.isArrayLiteralExpression(variable?.initializer));assert.deepEqual(variable.initializer.elements.map(n=>{assert.ok(ts.isStringLiteral(n));return n.text;}),values);
+      }
+      for(const value of stages)assert.ok(family.stages.includes(value));for(const value of checks)assert.ok(family.checks.includes(value));
+    }else{
+      assert.deepEqual([...stages].sort(),[...family.stages].sort());assert.deepEqual([...checks].sort(),[...family.checks].sort());
+      if(family.source===18){
+        assert.equal(compact(constructor),'`Skillfidelityfailed:stage=${stage};check=${check}`');
+        assert.deepEqual(dynamic.sort(),[...forms.keys()].sort());
+        assert.deepEqual(loops,['consttaskof[0,1]','letgate=task*6+1;gate<=task*6+6;gate++','constindexof[1,2]','consttaskof[0,1]']);
+      }else{
+        assert.deepEqual(constructor.templateSpans.map(s=>s.expression.getText(ast)),['stage','kind','line','JSON.stringify(observed)','JSON.stringify(assetEvidence)','JSON.stringify(faults)','JSON.stringify(posts)','JSON.stringify(displayReads)']);
+        assert.deepEqual(constructor.templateSpans.map(s=>s.literal.text),['; kind=',' line=','; capture=','; assets=','; faults=','; posts=','; display=','']);
+        assert.equal(constructor.head.text,family.prefix+' ');
+        assert.match(text,/\['Error', 'TypeError', 'SyntaxError', 'TimeoutError', 'ProtocolError'\]\.includes\(cause\?\.name\)/);
+        assert.ok(text.includes("?.[1] ?? 'none'"));
+      }
+    }
   });
 });
 test('C89 source guards bind matcher, error-kind and body-rejection vocabularies without copying message tails',async()=>{
@@ -161,6 +238,111 @@ test('C90 installed serializer carries all nine ordinary Error wrappers through 
     const row=publicSummary(report(r),envelope,quiet).value.case_observations.cases[1];
     assert.deepEqual(row.slice(0,4),[sourceID,61,4,sourceID===10?3:null]);assert.deepEqual(row[9].slice(0,3),[2,2,i+1]);assert.equal(row[7],2);assert.equal(row[9][7],expected.stored_line??null);
     assert.deepEqual(Object.getOwnPropertyDescriptors(error),before);
+  });
+});
+test('C91 installed serializer retains four actual wrapper facts with exact error, result, source and public tag2 associations',async t=>{
+  for(const [sourceID,family,message,expected,tuple]of c91Wrappers)await t.test('family '+family,()=>{
+    const q=declaration(sourceID,'synthetic',61,4),error=Object.freeze({...serializeError(new Error(message)),location:Object.freeze({...q.location,line:222,column:8})});
+    assert.equal(error.message,'Error: '+message);const before=Object.getOwnPropertyDescriptors(error);
+    const r=emit([q,q],[result({errors:[error]}),result({errors:[serializeError(new Error('private first')),error]})]);
+    const encoded=report(r),c=decodeReport(encoded,quiet).cases[1];
+    assert.deepEqual(c.errors[1].stored,{family,stage:null,check:null,kind:null,matcher:null,stored_line:null,presentation:null,entry:null,body_classes:null,...expected});
+    assert.deepEqual(encoded.cases[1][11][1][2],tuple);assert.equal(c.file,sourceFiles[sourceID-1]);assert.deepEqual(c.declaration,[61,4]);
+    assert.equal(c.status,'failed');assert.equal(c.error_count,2);assert.deepEqual([c.begin,c.end,c.result,c.errors[1].ordinal],[2,2,2,2]);assert.deepEqual(c.errors[1].location,[222,8]);
+    const row=publicSummary(encoded,envelope,quiet).value.case_observations.cases[1];
+    assert.deepEqual(row.slice(0,4),[sourceID,61,4,null]);assert.equal(row[7],2);assert.deepEqual(row[9],[2,2,...tuple.slice(0,6),null]);
+    assert.deepEqual(Object.getOwnPropertyDescriptors(error),before);assert.ok(!JSON.stringify(encoded).includes('private-tail'));
+  });
+});
+test('C91 every new closed stage, check, kind and bounded line survives the actual serializer and codec',async t=>{
+  for(const [sourceID,family]of c91Wrappers){
+    const f=families[family-1],q=declaration(sourceID);
+    for(const [field,values]of [['stage',f.stages],['check',f.checks],['kind',family>=12?kinds:[]]])for(const value of values)await t.test(family+' '+field+' '+value,()=>{
+      const stage=field==='stage'?value:f.stages[0],check=field==='check'?value:f.checks[0],kind=field==='kind'?value:'Error';
+      const message=family<12?`${f.prefix} stage=${stage}; check=${check}`:`${f.prefix} ${stage}; kind=${kind} line=1; capture=private-tail`;
+      const encoded=report(emit([q],[result({errors:[serializeError(new Error(message))]})])),c=decodeReport(encoded,quiet).cases[0];
+      assert.equal(c.errors[0].stored[field],value);assert.equal(c.errors[0].stored.family,family);assert.equal(c.errors[0].stored.body_classes,null);
+      assert.equal(publicSummary(encoded,envelope,quiet).value.case_observations.cases[0][9][0],2);
+    });
+    if(family>=12)for(const [line,expected]of [['1',1],['1000000',1_000_000],['1000001',null],['9999999',null],['none',null]])await t.test(family+' line '+line,()=>{
+      const message=`${f.prefix} startup; kind=Error line=${line}; capture=not JSON`;
+      const c=emit([q],[result({errors:[serializeError(new Error(message))]})]).cases[0];assert.equal(c.errors[0].stored.stored_line,expected);
+    });
+  }
+});
+test('C91 strict new wrappers reject malformed envelopes and retain only known partial labels',async t=>{
+  for(const [sourceID,family,message]of c91Wrappers)await t.test('family '+family,async t=>{
+    const file=sourceFiles[sourceID-1],q=declaration(sourceID),f=families[family-1];
+    for(const [i,value]of [null,undefined,42,{},new String(message),'Error: '+message,'private '+message,'\n'+message,message.replace(f.prefix,'Unsupported wrapper:')].entries())await t.test('bare negative '+i,()=>assert.equal(storedObservation(file,value),null));
+    assert.equal(storedObservation('unknown source',message),null);assert.equal(storedObservation(sourceFiles[0],message),null);
+    for(const [i,value]of [message,'TypeError: '+message,'Error: Error: '+message,' Error: '+message,'Error: private '+message,'Error:\t'+message].entries())await t.test('callback negative '+i,()=>{
+      const c=emit([q],[result({errors:[{message:value}]})]).cases[0];assert.equal(c.errors[0].stored,null);assert.equal(c.errors[0].reason,'unsupported_error');
+    });
+    if(family<12){
+      for(const tail of ['; private-tail','\nprivate-tail','\rprivate-tail'])assert.equal(storedObservation(file,message+tail),null);
+      const partial=storedObservation(file,`${f.prefix} stage=foreign; check=foreign`);assert.equal(partial.stage,null);assert.equal(partial.check,null);
+    }else{
+      for(const header of ['startup; kind=Error line=0; capture=','startup; kind=Error line=-1; capture=','startup; kind=Error line=01; capture=','startup; kind=Error line=1.5; capture=','startup; kind=Error line=10000000; capture=','startup; kind=Error line=unknown; capture=','startup; kind=Error line=1; assets=','startup; kind=Error; line=1; capture=','startup\n; kind=Error line=1; capture='])assert.equal(storedObservation(file,f.prefix+' '+header),null);
+      const partial=storedObservation(file,`${f.prefix} foreign; kind=foreign line=none; capture=`);assert.equal(partial.stage,null);assert.equal(partial.kind,null);assert.equal(partial.stored_line,null);
+      const original=storedObservation(file,message);
+      for(const tail of ['{not JSON','{"task":{"body_rejection_class":"target_closed"}}; delay={}; disconnectedView={}','\nError: private\r\n; stage=startup; kind=Error line=1; capture=private']){
+        assert.deepEqual(storedObservation(file,message.slice(0,message.indexOf('capture=')+8)+tail),original);
+      }
+    }
+    const text=await fs.readFile(join(ROOT,file),'utf8'),ast=ts.createSourceFile('source.mjs',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),cleanup=[];
+    function visit(n){if(ts.isNewExpression(n)&&n.expression.getText(ast)==='Error'&&ts.isStringLiteral(n.arguments?.[0]))cleanup.push(n.arguments[0].text);ts.forEachChild(n,visit);}visit(ast);
+    assert.ok(cleanup.length>=2);for(const value of cleanup){assert.equal(storedObservation(file,value),null);assert.equal(emit([q],[result({errors:[serializeError(new Error(value))]})]).cases[0].errors[0].stored,null);}
+  });
+});
+test('C91 new private tuples reject old typed maps and malformed dictionaries before public omission',async t=>{
+  for(const [sourceID,family,message]of c91Wrappers)await t.test('family '+family,async t=>{
+    const encoded=report(emit([declaration(sourceID)],[result({errors:[serializeError(new Error(message))]})]));
+    assert.equal(decodeReport(encoded,quiet).cases[0].errors[0].stored.family,family);
+    const mutations={oldmap:v=>v.source_map=1,unknownmap:v=>v.source_map=3,schema:v=>v.version=2,unknownfamily:v=>v.cases[0][11][0][2][0]=14,
+      source:v=>v.cases[0][0]=3,stage:v=>v.cases[0][11][0][2][1]=999,check:v=>v.cases[0][11][0][2][2]=999,kind:v=>v.cases[0][11][0][2][3]=7,line:v=>v.cases[0][11][0][2][5]=1_000_001};
+    for(const [name,mutate]of Object.entries(mutations))await t.test(name,()=>{
+      const bad=clone(encoded);mutate(bad);assert.throws(()=>decodeReport(bad,quiet),{code:'schema_unavailable'});
+      assert.deepEqual(publicSummary(bad,envelope,quiet,1),{value:null,reason:'schema_unavailable'});
+    });
+    for(const map of [1,3])assert.throws(()=>decodeReport({version:1,source_map:map,unavailable:9},quiet),{code:'schema_unavailable'});
+  });
+});
+test('C91 new fields collide before passed-case, ninth-error, retained-case and public omission',async t=>{
+  for(const [sourceID,family,message,expected]of c91Wrappers)await t.test('family '+family,async t=>{
+    const q=declaration(sourceID),error=serializeError(new Error(message)),positive=emit([q],[result({errors:[error]})]),encoded=report(positive);
+    assert.equal(positive.cases[0].errors[0].stored.stage,expected.stage);
+    const tokens=['stage','kind','family',expected.stage];if(expected.check)tokens.push('check',expected.check);
+    for(const token of tokens)await t.test(token,()=>{
+      const redact=preparationRedactor({SYNTHETIC_TOKEN:token});assert.throws(()=>decodeReport(encoded,redact),{code:'privacy_collision'});
+      assert.deepEqual(publicSummary(encoded,envelope,redact,1),{value:null,reason:'privacy_collision'});
+      for(const status of ['passed','skipped']){
+        const x=result({status,errors:[error]}),r=new Reporter();r.redact=redact;r.onBegin({projects:[]},{allTests:()=>[q]});r.onTestBegin(q,x);r.onTestEnd(q,x);assert.equal(r.collision,true);
+      }
+    });
+    for(const mode of ['ninth','omitted'])await t.test(mode,()=>{
+      const count=mode==='omitted'?257:1,tests=Array.from({length:count},(_,i)=>declaration(sourceID,'synthetic '+i,100+i)),results=tests.map((_,i)=>result({errors:i===count-1?[...Array.from({length:mode==='ninth'?8:0},()=>serializeError(new Error('private first'))),error]:[]}));
+      const control=emit(tests,results);assert.equal(control.collision,false);assert.equal(control.omitted[mode==='ninth'?1:0],1);
+      const r=new Reporter();r.redact=preparationRedactor({SYNTHETIC_TOKEN:expected.stage});r.onBegin({projects:[]},{allTests:()=>tests});for(let i=0;i<count;i++){r.onTestBegin(tests[i],results[i]);r.onTestEnd(tests[i],results[i]);}assert.equal(r.collision,true);
+    });
+    if(family>=12){
+      const redact=preparationRedactor({SYNTHETIC_TOKEN:'capture-canary'}),privateError=serializeError(new Error(message+'capture-canary'));
+      const r=emit([q],[result({errors:[privateError]})]);assert.deepEqual(r.cases[0].errors[0].stored,positive.cases[0].errors[0].stored);
+      assert.equal(publicSummary(report(r),envelope,redact).reason,null);assert.ok(!JSON.stringify(report(r)).includes('capture-canary'));
+    }
+  });
+});
+test('C91 new-family collisions publish only the map2 rejection marker across filtering and retention',async t=>{
+  for(const [sourceID,family,message,expected]of c91Wrappers)for(const mode of ['retained','passed','ninth','omitted'])await t.test(family+' '+mode,async t=>{
+    const parent=await temporary(t),output=join(parent,'playwright-output'),count=mode==='omitted'?257:1;
+    const tests=Array.from({length:count},(_,i)=>declaration(sourceID,'synthetic '+i,100+i));
+    const results=tests.map((_,i)=>result({status:mode==='passed'?'passed':'failed',errors:i===count-1?[...Array.from({length:mode==='ninth'?8:0},()=>serializeError(new Error('private first'))),serializeError(new Error(message))]:[]}));
+    const positive=emit([tests.at(-1)],[result({errors:[results.at(-1).errors.at(-1)]})]);assert.equal(positive.cases[0].errors[0].stored.stage,expected.stage);
+    const r=new Reporter();r.redact=preparationRedactor({SYNTHETIC_TOKEN:expected.stage});r.onBegin({projects:[{outputDir:output}]},{allTests:()=>tests});
+    for(let i=0;i<count;i++){r.onTestBegin(tests[i],results[i]);r.onTestEnd(tests[i],results[i]);}assert.equal(r.collision,true);
+    await r.onEnd({status:'failed'});const raw=await fs.readFile(join(output,reportName),'utf8');
+    assert.equal(raw,'{"version":1,"source_map":2,"unavailable":9}\n');assert.deepEqual(await fs.readdir(output),[reportName]);
+    assert.equal((await fs.lstat(join(output,reportName))).mode&0o7777,0o600);
+    assert.throws(()=>decodeReport(JSON.parse(raw),quiet),{code:'privacy_collision'});assert.deepEqual(publicSummary(JSON.parse(raw),envelope,quiet),{value:null,reason:'privacy_collision'});
   });
 });
 test('C90 callback envelopes reject alternate names, nested prefixes, preludes and malformed inputs',async t=>{
@@ -334,7 +516,7 @@ test('C89 byte boundaries 1024/1025/1026 and overflow omit only whole tuples wit
 });
 test('C89 private codec rejects unknown enums, malformed tuples, duplicate ordinals, bounds and wrong family/source',async t=>{
   const {encoded}=realistic();
-  const mutations=[v=>v.extra=1,v=>v.version=2,v=>v.source_map=2,v=>v.run=5,v=>v.completion=3,v=>v.counts[0]=-1,v=>v.counts.push(0),v=>v.omitted[0]=1.5,
+  const mutations=[v=>v.extra=1,v=>v.version=2,v=>v.source_map=1,v=>v.source_map=3,v=>v.run=5,v=>v.completion=3,v=>v.counts[0]=-1,v=>v.counts.push(0),v=>v.omitted[0]=1.5,
     v=>v.cases[0][0]=35,v=>v.cases[0][3]=7,v=>v.cases[0][7]=6,v=>v.cases[0][1]=0,v=>v.cases[0][8]=-1,v=>v.cases[0][9]=Infinity,
     v=>v.cases[0][11][0][0]=2,v=>v.cases[0][11][0][2][1]=999,v=>v.cases[0][11][0][2][0]=1,v=>v.cases[0][5]=1000,
     v=>v.cases[1][5]=v.cases[0][5],v=>v.cases[0][6]=1000,v=>v.cases[3][12][1]=999,v=>v.cases[3][12][2]=0];
@@ -465,7 +647,7 @@ try{
   const raw=await fs.readFile(join(output,reportName),'utf8'),encoded=JSON.parse(raw);
   const envelope={version:1,terminal:{code:1,signal:null}};
   if(!ordinary&&!unavailable){
-    assert.equal(raw,'{"version":1,"source_map":1,"unavailable":9}\\n');
+    assert.equal(raw,'{"version":1,"source_map":2,"unavailable":9}\\n');
     assert.throws(()=>decodeReport(encoded),{code:'privacy_collision'});
     for(const limit of [1024,1])assert.deepEqual(publicSummary(encoded,envelope,undefined,limit),{value:null,reason:'privacy_collision'});
   }else{
@@ -683,7 +865,7 @@ test('C89 F4 before-cutoff collisions reject all facts including an omitted case
     r.onTestEnd(tests.at(-1),results.at(-1));assert.equal(r.collision,true);
     const pending=r.onEnd({get status(){assert.fail('collision must not inspect terminal status');}});await w.reached;
     w.release();assert.equal(await pending,undefined);
-    const raw=await fs.readFile(join(w.output,reportName),'utf8');assert.equal(raw,'{"version":1,"source_map":1,"unavailable":9}\n');assert.deepEqual(w.writes,[raw]);
+    const raw=await fs.readFile(join(w.output,reportName),'utf8');assert.equal(raw,'{"version":1,"source_map":2,"unavailable":9}\n');assert.deepEqual(w.writes,[raw]);
     assert.throws(()=>w.api.decodeReport(JSON.parse(raw)),{code:'privacy_collision'});
     assert.deepEqual(w.api.publicSummary(JSON.parse(raw),envelope),{value:null,reason:'privacy_collision'});
   });
@@ -718,6 +900,7 @@ import {compileFunction} from 'node:vm';
 import {appendMeasurementAnnotation} from ${JSON.stringify(pathToFileURL(reporter).href)};
 compileFunction(\`test('synthetic strict',async()=>{test.fail();throw new Error('Client handoff failed: stage=create; check=receipt');});\`,['test'],{filename:${JSON.stringify(join(ROOT,sourceFiles[2]))},lineOffset:20})(test);
 compileFunction(\`test('synthetic capture',async()=>{test.fail();throw new Error('Selection epoch failed: startup; kind=ProtocolError line=268; capture={"task":{"body_rejection_class":"target_closed"}}; delay={}');});\`,['test'],{filename:${JSON.stringify(join(ROOT,sourceFiles[29]))},lineOffset:30})(test);
+${c91Wrappers.map(([sourceID,family,message])=>`compileFunction(${JSON.stringify(`test('synthetic family ${family}',async()=>{test.fail();throw new Error(${JSON.stringify(message)});});`)},['test'],{filename:${JSON.stringify(join(ROOT,sourceFiles[sourceID-1]))},lineOffset:40})(test);`).join('\n')}
 compileFunction(\`test('synthetic live',async({},info)=>{append(()=>({info,family:1,packet:Object.freeze({first_operation:'first_dom'}),body_success:false,cleanup:false,steps:[]}));expect.soft(1).toBe(2);expect(3).toBe(4);});\`,['test','expect','append'],{filename:${JSON.stringify(join(ROOT,sourceFiles[11]))},lineOffset:10})(test,expect,appendMeasurementAnnotation);
 test('synthetic local timeout',async()=>{test.setTimeout(1000);await new Promise(()=>{});});
 test('synthetic global timeout',async()=>{test.setTimeout(20000);await new Promise(()=>{});});
@@ -732,7 +915,7 @@ test('synthetic unexecuted',async()=>{});
   const encoded=JSON.parse(await fs.readFile(join(output,reportName),'utf8'));
   t.diagnostic(JSON.stringify({synthetic_transport:true,completion:encoded.completion,counts:encoded.counts,omitted:encoded.omitted,statuses:encoded.cases.map(c=>c[7])}));
   const value=decodeReport(encoded,quiet);
-  assert.equal(value.run,'timedout');assert.equal(value.counts[0],7);assert.ok(value.counts[2]>=5&&value.counts[2]<=7);
+  assert.equal(value.run,'timedout');assert.equal(value.counts[0],11);assert.ok(value.counts[2]>=9&&value.counts[2]<=11);
   t.diagnostic(JSON.stringify({synthetic_node_only:true,run:value.run,completion:value.completion,counts:value.counts,statuses:value.cases.map(c=>c.status),workers:value.cases.map(c=>c.worker)}));
   assert.ok(value.cases.some(c=>c.status==='timedOut'));assert.ok(value.cases.some(c=>c.worker===null&&c.status==='skipped'));
   const measured=value.cases.find(c=>c.file===sourceFiles[11]);assert.equal(measured.measurement.checkpoint,'first_dom');assert.equal(measured.error_count,2);
@@ -741,6 +924,7 @@ test('synthetic unexecuted',async()=>{});
   for(const [sourceID,expected,tuple]of [
     [3,{family:5,stage:'create',check:'receipt',kind:null,matcher:null,stored_line:null,presentation:null,entry:null,body_classes:null},[2,1,5,2,2,null,null,null,null]],
     [30,{family:4,stage:'startup',check:null,kind:'ProtocolError',matcher:null,stored_line:268,presentation:null,entry:null,body_classes:['target_closed']},[2,1,4,1,null,5,null,268,2]],
+    ...c91Wrappers.map(([sourceID,family,,expected,tuple])=>[sourceID,{family,stage:null,check:null,kind:null,matcher:null,stored_line:null,presentation:null,entry:null,body_classes:null,...expected},[2,1,...tuple.slice(0,6),null]]),
   ]){
     const c=value.cases.find(c=>c.file===sourceFiles[sourceID-1]);assert.ok(c);assert.equal(c.status,'failed');
     assert.deepEqual(c.errors[0].stored,expected);assert.equal(c.error_count,1);assert.equal(c.errors[0].ordinal,1);assert.equal(c.result,1);

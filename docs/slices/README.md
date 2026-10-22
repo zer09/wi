@@ -1,6 +1,6 @@
 # Current Wi slice register
 
-Updated **October13,2026** after reviewed C50 evidence reconciliation. Accepted runtime baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**, PR #9. Native Linux/macOS only; see [platform policy](../PLATFORM_SUPPORT.md). Historical Windows results are not current support.
+Accepted runtime baseline **76bb32fd04fd4737c0efcceaabc7d10387453147**, PR #9. Native Linux/macOS only; see [platform policy](../PLATFORM_SUPPORT.md). Historical Windows results are not current support.
 
 | Slice | Status | Evidence or assignment |
 |---|---|---|
@@ -12,9 +12,11 @@ Updated **October13,2026** after reviewed C50 evidence reconciliation. Accepted 
 | V1-A execution owner | Accepted/merged PR8,16d623a | [Evidence](v1a/VERIFICATION.md) |
 | V1-B HTTP service | Accepted for retained scope/merged PR9,76bb32f | [Original evidence](v1b/VERIFICATION.md), [platform follow-up](v1b/PLATFORM_FOLLOWUP.md) |
 | G1 original g1.0 | Unaccepted implementation checkpoint8f45dda; rejected history requirements superseded | [Checkpoint](g1/VERIFICATION.md), [design packet](g1/DESIGN_REVIEW.md) |
-| **G1 replacement g1.1** | **Local implementation and scoped C43-C50 evidence;40 PARTIAL/0 PASS/0 NOT_RUN, accepted=false** | [Current index](g1/README.md), [contract](g1/CONTRACT.md), [matrix](g1/MATRIX.md), [C49 evidence](g1/C3B_SKILL_SOURCE_FIDELITY.md), [C50 evidence](g1/C3B_INTERRUPTED_DISPLAY_PARITY.md), [continuation handoff](../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) |
+| **G1 replacement g1.1** | **Committed but unaccepted runtime;40 PARTIAL/0 PASS/0 NOT_RUN, accepted=false, inventory OPEN** | [Current index](g1/README.md), [contract](g1/CONTRACT.md), [matrix](g1/MATRIX.md), [C93 local and hosted verification](g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) |
 
-The203-path g1.0 checkpoint is historical partial work, not an empty planning-only PR. The later g1.1 design commits changed documentation; subsequent local implementation adds schema3/display HTTP-SSE and the thin browser, with explicit raw-runtime/Window B retirements. C49 adds complete saved-skill source-change/deletion browser evidence. Current C50 adds exact same-H24 interrupted DTO/DOM parity in two independent fresh connected browsers after owned producer death; one15.9s case and both scoped reviews PASS. No original report or failed role has been relabelled PASS. Upgrade/reopen, expanded barriers/measurements, final gates/CI/complete-diff reviews and owner acceptance remain open. C50 authorizes no next increment.
+The203-path g1.0 checkpoint is historical partial work, not an empty planning-only PR. The later committed G1.1 runtime adds schema3/display HTTP-SSE and the thin browser, with explicit raw-runtime/Window B retirements. C93 records local and successful hosted verification scoped to source `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits retain a separate cutoff and do not inherit exact-head CI results. Source completion alone proves neither CI nor acceptance. Final assertion/report adequacy, complete original-master/checkpoint/current review coverage and owner acceptance remain open; C15/active1 owner dispositions remain unchanged.
+
+Historical [C49 saved-skill fidelity](g1/C3B_SKILL_SOURCE_FIDELITY.md), [C50 interrupted parity](g1/C3B_INTERRUPTED_DISPLAY_PARITY.md) and the October13 [handoff](../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) retain their recorded cutoffs. They are not current next-task authority. No original report or failed role is relabelled PASS, and this register authorizes no execution or Git transition.
 
 ## V1-B/platform closure
 

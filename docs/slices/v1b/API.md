@@ -23,7 +23,7 @@ are required; only `account` accepts null. There are no implicit config defaults
 {
   "schema_version": 1,
   "listen": "127.0.0.1:8787",
-  "public_origin": "https://wi.example.test",
+  "public_origin": "http://127.0.0.1:8787",
   "data_root": "/absolute/wi-data",
   "client_token_file": "/absolute/private/wi-owner-token",
   "global_skills_root": "/absolute/wi-skills",
@@ -44,10 +44,13 @@ URLs, shell history or documentation.
 - `schema_version` is the integer 1. `enable_add_numbers` is a boolean.
 - `listen` is a literal-loopback socket address, such as `127.0.0.1:8787` or
   `[::1]:8787`. Port 0 is allowed; use the actual address from the startup notice.
-- `public_origin` is an explicit HTTPS origin with no credentials, query, fragment
-  or path other than an optional trailing slash. Local development may use HTTP
-  with a literal loopback IP, not a hostname resolved to loopback. The origin is
-  not inferred from Host or forwarded headers. Port 0 does not update this setting.
+- `public_origin` is an explicit origin with no credentials, query, fragment or
+  path other than an optional trailing slash. Normal same-machine operation uses
+  HTTP with a literal loopback IP, not a hostname resolved to loopback; no TLS or
+  proxy is required. The example matches the listener. Separately chosen remote
+  access requires a same-host HTTPS proxy and an HTTPS public origin, such as
+  `https://wi.example.test`. The origin is not inferred from Host or forwarded
+  headers. Port 0 does not update this setting.
 - All configured file/data/skill paths are absolute. `workspaces` is nonempty;
   each entry must be an existing directory with a UTF-8 canonical path. Startup
   canonicalizes and deduplicates entries without changing cwd. HTTP workspace

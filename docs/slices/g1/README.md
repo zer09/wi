@@ -1,22 +1,16 @@
 # G1.1 current implementation and handoff index
 
-**Current contract: g1.1. Updated October13,2026 after C50 reconciliation.** Accepted master remains `76bb32fd04fd4737c0efcceaabc7d10387453147`. PR #10's preserved unaccepted checkpoint is `8f45dda2a2c168931735cf798560b8dfd02a1579`. Current local schema3/display/browser source is implemented, uncommitted and not accepted.
+**Current contract: g1.1.** Accepted master remains `76bb32fd04fd4737c0efcceaabc7d10387453147`. PR #10's preserved unaccepted checkpoint is `8f45dda2a2c168931735cf798560b8dfd02a1579`. The later schema3/display/browser runtime is committed but unaccepted.
 
-**Matrix:40 PARTIAL /0 PASS /0 NOT_RUN; accepted=false.** The forty rows originally started NOT RUN at design time. Current scoped evidence does not turn those original planning statements into present status or whole-row passes. Ledger remains31/50 used19 remaining; no live work is authorized.
+**Matrix:40 PARTIAL /0 PASS /0 NOT_RUN; accepted=false; inventory OPEN.** The forty rows originally started NOT RUN at design time. Current scoped evidence does not turn those original planning statements into present status or whole-row passes. Ledger remains31/50 used19 remaining; no live work is authorized.
 
-## Current continuation
+## Current verification and remaining closure
 
-- [Detailed C49 continuation handoff](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md).
-- [Fresh-agent implementation prompt](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume-prompt.md).
-- [Human verification](VERIFICATION_G1_1.md) and [machine verification](verification-g1.1.json).
-- [C49 persisted skill-source browser fidelity](C3B_SKILL_SOURCE_FIDELITY.md): one complete42.2s case and both accumulated-scope reviews PASS, with earlier failures preserved.
-- [C50 same-H interrupted parity](C3B_INTERRUPTED_DISPLAY_PARITY.md): one15.9s case and both scoped reviews PASS; two independently fresh connected browsers match exact interrupted H24 after owned producer death.
+[Current C93 verification](VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records local and successful hosted verification scoped to source `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits retain a separate cutoff and do not inherit exact-head CI results. Source completion alone proves neither CI nor acceptance. The [human report](VERIFICATION_G1_1.md) and [machine report](verification-g1.1.json) preserve earlier results and failed roles at their recorded cutoffs.
 
-C49 documents two actual completed Tasks and two fresh browsers after guarded main-SKILL change and deletion. Newest B renders before one explicitly requested older A; exact saved tool/skill bytes and recorded state persist. Near-top focus/setup causes zero backward reads; one genuine Home admits one saved-cursor block read. Final privacy/assets/no-work and strict cleanup pass. Its native gates are qualified source-bound reuse, not new successor execution.
+Final assertion/report adequacy, complete original-master/checkpoint/current review coverage and owner acceptance remain open. C15/active1 owner dispositions and the application reader remain unchanged. Use the owner's current assignment before execution; this index authorizes no next increment or Git transition.
 
-The handoff's bounded next task, **C50 same-H interrupted-task parity across two independent real browsers**, is now complete through existing C46/C47 machinery. No earlier case was replayed. C50 authorizes no next increment. Upgrade/reopen, remaining measurements, final full gates, hosted exact-head CI and three final complete-diff reviews remain open. C15/active1 remain owner-deferred; keep the application reader unchanged.
-
-## Completed scoped work to retain
+## Historical scoped work to retain
 
 | Evidence | Scope |
 |---|---|
@@ -42,4 +36,4 @@ The fixed result is newest human interaction first, transactionally saved chrono
 
 Original [checkpoint report](VERIFICATION.md), [machine report](verification.json), [design packet](DESIGN_REVIEW.md) and old handoffs remain historical. Their paused/decision-required wording is superseded for future work by g1.1, not overwritten. The original contract/prompt remains at [checkpoint8f45dda](https://github.com/zer09/wi/tree/8f45dda2a2c168931735cf798560b8dfd02a1579/docs/slices/g1).
 
-The owner requested current documentation, a new handoff/prompt and a staging checkpoint. Staging does not accept separate diagnostic work or authorize a commit, push, merge, release, deployment or live provider run. A handoff alone is context, not implementation authority. Verify actual Git/environment/evidence state and use the owner's current request before execution.
+The October13 [C49 continuation handoff](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) and [fresh-agent prompt](../../../handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume-prompt.md) retain their historical task and staging boundaries. Their proposed C50 task is complete; they are not current next-task authority. A handoff alone does not authorize implementation, staging, a commit, push, merge, release, deployment or live provider run. Verify actual Git/environment/evidence state and use the owner's current request before execution.

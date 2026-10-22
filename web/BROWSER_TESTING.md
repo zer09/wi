@@ -22,14 +22,23 @@ Run commands from the repository root. The placeholders below represent caller-p
 
 The parents must have mode 0700. The approved environment file does not contain browser or fixture variables.
 
-Install system dependencies separately, when required:
+Before provisioning, use Node 24 and install the locked web dependencies, including the Playwright SDK. If dependencies are absent or do not match `web/package-lock.json`, ordinarily run:
 
 ```sh
-cd web
-npx --no-install playwright install-deps chromium
+node -- scripts/agent_env.mjs --env-file <approved-env.json> -- npm --prefix web ci
 ```
 
-Return to the repository root before provisioning:
+Correctly installed locked dependencies need no forced reinstall. The provisioner reads the installed `playwright-core` SDK version before downloading; it does not install npm packages.
+
+Install an `unzip` executable on the approved `PATH` before provisioning. The provisioner invokes `unzip` only after downloading the archive. Do not assume Playwright's system-dependency installer supplies it.
+
+Install Playwright system dependencies separately, when required:
+
+```sh
+node -- scripts/agent_env.mjs --env-file <approved-env.json> -- node -- web/node_modules/@playwright/test/cli.js install-deps chromium
+```
+
+This installs browser system dependencies, not npm packages or the pinned browser archive. Provision the fixed browser separately:
 
 ```sh
 node -- scripts/agent_env.mjs --env-file <approved-env.json> -- node -- web/scripts/prepare-browser.mjs --output <browser-cache>
@@ -67,6 +76,6 @@ The full suite retains 89 cases in 34 files, one worker, zero retries, a 900-sec
 
 ## CI and safety
 
-The Ubuntu browser job installs system dependencies without downloading obsolete bundled Chromium. Its private publisher creates the approved six-value file and separate browser output controls. The pinned provisioner runs through `agent_env.mjs` before browser gates. Preparation and guarded launch receive `WI_BROWSER_BINDING` through step environment values, not `GITHUB_ENV` or raw fixture publication.
+The Ubuntu browser job runs `npm ci` before Playwright system-dependency installation, without downloading obsolete bundled Chromium. Its private publisher creates the approved six-value file and separate browser output controls. The pinned provisioner runs through `agent_env.mjs` before browser gates. Preparation and guarded launch receive `WI_BROWSER_BINDING` through step environment values, not `GITHUB_ENV` or raw fixture publication.
 
 Use synthetic credentials, roots and scripted providers only. This procedure adds no authentication mode, reader change, no-store exception, policy waiver, live provider permission, acceptance or deployment authority. Browser provisioning alone does not prove runtime compatibility. Local execution, hosted execution and native platform results remain separate evidence.

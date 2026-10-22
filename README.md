@@ -7,21 +7,22 @@ function-tool continuation.
 
 See the [documentation index](docs/README.md) for current documentation and historical records.
 
-**Local G1.1: implemented source, uncommitted and not accepted.** Accepted master
-remains `76bb32f`; historical unaccepted checkpoint `8f45dda` is separate from the
-current schema3/display/browser work on PR #10. All 40 G11 rows remain PARTIAL,
-accepted=false. [Human evidence](docs/slices/g1/VERIFICATION_G1_1.md) and
-[JSON](docs/slices/g1/verification-g1.1.json) retain scoped local checks and failed roles.
-Latest scoped completion: [C50 same-H interrupted parity](docs/slices/g1/C3B_INTERRUPTED_DISPLAY_PARITY.md)
-passed once in15.9s with both scoped reviews PASS. Two independent fresh browsers
-match exact interrupted H24 DTO/DOM after owned producer death, with zero observer POSTs/work.
-C44-C49 retain partial parity, handoff, restart, S2 and completed saved-skill proof.
-See the [current continuation handoff](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md).
-C15 and active-conflict remain owner-deferred; the application reader is unchanged.
-Upgrade/reopen, expanded barriers, qualified browser/server measurements,
-final required gates, exact-head CI and three complete-diff reviews remain open.
-The bounded C50 task is complete; no next increment is authorized.
-No final acceptance, hosted CI or new live-provider result is claimed.
+**G1.1: committed runtime, not accepted.** Accepted master remains `76bb32f`;
+historical unaccepted checkpoint `8f45dda` is separate from the later
+schema3/display/browser implementation on PR #10.
+[C93 verification](docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification)
+records local and successful hosted verification scoped to source
+`1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits
+retain a separate cutoff and do not inherit exact-head CI results.
+All 40 G11 rows remain PARTIAL, accepted=false and inventory OPEN.
+C15/active1 owner dispositions and the application reader remain unchanged.
+Final assertion/report adequacy, complete original-master/checkpoint/current
+review coverage and owner acceptance remain open and separate from those gates.
+Historical [C49 saved-skill fidelity](docs/slices/g1/C3B_SKILL_SOURCE_FIDELITY.md),
+[C50 interrupted parity](docs/slices/g1/C3B_INTERRUPTED_DISPLAY_PARITY.md) and
+[handoffs](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) retain their
+recorded cutoffs, not current next-task authority. Source completion alone proves
+neither CI nor acceptance. This summary authorizes no execution or Git transition.
 
 **Native platform policy, September 20, 2026: Linux and macOS.** Native Windows
 support and its CI job have been withdrawn by the owner. Windows-only first-party

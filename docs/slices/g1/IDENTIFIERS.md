@@ -74,7 +74,9 @@ The owner answered Yes to the explicit display-read error proposal. An otherwise
 
 Apply exact shared encoded-size accounting after allowing compact human/entry fragments to shrink while retaining required progress. Do not reject a legacy header merely because a full-sized preview leaves insufficient space. Fail the addressed response without partial success, omission, a partial-summary marker, paged ID, truncation, rewrite or silent block skipping. Canonical bytes, raw history, migration and execution state remain unchanged. Other representable blocks remain readable. No real user data was inspected.
 
-The Rust disposition and entry/content regressions are implemented and passed all three scoped A5b1 reviews; see A5B1_READS.md. HTTP/SSE and the specified 422 mapping are not implemented. General native/generic ID formats and managed/account compatibility remain open; the owner invited focused questions.
+The Rust disposition and entry/content regressions passed all three scoped A5b1 reviews; see A5B1_READS.md for that historical cutoff, when HTTP/SSE mapping was still pending. The current HTTP adapter implements api.conversation_display_unavailable/422 (`src/http_api/dto/errors.rs:146-155`), used by page, entry and content callers (`src/http_api/router/conversation.rs:87-107`). Initial display SSE preparation returns the mapped error before HTTP success (`src/http_api/router/conversation/events.rs:21-45`). After stream establishment, errors use wi.error rather than a changed HTTP status (`src/http_api/router/conversation/events.rs:131-144`).
+
+Inspected test-source assertions in `b1_historical_oversized_header_http_422_preserves_canonical_raw_and_healthy_blocks` and `b2_initial_legacy_unrepresentable_batch_is_422_before_sse_and_never_mutates` cover HTTP/initial-SSE 422 responses, canonical preservation, raw reads and healthy blocks (`src/http_api/router/tests/conversation_tests/legacy.rs:176-281`). This is test-source coverage, not a newly executed pass. General native/generic ID formats and managed/account compatibility remain open; the owner invited focused questions.
 
 ## Execution order and checks
 

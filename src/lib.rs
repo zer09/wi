@@ -1,5 +1,6 @@
-//! Provider/session layer and explicit-root application storage. No web server,
-//! filesystem tool, hosted sandbox, or durable job scheduler is included.
+//! Provider/session layer, explicit-root application storage, and an authenticated
+//! loopback HTTP service. No filesystem tool, hosted sandbox, or durable job
+//! scheduler is included.
 #![forbid(unsafe_code)]
 
 pub mod context;

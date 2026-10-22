@@ -28,7 +28,7 @@ not the last received byte. Lost acknowledgments can replay records; deduplicate
 session/sequence and detect conflicting duplicates. JSON/SSE preserves visible text,
 including control characters; a future GUI must render it as untrusted text, not HTML.
 
-Plain HTTP is allowed only for explicit literal-loopback local development. Never provide an insecure public-bind switch or recommend sending the secret over a LAN in cleartext. Checking the configured HTTPS public origin cannot prove a proxy actually uses TLS: document that limit. Provider TLS validation and fixed subscription endpoints remain unchanged. A non-loopback TcpListener passed to the library is rejected before serving too.
+Literal-loopback HTTP is normal same-machine operation; no TLS or proxy is required for that local workflow. Use a literal loopback IP, not a hostname resolved to loopback. Remote access remains conditional on the same-host HTTPS proxy described above. Never provide an insecure public-bind switch or recommend sending the secret over a LAN in cleartext. Checking the configured HTTPS public origin cannot prove a proxy actually uses TLS: document that limit. Provider TLS validation and fixed subscription endpoints remain unchanged. A non-loopback TcpListener passed to the library is rejected before serving too.
 
 Native backend build/CI targets are Linux and macOS. This does not extend Linux-only
 managed-auth storage or live-provider evidence to macOS. Windows native execution is

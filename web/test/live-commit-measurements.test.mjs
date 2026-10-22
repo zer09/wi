@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { browserPin } from '../test-support/browser-pin.mjs';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -394,8 +395,13 @@ async function specCase(t, options = {}) {
   expectation.poll = fn => ({ toBe: async e => { if (e) await eventually(fn); else assert.equal(await fn(), e); } });
   const values = {
     test: Object.assign((name, fn) => { assert.equal(callback, undefined); callback = fn; }, { use: () => {} }), expect: expectation,
-    chromium: { launchServer: async () => { raise('server-acquired'); return { process: () => ({ pid: 901 }), wsEndpoint: () => 'unpublished', close: async () => { raise('server-close'); serverClosed = true; }, kill: async () => { raise('server-kill'); serverClosed = true; } }; },
-      connect: async () => { raise('browser-acquired'); return { version: () => '145.0.7632.6', close: async () => { raise('browser-close'); browserClosed = true; }, newContext: async () => { raise('context-acquired'); return { close: async () => { raise('context-close'); if (options.sseClose) network.failed(sse); }, route: async () => {}, on: (name, fn) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); }, newPage: async () => page }; } }; } },
+    browserPin, browserLaunchOptions: (...args) => {
+      assert.deepEqual(args, []); raise('browser-admission');
+      if (events.filter(e => e === 'browser-admission').length === options.browserReject) throw failure;
+      return Object.freeze({ executablePath: '/synthetic/admitted-browser' });
+    },
+    chromium: { launchServer: async options => { assert.deepEqual(options, { host: '127.0.0.1', headless: true, executablePath: '/synthetic/admitted-browser' }); raise('server-acquired'); return { process: () => ({ pid: 901 }), wsEndpoint: () => 'unpublished', close: async () => { raise('server-close'); serverClosed = true; }, kill: async () => { raise('server-kill'); serverClosed = true; } }; },
+      connect: async () => { raise('browser-acquired'); return { version: () => options.browserVersion ?? browserPin.version, close: async () => { raise('browser-close'); browserClosed = true; }, newContext: async () => { raise('context-acquired'); return { close: async () => { raise('context-close'); if (options.sseClose) network.failed(sse); }, route: async () => {}, on: (name, fn) => { assert.ok(!handlers.has(name)); handlers.set(name, fn); }, newPage: async () => page }; } }; } },
     readFile: async u => u.href === specPath.href ? source : helper,
     writeFile: async (p, raw, opts) => { const name = p.split('/').at(-1); events.push('save:' + name); assert.equal(opts.mode, 0o600); assert.equal(opts.flag, 'wx');
       if (options.write === name) throw publication; artifacts.set(name, JSON.parse(raw)); },
@@ -1176,4 +1182,48 @@ test('C89 live actual callback contains TestInfo access and append failures with
     assert.deepEqual(c.artifacts.get('BROWSER_RESULT.json').first_failure, c.firstPacket);
     assert.equal(c.artifacts.get('BROWSER_RESULT.json').status, 'FAILED'); assert.equal(c.cleanupResult.steps.length, 12);
   });
+});
+
+test('C93C live source requires real shared admission at preflight and owned launch', async t => {
+  const spec = await fs.readFile(specPath, 'utf8');
+  const helper = await fs.readFile(new URL('../test-support/live-commit-measurements.mjs', import.meta.url), 'utf8');
+  assert.match(spec, /import \{ browserPin, browserLaunchOptions \} from '\.\.\/test-support\/browser-pin\.mjs';/);
+  assert.equal(sourceGuard(spec, helper), true);
+  for (const [name, change] of Object.entries({
+    'missing preflight': s => s.replace('    browserLaunchOptions();\n', ''),
+    'wrong import': s => s.replace("from '../test-support/browser-pin.mjs'", "from '../test-support/fixture.mjs'"),
+    shadow: s => s.replace('    browserLaunchOptions();', '    const browserLaunchOptions = () => ({}); browserLaunchOptions();'),
+    'extra argument': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(process.env)'),
+    'unused options': s => s.replace(', ...browserLaunchOptions()', ''),
+    'comment counterfeit': s => s.replace('    browserLaunchOptions();', '    // browserLaunchOptions();'),
+    'wrong version': s => s.replace('toBe(browserPin.version)', "toBe('145.0.7632.6')"),
+    bypass: s => s.replace('...browserLaunchOptions()', "...{ executablePath: '/synthetic/other' }"),
+    'remote connection': s => s.replace('chromium.connect(server.wsEndpoint())', "chromium.connect('ws://synthetic.invalid')"),
+    'SDK environment override': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); process.env.PWDEBUG = '1';"),
+    'extra launch args': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(), args: []'),
+    'pin shadow': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); const browserPin = { version: 'other' };"),
+  })) await t.test(name, () => {
+    const changed = change(spec); assert.notEqual(changed, spec); assert.throws(() => sourceGuard(changed, helper));
+  });
+});
+
+test('C93C live actual callback admits before evidence and rechecks at owned launch', async t => {
+  const normal = await specCase(t);
+  assert.equal(normal.events.filter(e => e === 'browser-admission').length, 2);
+  assert.ok(normal.events.indexOf('browser-admission') < normal.events.indexOf('reserve'));
+  assert.equal(normal.events[normal.events.indexOf('server-acquired') - 1], 'browser-admission');
+  const early = await specCase(t, { browserReject: 1 });
+  assert.equal(early.ownedError, early.failure); assert.equal(early.artifacts.size, 0);
+  for (const event of ['reserve', 'marker', 'binding', 'allocation', 'nested-create', 'native-acquired', 'server-acquired']) assert.equal(early.events.includes(event), false);
+  const late = await specCase(t, { browserReject: 2 });
+  assert.equal(late.ownedError, late.failure); assert.equal(late.events.includes('server-acquired'), false);
+  assert.ok(late.events.includes('native_stop')); assert.equal(late.facts.closed, true);
+  assert.equal(late.artifacts.get('BROWSER_RESULT.json').status, 'FAILED');
+});
+test('C93C live actual callback rejects a nonexact runtime browser version', async t => {
+  for (const browserVersion of ['145.0.7632.6', browserPin.version + '.extra']) {
+    const c = await specCase(t, { browserVersion });
+    assert.ok(c.ownedError instanceof assert.AssertionError); assert.equal(c.events.includes('context-acquired'), false);
+    assert.ok(c.events.includes('server-close')); assert.ok(c.events.includes('native_stop'));
+  }
 });

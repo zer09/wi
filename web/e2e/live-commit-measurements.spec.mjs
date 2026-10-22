@@ -1,4 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
+import { browserPin, browserLaunchOptions } from '../test-support/browser-pin.mjs';
 import { appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 import { readFile, writeFile, rm, rmdir, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -40,6 +41,7 @@ test('one genuine Task live append, authoritative replacement and terminal commi
     for (const member of tree.members) if (!browserMembers.some(i => i.pid === member.pid && i.start_ticks === member.start_ticks)) browserMembers.push(member);
   }
   try {
+    browserLaunchOptions();
     sourceGuard(await readFile(new URL(import.meta.url), 'utf8'), await readFile(new URL('../test-support/live-commit-measurements.mjs', import.meta.url), 'utf8'));
     binding = await operation('binding', () => resolveBinding(process.env));
     await operation('allocation', () => {
@@ -85,7 +87,7 @@ test('one genuine Task live append, authoritative replacement and terminal commi
     expect(native.head).toBe(1);
     const drive = phaseDrive(native);
     server = await operation('server', () => acquireResource(owned, 'browser-server-close', 40,
-      () => chromium.launchServer({ host: '127.0.0.1', headless: true }), value => operation('server_close', () => value.close())));
+      () => chromium.launchServer({ host: '127.0.0.1', headless: true, ...browserLaunchOptions() }), value => operation('server_close', () => value.close())));
     owned.register('browser-final-discovery', 10, () => operation('browser_discovery', async () => { await discoverOwned(); finalDiscovery = true; }));
     owned.register('browser-emergency', 41, () => operation('browser_emergency', async () => {
       if (browserIdentity?.state !== 'present') return;
@@ -104,7 +106,7 @@ test('one genuine Task live append, authoritative replacement and terminal commi
     });
     browser = await operation('browser', () => acquireResource(owned, 'browser-connection-close', 30,
       () => chromium.connect(server.wsEndpoint()), value => operation('browser_close', () => value.close())));
-    browserVersion = browser.version(); expect(browserVersion).toBe('145.0.7632.6');
+    browserVersion = browser.version(); expect(browserVersion).toBe(browserPin.version);
     context = await operation('context', () => acquireResource(owned, 'context-close', 20,
       () => browser.newContext({ serviceWorkers: 'block', viewport: { width: 1000, height: 700 } }), value => operation('context_close', () => {
         // Discovery remains observation. Only this actual close admits established-SSE cancellation.

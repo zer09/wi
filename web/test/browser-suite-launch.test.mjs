@@ -18,6 +18,7 @@ import { prepareBrowserSuite } from '../test-support/browser-suite-preparation.m
 import { recordPreparationCommand } from '../test-support/browser-fixture-preparation.mjs';
 import { ROOT, TARGET, CHILD } from '../test-support/live-commit-native.mjs';
 import { launchBrowserSuite } from '../test-support/browser-suite-launch.mjs';
+import { browserPin, browserAdmission } from '../test-support/browser-pin.mjs';
 import { run } from '../scripts/launch-browser-suite.mjs';
 import Reporter, { decodeReport, encodeReport, publicSummary, reportName, sourceFiles, joinedScenarios, appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 
@@ -29,6 +30,26 @@ const keys = ['WI_C3A_FIXTURE', 'WI_C3A_FIXTURE_SHA256', 'WI_C47_FIXTURE_SHA256'
   'WI_BROWSER_FIXTURE_PARENT', 'WI_C52_EVIDENCE', 'WI_C54_ALLOCATION_PARENT', 'WI_C54_OUTER_MARKER'];
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 const privateWrite = (path, bytes) => fs.writeFile(path, bytes, { mode: 0o600 });
+// The real admission API reads these inert bytes through its explicit synthetic pin seam.
+async function suiteBrowser(parent) {
+  const root = join(parent, 'synthetic-browser'), archive = Buffer.from('synthetic archive'), body = Buffer.from('inert synthetic browser');
+  await fs.mkdir(root, { mode: 0o700 });
+  await fs.mkdir(join(root, 'package'), { mode: 0o700 });
+  await fs.mkdir(join(root, 'package/chrome-headless-shell-linux64'), { mode: 0o755 });
+  await fs.writeFile(join(root, 'package', browserPin.executable), body, { mode: 0o755 });
+  await fs.writeFile(join(root, 'browser.zip'), archive, { mode: 0o600 });
+  let crc = 0xffffffff;
+  for (const byte of archive) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0x82f63b78 ^ crc >>> 1 : crc >>> 1; }
+  const sum = Buffer.alloc(4); sum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  const inventory = [{ relative: browserPin.executable, bytes: body.length, mode: 0o755, sha256: hash(body) }];
+  const pin = { ...browserPin, bytes: archive.length, files: 1, archiveSHA256: hash(archive),
+    md5: createHash('md5').update(archive).digest('base64'), crc32c: sum.toString('base64'),
+    treeSHA256: hash(JSON.stringify(inventory)), executableSHA256: hash(body) };
+  const binding = join(root, 'binding.json'), executablePath = join(root, 'package', pin.executable);
+  await fs.writeFile(binding, JSON.stringify({ schema: 1, pin, root, executablePath, inventory }) + '\n', { mode: 0o600 });
+  return { root, binding, executablePath, browserIO: { pin, sdk: () => browserPin.sdk } };
+}
+
 async function fixture(t) {
   const parent = await fs.mkdtemp(join(tmpdir(), 'wi-launch-unit-'));
   t.after(() => fs.rm(parent, { recursive: true, force: true }));
@@ -36,12 +57,13 @@ async function fixture(t) {
   for (const p of ['web/e2e', 'web/test-support', 'web/scripts']) await fs.mkdir(join(sourceRoot, p), { recursive: true, mode: 0o700 });
   for (const p of ['web/e2e/case.mjs', 'web/test-support/helper.mjs', 'web/test-support/data.json', 'web/scripts/tool.mjs',
     'web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json']) await privateWrite(join(sourceRoot, p), '{}\n');
-  const env = { ...process.env }, output = join(parent, 'fresh');
+  const browser = await suiteBrowser(parent);
+  const env = { ...process.env, WI_BROWSER_BINDING: browser.binding }, output = join(parent, 'fresh');
   const sources = { 'Cargo.lock': { bytes: 4, sha256: hash('lock'), mode: 0o644 }, 'src/lib.rs': { bytes: 6, sha256: hash('source'), mode: 0o644 } };
   const executable = join(TARGET, 'debug/deps/wi-0123456789abcdef');
   const cargo = JSON.stringify({ reason: 'compiler-artifact', manifest_path: join(ROOT, 'Cargo.toml'), target: { name: 'wi', kind: ['lib'], src_path: join(ROOT, 'src/lib.rs') }, profile: { test: true }, executable }) + '\n'
     + JSON.stringify({ reason: 'build-finished', success: true }) + '\n';
-  const options = { env, sourceRoot, sources: async () => clone(sources),
+  const options = { env, sourceRoot, browserIO: browser.browserIO, sources: async () => clone(sources),
     validate: async value => clone(value),
     bind: async text => ({ executable, sha256: hash('synthetic bytes'), selector: CHILD, sources: clone(sources), cargo_json: text }),
     command: (program, argv, opts) => recordPreparationCommand(program, argv, opts, () => {
@@ -64,8 +86,8 @@ async function fixture(t) {
     queueMicrotask(() => { child.emit('spawn'); child.stdout.end('synthetic launch\n'); child.stderr.end(); child.emit('close', 0, null); });
     return child;
   };
-  return { parent, output, bundle, data, env, sourceRoot, sources, bus, calls, kills,
-    io: { env, sourceRoot, sources: options.sources, validate: options.validate, signals: bus, spawn: fake } };
+  return { parent, output, bundle, data, env, sourceRoot, sources, bus, calls, kills, browser,
+    io: { env, sourceRoot, browserIO: browser.browserIO, sources: options.sources, validate: options.validate, signals: bus, spawn: fake } };
 }
 async function reject(f, extra = {}) {
   const r = await launchBrowserSuite({ bundle: f.bundle }, { ...f.io, ...extra });
@@ -89,6 +111,139 @@ function during(f, action, code = 0, signal = null) {
   };
 }
 function listeners(f) { for (const s of signals) assert.equal(f.bus.listenerCount(s), 0); }
+
+test('C93D launcher rejects browser input, old schemas and SDK overrides before either control', async t => {
+  for (const kind of ['missing', 'substituted', 'receipt', 'rewrite', 'package', 'extra', 'sdk', 'unseamed', 'override', 'old-schema', 'pin', 'headless', 'provenance-extra', 'hash', 'snapshot', 'admission-extra']) await t.test(kind, async t => {
+    const f = await fixture(t);
+    if (kind === 'missing') delete f.env.WI_BROWSER_BINDING;
+    if (kind === 'substituted') { const other = await suiteBrowser(await fs.mkdtemp(join(f.parent, 'other-'))); f.env.WI_BROWSER_BINDING = other.binding; }
+    if (kind === 'receipt') await fs.appendFile(f.browser.binding, ' ');
+    if (kind === 'rewrite') { const bytes = await fs.readFile(f.browser.binding); await fs.unlink(f.browser.binding); await privateWrite(f.browser.binding, bytes); }
+    if (kind === 'package') await fs.appendFile(f.browser.executablePath, 'changed');
+    if (kind === 'extra') await privateWrite(join(f.browser.root, 'extra'), 'changed');
+    if (kind === 'sdk') f.io.browserIO.sdk = () => 'different';
+    if (kind === 'unseamed') delete f.io.browserIO;
+    if (kind === 'override') f.env.DEBUG_FILE = 'synthetic-private-path';
+    if (kind === 'old-schema') await changeBundle(f, b => { delete b.browser; });
+    if (['pin', 'headless', 'provenance-extra', 'hash', 'snapshot', 'admission-extra'].includes(kind)) await changeBundle(f, b => {
+      assert.ok(b.browser, 'The actual preparation must bind browser provenance.');
+      if (kind === 'pin') b.browser.pin.version = '145.0.7632.6';
+      if (kind === 'headless') b.browser.headless = false;
+      if (kind === 'provenance-extra') b.browser.extra = true;
+      if (kind === 'hash') b.browser.admission.bindingSHA256 = 'f'.repeat(64);
+      if (kind === 'snapshot') b.browser.snapshot.receipt.ino++;
+      if (kind === 'admission-extra') b.browser.admission.extra = true;
+    });
+    const r = await reject(f); assert.equal(r.outcome.consumed, false); listeners(f);
+  });
+});
+
+test('C93 environment modes reject before guard OUTER and child; empty modes preserve input', async t => {
+  for (const key of ['PWPAUSE', 'PWTEST_WATCH', 'PWTEST_PROFILE_DIR']) {
+    for (const name of [key, 'npm_config_' + key.toLowerCase(), 'npm_package_config_' + key.toLowerCase()]) {
+      for (const value of ['0', 'false', '/synthetic/mode', '', undefined]) await t.test(name + '=' + JSON.stringify(value), async t => {
+        const f = await fixture(t);
+        if (value !== undefined) f.env[name] = value;
+        f.env.PLAYWRIGHT_NO_COPY_PROMPT = 'retained';
+        Object.defineProperty(f.env, 'syntheticHidden', { value: 'retained', enumerable: false });
+        Object.defineProperty(f.env, Symbol('synthetic descriptor'), { value: 'retained', enumerable: false });
+        const before = Object.getOwnPropertyDescriptors(f.env);
+        if (value === '' || value === undefined) {
+          const r = await launchBrowserSuite({ bundle: f.bundle }, f.io);
+          assert.equal(r.code, 0); assert.equal(f.calls.length, 1);
+          assert.equal(f.calls[0].opts.env.PLAYWRIGHT_NO_COPY_PROMPT, 'retained');
+          assert.equal(f.calls[0].opts.env[name], value);
+        } else {
+          const r = await reject(f); assert.equal(r.outcome.consumed, false);
+          await absent(f.data.planned.c52); await absent(f.data.planned.playwright);
+        }
+        assert.deepEqual(Object.getOwnPropertyDescriptors(f.env), before); listeners(f);
+        t.after(() => absent(f.parent));
+      });
+    }
+  }
+});
+
+test('C93 environment modes recheck after guard OUTER and final output reads with first status preserved', async t => {
+  for (const key of ['PWPAUSE', 'PWTEST_WATCH', 'PWTEST_PROFILE_DIR']) {
+    for (const name of [key, 'npm_config_' + key.toLowerCase(), 'npm_package_config_' + key.toLowerCase()]) {
+      for (const value of ['0', 'false']) for (const boundary of ['guard', 'outer', 'final', 'child', 'child-error']) await t.test(`${name}-${value}-${boundary}`, async t => {
+        const f = await fixture(t);
+        let changed = false;
+        const change = () => { changed = true; f.env[name] = value; };
+        if (boundary === 'child' || boundary === 'child-error') during(f, change, boundary === 'child-error' ? 17 : 0);
+        else f.io.io = {
+          open: async (path, ...args) => { const handle = await fs.open(path, ...args); if (path === f.data.planned[boundary]) change(); return handle; },
+          lstat: async path => {
+            try { return await fs.lstat(path); }
+            catch (error) {
+              // Insert the mode only after all earlier native and control readbacks.
+              if (boundary === 'final' && !changed && error.code === 'ENOENT' && path === f.data.planned.playwright
+                && await fs.lstat(f.data.planned.outer).then(() => true, () => false)) change();
+              throw error;
+            }
+          },
+        };
+        const r = await launchBrowserSuite({ bundle: f.bundle }, f.io);
+        assert.ok(changed); assert.equal(r.code, boundary === 'child-error' ? 17 : 1); assert.equal(r.signal, null);
+        assert.equal(r.outcome.first_failure, { guard: 'guard_recheck', outer: 'dispatch_recheck', final: 'dispatch_recheck', child: 'post_readback', 'child-error': 'child' }[boundary]);
+        assert.equal(f.calls.length, boundary.startsWith('child') ? 1 : 0); assert.equal(r.outcome.consumed, true);
+        assert.ok(await fs.lstat(f.data.planned.guard));
+        if (boundary === 'guard') await absent(f.data.planned.outer);
+        else assert.ok(await fs.lstat(f.data.planned.outer));
+        assert.equal(f.env[name], value); listeners(f);
+        t.after(() => absent(f.parent));
+      });
+    }
+  }
+});
+
+test('C93D direct child inherits exactly the captured browser input beside eight generated values', async t => {
+  const f = await fixture(t), before = { ...f.env }, admission = browserAdmission(f.env, f.io.browserIO);
+  f.env.PLAYWRIGHT_NO_COPY_PROMPT = 'retained';
+  const r = await launchBrowserSuite({ bundle: f.bundle }, f.io);
+  assert.equal(r.code, 0); assert.equal(f.calls.length, 1);
+  assert.ok(f.data.browser, 'The actual bundle must bind the exact caller input.');
+  assert.deepEqual(f.data.browser.admission, admission);
+  assert.deepEqual(f.calls[0].opts.env, { ...before, PLAYWRIGHT_NO_COPY_PROMPT: 'retained', ...f.data.environment, WI_BROWSER_BINDING: admission.binding });
+  assert.deepEqual(Object.keys(f.data.environment).sort(), [...keys].sort());
+  assert.deepEqual(f.env, { ...before, PLAYWRIGHT_NO_COPY_PROMPT: 'retained' }); listeners(f);
+});
+
+test('C93D dispatch and post readbacks retain first-error and primary child status on browser swaps', async t => {
+  for (const boundary of ['guard', 'outer', 'child']) for (const code of [0, 17]) await t.test(`${boundary}-${code}`, async t => {
+    const f = await fixture(t); let changed = false;
+    const change = async () => { changed = true; await fs.appendFile(f.browser.binding, ' '); };
+    if (boundary === 'child') during(f, change, code);
+    else f.io.io = { open: async (path, ...args) => {
+      const handle = await fs.open(path, ...args);
+      if (path === f.data.planned[boundary]) await change();
+      return handle;
+    } };
+    const r = await launchBrowserSuite({ bundle: f.bundle }, f.io);
+    assert.ok(changed); assert.equal(r.code, boundary === 'child' && code !== 0 ? code : 1);
+    assert.equal(f.calls.length, boundary === 'child' ? 1 : 0);
+    assert.equal(r.outcome.first_failure, { guard: 'guard_recheck', outer: 'dispatch_recheck', child: code ? 'child' : 'post_readback' }[boundary]);
+    assert.ok(await fs.lstat(f.data.planned.guard)); listeners(f);
+  });
+});
+
+test('C93D final browser check follows all native and output readbacks immediately before dispatch', async t => {
+  const f = await fixture(t); let changed = false;
+  f.io.io = { lstat: async path => {
+    try { return await fs.lstat(path); }
+    catch (error) {
+      if (!changed && error.code === 'ENOENT' && path === f.data.planned.playwright
+        && await fs.lstat(f.data.planned.outer).then(() => true, () => false)) {
+        changed = true; await fs.appendFile(f.browser.binding, ' ');
+      }
+      throw error;
+    }
+  } };
+  const r = await launchBrowserSuite({ bundle: f.bundle }, f.io);
+  assert.ok(changed); assert.equal(r.code, 1); assert.equal(r.outcome.first_failure, 'dispatch_recheck');
+  assert.equal(f.calls.length, 0); assert.equal(r.outcome.consumed, true); listeners(f);
+});
 
 const diagnosticPrefix = 'browser_suite_launch: failure ';
 const diagnosticFallback = 'browser_suite_launch: failure diagnostics unavailable.\n';
@@ -577,7 +732,7 @@ test('C88 R1 long and boundary-width pinned headers retain uniquely associated o
   const cases = [];
   for (const [file, declarationLine, frameLine, frameColumn, id] of [
     ['client-close-handoff.spec.mjs', 51, 247, 15, 3], ['display-app.spec.mjs', 214, 218, 108, 6],
-    ['live-commit-measurements.spec.mjs', 12, 24, 5, 12],
+    ['live-commit-measurements.spec.mjs', 13, 25, 5, 12],
   ]) {
     const source = await fs.readFile(new URL('../e2e/' + file, import.meta.url), 'utf8');
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
@@ -1768,9 +1923,10 @@ function diagnosticCollision(kind) {
     import {prepareBrowserSuite} from './web/test-support/browser-suite-preparation.mjs';
     import {recordPreparationCommand} from './web/test-support/browser-fixture-preparation.mjs';
     import {launchBrowserSuite} from './web/test-support/browser-suite-launch.mjs';
+    import {browserPin} from './web/test-support/browser-pin.mjs';
     import {run} from './web/scripts/launch-browser-suite.mjs';
     import {ROOT,TARGET,CHILD} from './web/test-support/live-commit-native.mjs';
-    const hash=${hash},clone=${clone},load=${load},fixture=${fixture},privateWrite=${privateWrite},during=${during};
+    const hash=${hash},clone=${clone},load=${load},suiteBrowser=${suiteBrowser},fixture=${fixture},privateWrite=${privateWrite},during=${during};
     const diagnosticFallback=${JSON.stringify(diagnosticFallback)},diagnosticPrefix=${JSON.stringify(diagnosticPrefix)},diagnosticLine=${diagnosticLine};
     const real=globalThis.process,descriptor=Object.getOwnPropertyDescriptor(globalThis,'process');
     const before={...real.env},fields=Object.getOwnPropertyDescriptors(real),cleanups=[];

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { browserPin } from '../test-support/browser-pin.mjs';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -364,8 +365,13 @@ async function specCase(options={}){
   let bindingReads=0;
   const values={
     test:Object.assign((name,cb)=>{events.push('collected');callback=cb;},{use:()=>{}}),expect:expectation,
-    chromium:{launchServer:async()=>{raise('launch');return {process:()=>({pid:901}),wsEndpoint:()=> 'unpublished endpoint',close:async()=>{raise('server-close');serverClosed=true;}};},
-      connect:async()=>{raise('connect');return {version:()=> '145.0.7632.6',close:async()=>{raise('browser-close');if(options.sseSchedule==='post-close')injectSse();},newContext:async()=>{raise('context');return {close:async()=>{raise('context-close');if(options.sseSchedule==='close-initiation')injectSse();},
+    browserPin,browserLaunchOptions:(...args)=>{
+      assert.deepEqual(args,[]);raise('browser-admission');
+      if(events.filter(e=>e==='browser-admission').length===options.browserReject)throw failure;
+      return Object.freeze({executablePath:'/synthetic/admitted-browser'});
+    },
+    chromium:{launchServer:async options=>{assert.deepEqual(options,{host:'127.0.0.1',headless:true,executablePath:'/synthetic/admitted-browser'});raise('launch');return {process:()=>({pid:901}),wsEndpoint:()=> 'unpublished endpoint',close:async()=>{raise('server-close');serverClosed=true;}};},
+      connect:async()=>{raise('connect');return {version:()=> options.browserVersion??browserPin.version,close:async()=>{raise('browser-close');if(options.sseSchedule==='post-close')injectSse();},newContext:async()=>{raise('context');return {close:async()=>{raise('context-close');if(options.sseSchedule==='close-initiation')injectSse();},
         setDefaultTimeout:()=>{},setDefaultNavigationTimeout:()=>{},route:async()=>{},on:(name,fn)=>handlers.set(name,fn),newPage:async()=>{raise('page');if(options.success)return page;throw failure;}};}};}},
     JSON:{...JSON,stringify:(value,...args)=>{
       const name=value?.steps?'CLEANUP.json':value?.observation?'MEASUREMENTS.json':value?.fresh_cases?'BROWSER_RESULT.json':null;
@@ -411,7 +417,7 @@ async function specCase(options={}){
   const annotations=[],info={outputPath:name=>{assert.equal(name,'c53-evidence');events.push('output');return '/synthetic/evidence';},
     get annotations(){events.push('annotation');if(options.annotationAccess)throw publication;return options.annotationAppend?Object.freeze(annotations):annotations;}};
   try{await callback({},info);}catch(caught){error=caught;}
-  assert.equal(events.filter(e=>e==='collected').length,1);if(options.success&&!options.injected&&!options.badLabel&&!options.discovery&&!options.nativeDefect&&!options.publication&&!options.serializationArtifact&&!options.factsGetter&&!options.countsGetter&&!options.evidenceGetter&&options.sseSchedule!=='held-discovery'&&!options.cleanupSchedule&&!options.bindingChanged&&!options.handles&&!options.rejectedIdentity)assert.equal(error,undefined);else assert.ok(error);
+  assert.equal(events.filter(e=>e==='collected').length,1);if(options.success&&!options.browserReject&&!options.browserVersion&&!options.injected&&!options.badLabel&&!options.discovery&&!options.nativeDefect&&!options.publication&&!options.serializationArtifact&&!options.factsGetter&&!options.countsGetter&&!options.evidenceGetter&&options.sseSchedule!=='held-discovery'&&!options.cleanupSchedule&&!options.bindingChanged&&!options.handles&&!options.rejectedIdentity)assert.equal(error,undefined);else assert.ok(error);
   assert.ok(!JSON.stringify([...saved.values()]).includes(failure.message));
   return {saved,events,error,first:cleanupResult.error,failure,publication,native,collected,serializationAttempts,packet:diagnostic.packet(),injection,forwarded,parentReads,removed,annotations};
 }
@@ -720,4 +726,48 @@ test('C89 content actual callback contains annotation access and append rejectio
     assert.deepEqual(c.annotations,[]);assert.deepEqual(c.saved.get('BROWSER_RESULT.json').first_failure,c.packet);
     assert.equal(c.saved.get('BROWSER_RESULT.json').status,'FAILED');assert.equal(c.saved.get('CLEANUP.json').steps.length,11);
   });
+});
+
+test('C93C content source requires real shared admission at preflight and owned launch', async t => {
+  const spec = await fs.readFile(specPath, 'utf8');
+  const helper = await fs.readFile(new URL('../test-support/content-measurements.mjs', import.meta.url), 'utf8');
+  assert.match(spec, /import \{ browserPin, browserLaunchOptions \} from '\.\.\/test-support\/browser-pin\.mjs';/);
+  assert.equal(sourceGuard(spec, helper), true);
+  for (const [name, change] of Object.entries({
+    'missing preflight': s => s.replace('    browserLaunchOptions();\n', ''),
+    'wrong import': s => s.replace("from '../test-support/browser-pin.mjs'", "from '../test-support/fixture.mjs'"),
+    shadow: s => s.replace('    browserLaunchOptions();', '    const browserLaunchOptions = () => ({}); browserLaunchOptions();'),
+    'extra argument': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(process.env)'),
+    'unused options': s => s.replace(', ...browserLaunchOptions()', ''),
+    'comment counterfeit': s => s.replace('    browserLaunchOptions();', '    // browserLaunchOptions();'),
+    'wrong version': s => s.replace('toBe(browserPin.version)', "toBe('145.0.7632.6')"),
+    bypass: s => s.replace('...browserLaunchOptions()', "...{ executablePath: '/synthetic/other' }"),
+    'remote connection': s => s.replace('chromium.connect(server.wsEndpoint())', "chromium.connect('ws://synthetic.invalid')"),
+    'SDK environment override': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); process.env.PWDEBUG = '1';"),
+    'extra launch args': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(), args: []'),
+    'pin shadow': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); const browserPin = { version: 'other' };"),
+  })) await t.test(name, () => {
+    const changed = change(spec); assert.notEqual(changed, spec); assert.throws(() => sourceGuard(changed, helper));
+  });
+});
+
+test('C93C content actual callback admits before evidence and rechecks at owned launch', async () => {
+  const normal = await specCase({ success: true });
+  assert.equal(normal.events.filter(e => e === 'browser-admission').length, 2);
+  assert.ok(normal.events.indexOf('browser-admission') < normal.events.indexOf('output'));
+  assert.equal(normal.events[normal.events.indexOf('launch') - 1], 'browser-admission');
+  const early = await specCase({ browserReject: 1 });
+  assert.equal(early.first, early.failure); assert.equal(early.saved.size, 0);
+  for (const event of ['output', 'reserve', 'marker', 'discovery', 'binding', 'root', 'initialize', 'launch']) assert.equal(early.events.includes(event), false);
+  const late = await specCase({ browserReject: 2 });
+  assert.equal(late.first, late.failure); assert.equal(late.events.includes('launch'), false);
+  assert.ok(late.events.includes('native-stop')); assert.equal(late.native.closed, true);
+  assert.equal(late.saved.get('BROWSER_RESULT.json').status, 'FAILED');
+});
+test('C93C content actual callback rejects a nonexact runtime browser version', async () => {
+  for (const browserVersion of ['145.0.7632.6', browserPin.version + '.extra']) {
+    const c = await specCase({ success: true, browserVersion });
+    assert.ok(c.first instanceof assert.AssertionError); assert.equal(c.events.includes('context'), false);
+    assert.ok(c.events.includes('server-close')); assert.ok(c.events.includes('native-stop'));
+  }
 });

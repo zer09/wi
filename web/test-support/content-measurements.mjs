@@ -5,7 +5,7 @@ import { facts, sid, head, expectedPage, projectionTables, digest } from './upgr
 import { expectedBlock } from './rich-display-parity.mjs';
 import { files, leaked, responseHeaders } from './interrupted-display-parity.mjs';
 import { nativeBinding, workProof } from './restart-display.mjs';
-import { transportTiming, transportSizes, identity, parseStat, retirement } from './display-measurements.mjs';
+import { transportTiming, transportSizes, identity, parseStat, retirement, browserSourceProof } from './display-measurements.mjs';
 const reject = () => { throw new Error('Content measurement rejected'); };
 const equal = (a, b) => { if (!isDeepStrictEqual(a, b)) reject(); };
 const integer = n => Number.isSafeInteger(n) && n >= 0;
@@ -315,6 +315,7 @@ export function removable(cleanupFailed, fallback, handles, native, browser) {
     && native.length>0 && browser.length>0 && [...native,...browser].every(v=>['absent','reused'].includes(v.retirement));
 }
 export function sourceGuard(spec, helper) {
+  browserSourceProof(spec);
   const implementation=helper.slice(0,helper.indexOf('export function sourceGuard'));
   const forbidden=[/newCDPSession|_channel|_connection|wsPath\s*:|executablePath\s*:|args\s*:/,
     /\.(json|text|arrayBuffer)\s*\(/,/test\.(skip|fixme|only)\s*\(/,/globalThis\.fetch\s*=|prototype\.|\.stack\b|console\./,

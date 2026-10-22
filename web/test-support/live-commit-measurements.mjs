@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { isAbsolute, join, dirname, basename, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { browserSourceProof } from './display-measurements.mjs';
 import { validateTaskCommand } from '../dist/api.js';
 import { texts, savedProof, nativeBinding, ownNativeDiagnostic, nodeBoundaries } from './live-commit-native.mjs';
 import { files, responseHeaders, newFaults } from './interrupted-display-parity.mjs';
@@ -416,8 +417,9 @@ export function diagnostics(read) {
     } };
 }
 export function sourceGuard(spec, helper) {
+  browserSourceProof(spec);
   const implementation = helper.slice(0, helper.indexOf('export function sourceGuard'));
-  const forbidden = /discoverFixture|newCDPSession|_channel|_connection|executablePath\s*:|wsPath\s*:|globalThis\.fetch\s*=|\.stack\b|test\.(skip|fixme|only)\s*\(|\.json\s*\(|\.text\s*\(|\.arrayBuffer\s*\(|fetch\s*\(/;
+  const forbidden = /discoverFixture|newCDPSession|_channel|_connection|executablePath\s*:|args\s*:|wsPath\s*:|globalThis\.fetch\s*=|\.stack\b|test\.(skip|fixme|only)\s*\(|\.json\s*\(|\.text\s*\(|\.arrayBuffer\s*\(|fetch\s*\(/;
   if (forbidden.test(spec) || forbidden.test(implementation) || /\.body\s*\(/.test(spec)
     || (implementation.match(/\.body\s*\(/g) ?? []).length !== 1 || !implementation.includes('await assetReply.body()')) reject();
   return true;

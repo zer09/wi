@@ -43,7 +43,7 @@ jobs:
         working-directory: .
       - run: npm ci
         working-directory: web
-      - run: npx --no-install playwright install --with-deps chromium
+      - run: npx --no-install playwright install-deps chromium
         working-directory: web
       - name: Provision private browser suite environment
         id: suite_environment
@@ -91,9 +91,12 @@ jobs:
             const approved = { TMPDIR: scratch, CARGO_TARGET_DIR: join(root, 'target'),
               RUSTFLAGS: '--cfg a5b2_max01_biuto9e0', GIT_OPTIONAL_LOCKS: '0', NODE_OPTIONS: '', PATH: env.PATH };
             const controls = { env_file: join(parent, 'environment.json'), suite_output: join(parent, 'suite'),
-              bundle_file: join(parent, 'suite', 'control', 'suite-ready.json') };
+              bundle_file: join(parent, 'suite', 'control', 'suite-ready.json'),
+              browser_output: join(scratch, 'browser'), browser_binding: join(scratch, 'browser', 'binding.json') };
             for (const value of Object.values(controls)) pathValue(value);
-            try { await io.lstat(controls.suite_output); reject(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+            for (const value of [controls.suite_output, controls.browser_output]) {
+              try { await io.lstat(value); reject(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+            }
             const redact = preparationRedactor(env);
             // Required data must survive scrubbing unchanged before any bytes are saved.
             for (const value of [approved, controls]) {
@@ -116,6 +119,12 @@ jobs:
             process.exitCode = 1;
           }
           NODE
+      - name: Provision pinned browser
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+          WI_CI_BROWSER_OUTPUT: ${{ steps.suite_environment.outputs.browser_output }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/prepare-browser.mjs --output "$WI_CI_BROWSER_OUTPUT"
       - name: Typecheck browser sources
         working-directory: .
         env:
@@ -136,10 +145,12 @@ jobs:
         env:
           WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
           WI_CI_SUITE_OUTPUT: ${{ steps.suite_environment.outputs.suite_output }}
+          WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.browser_binding }}
         run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/prepare-browser-suite.mjs --output "$WI_CI_SUITE_OUTPUT"
       - name: Launch guarded browser suite
         working-directory: .
         env:
           WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
           WI_CI_BUNDLE_FILE: ${{ steps.suite_environment.outputs.bundle_file }}
+          WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.browser_binding }}
         run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/launch-browser-suite.mjs --bundle "$WI_CI_BUNDLE_FILE"

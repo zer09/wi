@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { prepareBrowserSuite } from '../test-support/browser-suite-preparation.mjs';
 import { prepareBrowserFixture, recordPreparationCommand, sanitizeRecord, preparationRedactor } from '../test-support/browser-fixture-preparation.mjs';
 import { ROOT, TARGET, CHILD } from '../test-support/live-commit-native.mjs';
+import { browserPin, browserAdmission } from '../test-support/browser-pin.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const clone = value => structuredClone(value);
@@ -20,6 +21,26 @@ const fixed = { message: 'Browser suite preparation failed.' };
 const keys = ['WI_C3A_FIXTURE', 'WI_C3A_FIXTURE_SHA256', 'WI_C47_FIXTURE_SHA256', 'WI_C54_NATIVE_BINDING',
   'WI_BROWSER_FIXTURE_PARENT', 'WI_C52_EVIDENCE', 'WI_C54_ALLOCATION_PARENT', 'WI_C54_OUTER_MARKER'];
 
+// The real admission API reads these inert bytes through its explicit synthetic pin seam.
+async function suiteBrowser(parent) {
+  const root = join(parent, 'synthetic-browser'), archive = Buffer.from('synthetic archive'), body = Buffer.from('inert synthetic browser');
+  await fs.mkdir(root, { mode: 0o700 });
+  await fs.mkdir(join(root, 'package'), { mode: 0o700 });
+  await fs.mkdir(join(root, 'package/chrome-headless-shell-linux64'), { mode: 0o755 });
+  await fs.writeFile(join(root, 'package', browserPin.executable), body, { mode: 0o755 });
+  await fs.writeFile(join(root, 'browser.zip'), archive, { mode: 0o600 });
+  let crc = 0xffffffff;
+  for (const byte of archive) { crc ^= byte; for (let bit = 0; bit < 8; bit++) crc = crc & 1 ? 0x82f63b78 ^ crc >>> 1 : crc >>> 1; }
+  const sum = Buffer.alloc(4); sum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+  const inventory = [{ relative: browserPin.executable, bytes: body.length, mode: 0o755, sha256: hash(body) }];
+  const pin = { ...browserPin, bytes: archive.length, files: 1, archiveSHA256: hash(archive),
+    md5: createHash('md5').update(archive).digest('base64'), crc32c: sum.toString('base64'),
+    treeSHA256: hash(JSON.stringify(inventory)), executableSHA256: hash(body) };
+  const binding = join(root, 'binding.json'), executablePath = join(root, 'package', pin.executable);
+  await fs.writeFile(binding, JSON.stringify({ schema: 1, pin, root, executablePath, inventory }) + '\n', { mode: 0o600 });
+  return { root, binding, executablePath, browserIO: { pin, sdk: () => browserPin.sdk } };
+}
+
 async function fixture(t) {
   const parent = await fs.mkdtemp(join(tmpdir(), 'wi-suite-unit-'));
   t.after(() => fs.rm(parent, { recursive: true, force: true }));
@@ -27,12 +48,13 @@ async function fixture(t) {
   for (const name of ['web/e2e', 'web/test-support', 'web/scripts']) await fs.mkdir(join(sourceRoot, name), { recursive: true, mode: 0o700 });
   for (const name of ['web/e2e/case.mjs', 'web/test-support/helper.mjs', 'web/test-support/data.json', 'web/scripts/prepare.mjs',
     'web/playwright.config.mjs', 'web/package.json', 'web/package-lock.json']) await fs.writeFile(join(sourceRoot, name), '{}\n', { mode: 0o600 });
-  const output = join(parent, 'fresh'), calls = [], env = { ...process.env };
+  const browser = await suiteBrowser(parent);
+  const output = join(parent, 'fresh'), calls = [], env = { ...process.env, WI_BROWSER_BINDING: browser.binding };
   const sources = { 'Cargo.lock': { bytes: 4, sha256: hash('lock'), mode: 0o644 }, 'src/lib.rs': { bytes: 6, sha256: hash('source'), mode: 0o644 } };
   const executable = join(TARGET, 'debug/deps/wi-0123456789abcdef');
   const artifact = { reason: 'compiler-artifact', manifest_path: join(ROOT, 'Cargo.toml'), target: { name: 'wi', kind: ['lib'], src_path: join(ROOT, 'src/lib.rs') }, profile: { test: true }, executable };
   const cargo = JSON.stringify(artifact) + '\n' + JSON.stringify({ reason: 'build-finished', success: true }) + '\n';
-  const io = { sourceRoot, env, sources: async () => clone(sources),
+  const io = { sourceRoot, env, browserIO: browser.browserIO, sources: async () => clone(sources),
     bind: async text => ({ executable, sha256: hash('synthetic artifact bytes'), selector: CHILD, sources: clone(sources), cargo_json: text }),
     validate: async binding => clone(binding),
     command: async (program, argv, options) => {
@@ -48,7 +70,7 @@ async function fixture(t) {
       });
     },
   };
-  return { parent, output, sourceRoot, sources, executable, calls, io, env };
+  return { parent, output, sourceRoot, sources, executable, calls, io, env, browser };
 }
 async function fails(f, extra = {}) {
   await assert.rejects(prepareBrowserSuite({ output: f.output }, { ...f.io, ...extra }), fixed);
@@ -64,6 +86,117 @@ async function walk(path) {
   }
   return result;
 }
+
+test('C93D actual preparation rejects browser input and SDK overrides before output or producer', async t => {
+  for (const kind of ['missing', 'relative', 'substituted', 'receipt', 'archive', 'package', 'sdk', 'unseamed', 'override', 'overlap', 'ancestor']) await t.test(kind, async t => {
+    const f = await fixture(t);
+    if (kind === 'missing') delete f.env.WI_BROWSER_BINDING;
+    if (kind === 'relative') f.env.WI_BROWSER_BINDING = 'relative';
+    if (kind === 'substituted') f.env.WI_BROWSER_BINDING += '.other';
+    if (kind === 'receipt') await fs.writeFile(f.browser.binding, '{}\n');
+    if (kind === 'archive') await fs.appendFile(join(f.browser.root, 'browser.zip'), 'changed');
+    if (kind === 'package') await fs.appendFile(f.browser.executablePath, 'changed');
+    if (kind === 'sdk') f.io.browserIO.sdk = () => 'different';
+    if (kind === 'unseamed') delete f.io.browserIO;
+    if (kind === 'override') f.env.PW_TEST_CONNECT_WS_ENDPOINT = 'synthetic-private-endpoint';
+    if (kind === 'overlap') f.output = join(f.browser.root, 'suite');
+    if (kind === 'ancestor') f.output = f.parent;
+    await assert.rejects(prepareBrowserSuite({ output: f.output }, f.io), fixed);
+    assert.equal(f.calls.length, 0);
+    if (kind !== 'ancestor') await absent(f.output);
+    await absent(join(f.browser.root, 'suite'));
+  });
+});
+
+test('C93 environment modes reject before suite output and the actual producer; empty modes preserve input', async t => {
+  for (const key of ['PWPAUSE', 'PWTEST_WATCH', 'PWTEST_PROFILE_DIR']) {
+    for (const name of [key, 'npm_config_' + key.toLowerCase(), 'npm_package_config_' + key.toLowerCase()]) {
+      for (const value of ['0', 'false', '/synthetic/mode', '', undefined]) await t.test(name + '=' + JSON.stringify(value), async t => {
+        const f = await fixture(t);
+        if (value !== undefined) f.env[name] = value;
+        f.env.PLAYWRIGHT_NO_COPY_PROMPT = 'retained';
+        Object.defineProperty(f.env, 'syntheticHidden', { value: 'retained', enumerable: false });
+        Object.defineProperty(f.env, Symbol('synthetic descriptor'), { value: 'retained', enumerable: false });
+        const before = Object.getOwnPropertyDescriptors(f.env), prepare = prepareBrowserFixture;
+        let producers = 0;
+        f.io.prepare = async (...args) => { producers++; return prepare(...args); };
+        if (value === '' || value === undefined) {
+          const bundle = await load(await prepareBrowserSuite({ output: f.output }, f.io));
+          assert.equal(bundle.launch, 'pending'); assert.equal(bundle.full_readiness, false);
+          assert.equal(producers, 1); assert.equal(f.calls.length, 5);
+          for (const path of Object.values(bundle.planned)) await absent(path);
+        } else {
+          await fails(f); await absent(f.output);
+          assert.equal(producers, 0); assert.deepEqual(f.calls, []);
+        }
+        assert.deepEqual(Object.getOwnPropertyDescriptors(f.env), before);
+        t.after(() => absent(f.parent));
+      });
+    }
+  }
+});
+
+test('C93 environment modes are rechecked after producer and pending publication', async t => {
+  for (const key of ['PWPAUSE', 'PWTEST_WATCH', 'PWTEST_PROFILE_DIR']) {
+    for (const name of [key, 'npm_config_' + key.toLowerCase(), 'npm_package_config_' + key.toLowerCase()]) {
+      for (const value of ['0', 'false']) for (const boundary of ['build', 'pending']) await t.test(`${name}-${value}-${boundary}`, async t => {
+        const f = await fixture(t), command = f.io.command;
+        let changed = false;
+        const change = () => { changed = true; f.env[name] = value; };
+        f.io.command = async (...args) => { const result = await command(...args); if (boundary === 'build' && args[2].name === 'build') change(); return result; };
+        f.io.io = { writeFile: async (path, ...args) => { await fs.writeFile(path, ...args); if (boundary === 'pending' && path.endsWith('suite-ready.pending.json')) change(); } };
+        await fails(f); assert.ok(changed); assert.equal(f.calls.length, 5);
+        assert.equal(f.env[name], value);
+        assert.deepEqual(await load(join(f.output, 'suite-failure.json')), { stage: boundary === 'build' ? 'readiness' : 'publication', ready: false, launch: 'pending' });
+        if (boundary === 'pending') assert.equal((await load(join(f.output, 'control/suite-ready.pending.json'))).launch, 'pending');
+        else await absent(join(f.output, 'control/suite-ready.pending.json'));
+        t.after(() => absent(f.parent));
+      });
+    }
+  }
+});
+
+test('C93D closed browser provenance captures the caller separately from the eight generated variables', async t => {
+  const f = await fixture(t); f.env.PLAYWRIGHT_NO_COPY_PROMPT = 'retained';
+  const before = { ...f.env }, admission = browserAdmission(f.env, f.io.browserIO);
+  const bundle = await load(await prepareBrowserSuite({ output: f.output }, f.io));
+  assert.ok(bundle.browser, 'The actual preparer must publish closed browser provenance.');
+  assert.deepEqual(Object.keys(bundle.browser).sort(), ['product', 'headless', 'pin', 'admission', 'snapshot'].sort());
+  assert.equal(bundle.browser.product, 'chrome-headless-shell'); assert.equal(bundle.browser.headless, true);
+  assert.deepEqual(bundle.browser.pin, browserPin); assert.deepEqual(bundle.browser.admission, admission);
+  assert.deepEqual(Object.keys(bundle.environment).sort(), [...keys].sort());
+  assert.equal(bundle.environment.WI_BROWSER_BINDING, undefined);
+  assert.deepEqual(f.env, before); assert.equal(f.calls.length, 5);
+});
+
+test('C93D browser readback rejects receipt rewrites and package/root changes before publication', async t => {
+  for (const boundary of ['build', 'pending']) for (const kind of ['receipt', 'rewrite', 'package', 'executable-rewrite', 'extra', 'root-mode', 'caller-input', 'sdk-override']) await t.test(`${boundary}-${kind}`, async t => {
+    const f = await fixture(t); let changed = false;
+    const change = async () => {
+      changed = true;
+      if (kind === 'receipt') await fs.appendFile(f.browser.binding, ' ');
+      if (kind === 'rewrite') { const bytes = await fs.readFile(f.browser.binding); await fs.unlink(f.browser.binding); await fs.writeFile(f.browser.binding, bytes, { mode: 0o600 }); }
+      if (kind === 'package') await fs.appendFile(f.browser.executablePath, 'changed');
+      if (kind === 'executable-rewrite') { const bytes = await fs.readFile(f.browser.executablePath); await fs.unlink(f.browser.executablePath); await fs.writeFile(f.browser.executablePath, bytes, { mode: 0o755 }); }
+      if (kind === 'caller-input') f.env.WI_BROWSER_BINDING += '.other';
+      if (kind === 'sdk-override') f.env.DEBUG = 'pw:browser';
+      if (kind === 'extra') await fs.writeFile(join(f.browser.root, 'extra'), 'changed');
+      if (kind === 'root-mode') await fs.chmod(f.browser.root, 0o755);
+    };
+    const command = f.io.command;
+    f.io.command = async (...args) => { const value = await command(...args); if (boundary === 'build' && args[2].name === 'build') await change(); return value; };
+    f.io.io = { writeFile: async (path, ...args) => { await fs.writeFile(path, ...args); if (boundary === 'pending' && path.endsWith('suite-ready.pending.json')) await change(); } };
+    await fails(f); assert.ok(changed); assert.equal(f.calls.length, 5);
+  });
+});
+
+test('C93D new browser keys reject privacy collisions after producer receipts without publishing raw data', async t => {
+  for (const token of ['product', 'headless', 'admission', 'bindingSHA256', 'treeSHA256']) await t.test(token, async t => {
+    const f = await fixture(t); f.env.SYNTHETIC_TOKEN = token;
+    await fails(f); assert.equal(f.calls.length, 5);
+    for (const { path, s } of await walk(f.output)) if (s.isFile()) assert.equal((await fs.readFile(path)).includes(Buffer.from(token)), false);
+  });
+});
 
 test('actual C65/C67 composition publishes preparation data only and preserves parent environment', async t => {
   const f = await fixture(t), before = { ...process.env };
@@ -439,8 +572,9 @@ function collisionScenario(collision, context = 'controlled') {
     import {prepareBrowserSuite} from './web/test-support/browser-suite-preparation.mjs';
     import {recordPreparationCommand} from './web/test-support/browser-fixture-preparation.mjs';
     import {ROOT,TARGET,CHILD} from './web/test-support/live-commit-native.mjs';
+    import {browserPin} from './web/test-support/browser-pin.mjs';
     async function scenario() {
-    const hash=${hash}, clone=${clone}, fixture=${fixture}, walk=${walk};
+    const hash=${hash}, clone=${clone}, suiteBrowser=${suiteBrowser}, fixture=${fixture}, walk=${walk};
     const real=globalThis.process, descriptor=Object.getOwnPropertyDescriptor(globalThis,'process');
     const before={...real.env}, fields=Object.getOwnPropertyDescriptors(real), cleanups=[];
     const collision=real.argv[1], context=real.argv[2];

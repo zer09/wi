@@ -13,6 +13,7 @@ import { constants as fsConstants } from 'node:fs';
 import * as runnerPath from 'node:path';
 import { EventEmitter } from 'node:events';
 import { spawnSync } from 'node:child_process';
+import { isUtf8 } from 'node:buffer';
 import { preparationRedactor, sanitizeRecord } from '../test-support/browser-fixture-preparation.mjs';
 import { run as runAgentEnvironment } from '../../scripts/agent_env.mjs';
 import * as f from '../test-support/display-fixtures.mjs';
@@ -462,6 +463,7 @@ const ciKeys = ['TMPDIR', 'CARGO_TARGET_DIR', 'RUSTFLAGS', 'GIT_OPTIONAL_LOCKS',
 const ciFlags = '--cfg a5b2_max01_biuto9e0';
 const ciProvisionName = 'Provision private browser suite environment';
 const ciGateCommands = [
+  ['Provision pinned browser', 'node -- web/scripts/prepare-browser.mjs --output "$WI_CI_BROWSER_OUTPUT"'],
   ['Typecheck browser sources', 'npm --prefix web run typecheck'],
   ['Verify embedded assets', 'npm --prefix web run verify:assets'],
   ['Test browser units', 'npm --prefix web test'],
@@ -492,25 +494,53 @@ function ciWorkflowProof(workflow, pkg = ciPackage(), config = ciConfig()) {
     "      - uses: actions/setup-node@v4\n        with:\n          node-version: '24.18.0'\n",
     '      - name: Warm Cargo cache\n        run: cargo fetch --locked\n        working-directory: .\n',
     '      - run: npm ci\n        working-directory: web\n',
-    '      - run: npx --no-install playwright install --with-deps chromium\n        working-directory: web\n',
+    '      - run: npx --no-install playwright install-deps chromium\n        working-directory: web\n',
   ]);
-  assert.equal(extracted.steps.length, 12);
+  assert.equal(extracted.steps.length, 13);
+  let controls;
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && node.name.getText(extracted.ast) === 'controls') { assert.equal(controls, undefined); controls = node.initializer; }
+    ts.forEachChild(node, visit);
+  };
+  visit(extracted.ast); assert.ok(controls && ts.isObjectLiteralExpression(controls));
+  assert.deepEqual(controls.properties.map(p => [p.name.getText(extracted.ast), p.initializer.getText(extracted.ast)]), [
+    ['env_file', "join(parent, 'environment.json')"], ['suite_output', "join(parent, 'suite')"],
+    ['bundle_file', "join(parent, 'suite', 'control', 'suite-ready.json')"],
+    ['browser_output', "join(scratch, 'browser')"], ['browser_binding', "join(scratch, 'browser', 'binding.json')"],
+  ]);
   for (const [i, [name, command]] of ciGateCommands.entries()) {
     let env = '          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}\n';
-    if (i === 3) env += '          WI_CI_SUITE_OUTPUT: ${{ steps.suite_environment.outputs.suite_output }}\n';
-    if (i === 4) env += '          WI_CI_BUNDLE_FILE: ${{ steps.suite_environment.outputs.bundle_file }}\n';
+    if (i === 0) env += '          WI_CI_BROWSER_OUTPUT: ${{ steps.suite_environment.outputs.browser_output }}\n';
+    if (i === 4) env += '          WI_CI_SUITE_OUTPUT: ${{ steps.suite_environment.outputs.suite_output }}\n';
+    if (i === 5) env += '          WI_CI_BUNDLE_FILE: ${{ steps.suite_environment.outputs.bundle_file }}\n';
+    if (i >= 4) env += '          WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.browser_binding }}\n';
     assert.equal(extracted.steps[i + 7], `      - name: ${name}\n        working-directory: .\n        env:\n${env}        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- ${command}\n`);
   }
   assert.ok(!/GITHUB_ENV|continue-on-error|always\(|test:e2e|upload-artifact/.test(workflow));
   assert.equal(pkg.scripts.test, 'node --test test/*.test.mjs'); assert.equal(pkg.scripts['test:e2e'], 'playwright test');
   assert.deepEqual(pkg.devDependencies, { '@playwright/test': '1.58.2', typescript: '5.9.3' });
   const configAst = ts.createSourceFile('config.mjs', config, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  assert.equal(configAst.parseDiagnostics.length, 0); assert.equal(configAst.statements.length, 2);
-  const value = runInNewContext(configAst.statements[1].getText(configAst).replace('export default ', ''), { defineConfig: v => v });
+  assert.equal(configAst.parseDiagnostics.length, 0); assert.equal(configAst.statements.length, 3);
+  assert.equal(configAst.statements[0].getText(configAst), "import { defineConfig } from '@playwright/test';");
+  assert.equal(configAst.statements[1].getText(configAst), "import { browserLaunchOptions } from './test-support/browser-pin.mjs';");
+  const exported = configAst.statements[2];
+  assert.ok(ts.isExportAssignment(exported) && ts.isCallExpression(exported.expression));
+  assert.equal(exported.expression.expression.getText(configAst), 'defineConfig');
+  assert.equal(exported.expression.arguments.length, 1);
+  const use = exported.expression.arguments[0].properties.find(p => p.name?.getText(configAst) === 'use');
+  const launch = use.initializer.properties.find(p => p.name?.getText(configAst) === 'launchOptions');
+  assert.equal(launch.initializer.getText(configAst), 'browserLaunchOptions()');
+  let admissions = 0;
+  const value = runInNewContext(exported.getText(configAst).replace('export default ', ''), {
+    defineConfig: v => v, browserLaunchOptions: (...args) => {
+      assert.deepEqual(args, []); admissions++; return Object.freeze({ executablePath: '/synthetic/admitted-browser' });
+    },
+  });
+  assert.equal(admissions, 1);
   assert.equal(isDeepStrictEqual(JSON.parse(JSON.stringify(value)), {
     testDir: './e2e', fullyParallel: false, workers: 1, retries: 0, timeout: 60_000, globalTimeout: 900_000,
     expect: { timeout: 10_000 }, reporter: [['line'], ['./test-support/browser-case-diagnostics.mjs']], use: { browserName: 'chromium', headless: true,
-      viewport: { width: 1440, height: 900 }, actionTimeout: 10_000, navigationTimeout: 10_000,
+      launchOptions: { executablePath: '/synthetic/admitted-browser' }, viewport: { width: 1440, height: 900 }, actionTimeout: 10_000, navigationTimeout: 10_000,
       trace: 'off', screenshot: 'off', video: 'off', serviceWorkers: 'block' },
   }), true);
   return extracted;
@@ -557,9 +587,9 @@ async function runCiBootstrap(fixture, { env = fixture.env, cwd = fixture.checko
 }
 async function ciOutputs(fixture) {
   const bytes = readFileSync(fixture.output, 'utf8'); assert.ok(bytes.startsWith('prior=unchanged\n'));
-  const lines = bytes.slice('prior=unchanged\n'.length).trimEnd().split('\n'); assert.equal(lines.length, 3);
+  const lines = bytes.slice('prior=unchanged\n'.length).trimEnd().split('\n'); assert.equal(lines.length, 5);
   const entries = lines.map(s => { const i = s.indexOf('='); return [s.slice(0, i), s.slice(i + 1)]; });
-  assert.deepEqual(entries.map(([key]) => key), ['env_file', 'suite_output', 'bundle_file']);
+  assert.deepEqual(entries.map(([key]) => key), ['env_file', 'suite_output', 'bundle_file', 'browser_output', 'browser_binding']);
   return Object.fromEntries(entries);
 }
 async function ciProvisionProof(fixture) {
@@ -577,6 +607,9 @@ async function ciProvisionProof(fixture) {
   assert.deepEqual(await readdir(parent), ['environment.json']);
   assert.equal(dirname(paths.suite_output), parent); assert.equal(paths.bundle_file, join(paths.suite_output, 'control', 'suite-ready.json'));
   await assert.rejects(lstat(paths.suite_output), { code: 'ENOENT' });
+  assert.equal(paths.browser_output, join(approved.TMPDIR, 'browser'));
+  assert.equal(paths.browser_binding, join(paths.browser_output, 'binding.json'));
+  await assert.rejects(lstat(paths.browser_output), { code: 'ENOENT' });
   assert.ok(!readFileSync(fixture.output, 'utf8').includes('WI_C3A_FIXTURE'));
   return { paths, approved };
 }
@@ -584,7 +617,8 @@ test('CI source binds one private provision, exact gates, preparation and guarde
 test('actual YAML bootstrap provisions private data with spaces and unchanged ordered PATH duplicates', async t => {
   const fixture = await ciRunner(t), { paths, approved } = await ciProvisionProof(fixture);
   const other = await ciRunner(t), second = await ciProvisionProof(other); assert.notEqual(dirname(paths.env_file), dirname(second.paths.env_file));
-  const calls = [], variables = { WI_CI_ENV_FILE: paths.env_file, WI_CI_SUITE_OUTPUT: paths.suite_output, WI_CI_BUNDLE_FILE: paths.bundle_file };
+  const calls = [], variables = { WI_CI_ENV_FILE: paths.env_file, WI_CI_BROWSER_OUTPUT: paths.browser_output,
+    WI_CI_SUITE_OUTPUT: paths.suite_output, WI_CI_BUNDLE_FILE: paths.bundle_file };
   const commands = ciWorkflowProof(ciWorkflow()).steps.slice(7).map(step => step.match(/        run: (.+)\n$/)[1]);
   for (const command of commands) {
     // Interpret only the quoted scalar arguments already constrained by the source proof, never execute a shell.
@@ -600,6 +634,7 @@ test('actual YAML bootstrap provisions private data with spaces and unchanged or
     assert.deepEqual(result, { code: 0, signal: null });
   }
   assert.deepEqual(calls, [
+    { program: 'node', args: ['--', 'web/scripts/prepare-browser.mjs', '--output', paths.browser_output] },
     { program: 'npm', args: ['--prefix', 'web', 'run', 'typecheck'] },
     { program: 'npm', args: ['--prefix', 'web', 'run', 'verify:assets'] },
     { program: 'npm', args: ['--prefix', 'web', 'test'] },
@@ -607,6 +642,40 @@ test('actual YAML bootstrap provisions private data with spaces and unchanged or
     { program: 'node', args: ['--', 'web/scripts/launch-browser-suite.mjs', '--bundle', paths.bundle_file] },
   ]);
 });
+test('C93D actual workflow step inputs survive the actual agent_env body beside exactly six approved values', async t => {
+  const f = await ciRunner(t), { paths, approved } = await ciProvisionProof(f);
+  const source = readFileSync(new URL('../../scripts/agent_env.mjs', import.meta.url), 'utf8');
+  const ast = ts.createSourceFile('agent_env.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const body = ast.statements.filter(n => !ts.isImportDeclaration(n) && !ts.isIfStatement(n))
+    .map(n => n.getText(ast).replace(/^export /, '')).join('\n');
+  const steps = ciWorkflowProof(ciWorkflow()).steps.slice(7), outputs = new Map(Object.entries(paths));
+  let dispatches = 0;
+  for (const [index, step] of steps.entries()) {
+    const stepEnv = { UNRELATED: 'retained' };
+    for (const match of step.matchAll(/^          (\w+): \$\{\{ steps\.suite_environment\.outputs\.(\w+) \}\}$/gm)) {
+      assert.ok(outputs.has(match[2])); stepEnv[match[1]] = outputs.get(match[2]);
+    }
+    const command = step.match(/        run: (.+)\n$/)[1];
+    const argv = command.match(/"[^"]*"|[^\s]+/g).map(arg => arg.startsWith('"$') ? stepEnv[arg.slice(2, -1)] : arg);
+    const bus = new EventEmitter(); bus.env = Object.freeze({ ...stepEnv });
+    bus.stderr = { write: () => assert.fail('A valid workflow input must not emit a diagnostic.') };
+    const run = runInNewContext(body + '\nrun;', { process: bus, readFileSync, isUtf8,
+      delimiter: runnerPath.delimiter, isAbsolute, spawn: () => assert.fail('Use only the synthetic direct transport.') });
+    const result = await run(argv.slice(3), (program, args, options) => {
+      dispatches++; assert.equal(options.shell, false); assert.equal(options.stdio, 'inherit');
+      assert.equal(isDeepStrictEqual(JSON.parse(JSON.stringify(options.env)), { ...stepEnv, ...approved }), true);
+      assert.equal(options.env.WI_BROWSER_BINDING, index >= 4 ? paths.browser_binding : undefined);
+      if (index === 0) { assert.equal(program, 'node'); assert.deepEqual([...args], ['--', 'web/scripts/prepare-browser.mjs', '--output', paths.browser_output]); }
+      const child = new EventEmitter(); child.exitCode = null; child.signalCode = null;
+      queueMicrotask(() => { child.emit('spawn'); child.exitCode = 0; child.emit('close', 0, null); }); return child;
+    });
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { code: 0, signal: null });
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) assert.equal(bus.listenerCount(signal), 0);
+    assert.deepEqual(bus.env, stepEnv);
+  }
+  assert.equal(dispatches, 6);
+});
+
 for (const key of ['GITHUB_WORKSPACE', 'RUNNER_TEMP', 'GITHUB_OUTPUT', 'PATH']) for (const defect of ['missing', 'relative', 'nul', 'unicode', 'empty', 'boxed', 'number', 'null'])
   test(`actual CI bootstrap rejects ${key}/${defect} before publication`, async t => {
     const f = await ciRunner(t), env = { ...f.env };
@@ -676,6 +745,15 @@ for (const overlap of ['PATH', 'RUSTFLAGS', 'parent', 'nonoverlap']) test(`actua
   }
 });
 const ciMutations = {
+  'missing browser provision': s => s.replace(/      - name: Provision pinned browser[\s\S]*?(?=      - name: Typecheck)/, ''),
+  'old bundled download': s => s.replace('playwright install-deps chromium', 'playwright install --with-deps chromium'),
+  'browser extra output': s => s.replace("browser_output: join(scratch, 'browser'),", "extra_output: scratch, browser_output: join(scratch, 'browser'),"),
+  'browser wrong input': s => s.replace('WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.browser_binding }}', 'WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.bundle_file }}'),
+  'browser missing input': s => s.replace('          WI_BROWSER_BINDING: ${{ steps.suite_environment.outputs.browser_binding }}\n', ''),
+  'browser stage injection': s => s.replace('--output "$WI_CI_BROWSER_OUTPUT"', '--output "$WI_CI_BROWSER_OUTPUT" --launch'),
+  'browser expression injection': s => s.replace('"$WI_CI_BROWSER_OUTPUT"', '${{ steps.suite_environment.outputs.browser_output }}'),
+  'browser output in records': s => s.replace("browser_output: join(scratch, 'browser')", "browser_output: join(parent, 'browser')"),
+  'browser provision reordered': s => { const i = s.indexOf('      - name: Provision pinned browser'), j = s.indexOf('      - name: Typecheck'); return s.slice(0, i) + s.slice(j) + s.slice(i, j); },
   'missing preparation': s => s.replace(/      - name: Prepare private browser suite[\s\S]*?(?=      - name: Launch)/, ''),
   'missing launch': s => s.replace(/      - name: Launch guarded browser suite[\s\S]*/, ''),
   'reordered launch': s => { const i = s.indexOf('      - name: Prepare private'), j = s.indexOf('      - name: Launch guarded'); return s.slice(0, i) + s.slice(j) + s.slice(i, j); },
@@ -711,6 +789,13 @@ for (const [name, change] of Object.entries({
   'missing line reporter': s => s.replace("['line'], ", ''),
   'reordered reporters': s => s.replace("[['line'], ['./test-support/browser-case-diagnostics.mjs']]", "[['./test-support/browser-case-diagnostics.mjs'], ['line']]"),
   'extra reporter': s => s.replace("reporter: [[", "reporter: [['json'], ["),
+  'wrong browser import': s => s.replace("from './test-support/browser-pin.mjs'", "from './test-support/fixture.mjs'"),
+  'missing browser admission': s => s.replace('    launchOptions: browserLaunchOptions(),\n', ''),
+  'browser admission argument': s => s.replace('browserLaunchOptions()', 'browserLaunchOptions(process.env)'),
+  'browser path bypass': s => s.replace('browserLaunchOptions()', "{ executablePath: '/synthetic/other' }"),
+  'extra browser option': s => s.replace('browserLaunchOptions()', "{ ...browserLaunchOptions(), args: [] }"),
+  'comment browser counterfeit': s => s.replace('    launchOptions: browserLaunchOptions(),', '    // launchOptions: browserLaunchOptions(),'),
+  'browser shadow': s => s.replace('export default', 'const browserLaunchOptions = () => ({});\nexport default'),
 }))
   test(`CI config sensitivity rejects ${name}`, () => { ciWorkflowProof(ciWorkflow()); assert.throws(() => ciWorkflowProof(ciWorkflow(), ciPackage(), change(ciConfig()))); });
 for (const [name, change] of Object.entries({ extra: s => s.replace('TMPDIR: scratch,', "EXTRA: '', TMPDIR: scratch,"), missing: s => s.replace('NODE_OPTIONS: \'\',', ''), changed: s => s.replace('PATH: env.PATH', "PATH: '/changed'") }))
@@ -731,4 +816,19 @@ test('extracted bootstrap and every run fragment pass JavaScript and bash syntax
   const x = ciWorkflowProof(ciWorkflow());
   const fragments = [x.shell, ...ciGateCommands.map(([, cmd]) => `node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- ${cmd}`)];
   for (const input of fragments) { const result = spawnSync('bash', ['-n'], { input, encoding: 'utf8' }); assert.equal(result.status, 0); assert.equal(result.signal, null); }
+});
+
+test('C93C default config uses only the admitted central launch options', () => {
+  const ast = ts.createSourceFile('config.mjs', ciConfig(), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  assert.equal(ast.parseDiagnostics.length, 0); assert.equal(ast.statements.length, 3);
+  const admission = ast.statements[1]; assert.ok(ts.isImportDeclaration(admission));
+  assert.equal(admission.moduleSpecifier.text, './test-support/browser-pin.mjs');
+  assert.equal(admission.importClause.getText(ast), '{ browserLaunchOptions }');
+  let calls = 0;
+  const value = runInNewContext(ast.statements[2].getText(ast).replace('export default ', ''), {
+    defineConfig: v => v, browserLaunchOptions: (...args) => {
+      assert.deepEqual(args, []); calls++; return Object.freeze({ executablePath: '/synthetic/admitted-browser' });
+    },
+  });
+  assert.equal(calls, 1); assert.deepEqual(JSON.parse(JSON.stringify(value.use.launchOptions)), { executablePath: '/synthetic/admitted-browser' });
 });

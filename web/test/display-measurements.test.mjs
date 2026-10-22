@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { isAbsolute, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import ts from 'typescript';
+import { browserPin } from '../test-support/browser-pin.mjs';
 import { transportTiming, transportSizes, measurementCollector, installColdObserver, coldProof, parseStat, parseMemory,
   identity, retirement, aggregateBrowser, memoryProbe, sampler, memorySummary, resources, acquireResource, acquireObserver,
   sourceGuard, boundaries } from '../test-support/display-measurements.mjs';
@@ -371,7 +372,7 @@ async function specCase(options = {}) {
   const page = { on() {}, goto: async () => {}, getByLabel: () => locator, locator: () => locator, getByRole: () => locator };
   const context = { setDefaultTimeout() {}, setDefaultNavigationTimeout() {}, route: async () => {}, on() {}, newPage: async () => page,
     close: async () => { raise('context-close'); } };
-  const browser = { version: () => '145.0.7632.6', newContext: async () => { raise('context'); return context; }, close: async () => { raise('browser-close'); } };
+  const browser = { version: () => options.browserVersion ?? browserPin.version, newContext: async () => { raise('context'); return context; }, close: async () => { raise('browser-close'); } };
   const server = { process: () => ({ pid: 902 }), wsEndpoint: () => 'synthetic-unlogged-control',
     close: async () => { raise('server-close'); serverClosed = true; }, kill: async () => { events.push('browser-emergency'); serverClosed = true; } };
   function fakeExpect(value) { return { toBe: expected => assert.equal(value, expected), toEqual: expected => assert.deepEqual(value, expected),
@@ -383,7 +384,15 @@ async function specCase(options = {}) {
   let reserved = false;
   const output = env.WI_C52_EVIDENCE ?? '/synthetic/test-output/c52-evidence';
   const values = { process: localProcess, test: fakeTest, expect: fakeExpect,
-    chromium: { launchServer: async () => { raise('launch'); return server; }, connect: async () => { raise('connect'); return browser; } },
+    browserPin, browserLaunchOptions: (...args) => {
+      assert.deepEqual(args, []); raise('browser-admission');
+      if (events.filter(e => e === 'browser-admission').length === options.browserReject) throw synthetic;
+      return Object.freeze({ executablePath: '/synthetic/admitted-browser' });
+    },
+    chromium: { launchServer: async options => {
+      assert.deepEqual(options, { host: '127.0.0.1', headless: true, executablePath: '/synthetic/admitted-browser' });
+      raise('launch'); return server;
+    }, connect: async () => { raise('connect'); return browser; } },
     readFile: async url => { events.push('source-read'); return String(url).includes('spec.mjs') ? source : helper; },
     mkdir: async (path, flags) => { events.push('reserve'); assert.equal(path, output); assert.deepEqual(flags, { mode: 0o700 });
       if (options.occupied) throw synthetic; reserved = true; if (options.markerOccupied) saved.set('C52.once.json', { consumed: true }); },
@@ -538,4 +547,48 @@ test('C52 static guards bind actual spec and helper and detect forbidden source 
   assert.throws(() => sourceGuard(spec.replace("context.on('requestfinished', network.finished)", ''), helper));
   assert.equal(/async \(\{ browser \}\)/.test(spec), false);
   assert.ok(spec.includes('serviceWorkers: \'block\'')); assert.ok(spec.includes('viewport: { width: 1000, height: 700 }'));
+});
+
+test('C93C display source requires real shared admission at preflight and owned launch', async t => {
+  const spec = await readFile(new URL('../e2e/display-measurements.spec.mjs', import.meta.url), 'utf8');
+  const helper = await readFile(new URL('../test-support/display-measurements.mjs', import.meta.url), 'utf8');
+  assert.match(spec, /import \{ browserPin, browserLaunchOptions \} from '\.\.\/test-support\/browser-pin\.mjs';/);
+  assert.equal(sourceGuard(spec, helper), true);
+  for (const [name, change] of Object.entries({
+    'missing preflight': s => s.replace('    browserLaunchOptions();\n', ''),
+    'wrong import': s => s.replace("from '../test-support/browser-pin.mjs'", "from '../test-support/fixture.mjs'"),
+    shadow: s => s.replace('    browserLaunchOptions();', '    const browserLaunchOptions = () => ({}); browserLaunchOptions();'),
+    'extra argument': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(process.env)'),
+    'unused options': s => s.replace(', ...browserLaunchOptions()', ''),
+    'comment counterfeit': s => s.replace('    browserLaunchOptions();', '    // browserLaunchOptions();'),
+    'wrong version': s => s.replace('toBe(browserPin.version)', "toBe('145.0.7632.6')"),
+    bypass: s => s.replace('...browserLaunchOptions()', "...{ executablePath: '/synthetic/other' }"),
+    'remote connection': s => s.replace('chromium.connect(server.wsEndpoint())', "chromium.connect('ws://synthetic.invalid')"),
+    'SDK environment override': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); process.env.PWDEBUG = '1';"),
+    'extra launch args': s => s.replace('...browserLaunchOptions()', '...browserLaunchOptions(), args: []'),
+    'pin shadow': s => s.replace('    browserLaunchOptions();', "    browserLaunchOptions(); const browserPin = { version: 'other' };"),
+  })) await t.test(name, () => {
+    const changed = change(spec); assert.notEqual(changed, spec); assert.throws(() => sourceGuard(changed, helper));
+  });
+});
+
+test('C93C display actual callback admits before evidence and rechecks at owned launch', async () => {
+  const normal = await specCase();
+  assert.equal(normal.events.filter(e => e === 'browser-admission').length, 2);
+  assert.ok(normal.events.indexOf('browser-admission') < normal.events.indexOf('output-path'));
+  assert.equal(normal.events[normal.events.indexOf('launch') - 1], 'browser-admission');
+  const early = await specCase({ browserReject: 1 });
+  assert.equal(early.failure, early.synthetic); assert.equal(early.saved.size, 0);
+  for (const event of ['output-path', 'reserve', 'discovery', 'binding', 'root-acquire', 'native-acquire', 'launch']) assert.equal(early.events.includes(event), false);
+  const late = await specCase({ browserReject: 2 });
+  assert.equal(late.failure, late.synthetic); assert.equal(late.events.includes('launch'), false);
+  assert.ok(late.events.includes('native-stop')); assert.equal(late.observer.evidence().closed, true);
+  assert.equal(late.saved.get('BROWSER_RESULT.json').status, 'FAILED');
+});
+test('C93C display actual callback rejects a nonexact runtime browser version', async () => {
+  for (const browserVersion of ['145.0.7632.6', browserPin.version + '.extra']) {
+    const c = await specCase({ browserVersion });
+    assert.ok(c.failure instanceof assert.AssertionError); assert.equal(c.events.includes('context'), false);
+    assert.ok(c.events.includes('server-close')); assert.ok(c.events.includes('native-stop'));
+  }
 });

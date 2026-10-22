@@ -1,4 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
+import { browserPin, browserLaunchOptions } from '../test-support/browser-pin.mjs';
 import { appendMeasurementAnnotation } from '../test-support/browser-case-diagnostics.mjs';
 import { readFile, writeFile, rm, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -44,6 +45,7 @@ test('one genuine Load older content prepend with original public transport meta
     for(const i of tree.members)if(!browserMembers.some(n=>n.pid===i.pid&&n.start_ticks===i.start_ticks))browserMembers.push(i);
   }
   try {
+    browserLaunchOptions();
     evidenceRoot=await reserveOutput(testInfo);
     sourceGuard(await readFile(new URL(import.meta.url),'utf8'),await readFile(new URL('../test-support/content-measurements.mjs',import.meta.url),'utf8'));
     binding=await resolveFixture(process.env, discoverFixture);
@@ -81,7 +83,7 @@ test('one genuine Load older content prepend with original public transport meta
       if(bodySucceeded)observerWork(native.samples);else contentWork(native.samples);
     });
     nativeIdentity=await observer.initialize();legacyProof(snapshot(fixture),seed);
-    server=await acquireResource(owned,'browser-server-close',40,()=>chromium.launchServer({ host: '127.0.0.1', headless:true }),value=>value.close());
+    server=await acquireResource(owned,'browser-server-close',40,()=>chromium.launchServer({ host: '127.0.0.1', headless:true, ...browserLaunchOptions() }),value=>value.close());
     owned.register('browser-final-discovery',10,async()=>{await discoverOwned();finalDiscovery=true;});
     owned.register('browser-emergency',41,async()=>{
       if(!browserIdentity || browserIdentity.state!=='present')return;
@@ -95,7 +97,7 @@ test('one genuine Load older content prepend with original public transport meta
     const candidate=await identity(server.process().pid);
     expect(candidate.state).toBe('present');expect(candidate.ppid).toBe(process.pid);browserIdentity=candidate;await discoverOwned();
     browser=await acquireResource(owned,'browser-connection-close',30,() => chromium.connect(server.wsEndpoint()),value=>value.close());
-    browserVersion=browser.version();expect(browserVersion).toBe('145.0.7632.6');
+    browserVersion=browser.version();expect(browserVersion).toBe(browserPin.version);
     context=await acquireResource(owned,'context-close',20,
       ()=>browser.newContext({serviceWorkers:'block',viewport:{width:1000,height:700}}),value=>{
         // Discovery is still observation. Only this close invocation admits SSE cancellation.

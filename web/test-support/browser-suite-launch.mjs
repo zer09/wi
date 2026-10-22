@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { browserSuiteManifest } from './browser-suite-preparation.mjs';
+import { browserSuiteManifest, browserSuiteProvenance } from './browser-suite-preparation.mjs';
+import { browserEnvironment } from './browser-pin.mjs';
 import { recordPreparationCommand, preparationRedactor, sanitizeRecord } from './browser-fixture-preparation.mjs';
 import { ROOT, TARGET, CARGO_ARGS, CHILD, nativeSources, nativeBinding, identityProof, artifactFromCargo, processIdentity } from './live-commit-native.mjs';
 import { CHILD_TEST, artifactFromCargo as ordinaryArtifact } from './fixture.mjs';
@@ -91,6 +92,8 @@ export async function launchBrowserSuite({ bundle }, overrides = {}) {
     control = dirname(bundle);
     const root = dirname(control), parent = dirname(root), artifact = join(root, 'artifact'), retained = join(root, 'retained');
     if ([ROOT, TARGET, sourceRoot].some(path => overlaps(root, path))) reject();
+    const browser = required(await browserSuiteProvenance(env, io, overrides.browserIO));
+    if (overlaps(root, browser.admission.root)) reject();
     const planned = { c52: join(root, 'c52-evidence'), playwright: join(root, 'playwright-output'),
       guard: join(control, 'execution-guard.json'), outer: join(control, 'c54-outer.json') };
     const pending = join(control, 'suite-ready.pending.json');
@@ -162,7 +165,7 @@ export async function launchBrowserSuite({ bundle }, overrides = {}) {
       `--config=${join(ROOT, 'web/playwright.config.mjs')}`, '--output', planned.playwright], cwd: ROOT };
     same(prepared, { version: 1, scope: 'browser suite preparation only', launch: 'pending', full_readiness: false,
       preparation_cutoff: 'revalidate all inputs before a separately authorized one-use launch', browser_executions: 0, case_markers: 0,
-      identities, environment: childEnvironment, approved_environment: environment(env), planned,
+      identities, browser, environment: childEnvironment, approved_environment: environment(env), planned,
       sources: { path: sourcePath, sha256: hash(sourceFile.bytes), manifest },
       producer: { path: provenancePath, sha256: hash(provenanceFile.bytes), records: pins, binding: native }, future_command: futureCommand,
       outer_content: { consumed: true }, execution_guard_reserved: false });
@@ -197,6 +200,10 @@ export async function launchBrowserSuite({ bundle }, overrides = {}) {
         same(await io.readdir(retained), [basename(identities.child.path)]);
         await absent(planned.c52); await absent(planned.playwright);
       }
+      // Check the browser last so native and control readbacks cannot hide a late swap.
+      browserEnvironment(overrides.env ?? process.env);
+      same((overrides.env ?? process.env).WI_BROWSER_BINDING, browser.admission.binding);
+      same(required(await browserSuiteProvenance(env, io, overrides.browserIO)), browser);
     };
     await recheck();
     stage = 'guard';
@@ -209,7 +216,7 @@ export async function launchBrowserSuite({ bundle }, overrides = {}) {
     stage = 'child';
     let launchText;
     try {
-      launchText = await recordPreparationCommand(futureCommand.program, futureCommand.argv, { cwd: ROOT, env: { ...env, ...childEnvironment }, output: control, name: 'launch' },
+      launchText = await recordPreparationCommand(futureCommand.program, futureCommand.argv, { cwd: ROOT, env: { ...env, ...childEnvironment, WI_BROWSER_BINDING: browser.admission.binding }, output: control, name: 'launch' },
         (program, argv, options) => {
           // No await between the final stop latch and this single direct dispatch.
           if (stopped) reject();

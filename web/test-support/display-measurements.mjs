@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
+import ts from 'typescript';
 import { restartParser, restartProtocol, rootProof, workProof, terminalProof } from './restart-display.mjs';
 import { sid, previous, expectedPage, collector } from './upgrade-display-parity.mjs';
 import { responseHeaders } from './interrupted-display-parity.mjs';
@@ -399,7 +400,49 @@ export function acquireObserver(binding, fixture, { spawnChild = spawn, readIden
   };
 }
 
+export function browserSourceProof(spec) {
+  const ast = ts.createSourceFile('measurement.mjs', spec, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  if (ast.parseDiagnostics.length) reject();
+  const imports = ast.statements.filter(ts.isImportDeclaration);
+  const pin = imports.filter(s => s.moduleSpecifier.text === '../test-support/browser-pin.mjs');
+  if (pin.length !== 1 || pin[0].importClause?.getText(ast) !== '{ browserPin, browserLaunchOptions }') reject();
+  const names = { browserLaunchOptions: 0, browserPin: 0, chromium: 0 }, launches = [], connects = [], versions = [];
+  function visit(node) {
+    if (ts.isIdentifier(node) && Object.hasOwn(names, node.text)) names[node.text]++;
+    if (ts.isCallExpression(node)) {
+      if (node.expression.getText(ast) === 'chromium.launchServer') launches.push(node);
+      if (node.expression.getText(ast) === 'chromium.connect') connects.push(node);
+      if (node.expression.getText(ast) === 'expect(browserVersion).toBe') versions.push(node);
+      if (['Object.assign', 'Object.defineProperty', 'Object.defineProperties', 'Reflect.set', 'Reflect.deleteProperty'].includes(node.expression.getText(ast))
+        && node.arguments[0]?.getText(ast) === 'process.env') reject();
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+      && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && node.left.getText(ast).startsWith('process.env')
+      && node.left.getText(ast) !== 'process.env.WI_C3A_FIXTURE') reject();
+    if (ts.isDeleteExpression(node) && node.expression.getText(ast).startsWith('process.env')) reject();
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  // Extra references also reject a local shadow or a second browser-selection route.
+  if (names.browserLaunchOptions !== 3 || names.browserPin !== 2 || names.chromium !== 4) reject();
+  const cases = ast.statements.filter(ts.isExpressionStatement).map(s => s.expression)
+    .filter(n => ts.isCallExpression(n) && n.expression.getText(ast) === 'test');
+  if (cases.length !== 1 || !ts.isArrowFunction(cases[0].arguments[1]) || !ts.isBlock(cases[0].arguments[1].body)) reject();
+  const tries = cases[0].arguments[1].body.statements.filter(ts.isTryStatement);
+  const early = tries[0]?.tryBlock.statements[0];
+  if (tries.length !== 1 || !early || !ts.isExpressionStatement(early) || early.expression.getText(ast) !== 'browserLaunchOptions()') reject();
+  if (launches.length !== 1 || launches[0].arguments.length !== 1 || !ts.isObjectLiteralExpression(launches[0].arguments[0])) reject();
+  const options = launches[0].arguments[0].properties;
+  if (options.length !== 3 || options[0].getText(ast) !== "host: '127.0.0.1'"
+    || !ts.isPropertyAssignment(options[1]) || options[1].name.getText(ast) !== 'headless' || options[1].initializer.kind !== ts.SyntaxKind.TrueKeyword
+    || !ts.isSpreadAssignment(options[2]) || options[2].expression.getText(ast) !== 'browserLaunchOptions()') reject();
+  if (connects.length !== 1 || connects[0].arguments.length !== 1 || connects[0].arguments[0].getText(ast) !== 'server.wsEndpoint()') reject();
+  if (versions.length !== 1 || versions[0].arguments.length !== 1 || versions[0].arguments[0].getText(ast) !== 'browserPin.version') reject();
+  return true;
+}
+
 export function sourceGuard(spec, helper) {
+  browserSourceProof(spec);
   const forbidden = [/newCDPSession/, /_channel/, /_connection/, /wsPath\s*:/, /executablePath\s*:/, /args\s*:/,
     /\.json\s*\(/, /\.text\s*\(/, /\.arrayBuffer\s*\(/, /\.body\s*\(/, /test\.(skip|fixme|only)\s*\(/,
     /globalThis\.fetch\s*=/, /prototype\./, /console\./, /\.stack\b/, /JSON\.stringify\(process\.env\)/,

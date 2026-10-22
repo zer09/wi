@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { browserLaunchOptions } from './test-support/browser-pin.mjs';
 
 export default defineConfig({
   testDir: './e2e',
@@ -12,6 +13,7 @@ export default defineConfig({
   use: {
     browserName: 'chromium',
     headless: true,
+    launchOptions: browserLaunchOptions(),
     viewport: { width: 1440, height: 900 },
     actionTimeout: 10_000,
     navigationTimeout: 10_000,

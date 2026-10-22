@@ -6,6 +6,7 @@ import { prepareBrowserFixture, recordPreparationCommand, preparationRedactor, s
 import { ROOT, TARGET, CARGO_ARGS, CHILD, nativeSources, bindCargoArtifact, nativeBinding, identityProof } from './live-commit-native.mjs';
 import { CHILD_TEST } from './fixture.mjs';
 import { outerProof, allocationProgress, allocationProof, prepareInvocation, resolveBinding } from './live-commit-measurements.mjs';
+import { browserPin, browserEnvironment, browserAdmission } from './browser-pin.mjs';
 
 const reject = () => { throw Error('Browser suite preparation failed.'); };
 const same = (a, b) => { if (!isDeepStrictEqual(a, b)) reject(); };
@@ -48,6 +49,20 @@ export async function browserSuiteManifest(sourceRoot = ROOT, io = fs) {
   return { files, directories };
 }
 
+export async function browserSuiteProvenance(env, io = fs, browserIO = {}) {
+  browserEnvironment(env);
+  const admission = browserAdmission(env, browserIO);
+  const paths = { root: admission.root, receipt: admission.binding,
+    package: join(admission.root, 'package'), executable: admission.executablePath };
+  const snapshot = async () => Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([key, path]) => {
+    const s = await io.lstat(path);
+    return [key, { path, ...Object.fromEntries(['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeMs', 'ctimeMs'].map(k => [k, s[k]])) }];
+  })));
+  const before = await snapshot();
+  same(browserAdmission(env, browserIO), admission); same(await snapshot(), before);
+  return { product: 'chrome-headless-shell', headless: true, pin: { ...browserPin }, admission, snapshot: before };
+}
+
 export async function prepareBrowserSuite({ output }, overrides = {}) {
   // Seams keep offline controls on owned synthetic files, without a native build.
   const io = { ...fs, ...overrides.io };
@@ -88,6 +103,8 @@ export async function prepareBrowserSuite({ output }, overrides = {}) {
       || typeof output !== 'string' || !output.isWellFormed() || output.includes('\0') || !isAbsolute(output)
       || resolve(output) !== output || output === '/') reject();
     if ([ROOT, TARGET, sourceRoot].some(path => overlaps(output, path))) reject();
+    const browser = await browserSuiteProvenance(env, io, overrides.browserIO);
+    if (overlaps(output, browser.admission.root)) reject();
     required({ output, environment: environment(env), node: process.execPath });
     const parent = await directory(dirname(output));
     await io.mkdir(output, { mode: 0o700 }); created = true;
@@ -195,6 +212,10 @@ export async function prepareBrowserSuite({ output }, overrides = {}) {
     const controlRecords = new Map();
     const readiness = async () => {
       same(env, initialEnv);
+      browserEnvironment(overrides.env ?? process.env);
+      same((overrides.env ?? process.env).WI_BROWSER_BINDING, browser.admission.binding);
+      // Delay structured privacy checks until C65 has retained its typed command receipts.
+      same(required(await browserSuiteProvenance(env, io, overrides.browserIO)), required(browser));
       same(await directory(dirname(output)), parent); same(await directory(output), root);
       same(await directory(retained), base); same(await directory(control), controlIdentity);
       same(await directory(artifact), artifactIdentity);
@@ -236,7 +257,7 @@ export async function prepareBrowserSuite({ output }, overrides = {}) {
         const bundle = required({ version: 1, scope: 'browser suite preparation only', launch: 'pending', full_readiness: false,
           preparation_cutoff: 'revalidate all inputs before a separately authorized one-use launch', browser_executions: 0, case_markers: 0,
           identities: { parent, root, artifact: artifactIdentity, control: controlIdentity, retained: base, child },
-          environment: childEnvironment, approved_environment: environment(env), planned,
+          browser, environment: childEnvironment, approved_environment: environment(env), planned,
           sources: { path: sourcePath, sha256: hash(controlRecords.get(sourcePath)), manifest: before },
           producer: { path: provenancePath, sha256: hash(controlRecords.get(provenancePath)), records: pins, binding: native },
           future_command: { program: process.execPath, argv: ['--', join(ROOT, 'web/node_modules/@playwright/test/cli.js'), 'test',

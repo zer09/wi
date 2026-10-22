@@ -1,4 +1,5 @@
 import { test, expect, chromium } from '@playwright/test';
+import { browserPin, browserLaunchOptions } from '../test-support/browser-pin.mjs';
 import { readFile, writeFile, mkdir, rm, lstat } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { discoverFixture } from '../test-support/fixture.mjs';
@@ -26,6 +27,7 @@ test('finite original cold warm older transport and qualified owned Linux memory
   const freeze = () => ({ phase, network: network?.facts() ?? null,
     counts: { latest: record.snapshots.length, streams: record.streams.length, older: record.older.length }, faults: { ...faults } });
   try {
+    browserLaunchOptions();
     evidenceRoot = process.env.WI_C52_EVIDENCE ?? testInfo.outputPath('c52-evidence');
     if (!isAbsolute(evidenceRoot)) throw new Error('Evidence directory rejected');
     // Exclusive reservation prevents even failure reporting from touching historical or unowned output.
@@ -70,7 +72,7 @@ test('finite original cold warm older transport and qualified owned Linux memory
     nativeIdentity = await observer.initialize(); legacyProof(snapshot(fixture), seed);
     phase = 'browser-server-acquisition';
     server = await acquireResource(owned, 'browser-server-close', 40,
-      () => chromium.launchServer({ host: '127.0.0.1', headless: true }), value => value.close());
+      () => chromium.launchServer({ host: '127.0.0.1', headless: true, ...browserLaunchOptions() }), value => value.close());
     owned.register('browser-emergency', 41, async () => {
       if (!browserIdentity) return;
       const current = await retirement(browserIdentity);
@@ -88,7 +90,7 @@ test('finite original cold warm older transport and qualified owned Linux memory
     expect(browserIdentity.state).toBe('present'); expect(browserIdentity.ppid).toBe(process.pid);
     phase = 'browser-connect';
     browser = await acquireResource(owned, 'browser-connection-close', 30, () => chromium.connect(server.wsEndpoint()), value => value.close());
-    browserVersion = browser.version(); expect(browserVersion).toBe('145.0.7632.6');
+    browserVersion = browser.version(); expect(browserVersion).toBe(browserPin.version);
     phase = 'context-acquisition';
     context = await acquireResource(owned, 'context-close', 20,
       () => browser.newContext({ serviceWorkers: 'block', viewport: { width: 1000, height: 700 } }), value => value.close());

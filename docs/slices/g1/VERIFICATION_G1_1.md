@@ -1,8 +1,102 @@
 # G1.1 verification: work in progress
 
-Contract: **g1.1**. Accepted: **false**. Status: **C3B54D5_CASE_REVIEWED_BROWSER_ARM_ONLY_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **C93_SCOPED_REVIEWED_LOCAL_HOSTED_PASS_ALL40_PARTIAL**.
 
-This report records observed local work. It is not G1.1 acceptance, merge authorization, or hosted CI evidence. The forty-row matrix remains open in `verification-g1.1.json`.
+This report distinguishes local execution, hosted CI and historical evidence at their recorded cutoffs. It is not G1.1 acceptance or merge authorization. The forty-row matrix remains open in `verification-g1.1.json`. Its previous top-level report status is retained as `previous_report_status`.
+
+## C93: fixed browser and current-head verification
+
+**COMPLETED_SCOPED_REVIEWED_LOCAL_HOSTED_PASS**, scoped to source commit `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. The owner approved replacing the frozen browser with a verified fixed build while preserving the application reader and no-store policy. The 20-path implementation was committed after source checks and completed accumulated source reviews. One fresh local guarded suite and completed operational reviews then preceded the push. This later documentation publication changes no runtime input and does not inherit exact-head CI evidence for its own later commit.
+
+### Exact upstream fix and browser selection
+
+The browser is separately pinned Chrome for Testing headless shell **157.0.8103.6**, revision **1717349**, Linux x64. Playwright remains **1.58.2**; its bundled registry was not upgraded or used as a fallback. The official version manifest, generation-bound archive, digests and extracted inventory bind the selected artifact. The exact tag resolves to `41520584daa68d0040db7746ae562a0ff82187f6`; its response loader blob is `40bc0f095e25466f0309cdc2513217a77d38270e`.
+
+[Chromium CL8508456](https://chromium-review.googlesource.com/c/chromium/src/+/8508456), commit [`62473ad0f747e245e514c93e741bb8e168a2a207`](https://chromium.googlesource.com/chromium/src/+/62473ad0f747e245e514c93e741bb8e168a2a207), fixes fully consumed fetch bodies being reported as `net::ERR_ABORTED`, with lost DevTools response data. The [pinned source](https://chromium.googlesource.com/chromium/src/+/41520584daa68d0040db7746ae562a0ff82187f6/third_party/blink/renderer/platform/loader/fetch/response_body_loader.cc#233) records the terminal result before notifying the client. Thus the fix is present in this browser build without waiting for a Playwright SDK release.
+
+The C92 eight-trial synthetic matrix reproduced the signature in both no-store/getReader split-body arms on Chromium145.0.7632.6; its six controls passed. This matrix is distinct from C15's earlier eight external controls. The same matrix on the qualified157 build completed all eight arms normally, including both formerly affected arms. This is bounded compatibility and bug-signature evidence, not proof that every historical CI failure had this cause. No reader change, no-store exception, body-error suppression, retry, assertion relaxation or deadline increase supplied this repair. Operation and admission requirements are in [Browser test operation](../../../web/BROWSER_TESTING.md).
+
+### Local source and runtime evidence
+
+| Check | Observed result and cutoff |
+| --- | --- |
+| Focused pin controls |404PASS; old-source395PASS/9FAIL remains the qualifying red|
+| Affected group |4459PASS; counts overlap the focused/full runs|
+| Default unfiltered Node |9899PASS/0failed-cancelled-skipped-todo; pre-checkpoint Git metadata; all20 implementation files and runtime inputs match1b8b50c|
+| Other source gates |10syntax checks, YAML0errors/0warnings, typecheck,8nonmutating assets, static/privacy/inverse/scope/whitespace PASS|
+| Registration only |89cases/34files; not browser execution|
+| Fresh suite preparation |One invocation PASS,45949ms; five original producer commands, including locked/offline lib-test no-run build|
+| Fresh guarded browser suite |One invocation at1b8b50c;89passed/34files;514173ms actual Playwright child wall; last-run passed/failedTests[]|
+| Browser configuration |Workers1/retries0/global900s/default case60s; all case/hook limits unchanged|
+| Reviews |Two completed accumulated20-path source reviews and two completed operational reviews PASS/no actionable findings; not refreshed complete original-master reviews|
+
+The consumed local bundle is never reusable. Original guard/OUTER and five case-family reservations were observed; reservations alone are not body proof. C69 outcome `test_counts` and `browser_executions` remain null. The reporter, typed passed counts and last-run file separately support the local89-case result.
+
+C52/C53/C54 packets record10/11/12successful cleanup steps with normal native retirement and removed roots. C57/C61 record3/5normal closures. Thirty finite recorded identities were absent and the fresh retained directory was empty; this is not complete descendant or global cleanup proof. Optional successful-case measurement annotations were absent; separate original packets support measurements. Exact release-to-DOM remains WAIVED_BY_OWNER, not measured.
+
+Preservation binds819source records,444native inputs,79runtime files and3653prior records. The444 count is inventory, not a standalone full-native run. Earlier failed delegates, rejected ZIP admission, red/incomplete terminals and metadata-comparator diagnostics remain failed at their original cutoffs. Valid replacement reviews close current gates without promoting failed roles. SDK-created output modes were tightened after execution inside an already-private parent, with bytes/inodes unchanged; no uniform creation-mode or universal procedural-compliance claim follows. Supporting records are retained (local record), without browser/native binaries or Git stores.
+
+### Hosted attempt1: both workflows successful
+
+| Workflow | Submitted head | Conclusion |
+| --- | --- | --- |
+|[Push39739062054](https://github.com/zer09/wi/actions/runs/39739062054)|1b8b50c7abd8ebdac95d8964a4788bf257ce3547|SUCCESS|
+|[PR39739066029](https://github.com/zer09/wi/actions/runs/39739066029)|1b8b50c7abd8ebdac95d8964a4788bf257ce3547|SUCCESS|
+
+All three jobs and every listed job step succeeded in each workflow, with no skipped native or browser prerequisite step. Each workflow records Ubuntu1252PASS and macOS1202PASS, each12existingignored/0failed/0filtered across23all-target harnesses, plus doctest0. All six native arrays pass on both platforms; local locked/offline flags are not attributed to those unchanged arrays. Repeated workflow/platform counts overlap and are not additional unique tests.
+
+Each browser job passes npm-ci, system dependencies, private environment creation, fixed-browser provisioning, typecheck,8assets,9899default unfiltered units, fresh private preparation and guarded launch. The public console does not expose the successful Playwright child summary or private runtime receipts, markers and cleanup. Hosted case counts and those private facts therefore remain null/unavailable, not copied from the local89-case result. Both runs have0uploaded artifacts.
+
+Push jobs checked out the submitted commit. PR jobs checked out `dd67f792dc41d314b7371c51509dd8b79bab00dc`, with parents accepted master76bb32f and submitted1b8b50c. Both checkout trees equal `60043d5d23e0d03e605a03853e749be918bd6142`. The PR merge commit is not mislabelled as the submitted commit. PR#10 was confirmed open and draft after the push; this publication changes no PR state and grants no merge or acceptance.
+
+### Disposition and publication boundary
+
+The current-head hosted execution gap is closed for1b8b50c, including fresh native platform and npm-ci evidence. This does not recover old failed-run internals or close every G11 requirement. All40 remain PARTIAL, accepted=false and inventoryOPEN. C15 remains OPEN_OWNER_DEFERRED; active1's owner disposition, reader/SSE/no-store/access, waiver, ledger and historical failures stay unchanged. Final assertion/report adequacy, complete-diff review coverage and owner acceptance remain separate. Earlier future-work paragraphs describe their recorded cutoffs, not instructions to replay completed gates.
+
+This six-file documentation publication retains the pre-existing C84 entries and all original machine objects except the deliberately refreshed current report-status label. The previous label is retained separately. It excludes the staged C55 and untracked transfer handoffs. The owner authorized a local docs-only commit, not a push; no product test, browser bundle or CI workflow is replayed for it.
+
+## C84: exact-head hosted attempts, native PASS and guarded-launch failure
+
+**FAILED_BROWSER_LAUNCH_NATIVE_PASS.** The owner authorized one normal current-branch push and inspection of its resulting workflows. Submitted head is `465cd9b1554d5dbcbc3000a8cd4d88235d34516c`; the remote advanced from `ce361f5e345f0d6031fc9ef668b90a2b648bef07` through the two existing C82/C83 commits. No force push, tag, backup ref, workflow dispatch, rerun, cancellation or PR state change occurred. PR#10 remains open and draft. The interrupted preflight's empty record remains preserved; fresh remote/run checks found the push had not happened before continuation. The exact crash cause is unknown.
+
+| Original workflow | Attempt | Conclusion |
+| --- | --- | --- |
+|[Push39461030757](https://github.com/zer09/wi/actions/runs/39461030757)|1|FAILED at Launch guarded browser suite|
+|[PR39461036533](https://github.com/zer09/wi/actions/runs/39461036533)|1|FAILED at Launch guarded browser suite|
+
+Both runs identify submitted head465cd9b. Push jobs checked out that exact commit. PR jobs checked out merge commit `62751c8cac43afaf715310330dcd2f0ae35c3c0f`, whose parents are accepted master76bb32f and submitted465cd9b. GitHub commit metadata confirms the merge and submitted trees both equal `36f313ca779cfc4b3e0957521bec13385070fc8f`. This binds the PR checkout tree without pretending the merge commit is the submitted commit.
+
+### Actual hosted results
+
+The following results occur in **each** workflow. Repeated workflow counts overlap; they are not additional unique tests.
+
+| Job or gate | Original result |
+| --- | --- |
+|Ubuntu native six gates|fmt/check/all-target test/warning-denied Clippy/build/doc PASS;1252passed/12existingignored/0failed/0filtered across23harnesses; doctest0|
+|macOS native six gates|Same six gates PASS;1202passed/12existingignored/0failed/0filtered across23harnesses; doctest0|
+|Browser dependency and runtime setup|npm-ci and pinned Chromium installation PASS|
+|Browser environment, typecheck and assets|Private environment provisioning, typecheck and8generated assets PASS|
+|Browser default unfiltered units|8081passed/0failed-cancelled-skipped-todo|
+|Private suite preparation|PASS|
+|Guarded suite launch|FAIL; console reports only process exit1|
+
+Native counts are parsed from the original all-target harness summaries, not copied from the Linux local result. The native job commands are the six unchanged workflow arrays, without attributing local locked/offline flags to them. No native gate is skipped. The only skipped step in either workflow is the browser job's post-setup-node cleanup step; all browser prerequisites and preparation ran successfully.
+
+### Browser failure evidence and limits
+
+The push launch step spans about229seconds; the PR launch step spans about290seconds according to GitHub step timestamps. These are launch-step intervals, not Playwright child duration, case counts or a benchmark. The console exposes neither a case-level error nor a Playwright summary. Both artifact listings return0uploaded artifacts.
+
+The launcher records child streams and receipts under its private control directory instead of forwarding them to the workflow console (`web/test-support/browser-suite-launch.mjs:211-277`). The CLI can return a nonzero outcome without printing an inner failure (`web/scripts/launch-browser-suite.mjs:12-20`). These source facts explain why the available console is insufficient; they do not identify the actual failing case or control boundary. The private `launch.stdout`, `launch.stderr`, `launch.command.json` and `launch-outcome.json` are not available in the retrieved job logs or uploaded artifacts.
+
+**Child execution, browser case counts, exact first failure, actual guard/case markers and cleanup remain unknown/null, not zero.** Preparation success and an entered launch step do not establish a complete browser pass or a specific failed case. No timeout, reader, native, producer or ownership cause is inferred. Neither failed workflow was retried, and no source repair or local test followed it.
+
+### Preservation and continuation boundary
+
+Before the push, parent checked both outgoing commits and nine changed blob versions for local-path/record references, plus813source/full modes,444native inputs,76runtime files,387finite prior records, approved environment, Git/index/C55 patch and both handoff pairs. The normal push advanced only the authorized branch remotely and its local origin-tracking ref. Both staged C55 files and both untracked transfer files remain outside the pushed commits. Original attempt1 metadata and both complete sanitized console logs are retained (local record). This later three-document failure publication is unstaged and has separate parent checks; no new checkpoint or second push follows a failed hosted gate.
+
+The C82 canonical-workspace correction now has successful current-tree macOS/Ubuntu native execution, and C83 has successful current-tree hosted unit execution. Those results do not promote the earlier failed hosted runs or establish full browser closure. The owner's earlier eb296d3 pass statement remains unbound: a bounded run lookup returned no run IDs for that commit. Original ce361f5 attempt1 failures remainFAILED.
+
+All40official requirements remainPARTIAL, accepted=false and inventoryOPEN. The98legacy objects,40matrix objects,170supplemental bindings, C15/active1, reader/SSE/no-store/access/auth, pins, waiver, ledger and historical failures remain unchanged. No live generation, credential/private-skill operation, merge, release, deployment or acceptance follows. The next bounded task is to investigate the launch/CI evidence boundary and obtain a safe diagnostic before any separately authorized source change or fresh hosted attempt. Do not blindly replay the consumed attempts.
 
 ## C83: aligned synthetic collision controls and nonvacuous version coverage
 

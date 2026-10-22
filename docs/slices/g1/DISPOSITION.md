@@ -2,6 +2,14 @@
 
 Date: September29,2026. Contract g1.1 supersedes g1.0 for resumed implementation on PR #10. This is a design/assignment record, NOT verification. Accepted master remains76bb32f. The preserved unaccepted checkpoint is8f45dda2a2c168931735cf798560b8dfd02a1579.
 
+## Current C93 verification and browser-blocker disposition
+
+The owner later authorized the fixed-browser pin and full unfiltered verification. At source `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`, one fresh local guarded suite passes89cases; attempt1 [push39739062054](https://github.com/zer09/wi/actions/runs/39739062054) and [PR39739066029](https://github.com/zer09/wi/actions/runs/39739066029) both pass all three jobs. See [current verification](VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) for source/tree bindings, native/Node counts and the distinction between public hosted launch success and private case-level facts.
+
+Chrome for Testing headless shell157.0.8103.6 contains Chromium CL8508456 and passes the C92 eight-trial qualification that previously reproduced the no-store body-loss signature. Playwright remains1.58.2. The application reader, SSE, no-store policy and original required assertions remain unchanged. This supersedes the old absence of a verified fixed-browser option; it does not recover every old failure's cause.
+
+C15 stays **OPEN_OWNER_DEFERRED**. Active1's owner disposition and the40PARTIAL/acceptedfalse/inventoryOPEN state are unchanged. Retain all35old observations, both failed samples, old controls and failed roles. Older deferral paragraphs describe their earlier cutoffs; they are not instructions to deny the now-observed full-suite pass, repeat stress sampling, suppress errors or replay consumed bundles. Final report/assertion adequacy, complete-diff review coverage and owner acceptance remain separate. The waiver and ledger do not change. The owner approved this later docs-only local commit, not another push or merge.
+
 ## 1. Historical records remain intact
 
 Do not rewrite these files as new acceptance:

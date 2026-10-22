@@ -4,6 +4,14 @@ The browser gate targets Linux x64. Native Cargo CI still runs its six gates on 
 
 Use Node 24 and the locked Playwright SDK 1.58.2. The browser is the separately pinned Chrome for Testing headless shell 157.0.8103.6, revision 1717349. The SDK's bundled Chromium registry remains unchanged. There is no bundled-browser fallback or moving browser channel.
 
+## Why the browser is pinned separately
+
+[Chromium CL8508456](https://chromium.googlesource.com/chromium/src/+/62473ad0f747e245e514c93e741bb8e168a2a207) fixes fully read fetch bodies being reported as cancelled, with lost DevTools response data. This affects the no-store streamed-response pattern used by browser observers. The exact157.0.8103.6 tag contains the fix: the loader records the terminal result before notifying its client.
+
+The fixed browser is selected independently of the unchanged Playwright SDK. The application reader and no-store policy are not changed to avoid the bug. Do not assume a newer SDK bundles a fixed browser; verify the replacement build and compatibility before an owner-approved pin change.
+
+[Current verification](../docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records the eight-trial qualification, local89-case pass and successful hosted workflows at source1b8b50c. Those results are scoped evidence, not general SDK compatibility or G1.1 acceptance.
+
 ## Provision the browser
 
 Run commands from the repository root. The placeholders below represent caller-provisioned, absolute canonical paths:

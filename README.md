@@ -15,10 +15,9 @@ records local and successful hosted verification scoped to source
 `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits
 retain a separate cutoff and do not inherit exact-head CI results.
 See [current merge readiness and C15/active1 dispositions](docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness)
-and the [machine matrix](docs/slices/g1/verification-g1.1.json) for row outcomes and remaining reviews.
-G1.1 remains accepted=false with inventory OPEN.
-Exact new-head CI remains pending after separately authorized commit/push;
-owner merge approval is separate from row outcomes.
+and the [machine matrix](docs/slices/g1/verification-g1.1.json) for row outcomes and revision-scoped checks.
+Both workflows pass for submitted implementation e61c881; each later pushed head needs its own CI.
+G1.1 remains accepted=false; owner acceptance and merge approval are separate from row outcomes.
 The application reader/SSE/no-store policy is unchanged; exact release-to-DOM
 remains WAIVED_BY_OWNER, not measured.
 Historical [C49 saved-skill fidelity](docs/slices/g1/C3B_SKILL_SOURCE_FIDELITY.md),

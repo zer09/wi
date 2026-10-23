@@ -10,7 +10,7 @@ Use Node 24 and the locked Playwright SDK 1.58.2. The browser is the separately 
 
 The fixed browser is selected independently of the unchanged Playwright SDK. The application reader and no-store policy are not changed to avoid the bug. Do not assume a newer SDK bundles a fixed browser; verify the replacement build and compatibility before an owner-approved pin change.
 
-[C93 verification](../docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records the eight-trial qualification and original89-case pass at source1b8b50c. The [current assessment](../docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness) adds the joined before-B skill-source mutation case and a local90-case pass. Hosted success atd757646 retains that revision's scope; a new pushed head needs its own CI. These results are not general SDK compatibility or merge authorization.
+[C93 verification](../docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records the eight-trial qualification and original89-case pass at source1b8b50c. The [current assessment](../docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness) adds the joined before-B skill-source mutation case and a local90-case pass. Both hosted workflows also pass at submitted e61c881, including pinned provisioning, preparation and guarded launch. Hosted case counts remain unavailable; the local90 count is not substituted. Earlier d757646 success retains its scope, and each later pushed head needs its own CI. These results are not general SDK compatibility or merge authorization.
 
 ## Provision the browser
 

@@ -6,7 +6,7 @@ Date: September29,2026. Contract g1.1 supersedes g1.0 for resumed implementation
 
 The owner's [merge assignment](MERGE_REVIEW.md) replaces the indefinite deferrals. **C15 is CLOSED_CURRENT_BROWSER_COMPATIBILITY.** **active1 is CLOSED_CURRENT_REGRESSION; HISTORICAL_CAUSE_UNDETERMINED.** The pinned fixed browser and current unfiltered reload/active-conflict cases pass; no application-reader change or new sampling campaign supplies these closures. Preserve every old failure and its causal limits. The active1 diagnostic was not a production repair.
 
-The new real before-B source-mutation scenario closes G1-MR-01 without replacing the existing C48 native or C49 saved-display tests. See the [current40-row assessment](VERIFICATION_G1_1.md#current-merge-readiness):38PASS,1PASS_WITH_WAIVER,1PARTIAL. Final review coverage is complete after the sole verified documentation correction; G11-39 awaits exact new-head CI. Exact release-to-DOM stays WAIVED_BY_OWNER, not measured. No commit/push/merge or broad evidence deletion is authorized.
+The new real before-B source-mutation scenario closes G1-MR-01 without replacing the existing C48 native or C49 saved-display tests. See the [current40-row assessment](VERIFICATION_G1_1.md#current-merge-readiness):39PASS,1PASS_WITH_WAIVER,0PARTIAL at submitted e61c881. Review coverage is complete after the sole verified documentation correction; both exact-head e61c881 workflows pass and close G11-39. Exact release-to-DOM stays WAIVED_BY_OWNER, not measured. The owner authorized final documentation publication/commit/push, its CI inspection and a PR completion comment, not acceptance/merge or broad evidence deletion.
 
 ## Historical C93 verification and browser-blocker disposition
 

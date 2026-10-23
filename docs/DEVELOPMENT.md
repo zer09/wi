@@ -65,4 +65,4 @@ CI retains Ubuntu/macOS native jobs and an Ubuntu browser job. Inspect each requ
 
 Update the relevant current guide when code changes. Keep schema/API rules near their source references. The historical plans and acceptance diaries are in the retained archive linked from [acceptance](ACCEPTANCE.md), not active assignments.
 
-The documentation cleanup preserves source, tests, assets, dependencies, and workflows. Historical packaging manifests describe their old bundles; they are not checksums for the current repository.
+The documentation cleanup preserves production behavior, test assertions, assets, dependencies, and workflows. The schema regression includes the SQL block in STORAGE.md rather than the archived planning file. Historical packaging manifests describe their old bundles; they are not checksums for the current repository.

@@ -30,9 +30,11 @@ No additional live provider requests or credential operations are part of this a
 
 ## Documentation cleanup
 
-Current docs describe startup, runtime ownership, HTTP/display protocols, storage, auth, tools, platforms, and development. The cleanup changes no executable source, test, generated asset, dependency, or workflow. A focused source/documentation cross-check covered startup/configuration, request routing, transaction/projector/read boundaries, migration, identity validation, tools and browser state.
+Current docs describe startup, runtime ownership, HTTP/display protocols, storage, auth, tools, platforms, and development. The cleanup changes no production behavior, generated asset, dependency, or workflow. One test's include path moves to the SQL reference in STORAGE.md; its schema/constraint assertions remain unchanged. A focused source/documentation cross-check covered startup/configuration, request routing, transaction/projector/read boundaries, migration, identity validation, tools and browser state.
 
 Large old root handoffs, packaging manifests, slice contracts, increment diaries and process reports leave the active tree. Their exact pre-cleanup content remains in the archive below. Removing them from normal documentation does not erase failures or relabel historical acceptance.
+
+Cleanup head `20c5de2` initially failed Cargo check because the schema regression included the removed planning file. The follow-up moves the exact SQL into STORAGE.md and changes only that include path. The initial failure remains recorded in CI; it is not a runtime regression or a waived test.
 
 ## Historical evidence
 

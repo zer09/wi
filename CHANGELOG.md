@@ -23,7 +23,7 @@
 
 Native Windows backend support is withdrawn. Linux/macOS native checks and the Linux-x64 browser gate remain. Managed authentication is Linux-specific. No release, deployment, or new live-provider certification is implied.
 
-G1.1 closes with 39 PASS and one PASS_WITH_WAIVER. See [acceptance](docs/ACCEPTANCE.md) for the exact scope, measurement waiver, historical reliability observations, and original reports. The documentation cleanup changes no executable behavior, dependency, test, or workflow.
+G1.1 closes with 39 PASS and one PASS_WITH_WAIVER. See [acceptance](docs/ACCEPTANCE.md) for the exact scope, measurement waiver, historical reliability observations, and original reports. The documentation cleanup changes no production behavior, dependency, or workflow. The schema regression's include path moves to the exact SQL reference in STORAGE.md without changing assertions.
 
 ## 0.2.0 source handoff, September 2026
 

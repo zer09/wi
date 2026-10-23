@@ -157,7 +157,7 @@ async fn schema(sql: &mut SqliteConnection, projection: bool) -> Vec<(String, St
 
 #[tokio::test]
 async fn a2_additive_ddl_matches_contract_preserves_v2_and_has_exact_indexes_and_fks() {
-    let contract = include_str!("../../../docs/slices/g1/SCHEMA.md")
+    let contract = include_str!("../../../docs/STORAGE.md")
         .split("```sql\n")
         .nth(1)
         .unwrap()

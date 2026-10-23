@@ -1,8 +1,112 @@
-# G1.1 verification: work in progress
+# G1.1 verification and merge readiness
 
-Contract: **g1.1**. Accepted: **false**. Status: **C93_SCOPED_REVIEWED_LOCAL_HOSTED_PASS_ALL40_PARTIAL**.
+Contract: **g1.1**. Accepted: **false**. Status: **LOCAL_ACCEPTANCE_REVIEWED_PENDING_NEW_HEAD_CI**.
 
-This report distinguishes local execution, hosted CI and historical evidence at their recorded cutoffs. It is not G1.1 acceptance or merge authorization. The forty-row matrix remains open in `verification-g1.1.json`. Its previous top-level report status is retained as `previous_report_status`.
+## Current merge readiness
+
+The current assessment replaces the blanket all-PARTIAL status, not historical observations. **38 PASS, 1 PASS_WITH_WAIVER, 1 PARTIAL.** G11-38 is complete after review consolidation and correction of the sole documentation finding. G11-39 awaits exact new-head CI after separately authorized commit/push. Owner merge approval is separate from these row outcomes.
+
+The inspected planner HEAD is `7e4d7fe41bd416b22bc799553f1d37230c1cd629`. Reviewed implementation `d757646abfba6dfa17725c812594c33b6c216355`, preserved checkpoint `8f45dda2a2c168931735cf798560b8dfd02a1579` and accepted master `76bb32fd04fd4737c0efcceaabc7d10387453147` are ancestors. The initial worktree/index were clean. The current implementation changes13test/fixture/tooling paths, with no production behavior change. All changes remain unstaged and uncommitted. This report and current pointers have a later documentation-only cutoff.
+
+### G1-MR-01: actual before-B source mutation closes the joined gap
+
+**CLOSED_CURRENT_JOINED_EXECUTION.** The new named J case is `main SKILL changed before explicit B replays exact original result without another loader dispatch` in `web/e2e/skill-history-replay.spec.mjs:13-180` (**MR-J01**). It retains the existing native transport permutations and C49 post-completion browser case.
+
+1. The browser explicitly submits A through real HTTP/RunHost/B2/SQLite/OpenAI WebSocket loopback. The actual S2 loader reads the owned synthetic main SKILL with `ORIGINAL_MAIN_SKILL_G1_MR_01`, Unicode and CRLF bytes. A's receipt is2..3; its terminal/result are19/20.
+2. After A completes and before B exists, the existing no-follow ownership guard changes that same file in place, preserving valid metadata. Synced exact readback and unchanged canonical prefix are asserted while browser POSTs remain create+A. No sleep establishes ordering.
+3. The browser explicitly submits B, receipt21..22. `Wire::receive` supplies the actual provider request. The original complete `assert_request` and new `historical_pair` check exact original call/output bytes, call ID, arguments, item identity and call-before-result ordering. Current preparation stays separate from stored history (`browser.rs:689-702`; `browser/skill_history_replay.rs:33-90`). No manual replay supplies the request.
+4. B requests only ordinary `add_numbers`, returns50 and completes at terminal/result38/39. The actual canonical loader-start count stays1, with matching run/request/turn/result/finish and strict start<result<finish. This counts actual dispatches, not provider intent or an internal filesystem-read counter.
+5. Saved A and live B retain exact chronological identities, fields, status and one answer each. Explicit rebase and genuine older navigation preserve both DOMs and all provider/tool/canonical facts. Totals remain2tasks,4provider requests,2tool results and3browser POSTs. Current focused and full-suite executions pass normal Stop/drain/exit0/empty native stderr/no fallback, file/context close, direct native reap and owned-root absence. These are finite owned facts, not global cleanup.
+
+The new case passes once focused and once within the finalized unfiltered suite. Two earlier focused failures remain failed: missing nested control protocol after A, then a test allowlist that omitted the real catalog `?limit=32` route after successful A/mutation/B. Material test-fixture/oracle corrections precede the passing run. No production violation or repair was established.
+
+### Current checks, reuse and revision boundaries
+
+| Evidence | Result and scope |
+| --- | --- |
+| `uv run --no-project python scripts/verify.py` | All six unchanged Cargo arrays PASS;1254native PASS,12existing ignores,0failed/filtered,23all-target harnesses; doctest0. Includes named `first_party_native_windows_compatibility_is_removed`. |
+| Focused controls | Current70new Node controls;361combined controls;2native oracles. Counts overlap the full runs. |
+| `npm --prefix web test` |9971default unfiltered PASS;0failed/cancelled/skipped/todo. |
+| Typecheck/assets/syntax | `npm --prefix web run typecheck`, `npm --prefix web run verify:assets` (8),10changed-JS syntax checks and whitespace PASS. |
+| Fresh preparation and guarded launch | One new `prepare-browser-suite.mjs` bundle and one unchanged `launch-browser-suite.mjs` invocation: **90PASS/35files**,517292ms actual Playwright child wall time. Reload and active-conflict are included without exclusions. Bundle consumed, never reusable. |
+| Pins/environment | Headless157.0.8103.6, Playwright1.58.2, Node24.18.0, Cargo/rustc1.98.1; approved six/shared target/jobs2/default scheduling. Workers1/retries0/global900s/default case60s unchanged. Verifier arrays have no locked/offline flags; offline environment and equal lock endpoints are not those argv flags. |
+| Named binding audit | Parent matches all54native,27client and89browser names from the existing assertion index to current logs, plus MR-J01 and identifier/legacy-header assertions.170bindings are not170additional unique tests. |
+| C79 mains | Twelve original PASS terminals/logs rehashed:9dev mains and HTTP dev-loaded/release-default/release-loaded. Recorded82e8180, published equivalenta2f0216. Examples/lock/assets/executable inputs match; the later `src/lib.rs` change is crate documentation and browser fixture changes are `cfg(test)`. Qualified reuse, not new executions. |
+| C35 CLI |152fake-only self-tests reused with unchanged paired CLI sources and Node24.18.0. No new CLI execution or historical binary-hash claim. |
+| Hosted d757646 | Attempt1 [push39769763470](https://github.com/zer09/wi/actions/runs/39769763470) and [PR39769768744](https://github.com/zer09/wi/actions/runs/39769768744) SUCCESS. Parent rechecks all3jobs/allsteps: Ubuntu/macOS six native gates and Ubuntu npm-ci/provision/typecheck/assets/units/preparation/guarded launch. No skipped step. Hosted case counts remain unavailable. |
+
+The current gates bind825source paths/full modes,445native inputs and82runtime files. All812nonassigned original paths, index/refs/approved environment and lockfiles are preserved. Production reader, SSE/no-store/auth/schema, generated assets and dependencies are unchanged. The later report publication does not change executable inputs. Installed locked packages and admitted browser cache were reused, not reinstalled.
+
+The first current native verifier failed `service::tests::loss::runtime_destruction_preserves_accepted_model_tool_and_result_prefixes`: read-only open at `src/service/tests/b2.rs:108` returned SQLite5 `database is locked`. Its exact lock interleaving remains unknown. A named diagnostic and the subsequent unchanged default unfiltered verifier pass. No serialization, deadline or production repair hides the original failure. Initial scaffolding, formatting, source-ID/pin and metadata-check failures also remain preserved. Current success is not a claim that every schedule is failure-free.
+
+### C15, active1 and measurement dispositions
+
+- **C15: CLOSED_CURRENT_BROWSER_COMPATIBILITY.** The verified fixed-browser pin, C93 qualification and current unfiltered reload regression support closure. Preserve old failed samples and individual attribution limits. Do not attribute every historical failure to Chromium.
+- **active1: CLOSED_CURRENT_REGRESSION; HISTORICAL_CAUSE_UNDETERMINED.** The retained active-conflict case passes the current full suite. Its old Create-body failure predates the active-conflict assertion. The diagnostic patch was not a production repair.
+- **Exact release-to-DOM: WAIVED_BY_OWNER, not measured.** Keep the original finite C37-C42/C52-C54 observations. Browser arm-to-DOM upper bounds include holds/polling/observation overhead; sampled memory is not a true peak and ProjectionReceipt is not SQL-only time. No new measurement or historical sampling campaign ran.
+
+### Current assessment of G11-00 through G11-39
+
+`Nnn`, `Cnn` and `Bnn` below mean the exact named `C62-Nnn`, `C75-Cnn` and `C76-Bnn` assertions in [assertion-index-g1.1.json](assertion-index-g1.1.json). Those IDs retain their historical provenance. The separate current binding above supplies present execution, not copied historical pass counts. [The machine matrix](verification-g1.1.json) lists each row's exact evidence IDs, required level, conclusion and limits. B/C synthetic DTO scenarios are never promoted to J.
+
+| Row / required level | Current result | Named assertion assessment |
+| --- | --- | --- |
+|00 /audit|PASS|Actual ancestry/worktree/source/index/ref preservation and no-live authority; original reports/checkpoint retained.|
+|01 /platform audit|PASS|N54 `first_party_native_windows_compatibility_is_removed`, preserved independent removal audit, current workflow and revision-scoped Linux/macOS gates.|
+|02 /S|PASS|N01-N03: exact human/run, stable source identity/order, repeated call/run isolation.|
+|03 /S|PASS|N04-N06: interleaved Unicode/control/empty bytes, tail-only chunks/counters and no canonical replay.|
+|04 /S|PASS|N02/N04/N07/N08: same-entry authority, independent refusal/reasoning/fallback and no duplicate final result.|
+|05 /S+H|PASS|N03/N09/N10 plus B30: actual registry outputs/is_error, uncertainty, reuse and cross-run identity.|
+|06 /S|PASS|N11/N12 plus `id2a_later_invalid_record_preflights_before_any_canonical_insert` and supported-batch ID2b: both pause points and complete rollback.|
+|07 /S|PASS|N12-N14, defined identifier producer/storage assertions and B08: all writers, receipt-first duplicates and external-effect/recording truth. Undefined external formats remain outside the defined amendment.|
+|08 /S|PASS|N15/N16: exact additive schema/indexes/constraints, preserved canonical/catalog versions and damaged/future refusal.|
+|09 /S+P|PASS|N17-N19, historical-ID migration assertion and B31: genuine1/2 preservation, bounded backfill, pre/post-commit death and idempotent reopen without work.|
+|10 /S+H|PASS|N16/N17/N20/N21 and B06: actual integrity errors, healthy blocks, distinct cold upgrade and zero warm backfill.|
+|11 /S|PASS|N05/N22-N25: scalar chunks, large/empty fields, exact cursor reconstruction/progress and generation handling.|
+|12 /S|PASS|N06/N26/N27: indexed100/10000-block plans/read counters and bounded short/long suffix. Synthetic scale is not live tool execution.|
+|13 /S+H|PASS|N28/N29 and B07-B09/B21: exact page/live partial/tool/terminal/failure/interrupted state and identity, not counts only.|
+|14 /H|PASS|N30-N32: LatestB/BeforeA/WithinB, empty metadata, consistent head and connection retirement.|
+|15 /S+H|PASS|N33/N34 and shared validators: strict cursor/resource/status classification, stable membership and no backward live cursor.|
+|16 /H|PASS|N25/N35/N36 plus named legacy-header HTTP/initial-SSE422 and valid-summary tests: actual bounds/progress, no truncation/quota.|
+|17 /H|PASS|N37/N38 plus snapshot/commit-barrier tests: matchingH attach, intervening state/private watermark and header conflict before200.|
+|18 /S+H|PASS|N27/N39/N40, `a5b3_escape_heavy_byte_splits_and_content_cursor_progress` and N37: ties/splits/moving-entity convergence.|
+|19 /H|PASS|N32/N41-N43 and B01: unread/drop observer ownership, no held network-yield lock, writer/host progress and ordered drain.|
+|20 /H+B|PASS|N38/N44/N45, C11 and browser privacy cases: literal loopback, bearer/Host/Origin, exact assets, memory-only token and inert content.|
+|21 /H|PASS|N46/N47, current reconciliation module and B25: exact addressed receipt proof, off-screen/absence/conflict/read failures and zero dispatch.|
+|22 /B+H|PASS|N30 plus B15/B31-B34/B43-B45/B47/B52: B-before-A, overflow zero older, serial fill/end and independent stream.|
+|23 /B|PASS|B04/B35/B46/B50: content then B activity then A, one anchor, honest partials and affected-entry refresh.|
+|24 /B|PASS|B34/B35/B48/B49/B53 and focus permutations:2px anchors,96px intent, no synthetic cascade, draft/focus and bottom-follow behavior.|
+|25 /C|PASS|C01-C08/C26/C27 and active graph: generic identity/revision/range conflicts and local replacement; no raw reducer.|
+|26 /C|PASS|C13-C15/C17-C25: actual framing splits/EOF and whole-frame apply before cursor; no WindowB substitute claim.|
+|27 /B+C|PASS|C01/C09/C12 and B20/B21/B26/B27/B36/B37/B50/B55: epochs/rebase/pending/reload; C15 current closure above.|
+|28 /B+H|PASS|C16 and actual command cases B01/B05/B08/B11/B16-B29 as mapped: pending/receipt/retry/reconcile/error truth; active1 current closure above.|
+|29 /B|PASS|B07-B10/B12/B13/B15/B21/B30/B31 and MR-J01: fixedH rich partial/refusal/reasoning/interrupted/terminal identity and no duplicate answer.|
+|30 /B|PASS|B10/B32/B33/B41/B42/B49/B51 and focus permutations: inert large content,360/1440 layouts, keyboard actions and announcements.|
+|31 /B+H|PASS|N31/N48/N49 and B02/B05/B11/B14/B28/B40/B47/B78: ID/as-of pagination, refresh, empty states, active rename and absent-workspace history.|
+|32 /disposition audit|PASS|Existing exact retirement mappings, current complete inventory and unfiltered suites retain required obligations; WindowB remains superseded, not passed.|
+|33 /J|PASS|B84-B89 and B25: six real transport/provenance chains, explicit next-task replay and no provider work on reads.|
+|34 /J|PASS|MR-J01 closes the actual before-B source-change edge. B15/B18/B30 and N51-N53 retain complementary saved-display/account/tool/transport assertions.|
+|35 /J+P|PASS|B03/B07/B12/B13/B20/B26/B31 and N29/N50: close/observe/later-submit, actual death/interruption-once/no-resume and fresh upgrade/restart browser.|
+|36 /measurements|PASS_WITH_WAIVER|Finite native/browser timing, payload/work/chunks, DB/WAL/disk and observed-memory evidence retained with its limits. Exact release-to-DOM waived, not measured.|
+|37 /native/auxiliary|PASS|Current six Cargo/verifier/platform results; qualified C79 twelve-main and C35CLI152 reuse; unchanged locked dependencies. Native first failure retained.|
+|38 /browser/review|PASS|Current90browser/9971unit/typecheck/assets and d757646npm-ci pass. Three independent complete-diff reviews plus the completed two-role correction gate supply final review coverage.|
+|39 /reports/exact head|PARTIAL|Current40-row assessment and report review complete; separately authorized exact new-head CI remains. Existing hosted green is not certification of this changed tree.|
+
+### Complete-diff review and remaining authority
+
+C80's three completed reviews remain valid at historical `1b201631d3a0fbb58925290bedf87764144c602c`, mapped to published `7365b1497fba35763a17a27036d524240a198fc4`. Parent rehashes their saved reports. They are not fresh reviews of later code.
+
+Three fresh independent `openai-codex` review sessions inspected the complete master->checkpoint->current inventory and dispositions, including all40 assessments. The tracked no-rename comparisons contain203/486/518paths; adding five untracked files gives a573-path union with50intermediate-only paths. The58-path post-C80 scope includes C82/C83 fixtures, launcher diagnostics/source maps, C93 pin/admission/CI, the new joined scenario, generated assets and current reports. This is complete inventory coverage with risk-based substantive inspection, not every-line review or historical test replay. Independence means separate review sessions, not three humans or model families.
+
+Two initial reviews returned PASS. One returned CHANGES_REQUIRED for **RA-01**, stale current all-PARTIAL summaries in five public overviews. Independent verification confirmed that documentation-only finding. The focused correction replaces duplicated status claims with current-assessment links while preserving historical C93 scope, accepted=false, the waiver and separate CI/owner authority. Both fresh accumulated repeat-review roles returned PASS with no actionable findings. The13 implementation inputs stayed unchanged. This closes the review obligation without repeating a three-review round after a small documentation edit; the original CHANGES_REQUIRED result remains historical.
+
+Review handoff qualification: the two repeat roles used the same output directory. The surviving Markdown report is review-a's; review-b's returned tool verdict and distinct result record retain its PASS, but two independently preserved Markdown files are not claimed. Its result record incorrectly labels555 as the post-C80 count; the independently verified current count is58, and555 is the old C80 union. Parent binds the surviving records and returned verdicts without rewriting them. Corrected read-only inventory/parser/path diagnostics, an initial unnecessary write-tree that returned the preexisting HEAD tree, and this handoff collision do not supply product proof or a universal procedural-compliance claim. All review product replays were0. The final parent rollup below has a later documentation-only cutoff and static/preservation checks; it is not a claim that the reviewers read their own future completion record.
+
+Parent rechecks d757646 hosted success without changing its revision scope. Actual PR#10 is OPEN and not draft at planner7e4d7fe; that externally observed state is not merge authorization. No PR state was changed here. A new committed/pushed tree requires both exact-head workflows after separate owner authorization. Do not merge, deploy, release, begin a new milestone or delete broad documentation. Ledger stays31/50 used19 remaining. No real credentials/private skills/auth commands/live generations were used.
+
+## Historical verification records
+
+The following sections retain their original observations, failures and cutoffs. Old all-PARTIAL, deferred and next-task wording is not the current assessment or execution authority.
 
 ## C93: fixed browser and current-head verification
 

@@ -29,6 +29,8 @@ mod presentation;
 mod replay_head;
 #[path = "browser/restart.rs"]
 mod restart;
+#[path = "browser/skill_history_replay.rs"]
+mod skill_history_replay;
 #[path = "browser/task.rs"]
 mod task;
 #[path = "browser/tool_fidelity.rs"]
@@ -65,6 +67,8 @@ struct Start {
     #[serde(default)]
     presentation: bool,
     #[serde(default)]
+    skill_replay: bool,
+    #[serde(default)]
     mutations: bool,
     #[serde(default)]
     unbound_history: bool,
@@ -93,6 +97,23 @@ fn final_polling<'de, D: serde::Deserializer<'de>>(
 
 impl Start {
     fn validate(&self) {
+        assert!(
+            !self.skill_replay
+                || (!self.presentation
+                    && !self.mutations
+                    && !self.unbound_history
+                    && !self.fixed_head
+                    && !self.tool_fidelity
+                    && !self.lifecycle_failure
+                    && !self.cancellation
+                    && !self.gate11_diagnostics
+                    && !self.native_latency
+                    && self.final_polling.is_none()
+                    && self.transport == Transport::WebSocket
+                    && !self.recovered
+                    && self.mime),
+            "fixture skill replay mode rejected"
+        );
         assert!(
             self.final_polling.is_none() || (self.native_latency && self.gate11_diagnostics),
             "fixture polling mode rejected"
@@ -221,6 +242,9 @@ enum Control {
     InspectToolFidelity {
         id: NonZeroU32,
     },
+    InspectSkillReplay {
+        id: u32,
+    },
     ArmCancellation {
         id: NonZeroU32,
     },
@@ -293,6 +317,7 @@ impl Control {
             | Self::ReleaseAcceptance { id }
             | Self::Drive { id, .. }
             | Self::Inspect { id }
+            | Self::InspectSkillReplay { id }
             | Self::InspectMutations { id }
             | Self::InspectTask { id }
             | Self::SeedInputFraming { id }
@@ -396,6 +421,7 @@ struct Proof {
     mismatch_armed: bool,
     mismatch_closed: bool,
     diagnostic: Option<Arc<presentation::Trace>>,
+    skill_replay: Option<skill_history_replay::Audit>,
 }
 
 #[derive(Clone)]
@@ -597,11 +623,14 @@ async fn provider(
     (presentation, mutations, fixed_head): (bool, bool, bool),
 ) {
     let diagnostic = proof.lock().unwrap().diagnostic.clone();
+    let skill_replay = proof.lock().unwrap().skill_replay.is_some();
     let mut prior = vec![];
     let mut old_key = Value::Null;
     for task in 0..if mutations { 1 } else { 2 } {
         let mut context = prior.clone();
-        let calls = if presentation {
+        let calls = if skill_replay {
+            skill_history_replay::calls(task)
+        } else if presentation {
             presentation::calls(task)
         } else {
             vec![call("add-雪", "add_numbers", ARGUMENTS[task])]
@@ -660,6 +689,15 @@ async fn provider(
                 context.push(user(&prepared.prepared_request().prompt));
                 assert_request(&body, &context, None, prepared);
                 assert!(body.get("previous_response_id").is_none());
+                if skill_replay && task == 1 {
+                    proof
+                        .lock()
+                        .unwrap()
+                        .skill_replay
+                        .as_mut()
+                        .unwrap()
+                        .request_b(&body, &records);
+                }
                 key = body["prompt_cache_key"].clone();
                 assert!(key.is_string() && key != old_key);
                 let selected = records
@@ -702,7 +740,9 @@ async fn provider(
                         _ => None,
                     })
                     .collect();
-                let expected_tools = if presentation {
+                let expected_tools = if skill_replay && task == 0 {
+                    vec![("original-main-skill", skill_history_replay::loaded(), false)]
+                } else if presentation {
                     presentation::outputs(task)
                 } else {
                     vec![("add-雪", OUTPUTS[task].into(), false)]
@@ -856,6 +896,15 @@ async fn provider(
         context.extend(answer);
         prior = context;
         old_key = key;
+        if skill_replay && task == 0 {
+            proof
+                .lock()
+                .unwrap()
+                .skill_replay
+                .as_mut()
+                .unwrap()
+                .completed_a(&records);
+        }
         proof.lock().unwrap().completed += 1;
         emit(json!({"event":"task_finished","task":task + 1}));
     }
@@ -948,6 +997,9 @@ async fn child() {
         "synthetic",
         "private-skill-browser\r\n",
     );
+    if start.skill_replay {
+        skill_history_replay::setup(&workspace);
+    }
     if start.presentation {
         assert!(start.transport == Transport::WebSocket && !start.recovered && start.mime);
         presentation::setup(&workspace);
@@ -1067,6 +1119,9 @@ async fn child() {
         Arc::get_mut(diagnostic.as_mut().unwrap()).unwrap().latency = Some(hooks.enable_latency());
     }
     proof.lock().unwrap().diagnostic = diagnostic.clone();
+    if start.skill_replay {
+        proof.lock().unwrap().skill_replay = Some(skill_history_replay::Audit::default());
+    }
     let (drive, driven) = mpsc::channel(1);
     let provider_db = db.clone();
     let provider_proof = proof.clone();
@@ -1299,6 +1354,20 @@ async fn child() {
                     } else {
                         emit(json!({"id":id.get(),"event":"gate11_diagnostic","state":"disabled","trace":null}));
                     }
+                }
+                Control::InspectSkillReplay { id } => {
+                    assert!(start.skill_replay);
+                    let state = db.inspect(id, &proof, &auth).await;
+                    let records = db.records().await;
+                    emit(
+                        proof
+                            .lock()
+                            .unwrap()
+                            .skill_replay
+                            .as_ref()
+                            .unwrap()
+                            .inspect(&records, state, id),
+                    );
                 }
                 Control::Inspect { id } => {
                     if let Some(audit) = &fixed {

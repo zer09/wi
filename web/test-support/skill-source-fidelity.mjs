@@ -8,6 +8,7 @@ import { parseDisplayCursor, validateConversationPage } from '../dist/display-ap
 import { parseControl } from './fixture.mjs';
 import { data, answer, skillOutput } from './presentation.mjs';
 import { richPartialFacts } from './rich-display-parity.mjs';
+import { replayTemplate } from './skill-history-replay.mjs';
 
 const reject = () => { throw new Error('Skill source fidelity rejected'); };
 export const FRONTMATTER = '---\nname: presentation\ndescription: synthetic metadata\n---\n';
@@ -62,8 +63,9 @@ export function unchangedNative(input, held) {
 }
 
 // Only the fixture's main file is writable. Every check runs before the first file effect.
-export async function ownedSkill({ fixture, workspace, tmpdir, executable, finished, probe = linuxProcess }) {
-  if (process.platform !== 'linux' || finished?.completed !== 2 || finished.provider_stage !== 'finished' || finished.gate !== null
+export async function ownedSkill({ fixture, workspace, tmpdir, executable, finished, probe = linuxProcess, beforeNextTask = false }) {
+  const completed = beforeNextTask ? 1 : 2, provider = beforeNextTask ? 'request' : 'finished';
+  if (typeof beforeNextTask !== 'boolean' || process.platform !== 'linux' || finished?.completed !== completed || finished.provider_stage !== provider || finished.gate !== null
     || !Number.isSafeInteger(fixture?.pid) || fixture.pid <= 1 || typeof workspace !== 'string' || workspace !== resolve(workspace)
     || typeof tmpdir !== 'string' || tmpdir !== resolve(tmpdir)) reject();
   const sandbox = dirname(dirname(workspace));
@@ -98,7 +100,8 @@ export async function ownedSkill({ fixture, workspace, tmpdir, executable, finis
     file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     equal(identity(await file.stat({ bigint:true })), identity(s));
     const originalIdentity = identity(s);
-    let expected = TEMPLATE, phase = 'bound';
+    const template = beforeNextTask ? replayTemplate : TEMPLATE;
+    let expected = template, phase = 'bound';
     async function validate() {
       await directories();
       const current = await probe(fixture.pid); processMatches(current); equal(current, living);
@@ -113,7 +116,7 @@ export async function ownedSkill({ fixture, workspace, tmpdir, executable, finis
     }
     await validate();
     const facts = { pid:fixture.pid, start:living.start, cwd:sandbox, workspace, path,
-      relative:relative(sandbox,path), identity:originalIdentity, template_sha256:sha256(TEMPLATE) };
+      relative:relative(sandbox,path), identity:originalIdentity, template_sha256:sha256(template) };
     return {
       facts,
       async change() {

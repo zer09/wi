@@ -10,14 +10,17 @@ See the [documentation index](docs/README.md) for current documentation and hist
 **G1.1: committed runtime, not accepted.** Accepted master remains `76bb32f`;
 historical unaccepted checkpoint `8f45dda` is separate from the later
 schema3/display/browser implementation on PR #10.
-[C93 verification](docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification)
+[Historical C93 verification](docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification)
 records local and successful hosted verification scoped to source
 `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits
 retain a separate cutoff and do not inherit exact-head CI results.
-All 40 G11 rows remain PARTIAL, accepted=false and inventory OPEN.
-C15/active1 owner dispositions and the application reader remain unchanged.
-Final assertion/report adequacy, complete original-master/checkpoint/current
-review coverage and owner acceptance remain open and separate from those gates.
+See [current merge readiness and C15/active1 dispositions](docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness)
+and the [machine matrix](docs/slices/g1/verification-g1.1.json) for row outcomes and remaining reviews.
+G1.1 remains accepted=false with inventory OPEN.
+Exact new-head CI remains pending after separately authorized commit/push;
+owner merge approval is separate from row outcomes.
+The application reader/SSE/no-store policy is unchanged; exact release-to-DOM
+remains WAIVED_BY_OWNER, not measured.
 Historical [C49 saved-skill fidelity](docs/slices/g1/C3B_SKILL_SOURCE_FIDELITY.md),
 [C50 interrupted parity](docs/slices/g1/C3B_INTERRUPTED_DISPLAY_PARITY.md) and
 [handoffs](handoffs/2026-10-13-032423-g1-1-c49-reviewed-resume.md) retain their

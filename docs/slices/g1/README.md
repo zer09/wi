@@ -2,13 +2,13 @@
 
 **Current contract: g1.1.** Accepted master remains `76bb32fd04fd4737c0efcceaabc7d10387453147`. PR #10's preserved unaccepted checkpoint is `8f45dda2a2c168931735cf798560b8dfd02a1579`. The later schema3/display/browser runtime is committed but unaccepted.
 
-**Matrix:40 PARTIAL /0 PASS /0 NOT_RUN; accepted=false; inventory OPEN.** The forty rows originally started NOT RUN at design time. Current scoped evidence does not turn those original planning statements into present status or whole-row passes. Ledger remains31/50 used19 remaining; no live work is authorized.
+**Current matrix:38PASS /1PASS_WITH_WAIVER /1PARTIAL; accepted=false.** Row outcomes are separate from owner merge approval. Ledger remains31/50 used19 remaining; no live work is authorized.
 
 ## Current verification and remaining closure
 
-[Current C93 verification](VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records local and successful hosted verification scoped to source `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`. Later documentation-only commits retain a separate cutoff and do not inherit exact-head CI results. Source completion alone proves neither CI nor acceptance. The [human report](VERIFICATION_G1_1.md) and [machine report](verification-g1.1.json) preserve earlier results and failed roles at their recorded cutoffs.
+The [current assessment](VERIFICATION_G1_1.md#current-merge-readiness) and [machine report](verification-g1.1.json) bind the uncommitted joined before-B source-mutation case,1254native/9971Node/90browser results and each existing requirement. G1-MR-01 is closed by actual J execution. C15 is CLOSED_CURRENT_BROWSER_COMPATIBILITY; active1 is CLOSED_CURRENT_REGRESSION with historical cause undetermined. Historical failures and the release-to-DOM waiver remain unchanged.
 
-Final assertion/report adequacy, complete original-master/checkpoint/current review coverage and owner acceptance remain open. C15/active1 owner dispositions and the application reader remain unchanged. Use the owner's current assignment before execution; this index authorizes no next increment or Git transition.
+Three independent complete-diff reviews and the two-role correction gate complete final review coverage, with handoff limits in the current report. G11-39 awaits exact new-head CI. Both d757646 hosted attempt1 workflows passed; that evidence does not certify a future changed head. [MERGE_REVIEW.md](MERGE_REVIEW.md) governs completion. No commit/push/merge, new milestone or broad documentation deletion is authorized.
 
 ## Historical scoped work to retain
 

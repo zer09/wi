@@ -1,8 +1,16 @@
 # Wi: G1.1 resume assignment
 
-Updated October 22, 2026. Accepted master is76bb32fd04fd4737c0efcceaabc7d10387453147. PR #10 contains an unaccepted implementation checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579. The owner approved replacing the rejected history design and resuming local implementation under **g1.1**. This is not G1 acceptance or merge authorization.
+Updated October 23, 2026. Accepted master is76bb32fd04fd4737c0efcceaabc7d10387453147. PR #10 contains an unaccepted implementation checkpoint8f45dda2a2c168931735cf798560b8dfd02a1579. The owner approved replacing the rejected history design and resuming local implementation under **g1.1**. This is not G1 acceptance or merge authorization.
 
-## Current continuation checkpoint
+## Current merge-readiness assignment
+
+Read [MERGE_REVIEW.md](docs/slices/g1/MERGE_REVIEW.md) and [current assessment](docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness) first. At planner HEAD7e4d7fe, the uncommitted13-path test/fixture change closes G1-MR-01 with actual browser A -> owned source change -> explicit B -> exact original provider replay/no loader redispatch. Production behavior stays unchanged. Current local gates pass1254native/12existing ignored,9971Node and90browser cases/35files. Initial failures remain preserved.
+
+Current rows:38PASS,1PASS_WITH_WAIVER,1PARTIAL. Final complete-diff review coverage is complete: three independent sessions plus the two-role correction gate close the sole verified documentation finding. The current report discloses the repeat-review handoff collision. G11-39 awaits exact new-head CI after separate commit/push authorization. C15 is CLOSED_CURRENT_BROWSER_COMPATIBILITY. Active1 is CLOSED_CURRENT_REGRESSION with HISTORICAL_CAUSE_UNDETERMINED. The reader/SSE/no-store policy, release-to-DOM waiver and ledger31/50 used19 remaining stay unchanged. Both d757646 hosted attempt1 workflows passed at that revision only. Do not replay a consumed bundle or historical sampling campaign.
+
+Leave implementation and publication unstaged/uncommitted until separate owner authorization. No push, merge, release, deployment, new milestone or broad documentation deletion. Actual PR#10 is open/non-draft; that state is not merge approval. The historical checkpoint paragraphs below retain their cutoffs and do not reinstate all40PARTIAL or old next-increment restrictions.
+
+## Historical continuation checkpoints
 
 **C93 fixed browser, local and hosted gates COMPLETED_SCOPED_REVIEWED:** Source checkpoint `1b8b50c7abd8ebdac95d8964a4788bf257ce3547` pins Chrome for Testing headless shell **157.0.8103.6** separately from unchanged Playwright **1.58.2**. Its exact tagged source contains Chromium CL8508456, which fixes completed no-store streamed responses being reported as cancelled. The controlled old-browser signature no longer occurs in the fixed build's eight-trial qualification. The application reader, SSE, no-store policy, assertions and project deadlines remain unchanged.
 

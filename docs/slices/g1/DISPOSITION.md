@@ -2,7 +2,13 @@
 
 Date: September29,2026. Contract g1.1 supersedes g1.0 for resumed implementation on PR #10. This is a design/assignment record, NOT verification. Accepted master remains76bb32f. The preserved unaccepted checkpoint is8f45dda2a2c168931735cf798560b8dfd02a1579.
 
-## Current C93 verification and browser-blocker disposition
+## Current merge-completion dispositions
+
+The owner's [merge assignment](MERGE_REVIEW.md) replaces the indefinite deferrals. **C15 is CLOSED_CURRENT_BROWSER_COMPATIBILITY.** **active1 is CLOSED_CURRENT_REGRESSION; HISTORICAL_CAUSE_UNDETERMINED.** The pinned fixed browser and current unfiltered reload/active-conflict cases pass; no application-reader change or new sampling campaign supplies these closures. Preserve every old failure and its causal limits. The active1 diagnostic was not a production repair.
+
+The new real before-B source-mutation scenario closes G1-MR-01 without replacing the existing C48 native or C49 saved-display tests. See the [current40-row assessment](VERIFICATION_G1_1.md#current-merge-readiness):38PASS,1PASS_WITH_WAIVER,1PARTIAL. Final review coverage is complete after the sole verified documentation correction; G11-39 awaits exact new-head CI. Exact release-to-DOM stays WAIVED_BY_OWNER, not measured. No commit/push/merge or broad evidence deletion is authorized.
+
+## Historical C93 verification and browser-blocker disposition
 
 The owner later authorized the fixed-browser pin and full unfiltered verification. At source `1b8b50c7abd8ebdac95d8964a4788bf257ce3547`, one fresh local guarded suite passes89cases; attempt1 [push39739062054](https://github.com/zer09/wi/actions/runs/39739062054) and [PR39739066029](https://github.com/zer09/wi/actions/runs/39739066029) both pass all three jobs. See [current verification](VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) for source/tree bindings, native/Node counts and the distinction between public hosted launch success and private case-level facts.
 

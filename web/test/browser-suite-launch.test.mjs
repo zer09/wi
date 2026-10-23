@@ -822,14 +822,14 @@ test('C88 R1 exact byte boundaries require an actual whole-tuple omission for tr
   });
 });
 
-test('C88 versioned source IDs follow all 34 actual tracked declaration identities in order', async t => {
+test('versioned source IDs bind all 35 current files without renumbering legacy IDs', async t => {
   const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
-  assert.equal(files.length, 34);
-  for (const [index, file] of files.entries()) await t.test(file, async t => {
+  assert.equal(files.length, 35);
+  for (const file of files) await t.test(file, async t => {
     const text = await observedCLI(t, failureReport([file])); privateObservation(text);
     const observation = JSON.parse(text.slice(diagnosticPrefix.length)).reporter_text;
-    assert.deepEqual(observation, wireObservation([coordinate(file)], { failed: 1, passed: 88 }, files));
-    assert.equal(observation.declarations[0][1], index + 1);
+    assert.deepEqual(observation, wireObservation([coordinate(file)], { failed: 1, passed: 88 }, sourceFiles.map(file => basename(file))));
+    assert.equal(observation.declarations[0][1], sourceFiles.indexOf('web/e2e/' + file) + 1);
   });
 });
 
@@ -928,7 +928,7 @@ test('C88 eight maximum tuples fit; larger summaries lose only whole tuples afte
   assert.deepEqual(max.reporter_text.declarations[0][5], [8, 8]); assert.equal(max.reporter_text.counts.fatal_errors, 1_000_000);
   t.diagnostic(`Maximum eight-entry diagnostic UTF8 bytes including prefix/newline: ${Buffer.byteLength(maxLine)}`);
   const large = failureReport(files), { parser } = await diagnosticCLI(() => {}), parsed = parser(large);
-  assert.equal(parsed.declarations.length, 34); assert.equal(parsed.truncated, false);
+  assert.equal(parsed.declarations.length, 35); assert.equal(parsed.truncated, false);
   const many = failureReport(Array.from({ length: 89 }, (_, i) => files[i % files.length]), undefined, [], i => ({ line: 17 + i, column: 3 }));
   assert.equal(parser(many).declarations.length, 89);
   const manyLine = await observedCLI(t, many); privateObservation(manyLine);
@@ -936,7 +936,7 @@ test('C88 eight maximum tuples fit; larger summaries lose only whole tuples afte
   assert.equal(manyWire.reporter_text.counts.failed, 89); assert.equal(manyWire.reporter_text.truncated, true);
   const line = await observedCLI(t, large); privateObservation(line);
   const wire = JSON.parse(line.slice(diagnosticPrefix.length)); assert.equal(wire.reporter_text.truncated, true);
-  assert.ok(wire.reporter_text.declarations.length >= 8 && wire.reporter_text.declarations.length < 34);
+  assert.ok(wire.reporter_text.declarations.length >= 8 && wire.reporter_text.declarations.length < 35);
   assert.ok(wire.reporter_text.declarations.every(d => d.length === 6));
   assert.deepEqual(wire.reporter_text.counts, parsed.counts); assert.deepEqual(wire.terminal, { code: 7, signal: null });
   const oneMore = structuredClone(wire); oneMore.reporter_text.declarations.push([1, wire.reporter_text.declarations.length + 1, 17, 3, null, null]);
@@ -948,7 +948,7 @@ test('C88 eight maximum tuples fit; larger summaries lose only whole tuples afte
     if (kind === 'invalid-last') changed = changed.replace(/^    web\/e2e\/upgrade-display-parity[^\n]*/m, s => s.replace(':17:3', ':0:3'));
     if (kind === 'extra-last') changed += '    web/e2e/joined.spec.mjs:19:3 › extra\n';
     if (kind === 'duplicate-last') changed = changed.replace(/^    web\/e2e\/upgrade-display-parity[^\n]*/m, s => s.replace('upgrade-display-parity', 'tool-fidelity'));
-    if (kind === 'missing-summary') changed = changed.replace('  34 failed\n', '');
+    if (kind === 'missing-summary') changed = changed.replace('  35 failed\n', '');
     assert.ok(changed !== large); assert.equal(parser(changed), null);
     const observed = await observedCLI(t, changed); privateObservation(observed);
     assert.equal(JSON.parse(observed.slice(diagnosticPrefix.length)).reporter_text, null);
@@ -1008,7 +1008,7 @@ test('C87 pinned formatter and closed allowlist bind every current declaration f
   assert.equal(terminalScreen.resolveFiles, 'cwd');
   const { parser } = await diagnosticCLI(() => assert.fail('Parser must not launch.'));
   const files = (await fs.readdir(new URL('../e2e/', import.meta.url))).filter(p => p.endsWith('.spec.mjs')).sort();
-  assert.equal(files.length, 34);
+  assert.equal(files.length, 35);
   for (const file of files) await t.test(file, async () => {
     assert.ok((await fs.lstat(new URL('../e2e/' + file, import.meta.url))).isFile());
     const text = reporterText({ failed: [file], passed: 88 });

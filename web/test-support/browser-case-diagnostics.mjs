@@ -15,6 +15,7 @@ export const sourceFiles = Object.freeze([
   'task-account-mismatch', 'task-active-conflict', 'task-disconnect-epoch', 'task-fixed-head', 'task-incomplete-history',
   'task-input-framing', 'task-input-rejection', 'task-recovery', 'task-reload-epoch', 'task-selection-epoch',
   'task-stale-history', 'task-unbound-history', 'tool-fidelity', 'upgrade-display-parity',
+  'skill-history-replay',
 ].map(name => `web/e2e/${name}.spec.mjs`));
 export const joinedScenarios = Object.freeze(['WS native', 'WS recovered', 'provider-SSE labelled native',
   'provider-SSE labelled recovered', 'provider-SSE missing-MIME native', 'provider-SSE missing-MIME recovered']);

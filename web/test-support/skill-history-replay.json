@@ -1,0 +1,8 @@
+{
+  "title": "Main SKILL historical replay",
+  "tasks": ["  Add 17 and 25. 雪\n<em>task & inert</em>\n", "Add 8 to the previous result. 雪\nSecond explicit task.\n"],
+  "answers": ["42 雪\r\n<em>answer & inert</em>\n", "50 雪\r\nSecond answer.\n"],
+  "body": "ORIGINAL_MAIN_SKILL_G1_MR_01 雪\r\nKeep these exact historical bytes.\n",
+  "call_id": "original-main-skill",
+  "arguments": "{\"id\":\"project:presentation\"}"
+}

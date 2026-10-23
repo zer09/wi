@@ -160,7 +160,7 @@ export async function nativeBinding(executable) {
   if (process.env.WI_C47_FIXTURE_SHA256 !== undefined && hash !== process.env.WI_C47_FIXTURE_SHA256) reject();
   const sources = {};
   for (const [file, expected] of [
-    ['src/providers/openai_codex/tests/replay/http_api_joined/browser.rs', '777b43e5225bac8b13b7bb0a8694e68b6809c4a77fdbf05391a8148c7d00694f'],
+    ['src/providers/openai_codex/tests/replay/http_api_joined/browser.rs', 'c004f59271deb49716e2aeccdfbf4154813d99b15a4d74209bd379638a50fe06'],
     ['src/providers/openai_codex/tests/replay/http_api_joined/browser/restart.rs', 'a3f39f2a2e2a9248143d24766ce28a8764ba7442c216667801435dc9be641164'],
   ]) { sources[file] = sha(await readFile(join(ROOT, file))); if (sources[file] !== expected) reject(); }
   return { executable, sha256: hash, sources };

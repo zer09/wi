@@ -9,8 +9,9 @@ import { fixedHeadEvidence, fixedHeadProtocol } from './fixed-head-protocol.mjs'
 import { unboundEvidence, unboundProtocol } from './unbound-history-protocol.mjs';
 import { toolFidelityEvidence, toolFidelityProtocol } from './tool-fidelity-protocol.mjs';
 import { lifecycleEvidence, lifecycleFlat, lifecycleProtocol } from './lifecycle-failure-protocol.mjs';
-import { cancellationEvidence, cancellationFlat, cancellationProtocol, startScenario } from './cancellation-protocol.mjs';
+import { cancellationEvidence, cancellationFlat, cancellationProtocol } from './cancellation-protocol.mjs';
 import { linuxProcess, strictStop } from './skill-source-fidelity.mjs';
+import { replayScenario, replayControl } from './skill-history-replay.mjs';
 
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 export const CHILD_TEST = 'providers::openai_codex::tests::replay_loopback_tests::http_api_joined::browser::child';
@@ -388,6 +389,8 @@ export function parseControl(value) {
   } else if (['lifecycle_failure_armed', 'lifecycle_failure_released'].includes(value.event)) {
     keys(value, base);
     if (value.id > 0xffffffff) fail();
+  } else if (value.event === 'skill_replay_inspect') {
+    replayControl(value);
   } else if (value.event === 'tool_fidelity_inspect') {
     toolFidelityEvidence(value);
   } else if (value.event === 'fixed_head_inspect') {
@@ -587,7 +590,7 @@ export function evaluateSkillCleanup(cleanup) {
 }
 
 export async function startFixture(executable, scenario, options = {}) {
-  scenario = startScenario(scenario);
+  scenario = replayScenario(scenario);
   const diagnosticsEnabled = gate11Options(options, scenario);
   const diagnostic = gate11Witness(diagnosticsEnabled);
   const sandbox = await mkdtemp(join(tmpdir(), 'wi-browser-'));
@@ -696,6 +699,7 @@ export async function startFixture(executable, scenario, options = {}) {
       keys(body, ['command','page']);
       if (options.nativeLatency !== true || !count(body.page) || body.page > 33) fail();
     }
+    if (body.command === 'inspect_skill_replay' && (scenario.skill_replay !== true || Object.keys(body).join(',') !== 'command')) fail();
     const id = nextId++;
     if (body.command === 'stop') stopId = id;
     const command = { ...body, id };

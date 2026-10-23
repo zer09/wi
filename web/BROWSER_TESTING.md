@@ -10,7 +10,7 @@ Use Node 24 and the locked Playwright SDK 1.58.2. The browser is the separately 
 
 The fixed browser is selected independently of the unchanged Playwright SDK. The application reader and no-store policy are not changed to avoid the bug. Do not assume a newer SDK bundles a fixed browser; verify the replacement build and compatibility before an owner-approved pin change.
 
-[Current verification](../docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records the eight-trial qualification, local89-case pass and successful hosted workflows at source1b8b50c. Those results are scoped evidence, not general SDK compatibility or G1.1 acceptance.
+[C93 verification](../docs/slices/g1/VERIFICATION_G1_1.md#c93-fixed-browser-and-current-head-verification) records the eight-trial qualification and original89-case pass at source1b8b50c. The [current assessment](../docs/slices/g1/VERIFICATION_G1_1.md#current-merge-readiness) adds the joined before-B skill-source mutation case and a local90-case pass. Hosted success atd757646 retains that revision's scope; a new pushed head needs its own CI. These results are not general SDK compatibility or merge authorization.
 
 ## Provision the browser
 
@@ -72,7 +72,7 @@ WI_BROWSER_BINDING=<browser-cache>/binding.json node -- scripts/agent_env.mjs --
 
 The launcher revalidates the captured browser provenance, native fixture and runtime inputs before consuming its execution guard and OUTER control. It rechecks before dispatch and after completion. The child receives the exact captured browser input beside the original eight generated values. Missing, stale or substituted receipts, changed packages and dangerous SDK environment overrides reject. `PLAYWRIGHT_NO_COPY_PROMPT` remains permitted and unchanged.
 
-The full suite retains 89 cases in 34 files, one worker, zero retries, a 900-second suite limit and the default 60-second case limit. A consumed bundle or failed case is not permission for an automatic retry. Keep failed records and owned partials. Private provenance does not appear in public CLI diagnostics.
+The full suite contains 90 cases in 35 files, one worker, zero retries, a 900-second suite limit and the default 60-second case limit. The added `skill-history-replay.spec.mjs` case verifies actual original tool-result replay after an owned source change before explicit task B; the existing native and post-completion skill cases remain. A consumed bundle or failed case is not permission for an automatic retry. Keep failed records and owned partials. Private provenance does not appear in public CLI diagnostics.
 
 ## CI and safety
 

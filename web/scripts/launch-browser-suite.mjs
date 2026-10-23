@@ -31,6 +31,7 @@ const reporterFiles = new Map([
   'task-account-mismatch', 'task-active-conflict', 'task-disconnect-epoch', 'task-fixed-head', 'task-incomplete-history',
   'task-input-framing', 'task-input-rejection', 'task-recovery', 'task-reload-epoch', 'task-selection-epoch',
   'task-stale-history', 'task-unbound-history', 'tool-fidelity', 'upgrade-display-parity',
+  'skill-history-replay',
 ].map((name, index) => [`web/e2e/${name}.spec.mjs`, index + 1]));
 const handoffStages = ['startup', 'create', 'first-send', 'close-a', 'observer-connect', 'first-completion', 'later-explicit-send', 'reopened-a'];
 const handoffChecks = ['outside', 'receipt', 'native', 'dto', 'handshake', 'order', 'assets', 'requests'];

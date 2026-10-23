@@ -59,8 +59,9 @@ function realistic() {
   return {r,encoded:report(r),tests,results};
 }
 
-test('C89 maps bind the actual 34-source inventory, legacy ID order and six joined public labels',async()=>{
-  assert.equal(sourceFiles.length,34);assert.equal(new Set(sourceFiles).size,34);
+test('source maps append the skill replay case and preserve the 34 legacy source IDs',async()=>{
+  assert.equal(sourceFiles.length,35);assert.equal(new Set(sourceFiles).size,35);
+  assert.equal(sourceFiles[34],'web/e2e/skill-history-replay.spec.mjs');
   const launch=await fs.readFile(new URL('../scripts/launch-browser-suite.mjs',import.meta.url),'utf8');
   const names=[...launch.slice(launch.indexOf('const reporterFiles'),launch.indexOf('const handoffStages')).matchAll(/'([a-z-]+)'/g)].map(m=>`web/e2e/${m[1]}.spec.mjs`);
   assert.deepEqual(sourceFiles,names);
@@ -99,7 +100,7 @@ test('C89 closed family vocabularies bind literal and template stage/check assig
 });
 test('C91 appends four families without changing the reviewed source and family dictionaries',()=>{
   const digest=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
-  assert.equal(digest(sourceFiles),'9bdf81ed7a07b1de20ff3f7d5e96efa31f38361aebc8f03b40eeb8d1c6ca32f1');
+  assert.equal(digest(sourceFiles.slice(0,34)),'9bdf81ed7a07b1de20ff3f7d5e96efa31f38361aebc8f03b40eeb8d1c6ca32f1');
   assert.equal(digest(families.slice(0,9)),'a7196db54e5b197a1ac00bcc8a0aa17cfcbca5e16573636876220209ae77b206');
   assert.equal(digest(kinds),'ac68313482d32433eacf8cebfebc39811bfc6baf7535e10f17cdcd42df3a9bea');
   assert.equal(digest(matchers),'fd14bd2a654aee81e48026c3bde30b2b33204f5a30f4318393441e2ac272ab2d');

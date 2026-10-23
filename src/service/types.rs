@@ -9,6 +9,7 @@ use crate::{
 pub enum RunHostError {
     RuntimeUnavailable,
     Closed,
+    ActiveRun,
 }
 
 impl RunHostError {
@@ -16,6 +17,7 @@ impl RunHostError {
         match self {
             Self::RuntimeUnavailable => "host.runtime_unavailable",
             Self::Closed => "host.closed",
+            Self::ActiveRun => "host.active_run",
         }
     }
 }

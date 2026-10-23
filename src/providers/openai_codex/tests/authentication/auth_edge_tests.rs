@@ -4,6 +4,63 @@ use serde_json::json;
 fn document() -> String {
     json!({"openai-codex":{"type":"oauth","access":"synthetic-token","expires":4102444800000u64,"accountId":"synthetic-account"}}).to_string()
 }
+
+#[test]
+fn default_locations_ignore_retired_platform_home() {
+    const CHILD: &str = "WI_AUTH_LOCATION_TEST";
+    if std::env::var_os(CHILD).is_some() {
+        let home = std::env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        for source in [AuthSource::Codex, AuthSource::Pi] {
+            let expected = match source {
+                AuthSource::Codex => std::env::var_os("CODEX_HOME")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+                    .or_else(|| home.as_ref().map(|path| path.join(".codex")))
+                    .map(|path| path.join("auth.json")),
+                AuthSource::Pi => home.as_ref().map(|path| path.join(".pi/agent/auth.json")),
+            };
+            let actual = LocalAuthFile::default_for(source);
+            match expected {
+                Some(path) => assert_eq!(actual.unwrap().path, path),
+                None => assert!(matches!(actual, Err(GatewayError::HomeUnavailable))),
+            }
+        }
+        return;
+    }
+
+    // Separate children keep environment changes away from parallel tests. No file is loaded.
+    let temp = tempfile::tempdir().unwrap();
+    for home in [None, Some(PathBuf::new()), Some(temp.path().join("home"))] {
+        for codex in [None, Some(PathBuf::new()), Some(temp.path().join("codex"))] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "providers::openai_codex::auth::edge_tests::default_locations_ignore_retired_platform_home",
+                ])
+                .env_clear()
+                .env(CHILD, "1")
+                .env("USERPROFILE", temp.path().join("retired-home-canary"))
+                .current_dir(temp.path());
+            if let Some(home) = &home {
+                command.env("HOME", home);
+            }
+            if let Some(codex) = codex {
+                command.env("CODEX_HOME", codex);
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+}
 #[tokio::test]
 async fn auth_bom_and_exact_size_boundary() {
     let file = tempfile::NamedTempFile::new().unwrap();

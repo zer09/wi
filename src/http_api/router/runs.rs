@@ -6,7 +6,7 @@ use crate::{
     },
     http_api::{
         ApiSettings,
-        dto::{ApiError, ErrorView, NoticeView, TaskAcceptedView},
+        dto::{ApiError, ErrorView, NoticeView, TaskAcceptedView, TaskReconciliationView},
     },
     run::RunRequest,
     service::{RunCompletion, RunHostError},
@@ -20,6 +20,10 @@ use std::sync::Arc;
 
 #[cfg(test)]
 pub(super) mod test_hooks;
+
+#[cfg(test)]
+#[path = "runs/tool_fidelity_tests.rs"]
+mod tool_fidelity_tests;
 
 // Validate the canonical command, not merely a receipt with a non-null run ID.
 async fn raw_receipt(
@@ -97,6 +101,33 @@ async fn raw_receipt(
     Ok(Some(receipt))
 }
 
+pub(super) async fn reconcile_task(
+    state: &ApiState,
+    sid: ApplicationSessionId,
+    command: input::Task,
+) -> Result<TaskReconciliationView, Box<ErrorView>> {
+    let session = state
+        .host
+        .storage()
+        .open_session(sid)
+        .await
+        .map_err(|error| ErrorView::storage(&error))?;
+    let Some(receipt) = raw_receipt(&session, &command).await? else {
+        // This absence says nothing about a competing or previously uncertain write.
+        return Ok(TaskReconciliationView::not_found());
+    };
+    // State can advance after proof; this is an addressed read, not a frozen snapshot.
+    let run = session
+        .run_record(command.run_id.clone())
+        .await
+        .map_err(|error| ErrorView::storage(&error))?
+        .ok_or_else(ErrorView::integrity)?;
+    if run.run_id() != &command.run_id || run.accepted_sequence() != receipt.first_sequence() {
+        return Err(ErrorView::integrity().into());
+    }
+    Ok(TaskReconciliationView::accepted(&receipt, &run))
+}
+
 pub(super) async fn submit(
     state: &ApiState,
     sid: ApplicationSessionId,
@@ -112,6 +143,12 @@ pub(super) async fn submit(
         .map_err(|error| ErrorView::storage(&error))?;
     if let Some(receipt) = raw_receipt(&session, &command).await? {
         return Ok(TaskAcceptedView::receipt(&receipt, true, None, vec![]));
+    }
+    if state
+        .client
+        .has_other_active_operation(&sid, &command.operation_id)
+    {
+        return reconcile(&session, &command, ErrorView::active_run().into()).await;
     }
     let prepared = prepare(
         state.config.settings(),
@@ -131,7 +168,7 @@ pub(super) async fn submit(
         .run_hooks
         .dispatched
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let ticket = match state.client.submit(
+    let ticket = match state.client.submit_exclusive(
         sid,
         PersistentRunRequest {
             operation_id: command.operation_id.clone(),
@@ -141,6 +178,9 @@ pub(super) async fn submit(
         tools,
     ) {
         Ok(ticket) => ticket,
+        Err(RunHostError::ActiveRun) => {
+            return reconcile(&session, &command, ErrorView::active_run().into()).await;
+        }
         Err(error) => {
             let error = host_error(error).with_notices(notices);
             return reconcile(&session, &command, error.into()).await;
@@ -206,6 +246,12 @@ async fn prepare(
                 .register(Arc::new(AddNumbers))
                 .map_err(|error| ErrorView::gateway(&error).with_notices(notices.clone()))?;
         }
+        #[cfg(test)]
+        if let Some(tool) = settings.test_tool() {
+            template
+                .register(tool.clone())
+                .map_err(|error| ErrorView::gateway(&error).with_notices(notices.clone()))?;
+        }
         let (prepared, tools) = prepare_run_with_skill_loading(
             RunRequest {
                 provider_id: settings.provider_id().to_owned(),
@@ -230,6 +276,7 @@ async fn prepare(
 fn host_error(error: RunHostError) -> ErrorView {
     match error {
         RunHostError::Closed => ErrorView::api(ApiError::Closed),
+        RunHostError::ActiveRun => ErrorView::active_run(),
         RunHostError::RuntimeUnavailable => ErrorView::api(ApiError::WorkerLost),
     }
 }

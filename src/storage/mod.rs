@@ -6,6 +6,7 @@ mod catalog;
 mod catalog_ops;
 mod catalog_repair;
 mod catalog_sync;
+mod conversation;
 mod creation;
 mod database;
 mod dto;
@@ -17,6 +18,8 @@ mod fault_tests;
 mod filesystem;
 mod history;
 mod history_prefix;
+#[cfg(test)]
+mod identifier_tests;
 mod ids;
 mod interruption;
 mod lifecycle;
@@ -43,6 +46,7 @@ pub(crate) mod test_hooks;
 
 pub use catalog_repair::RepairReport;
 pub use catalog_sync::RefreshResult;
+pub use conversation::ConversationError;
 pub use dto::{
     CleanupWarning, CommitReceipt, CommitResult, CreateResult, CreateSession, CreatedPayload,
     CreationProvenance, RecordedRunState, SessionAvailability, SessionManifest, SessionPage,
@@ -120,6 +124,16 @@ impl StoreInner {
         F: FnOnce(Arc<Self>) -> Fut + Send + 'static,
         Fut: Future<Output = Result<T, StorageError>> + Send + 'static,
     {
+        #[cfg(test)]
+        let timing = self.hooks.latency().map(|c| c.operation(mutation));
+        #[cfg(test)]
+        let _operation_time = timing
+            .as_ref()
+            .and_then(|c| c.span(test_hooks::latency::Stage::Operation));
+        #[cfg(test)]
+        let _admission_time = timing
+            .as_ref()
+            .and_then(|c| c.span(test_hooks::latency::Stage::Admission));
         let guard = self.lifecycle.admit().map_err(|error| {
             if mutation {
                 error.not_committed()
@@ -127,13 +141,51 @@ impl StoreInner {
                 error
             }
         })?;
+        #[cfg(test)]
+        let read_ticket = test_hooks::read_retirement::admit(&self.hooks);
+        #[cfg(test)]
+        drop(_admission_time);
+        #[cfg(test)]
+        let _spawn_time = timing
+            .as_ref()
+            .and_then(|c| c.span(test_hooks::latency::Stage::SpawnWait));
         tokio::spawn(async move {
+            #[cfg(test)]
+            let read_ticket = read_ticket;
+            #[cfg(test)]
+            let _operation_time = _operation_time;
+            #[cfg(test)]
+            drop(_spawn_time);
+            #[cfg(test)]
+            let _maintenance_time = timing
+                .as_ref()
+                .and_then(|c| c.span(test_hooks::latency::Stage::MaintenanceWait));
             let _maintenance = self.maintenance.read().await;
+            #[cfg(test)]
+            drop(_maintenance_time);
             let action = action(self.clone());
             #[cfg(test)]
-            let action = self.hooks.scope(action);
+            let action = test_hooks::read_retirement::worker(
+                &self.hooks,
+                read_ticket.as_ref().map(|ticket| ticket.id()),
+                self.hooks.scope(action),
+            );
+            #[cfg(test)]
+            let result = if let Some(timing) = timing {
+                timing.scope(action).await
+            } else {
+                action.await
+            };
+            #[cfg(not(test))]
             let result = action.await;
             guard.finish();
+            #[cfg(test)]
+            {
+                drop(_maintenance);
+                if let Some(ticket) = read_ticket {
+                    ticket.finish();
+                }
+            }
             result
         })
         .await

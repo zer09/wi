@@ -594,11 +594,17 @@ pub(super) async fn mutate(
     mutation: &Mutation,
     #[cfg(test)] fault: Option<RecordFault>,
 ) -> Result<(CommitReceipt, bool)> {
+    #[cfg(test)]
+    let _begin_time = test_hooks::latency::span(test_hooks::latency::Stage::Begin);
     let mut transaction = connection
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|e| database::error(e).not_committed())?;
+    #[cfg(test)]
+    drop(_begin_time);
     let result = async {
+        #[cfg(test)]
+        let _preflight_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
         let id = &provenance.session_id;
         let hash = command_hash(id, run_id, mutation)?;
         // A retry returns its original range even after the run is terminal.
@@ -609,10 +615,27 @@ pub(super) async fn mutate(
                 && history_selection(&mut transaction, id, run_id).await?.as_ref() != Some(selection) { return Err(integrity()); }
             return Ok((command.receipt, true));
         }
+        #[cfg(test)]
+        drop(_preflight_time);
+        #[cfg(test)]
+        let _validation_time = test_hooks::latency::span(test_hooks::latency::Stage::TransactionValidation);
         let manifest = session_schema::validate(&mut transaction, id, Some(provenance)).await?;
+        #[cfg(test)]
+        drop(_validation_time);
+        #[cfg(test)]
+        let _preflight_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
         if let Mutation::AcceptHistory { input, selection } = mutation {
             if manifest.head_sequence() != selection.through_sequence() { return Err(StorageError::new(StorageErrorKind::StaleHistory)); }
             if !selection.matches_input(input) { return Err(invalid()); }
+        }
+        // Preflight every novel record before allocating sequences or inserting rows.
+        // Exact historical retries and conflicts have already resolved above.
+        if let Mutation::Append { records } = mutation {
+            for record in records { record.validate_admission()?; }
+            let run = run_record(&mut transaction, id, run_id).await?.ok_or_else(transition)?;
+            for record in records {
+                record.validate_provider_admission(&run.input.prepared_request().provider_id)?;
+            }
         }
         let count = match mutation { Mutation::Accept { .. } => 1, Mutation::AcceptHistory { .. } => 2, Mutation::Append { records } => records.len() };
         let (first, last) = sequence_range(manifest.head_sequence(), count)?;
@@ -622,18 +645,36 @@ pub(super) async fn mutate(
                 if sqlx::query("SELECT 1 FROM runs WHERE run_id=?").bind(run_id.as_str()).fetch_optional(&mut *transaction).await.map_err(database::error)?.is_some() { return Err(transition()); }
                 if sqlx::query("SELECT 1 FROM runs WHERE state IN ('accepted','running')").fetch_optional(&mut *transaction).await.map_err(database::error)?.is_some() { return Err(StorageError::new(StorageErrorKind::ActiveRunExists)); }
                 let payload = AcceptedPayload { run_id: run_id.clone(), input: input.as_ref().clone(), owner_instance_id: owner.clone() };
+                #[cfg(test)]
+                drop(_preflight_time);
                 insert_event(&mut transaction, first, timestamp, run_id, "run.accepted", &dto::canonical_json(&payload)?, None).await?;
                 #[cfg(test)]
+                test_hooks::hit(test_hooks::Point::CanonicalInserted).await?;
+                #[cfg(test)]
                 if matches!(fault, Some(RecordFault::AfterEvent)) { return Err(StorageError::new(StorageErrorKind::Io)); }
+                #[cfg(test)]
+                let _projection_time = test_hooks::latency::span(test_hooks::latency::Stage::ProjectionReceipt);
                 sqlx::query("INSERT INTO runs (run_id, accepted_sequence, state, last_runtime_sequence, owner_instance_id) VALUES (?, ?, 'accepted', 0, ?)")
                     .bind(run_id.as_str()).bind(first).bind(owner.as_str()).execute(&mut *transaction).await.map_err(database::error)?;
+                conversation::projector::apply(&mut transaction, conversation::projector::Event {
+                    sequence: first as u64, run: Some(run_id), input: conversation::projector::Input::Accepted(input),
+                }).await?;
+                #[cfg(test)]
+                test_hooks::hit(test_hooks::Point::DisplayApplied).await?;
                 #[cfg(test)]
                 if matches!(fault, Some(RecordFault::AfterProjection)) { return Err(StorageError::new(StorageErrorKind::Io)); }
+                #[cfg(test)]
+                drop(_projection_time);
                 if let Mutation::AcceptHistory { selection, .. } = mutation {
                     #[cfg(test)]
                     test_hooks::hit(test_hooks::Point::HistorySelection).await?;
                     let payload = HistorySelectedPayload { run_id: run_id.clone(), selection: selection.clone() };
                     insert_event(&mut transaction, last, timestamp, run_id, "run.history.selected", &dto::canonical_json(&payload)?, None).await?;
+                    #[cfg(test)]
+                    let _projection_time = test_hooks::latency::span(test_hooks::latency::Stage::ProjectionReceipt);
+                    conversation::projector::apply(&mut transaction, conversation::projector::Event {
+                        sequence: last as u64, run: Some(run_id), input: conversation::projector::Input::HistorySelected,
+                    }).await?;
                 }
             }
             Mutation::Append { records } => {
@@ -641,8 +682,11 @@ pub(super) async fn mutate(
                 let mut correlation = Correlation::load(&mut transaction, id, &run).await?;
                 let mut unbound = history_selection(&mut transaction, id, run_id).await?.is_some()
                     && provider_binding(&mut transaction, id, run_id).await?.is_none();
+                #[cfg(test)]
+                drop(_preflight_time);
                 for (index, record) in records.iter().enumerate() {
-                    record.validate()?;
+                    #[cfg(test)]
+                    let _correlation_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
                     if unbound {
                         match record {
                             AppendRunRecord::Runtime(event) => replay::validate_unbound_runtime(event)?,
@@ -656,6 +700,8 @@ pub(super) async fn mutate(
                     if let AppendRunRecord::Runtime(event) = record {
                         correlation.observe(&mut transaction, &run, event, sequence).await?;
                     }
+                    #[cfg(test)]
+                    drop(_correlation_time);
                     append(&mut transaction, id, &mut run, sequence, timestamp, record, #[cfg(test)] fault).await?;
                     if let AppendRunRecord::ProviderBinding(binding) = record {
                         correlation.session = Some(binding.provider_session_id().to_owned());
@@ -664,6 +710,8 @@ pub(super) async fn mutate(
                 }
             }
         }
+        #[cfg(test)]
+        let _receipt_time = test_hooks::latency::span(test_hooks::latency::Stage::ProjectionReceipt);
         let receipt = CommitReceipt::run_batch(operation.clone(), id.clone(), run_id.clone(), first, last)?;
         sqlx::query("UPDATE manifest SET head_sequence=?, updated_at_ms=? WHERE singleton=1").bind(last).bind(timestamp).execute(&mut *transaction).await.map_err(database::error)?;
         sqlx::query("INSERT INTO commands (operation_id, method, payload_hash, first_sequence, last_sequence, receipt_json) VALUES (?, ?, ?, ?, ?, ?)")
@@ -683,6 +731,8 @@ async fn insert_event(
     json: &str,
     source: Option<&RunEventEnvelope>,
 ) -> Result<()> {
+    #[cfg(test)]
+    let _insert_time = test_hooks::latency::span(test_hooks::latency::Stage::CanonicalInsert);
     sqlx::query("INSERT INTO events (sequence, event_id, event_type, event_version, created_at_ms, run_id, source_event_id, source_sequence, payload_json) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)")
         .bind(sequence).bind(StoredEventId::new().as_str()).bind(kind).bind(timestamp).bind(run.as_str())
         .bind(source.map(|e| e.event_id.as_str())).bind(source.map(|e| e.sequence as i64)).bind(json)
@@ -719,6 +769,8 @@ async fn append(
     record: &AppendRunRecord,
     #[cfg(test)] fault: Option<RecordFault>,
 ) -> Result<()> {
+    #[cfg(test)]
+    let _preflight_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
     let (kind, json, source) = match record {
         AppendRunRecord::ProviderBinding(binding) => {
             if run.state != RecordedRunState::Running {
@@ -754,6 +806,8 @@ async fn append(
     {
         return Err(transition());
     }
+    #[cfg(test)]
+    drop(_preflight_time);
     insert_event(
         connection,
         sequence,
@@ -765,9 +819,13 @@ async fn append(
     )
     .await?;
     #[cfg(test)]
+    test_hooks::hit(test_hooks::Point::CanonicalInserted).await?;
+    #[cfg(test)]
     if matches!(fault, Some(RecordFault::AfterEvent)) {
         return Err(StorageError::new(StorageErrorKind::Io));
     }
+    #[cfg(test)]
+    let _correlation_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
     match record {
         AppendRunRecord::ProviderBinding(binding) => {
             run.provider_session_id = Some(binding.provider_session_id().to_owned());
@@ -839,13 +897,32 @@ async fn append(
             run.result_sequence = Some(sequence as u64);
         }
     }
+    #[cfg(test)]
+    drop(_correlation_time);
+    #[cfg(test)]
+    let _update_time = test_hooks::latency::span(test_hooks::latency::Stage::ProjectionReceipt);
     sqlx::query("UPDATE runs SET state=?, last_runtime_sequence=?, provider_session_id=?, result_sequence=? WHERE run_id=?")
         .bind(state_name(run.state)).bind(run.last_runtime_sequence as i64).bind(&run.provider_session_id).bind(run.result_sequence.map(|s| s as i64)).bind(run.run_id.as_str())
         .execute(&mut *connection).await.map_err(database::error)?;
+    #[cfg(test)]
+    drop(_update_time);
+    #[cfg(test)]
+    let _correlation_time = test_hooks::latency::span(test_hooks::latency::Stage::Correlation);
     // Keep terminal identity available for a following Result in the same batch.
     if !active(run.state) && run.terminal.is_none() {
         run.terminal = Some(history::event(connection, id, sequence as u64).await?);
     }
+    #[cfg(test)]
+    drop(_correlation_time);
+    #[cfg(test)]
+    let _projection_time = test_hooks::latency::span(test_hooks::latency::Stage::ProjectionReceipt);
+    conversation::projector::apply(
+        connection,
+        conversation::projector::Event::record(sequence as u64, &run.run_id, record)?,
+    )
+    .await?;
+    #[cfg(test)]
+    test_hooks::hit(test_hooks::Point::DisplayApplied).await?;
     #[cfg(test)]
     if matches!(fault, Some(RecordFault::AfterProjection)) {
         return Err(StorageError::new(StorageErrorKind::Io));

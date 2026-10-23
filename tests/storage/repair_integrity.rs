@@ -310,7 +310,7 @@ fn tool(run: &RunId, sequence: u64, call: &str, finish: bool) -> AppendRunRecord
 
 fn output(call: &str) -> AppendRunRecord {
     AppendRunRecord::ToolResult {
-        request_id: Some("original request".into()),
+        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         call_id: call.into(),
         output: "{ \"opaque\": \"\\n\" }\0\n雪".into(),
         is_error: true,

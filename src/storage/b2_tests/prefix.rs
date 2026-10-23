@@ -88,7 +88,7 @@ async fn p1b2_07_raw_prefix_oracle_pages_checkpoints_nulls_unicode_and_embedded_
             .unwrap(),
         expected
     );
-    sqlx::query("UPDATE manifest SET schema_version=2")
+    sqlx::query("UPDATE manifest SET schema_version=3")
         .execute(&mut sql)
         .await
         .unwrap();

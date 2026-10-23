@@ -188,6 +188,20 @@ fn native_scalar_projection_is_closed_and_preserves_bytes() {
 }
 
 #[test]
+fn shared_projection_keeps_raw_api1_response_bytes_without_applying_display_fallback() {
+    let mut source = response();
+    source.model = None;
+    source.usage = None;
+    source.text = "answer plus suffix".into();
+    source.output[0].native =
+        json!({"content":[{"type":"output_text", "text":"answer"}], "private":PRIVATE});
+    assert_eq!(
+        serde_json::to_string(&ResponseView::from(&source)).unwrap(),
+        r#"{"response_id":"response-visible","model":null,"outcome":{"status":"completed"},"output_provenance":"validated_output_item_done","text":"answer plus suffix","items":[{"item_id":"item-visible","kind":"message","function_call":null,"content":[{"kind":"text","text":"answer"}],"unsupported_content":false}],"usage":null}"#,
+    );
+}
+
+#[test]
 fn response_outcomes_statuses_usage_and_fallback_are_safe() {
     for (reason, expected) in [
         (None, Value::Null),
@@ -608,21 +622,32 @@ async fn actual_history_projects_receipts_private_checkpoints_and_terminal_witho
             },
         },
     ];
+    let admitted_runtime = |sequence, event| {
+        let mut observed = runtime(&run, sequence, event);
+        if observed.turn_id.is_some() {
+            observed.turn_id = Some("00000000-0000-4000-8000-000000000002".into());
+        }
+        if observed.request_id.is_some() {
+            observed.request_id = Some("00000000-0000-4000-8000-000000000001".into());
+        }
+        if let RunEvent::ProviderEvent { event } = &mut observed.event {
+            event.request_id = observed.request_id.clone();
+        }
+        observed
+    };
     for (index, event) in events.into_iter().enumerate() {
-        records.push(AppendRunRecord::Runtime(runtime(
-            &run,
+        records.push(AppendRunRecord::Runtime(admitted_runtime(
             index as u64 + 2,
             event,
         )));
     }
     records.push(AppendRunRecord::ToolResult {
-        request_id: Some("request-visible".into()),
+        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         call_id: "call".into(),
         output: "{\"error\":\"visible data, not failure\"}\r\n雪".into(),
         is_error: false,
     });
-    records.push(AppendRunRecord::Runtime(runtime(
-        &run,
+    records.push(AppendRunRecord::Runtime(admitted_runtime(
         9,
         RunEvent::ToolEvent {
             event: ToolExecutionEvent::ToolResultReused {
@@ -631,8 +656,7 @@ async fn actual_history_projects_receipts_private_checkpoints_and_terminal_witho
             },
         },
     )));
-    records.push(AppendRunRecord::Runtime(runtime(
-        &run,
+    records.push(AppendRunRecord::Runtime(admitted_runtime(
         10,
         RunEvent::TurnFinished {
             number: 1,
@@ -641,8 +665,7 @@ async fn actual_history_projects_receipts_private_checkpoints_and_terminal_witho
             upstream_outcome: Some(UpstreamOutcome::TerminalReceived),
         },
     )));
-    records.push(AppendRunRecord::Runtime(runtime(
-        &run,
+    records.push(AppendRunRecord::Runtime(admitted_runtime(
         11,
         RunEvent::RunFinished {
             outcome: RunOutcome::Completed,

@@ -268,7 +268,7 @@ impl SessionControl for Control {
         history.extend(response.output.iter().map(|item| item.native.clone()));
         state.turn += 1;
         self.script.counts.generated.fetch_add(1, Ordering::SeqCst);
-        let request_id = format!("{}-request-{}", self.script.label, turn + 1);
+        let request_id = format!("{}-{:012x}", &self.script.run_id.as_str()[..23], turn + 1);
         let mut events = vec![ProviderEvent::ResponseStarted {
             response_id: response.id.clone(),
         }];
@@ -671,7 +671,7 @@ async fn main() -> ExampleResult<()> {
         &a_run,
         "load-project",
         "load_skill",
-        "a-request-1",
+        &format!("{}-000000000001", &a_run.as_str()[..23]),
         &load_output,
     )
     .await?;
@@ -680,7 +680,7 @@ async fn main() -> ExampleResult<()> {
         &a_run,
         SUM_CALL,
         "add_numbers",
-        "a-request-2",
+        &format!("{}-000000000002", &a_run.as_str()[..23]),
         "{\"sum\":42}",
     )
     .await?;
@@ -828,7 +828,7 @@ async fn main() -> ExampleResult<()> {
         &b_run,
         SUM_CALL,
         "add_numbers",
-        "b-request-1",
+        &format!("{}-000000000001", &b_run.as_str()[..23]),
         "{\"sum\":43}",
     )
     .await?;

@@ -227,8 +227,8 @@ async fn skill_loading_public_run_delivers_real_body_with_explicit_selections_or
         assert_eq!(
             tool_trace(&events),
             vec![
-                json!({"request_id": "q1", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}),
-                json!({"request_id": "q1", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}),
+                json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}),
+                json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}),
             ]
         );
     }
@@ -287,10 +287,10 @@ async fn skill_loading_public_run_loads_workflow_then_adds_in_three_requests() {
     assert_eq!(
         tool_trace(&events),
         vec![
-            json!({"request_id": "q1", "event": {"type": "tool_execution_started", "call_id": "load-workflow", "tool_name": "load_skill"}}),
-            json!({"request_id": "q1", "event": {"type": "tool_execution_finished", "call_id": "load-workflow", "tool_name": "load_skill", "is_error": false}}),
-            json!({"request_id": "q2", "event": {"type": "tool_execution_started", "call_id": "add-result", "tool_name": "add_numbers"}}),
-            json!({"request_id": "q2", "event": {"type": "tool_execution_finished", "call_id": "add-result", "tool_name": "add_numbers", "is_error": false}}),
+            json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_started", "call_id": "load-workflow", "tool_name": "load_skill"}}),
+            json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_finished", "call_id": "load-workflow", "tool_name": "load_skill", "is_error": false}}),
+            json!({"request_id": "00000000-0000-4000-8000-000000000002", "event": {"type": "tool_execution_started", "call_id": "add-result", "tool_name": "add_numbers"}}),
+            json!({"request_id": "00000000-0000-4000-8000-000000000002", "event": {"type": "tool_execution_finished", "call_id": "add-result", "tool_name": "add_numbers", "is_error": false}}),
         ]
     );
 }
@@ -404,10 +404,10 @@ async fn skill_loading_public_run_cancels_before_dispatch_or_before_later_call()
         assert_eq!(script.records.inputs.lock().unwrap().len(), 1);
         let mut expected = Vec::new();
         if boundary != "before" {
-            expected.push(json!({"request_id": "q1", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}));
+            expected.push(json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}));
         }
         if boundary == "finish" {
-            expected.push(json!({"request_id": "q1", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}));
+            expected.push(json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}));
         }
         assert_eq!(tool_trace(&events), expected);
         assert_eq!(
@@ -493,10 +493,10 @@ async fn skill_loading_public_run_observer_failure_stops_later_work_and_delivery
             assert_eq!(count(&script.records.tool_calls), 0);
             assert_eq!(script.records.inputs.lock().unwrap().len(), 1);
             let mut expected = vec![
-                json!({"request_id": "q1", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}),
+                json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_started", "call_id": "load-main", "tool_name": "load_skill"}}),
             ];
             if at_finish {
-                expected.push(json!({"request_id": "q1", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}));
+                expected.push(json!({"request_id": "00000000-0000-4000-8000-000000000001", "event": {"type": "tool_execution_finished", "call_id": "load-main", "tool_name": "load_skill", "is_error": false}}));
             }
             assert_eq!(tool_trace(&events), expected);
             assert_eq!(trace(&events).last(), Some(&"tool_event"));

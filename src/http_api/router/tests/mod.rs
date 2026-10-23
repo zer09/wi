@@ -11,8 +11,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod asset_tests;
 mod authority_tests;
 mod boundary_tests;
+mod conversation_tests;
 mod events_tests;
 mod input_tests;
 mod metadata_tests;
@@ -49,6 +51,7 @@ struct Server {
     http: reqwest::Client,
     run_hooks: Arc<runs::test_hooks::Hooks>,
     event_hooks: Arc<events::test_hooks::Hooks>,
+    display_hooks: Arc<conversation::events::test_hooks::Hooks>,
     stop: CancellationToken,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
 }
@@ -78,6 +81,16 @@ impl Server {
         retired: bool,
         add: bool,
     ) -> Self {
+        Self::start_origin(temp, host, retired, add, false).await
+    }
+
+    async fn start_origin(
+        temp: tempfile::TempDir,
+        host: Arc<RunHost>,
+        retired: bool,
+        add: bool,
+        local_http: bool,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let workspace = if retired {
@@ -90,8 +103,13 @@ impl Server {
         }
         let mut options = SessionOptions::new("synthetic-model");
         options.instructions = "private-instructions-canary".into();
+        let origin = if local_http {
+            format!("http://{address}")
+        } else {
+            ORIGIN.to_owned()
+        };
         let settings = crate::http_api::ApiSettings::new(
-            ORIGIN,
+            &origin,
             vec![workspace],
             temp.path().join("private-skills-canary"),
             "http-test".into(),
@@ -109,6 +127,7 @@ impl Server {
         let token = crate::http_api::OwnerToken::load(&token_path).unwrap();
         let run_hooks = Arc::new(runs::test_hooks::Hooks::default());
         let event_hooks = Arc::new(events::test_hooks::Hooks::default());
+        let display_hooks = Arc::new(conversation::events::test_hooks::Hooks::default());
         let stop = CancellationToken::new();
         let app = router_inner(
             host.clone(),
@@ -117,6 +136,7 @@ impl Server {
             stop.clone(),
             run_hooks.clone(),
             event_hooks.clone(),
+            display_hooks.clone(),
         )
         .unwrap();
         let stopping = stop.clone();
@@ -132,6 +152,7 @@ impl Server {
             address,
             run_hooks,
             event_hooks,
+            display_hooks,
             http: reqwest::Client::builder()
                 .no_proxy()
                 .timeout(Duration::from_secs(10))

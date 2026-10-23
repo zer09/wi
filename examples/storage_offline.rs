@@ -27,6 +27,11 @@ use wi::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+const TURN_1: &str = "11111111-1111-4111-8111-000000000001";
+const TURN_2: &str = "11111111-1111-4111-8111-000000000002";
+const REQUEST_1: &str = "00000000-0000-4000-8000-000000000001";
+const REQUEST_2: &str = "00000000-0000-4000-8000-000000000002";
+
 async fn measured<T>(
     label: &str,
     future: impl Future<Output = std::result::Result<T, StorageError>>,
@@ -218,7 +223,7 @@ async fn observation(sample: usize) -> Result<()> {
         model_requests_admitted: 2,
         new_tool_dispatches: 1,
         tool_results_prepared: 1,
-        last_request_id: Some("request-2".into()),
+        last_request_id: Some(REQUEST_2.into()),
         last_upstream_outcome: Some(UpstreamOutcome::TerminalReceived),
         ..RunSummary::default()
     };
@@ -236,30 +241,30 @@ async fn observation(sample: usize) -> Result<()> {
         envelope(
             &run,
             2,
-            Some("turn-1"),
+            Some(TURN_1),
             None,
             RunEvent::TurnStarted { number: 1 },
         ),
         envelope(
             &run,
             3,
-            Some("turn-1"),
-            Some("request-1"),
-            observed(call_response, 1, "request-1"),
+            Some(TURN_1),
+            Some(REQUEST_1),
+            observed(call_response, 1, REQUEST_1),
         ),
     ];
     for (index, event) in tool_events.into_iter().enumerate() {
         records.push(envelope(
             &run,
             4 + index as u64,
-            Some("turn-1"),
-            Some("request-1"),
+            Some(TURN_1),
+            Some(REQUEST_1),
             RunEvent::ToolEvent { event },
         ));
     }
     records.extend([
         AppendRunRecord::ToolResult {
-            request_id: Some("request-1".into()),
+            request_id: Some(REQUEST_1.into()),
             call_id: call_id.clone(),
             output: output.clone(),
             is_error,
@@ -267,8 +272,8 @@ async fn observation(sample: usize) -> Result<()> {
         envelope(
             &run,
             6,
-            Some("turn-1"),
-            Some("request-1"),
+            Some(TURN_1),
+            Some(REQUEST_1),
             RunEvent::TurnFinished {
                 number: 1,
                 response_id: Some("response-1".into()),
@@ -279,22 +284,22 @@ async fn observation(sample: usize) -> Result<()> {
         envelope(
             &run,
             7,
-            Some("turn-2"),
+            Some(TURN_2),
             None,
             RunEvent::TurnStarted { number: 2 },
         ),
         envelope(
             &run,
             8,
-            Some("turn-2"),
-            Some("request-2"),
-            observed(final_response, 2, "request-2"),
+            Some(TURN_2),
+            Some(REQUEST_2),
+            observed(final_response, 2, REQUEST_2),
         ),
         envelope(
             &run,
             9,
-            Some("turn-2"),
-            Some("request-2"),
+            Some(TURN_2),
+            Some(REQUEST_2),
             RunEvent::TurnFinished {
                 number: 2,
                 response_id: Some("response-2".into()),
@@ -306,7 +311,7 @@ async fn observation(sample: usize) -> Result<()> {
             &run,
             10,
             None,
-            Some("request-2"),
+            Some(REQUEST_2),
             RunEvent::RunFinished {
                 outcome: RunOutcome::Completed,
                 summary,

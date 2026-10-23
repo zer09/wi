@@ -10,7 +10,7 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    ApiConfig, ConfigError,
+    ApiConfig, ConfigError, assets,
     boundary::{self, Boundary},
     dto::{self, ApiError, ErrorView},
     input, validate_listener,
@@ -23,8 +23,12 @@ use crate::{
     },
 };
 
+mod conversation;
 mod events;
 mod runs;
+
+#[cfg(test)]
+pub(crate) use events::test_hooks as event_test_hooks;
 
 struct ApiState {
     host: Arc<RunHost>,
@@ -36,6 +40,8 @@ struct ApiState {
     run_hooks: Arc<runs::test_hooks::Hooks>,
     #[cfg(test)]
     event_hooks: Arc<events::test_hooks::Hooks>,
+    #[cfg(test)]
+    display_hooks: Arc<conversation::events::test_hooks::Hooks>,
 }
 
 pub(super) fn router(
@@ -53,6 +59,27 @@ pub(super) fn router(
         Default::default(),
         #[cfg(test)]
         Default::default(),
+        #[cfg(test)]
+        Default::default(),
+    )
+}
+
+#[cfg(test)]
+pub(super) fn router_with_event_hooks(
+    host: Arc<RunHost>,
+    config: ApiConfig,
+    listener: SocketAddr,
+    network_close: CancellationToken,
+    event_hooks: Arc<event_test_hooks::Hooks>,
+) -> Result<Router, ConfigError> {
+    router_inner(
+        host,
+        config,
+        listener,
+        network_close,
+        Default::default(),
+        event_hooks,
+        Default::default(),
     )
 }
 
@@ -63,6 +90,7 @@ fn router_inner(
     network_close: CancellationToken,
     #[cfg(test)] run_hooks: Arc<runs::test_hooks::Hooks>,
     #[cfg(test)] event_hooks: Arc<events::test_hooks::Hooks>,
+    #[cfg(test)] display_hooks: Arc<conversation::events::test_hooks::Hooks>,
 ) -> Result<Router, ConfigError> {
     validate_listener(listener)?;
     let boundary = Boundary::new(&config, listener)?;
@@ -79,6 +107,8 @@ fn router_inner(
             run_hooks,
             #[cfg(test)]
             event_hooks,
+            #[cfg(test)]
+            display_hooks,
         })))
 }
 
@@ -90,6 +120,11 @@ enum Route<'a> {
     Rename(&'a str),
     Refresh(&'a str),
     History(&'a str),
+    Conversation(&'a str),
+    ConversationEntry(&'a str, &'a str, &'a str),
+    ConversationContent(&'a str),
+    ConversationEvents(&'a str),
+    ReconcileTask(&'a str),
     Run(&'a str, &'a str),
     Cancel(&'a str, &'a str),
     Operation(&'a str, &'a str),
@@ -107,6 +142,24 @@ impl<'a> Route<'a> {
             ["", "v1", "sessions", sid, "rename"] => Some(Self::Rename(sid)),
             ["", "v1", "sessions", sid, "refresh"] => Some(Self::Refresh(sid)),
             ["", "v1", "sessions", sid, "history"] => Some(Self::History(sid)),
+            ["", "v1", "sessions", sid, "conversation"] => Some(Self::Conversation(sid)),
+            [
+                "",
+                "v1",
+                "sessions",
+                sid,
+                "conversation",
+                "entries",
+                rid,
+                eid,
+            ] => Some(Self::ConversationEntry(sid, rid, eid)),
+            ["", "v1", "sessions", sid, "conversation", "content"] => {
+                Some(Self::ConversationContent(sid))
+            }
+            ["", "v1", "sessions", sid, "conversation", "events"] => {
+                Some(Self::ConversationEvents(sid))
+            }
+            ["", "v1", "sessions", sid, "runs", "reconcile"] => Some(Self::ReconcileTask(sid)),
             ["", "v1", "sessions", sid, "runs", rid] => Some(Self::Run(sid, rid)),
             ["", "v1", "sessions", sid, "runs", rid, "cancel"] => Some(Self::Cancel(sid, rid)),
             ["", "v1", "sessions", sid, "operations", oid] => Some(Self::Operation(sid, oid)),
@@ -119,9 +172,11 @@ impl<'a> Route<'a> {
     fn supports(self, method: &str) -> bool {
         match self {
             Self::Sessions => matches!(method, "GET" | "POST"),
-            Self::Rename(_) | Self::Refresh(_) | Self::Cancel(..) | Self::Tasks(_) => {
-                method == "POST"
-            }
+            Self::Rename(_)
+            | Self::Refresh(_)
+            | Self::Cancel(..)
+            | Self::Tasks(_)
+            | Self::ReconcileTask(_) => method == "POST",
             _ => method == "GET",
         }
     }
@@ -129,9 +184,11 @@ impl<'a> Route<'a> {
     fn allow(self) -> &'static str {
         match self {
             Self::Sessions => "GET, POST, OPTIONS",
-            Self::Rename(_) | Self::Refresh(_) | Self::Cancel(..) | Self::Tasks(_) => {
-                "POST, OPTIONS"
-            }
+            Self::Rename(_)
+            | Self::Refresh(_)
+            | Self::Cancel(..)
+            | Self::Tasks(_)
+            | Self::ReconcileTask(_) => "POST, OPTIONS",
             _ => "GET, OPTIONS",
         }
     }
@@ -140,7 +197,9 @@ impl<'a> Route<'a> {
         match self {
             Self::Sessions if method == "GET" => &["after_id", "limit"],
             Self::History(_) => &["after", "through", "limit"],
-            Self::Events(_) => &["after"],
+            Self::Events(_) | Self::ConversationEvents(_) => &["after"],
+            Self::Conversation(_) => &["before", "within"],
+            Self::ConversationContent(_) => &["cursor"],
             _ => &[],
         }
     }
@@ -152,14 +211,19 @@ impl<'a> Route<'a> {
             | Self::Rename(sid)
             | Self::Refresh(sid)
             | Self::History(sid)
+            | Self::Conversation(sid)
+            | Self::ConversationEntry(sid, _, _)
+            | Self::ConversationContent(sid)
+            | Self::ConversationEvents(sid)
             | Self::Run(sid, _)
             | Self::Cancel(sid, _)
             | Self::Operation(sid, _)
             | Self::Tasks(sid)
+            | Self::ReconcileTask(sid)
             | Self::Events(sid) => sid,
         };
         match self {
-            Self::Run(_, rid) | Self::Cancel(_, rid) => {
+            Self::Run(_, rid) | Self::Cancel(_, rid) | Self::ConversationEntry(_, rid, _) => {
                 parse_id::<RunId>(rid)?;
             }
             Self::Operation(_, oid) => {
@@ -184,6 +248,9 @@ async fn handle(State(state): State<Arc<ApiState>>, mut request: Request) -> Res
             .map_err(ErrorView::api)?;
         if request.method() == Method::OPTIONS {
             return Ok(preflight(&request, origin.is_some()).map_err(ErrorView::api)?);
+        }
+        if let Some(response) = assets::response(&request) {
+            return Ok(response.map_err(ErrorView::api)?);
         }
         boundary::authenticate(request.headers_mut(), &state.config).map_err(ErrorView::api)?;
         tokio::select! {
@@ -257,6 +324,7 @@ async fn dispatch(state: &ApiState, request: Request) -> Result<Response, Box<Er
     let session_id = route.session().map_err(ErrorView::api)?;
     let query = input::query(uri.query(), route.query_keys(request.method().as_str()))
         .map_err(ErrorView::api)?;
+    let conversation = conversation::Read::parse(route, &query, request.headers())?;
     let limit = query
         .get("limit")
         .map(|s| parse_page_limit(s))
@@ -268,11 +336,16 @@ async fn dispatch(state: &ApiState, request: Request) -> Result<Response, Box<Er
         .map(|s| parse_id(s))
         .transpose()
         .map_err(ErrorView::api)?;
-    let after = query
-        .get("after")
-        .map(|s| s.parse::<Cursor>())
-        .transpose()
-        .map_err(|_| ErrorView::api(ApiError::CursorInvalid))?;
+    // Display tokens belong only to the typed adapter, not the retained raw parser.
+    let after = if matches!(route, Route::History(_) | Route::Events(_)) {
+        query
+            .get("after")
+            .map(|s| s.parse::<Cursor>())
+            .transpose()
+            .map_err(|_| ErrorView::api(ApiError::CursorInvalid))?
+    } else {
+        None
+    };
     let after = if matches!(route, Route::Events(_)) {
         events::cursor(after, request.headers()).map_err(ErrorView::api)?
     } else {
@@ -293,6 +366,12 @@ async fn dispatch(state: &ApiState, request: Request) -> Result<Response, Box<Er
     let bytes = input::body(&parts.headers, body, post)
         .await
         .map_err(ErrorView::api)?;
+    if let Some(read) = conversation {
+        if !bytes.is_empty() {
+            return Err(ErrorView::api(ApiError::InvalidRequest).into());
+        }
+        return read.open(state, session_id.unwrap()).await;
+    }
     let store = state.host.storage();
     match route {
         Route::Settings => Ok(ok(dto::SettingsView::from(state.config.settings()))),
@@ -411,12 +490,27 @@ async fn dispatch(state: &ApiState, request: Request) -> Result<Response, Box<Er
                 _ => unreachable!(),
             }
         }
+        Route::ReconcileTask(_) => {
+            let command = input::json::<input::Task>(&bytes).map_err(ErrorView::api)?;
+            Ok(ok(runs::reconcile_task(
+                state,
+                session_id.unwrap(),
+                command,
+            )
+            .await?))
+        }
         Route::Tasks(_) => {
             let command = input::json::<input::Task>(&bytes).map_err(ErrorView::api)?;
             let accepted = runs::submit(state, session_id.unwrap(), command).await?;
             Ok((StatusCode::ACCEPTED, Json(accepted)).into_response())
         }
         Route::Events(_) => events::open(state, session_id.unwrap(), after).await,
+        Route::Conversation(_)
+        | Route::ConversationEntry(..)
+        | Route::ConversationContent(_)
+        | Route::ConversationEvents(_) => {
+            unreachable!("display reads handled before raw routes")
+        }
     }
 }
 

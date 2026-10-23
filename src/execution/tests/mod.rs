@@ -28,13 +28,16 @@ use tokio::sync::{Notify, mpsc};
 mod admission;
 mod commit_boundaries;
 mod faults;
+mod identifiers;
 pub(crate) mod in_session;
 mod independent;
 mod lifecycle;
+mod local_identifiers;
 pub(crate) mod process;
 mod recording;
 mod remediation;
 mod sql_failures;
+mod storage_identifiers;
 
 const ID: &str = "execution-script";
 const PARTIAL: &str = "partial 雪\n\0";
@@ -80,6 +83,7 @@ enum Step {
     },
     Wait,
     Reject,
+    MalformedReceipt(String),
     Failure(UpstreamOutcome),
 }
 
@@ -254,7 +258,7 @@ impl SessionControl for Control {
             }
         }
         self.records.inputs.lock().unwrap().push(input);
-        let request_id = format!("{}{number}", self.source.request_prefix);
+        let request_id = format!("{}{number:012x}", self.source.request_prefix);
         let step = self
             .steps
             .lock()
@@ -263,6 +267,19 @@ impl SessionControl for Control {
             .expect("extra provider request");
         match step {
             Step::Reject => return Err(GatewayError::Protocol("synthetic private rejection")),
+            Step::MalformedReceipt(request_id) => {
+                self.emit(
+                    &request_id,
+                    ProviderEvent::ResponseFinished {
+                        response: response(
+                            "rejected-response",
+                            vec![call("forbidden", 1, 2)],
+                            "never observed",
+                        ),
+                    },
+                );
+                return Ok(RequestReceipt { request_id });
+            }
             Step::Wait => self.sender.send(StreamItem::Waiting).unwrap(),
             Step::Failure(upstream_outcome) => self.emit(
                 &request_id,
@@ -451,7 +468,7 @@ impl Rig {
         let script = Arc::new(Script {
             source: SourceIds {
                 session: "provider-session",
-                request_prefix: "q",
+                request_prefix: "00000000-0000-4000-8000-",
                 event_prefix: "source-",
             },
             binding,

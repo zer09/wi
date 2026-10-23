@@ -90,7 +90,7 @@ fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> AppendRunRecord {
         turn_id: if matches!(event, RunEvent::RunStarted | RunEvent::RunFinished { .. }) {
             None
         } else {
-            Some("turn".into())
+            Some("00000000-0000-4000-8000-000000000002".into())
         },
         request_id: None,
         event,

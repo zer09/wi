@@ -194,7 +194,10 @@ async fn actual_serialized_error_flags_and_result_before_finish_are_preserved() 
             .unwrap();
         assert_eq!(saved.output(), Some(expected.as_str()));
         assert_eq!(saved.is_error(), Some(is_error));
-        assert_eq!(saved.request_id(), Some("q1"));
+        assert_eq!(
+            saved.request_id(),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
         assert!(saved.started_sequence() < saved.result_sequence().unwrap());
         assert!(saved.result_sequence().unwrap() < saved.finished_sequence().unwrap());
         let history = history(&rig.session).await;
@@ -257,14 +260,20 @@ async fn reused_call_has_one_effect_and_one_result_with_original_request() {
             _ => None,
         })
         .unwrap();
-    assert_eq!(reuse.request_id.as_deref(), Some("q2"));
+    assert_eq!(
+        reuse.request_id.as_deref(),
+        Some("00000000-0000-4000-8000-000000000002")
+    );
     let saved = rig
         .session
         .tool_result(rig.run_id.clone(), "one".into())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(saved.request_id(), Some("q1"));
+    assert_eq!(
+        saved.request_id(),
+        Some("00000000-0000-4000-8000-000000000001")
+    );
     let inputs = rig.script.records.inputs.lock().unwrap().clone();
     assert_eq!(value(&inputs[1]), value(&inputs[2]));
     rig.close().await;

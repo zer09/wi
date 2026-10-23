@@ -1,0 +1,5 @@
+{
+  "title": "  Explicit cancellation 雪 <em>inert title</em>  ",
+  "task": "  Keep this request pending. 雪\n<svg onload=\"globalThis.cancellationCanary=1\"></svg>\nhttps://invalid.example/cancellation\n  ",
+  "kinds": ["session.created", "run.accepted", "checkpoint", "run.started", "checkpoint", "turn.started", "turn.finished", "run.finished", "run.result"]
+}

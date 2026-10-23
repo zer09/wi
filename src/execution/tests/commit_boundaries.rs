@@ -149,7 +149,10 @@ async fn cancellation_during_actual_result_commit_keeps_exact_bytes_and_truthful
             .unwrap();
         assert_eq!(saved.output(), Some(expected.as_str()));
         assert_eq!(saved.is_error(), Some(is_error));
-        assert_eq!(saved.request_id(), Some("q1"));
+        assert_eq!(
+            saved.request_id(),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
         assert_eq!(saved.started_sequence(), 7);
         assert_eq!(saved.result_sequence(), Some(8));
         assert_eq!(saved.finished_sequence(), Some(9));

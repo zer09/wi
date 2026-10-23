@@ -2,6 +2,9 @@ use super::*;
 use crate::storage::SessionStore;
 use futures_util::StreamExt;
 
+mod lifecycle;
+mod serialized;
+
 async fn fixture() -> (tempfile::TempDir, SessionStore, SessionHandle) {
     let temp = tempfile::tempdir().unwrap();
     let store = SessionStore::open(temp.path().join("data")).await.unwrap();

@@ -1,0 +1,20 @@
+{
+  "name": "wi-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "node scripts/assets.mjs build",
+    "typecheck": "node scripts/assets.mjs typecheck",
+    "verify:assets": "node scripts/assets.mjs verify",
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "typescript": "5.9.3"
+  }
+}

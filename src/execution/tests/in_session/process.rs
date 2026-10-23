@@ -133,7 +133,7 @@ async fn produce(input: &ChildInput) {
     assert_eq!(tool.is_error(), Some(false));
     assert_eq!(
         tool.request_id(),
-        Some(format!("{}-q1", task.run_id).as_str())
+        Some(format!("{}-000000000001", &task.run_id.as_str()[..23]).as_str())
     );
     let saved = Saved {
         session_id: session.session_id().clone(),
@@ -314,7 +314,11 @@ async fn resume(input: &ChildInput, parent: &mut impl BufRead) {
         assert_eq!(event.session_id, format!("provider-{}", task.run_id));
         assert_eq!(
             event.request_id,
-            Some(format!("{}-q{}", task.run_id, index / 2 + 1))
+            Some(format!(
+                "{}-{:012x}",
+                &task.run_id.as_str()[..23],
+                index / 2 + 1
+            ))
         );
         let expected = if index < 2 {
             "p1b2-11-b-call"
@@ -336,7 +340,7 @@ async fn resume(input: &ChildInput, parent: &mut impl BufRead) {
     assert_eq!(tool.is_error(), Some(false));
     assert_eq!(
         tool.request_id(),
-        Some(format!("{}-q1", task.run_id).as_str())
+        Some(format!("{}-000000000001", &task.run_id.as_str()[..23]).as_str())
     );
     saved.assert_unchanged(&session).await;
     let all = history(&session).await;

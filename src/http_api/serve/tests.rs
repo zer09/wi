@@ -33,6 +33,7 @@ pub(super) enum Fault {
 
 #[derive(Default)]
 pub(super) struct Hooks {
+    pub events: Arc<router::event_test_hooks::Hooks>,
     pub host: Mutex<Weak<RunHost>>,
     pub accepted: Notify,
     pub write_pending: Notify,
@@ -42,6 +43,13 @@ pub(super) struct Hooks {
 }
 
 impl Hooks {
+    pub(super) fn with_events(events: Arc<router::event_test_hooks::Hooks>) -> Self {
+        Self {
+            events,
+            ..Default::default()
+        }
+    }
+
     fn fail(&self, fault: Fault) {
         *self.fault.lock().unwrap() = Some(fault);
         self.fault_ready.notify_one();
@@ -291,6 +299,7 @@ async fn repeated_shutdown_and_handler_clones_preserve_original_outcome() {
 mod drain;
 mod loss;
 mod network;
+mod sse_faults;
 
 #[test]
 fn serving_errors_are_static_and_have_no_sources() {

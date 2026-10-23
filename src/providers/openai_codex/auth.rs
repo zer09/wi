@@ -151,7 +151,6 @@ impl LocalAuthFile {
         let home = || {
             std::env::var_os("HOME")
                 .filter(|s| !s.is_empty())
-                .or_else(|| std::env::var_os("USERPROFILE").filter(|s| !s.is_empty()))
                 .map(PathBuf::from)
                 .ok_or(GatewayError::HomeUnavailable)
         };

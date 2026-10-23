@@ -108,7 +108,7 @@ pub(super) async fn materialize(
         false,
     )
     .await
-    .map(|manifest| (manifest, 2));
+    .map(|manifest| (manifest, 3));
     database::finish_write(
         connection,
         &inner.lifecycle,

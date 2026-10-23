@@ -282,6 +282,11 @@ pub(crate) async fn run_admitted<O: RunObserver>(
             .await?
             .map_err(|_| failed("session_open"))?;
         guard.0 = Some(session.control.clone());
+        if provider_id == crate::providers::openai_codex::PROVIDER_ID
+            && !crate::identifiers::is_canonical_uuid(&session.id)
+        {
+            return Err(failed("provider_correlation"));
+        }
         state.session_id = Some(session.id.clone());
         if let Some(replay) = replay {
             let identity = session
@@ -375,6 +380,10 @@ async fn drive<O: RunObserver>(
                 })
             })
             .await??;
+            // Generation was polled, but a bad receipt cannot establish request identity.
+            if !crate::identifiers::is_canonical_uuid(&receipt.request_id) {
+                return Err(failed("provider_correlation"));
+            }
             increment(&mut state.summary.model_requests_admitted)?;
             state.request_id = Some(receipt.request_id.clone());
             state.summary.last_request_id = Some(receipt.request_id);

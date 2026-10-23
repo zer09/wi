@@ -5,14 +5,21 @@ use crate::{ProviderEvent, run::RunEvent, tools::ToolExecutionEvent};
 use std::{
     cell::{Cell, RefCell},
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 use tokio::sync::Notify;
+
+pub(crate) mod latency;
+pub(crate) mod read_retirement;
 
 tokio::task_local! {
     static ACTIVE: Arc<Hooks>;
     static RECORD: RefCell<Option<(Record, OperationId)>>;
     static RECORDING: Cell<bool>;
+    static FINAL_ATTEMPT: RefCell<Option<crate::run::RunResult>>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,6 +37,23 @@ pub(crate) enum Record {
 
 pub(super) fn select_record(operation: &OperationId, mutation: &Mutation) {
     RECORDING.with(|recording| recording.set(true));
+    // Match only B's final-answer text, not rich fields or A's deltas.
+    if matches!(mutation, Mutation::Append { records } if matches!(records.as_slice(),
+        [AppendRunRecord::Runtime(event)] if matches!(&event.event, RunEvent::ProviderEvent { event }
+            if matches!(&event.event, ProviderEvent::OutputItemUpdated { response_id, kind: crate::DeltaKind::Text, .. }
+                if response_id == "task-1-final"))))
+    {
+        latency::final_delta();
+    }
+    FINAL_ATTEMPT.with(|attempt| {
+        *attempt.borrow_mut() = match mutation {
+            Mutation::Append { records } => match records.as_slice() {
+                [AppendRunRecord::Result(result)] => Some(result.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+    });
     let record = match mutation {
         Mutation::Accept { .. } | Mutation::AcceptHistory { .. } => Some(Record::Acceptance),
         Mutation::Append { records } => match records.as_slice() {
@@ -76,6 +100,12 @@ pub(crate) enum Point {
     MigrationRebuilt,
     MigrationPrecommit,
     MigrationCommitted,
+    ProjectionCreated,
+    ProjectionCopied,
+    ProjectionPrecommit,
+    ProjectionCommitted,
+    CanonicalInserted,
+    DisplayApplied,
     Materialized,
     CatalogAccepted,
     BeforeCommit,
@@ -89,6 +119,7 @@ pub(crate) enum Point {
     FinalResultCleanup,
     HistorySelection,
     ReplayHeadCaptured,
+    ConversationHeadCaptured,
 }
 
 pub(crate) enum Action {
@@ -104,6 +135,9 @@ pub(crate) struct Pause {
     pub release: Notify,
     pub rollback: bool,
     pub operation_id: Mutex<Option<OperationId>>,
+    // Private evidence of the attempted record, never a public result or receipt.
+    pub final_attempt: Mutex<Option<crate::run::RunResult>>,
+    pub hits: AtomicUsize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -111,15 +145,35 @@ pub(crate) struct Measurements {
     pub recording_commits: usize,
     pub other_commits: usize,
     pub read_transactions: usize,
+    pub projection_pages: usize,
+    pub projection_max_page: usize,
+    pub validation_payload_bytes: usize,
+    pub conversation_descriptors: usize,
+    pub conversation_chunks: usize,
+    pub conversation_bytes: usize,
 }
 
 #[derive(Default)]
 pub(crate) struct Hooks(
     Mutex<Option<(Option<Record>, Point, Action)>>,
     Mutex<Measurements>,
+    std::sync::OnceLock<Arc<latency::Collector>>,
+    read_retirement::Store,
 );
 
 impl Hooks {
+    pub(crate) fn track_reads(&self) -> Arc<read_retirement::Tracker> {
+        self.3.enable()
+    }
+
+    pub(crate) fn enable_latency(&self) -> Arc<latency::Collector> {
+        self.2.get_or_init(latency::Collector::new).clone()
+    }
+
+    pub(crate) fn latency(&self) -> Option<&Arc<latency::Collector>> {
+        self.2.get()
+    }
+
     pub fn measurements(&self) -> Measurements {
         *self.1.lock().unwrap()
     }
@@ -159,11 +213,35 @@ impl Hooks {
                 self.clone(),
                 RECORD.scope(
                     RefCell::new(None),
-                    RECORDING.scope(Cell::new(false), future),
+                    RECORDING.scope(
+                        Cell::new(false),
+                        FINAL_ATTEMPT.scope(RefCell::new(None), future),
+                    ),
                 ),
             )
             .await
     }
+}
+
+pub(super) fn projection_page(rows: usize) {
+    let _ = ACTIVE.try_with(|hooks| {
+        let mut measurements = hooks.1.lock().unwrap();
+        measurements.projection_pages += 1;
+        measurements.projection_max_page = measurements.projection_max_page.max(rows);
+    });
+}
+
+pub(super) fn conversation_read(descriptors: usize, chunks: usize, bytes: usize) {
+    let _ = ACTIVE.try_with(|hooks| {
+        let mut measurements = hooks.1.lock().unwrap();
+        measurements.conversation_descriptors += descriptors;
+        measurements.conversation_chunks += chunks;
+        measurements.conversation_bytes += bytes;
+    });
+}
+
+pub(super) fn validation_payload(bytes: usize) {
+    let _ = ACTIVE.try_with(|hooks| hooks.1.lock().unwrap().validation_payload_bytes += bytes);
 }
 
 // Count explicit read snapshots, not SQLite's implicit per-statement transactions.
@@ -196,7 +274,11 @@ pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
                         record.as_ref().is_some_and(|(kind, _)| *kind == selected)
                     })
             }) {
-                armed.take().map(|(_, _, action)| action)
+                let action = armed.take().map(|(_, _, action)| action);
+                if point == Point::Open && matches!(action, Some(Action::Fail(_))) {
+                    read_retirement::consumed_open_failure(hooks);
+                }
+                action
             } else {
                 None
             }
@@ -206,6 +288,11 @@ pub(crate) async fn hit(point: Point) -> Result<(), StorageError> {
     match action {
         Some(Action::Pause(pause)) => {
             *pause.operation_id.lock().unwrap() = record.map(|(_, operation)| operation);
+            *pause.final_attempt.lock().unwrap() = FINAL_ATTEMPT
+                .try_with(|attempt| attempt.borrow().clone())
+                .ok()
+                .flatten();
+            pause.hits.fetch_add(1, Ordering::SeqCst);
             pause.reached.notify_one();
             pause.release.notified().await;
             if pause.rollback {

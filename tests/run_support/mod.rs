@@ -91,7 +91,10 @@ impl SessionControl for Control {
             .unwrap()
             .pop_front()
             .expect("unexpected extra generation");
-        let request = format!("q{}", self.records.receipts.load(Ordering::SeqCst) + 1);
+        let request = format!(
+            "00000000-0000-4000-8000-{:012x}",
+            self.records.receipts.load(Ordering::SeqCst) + 1
+        );
         let events = match step {
             Step::Reject => {
                 return Err(GatewayError::Protocol("synthetic private provider detail"));
@@ -249,7 +252,7 @@ pub fn envelope(sequence: u64, event: ProviderEvent) -> EventEnvelope {
         sequence,
         event_id: format!("e{sequence}"),
         session_id: "s1".into(),
-        request_id: Some("q1".into()),
+        request_id: Some("00000000-0000-4000-8000-000000000001".into()),
         provider: ID.into(),
         provider_sequence: None,
         event,

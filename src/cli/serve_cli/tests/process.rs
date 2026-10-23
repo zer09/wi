@@ -15,6 +15,8 @@ use wi::{
     storage::{OperationId, RunId},
 };
 
+const LOCAL_SESSION: &str = "cccccccc-cccc-1ccc-8ccc-cccccccccccc";
+
 #[derive(Clone, Copy, Serialize, Deserialize)]
 enum Mode {
     Complete,
@@ -103,7 +105,7 @@ impl Provider for Script {
         let (generated, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mode = self.mode;
         Ok(ProviderSession {
-            id: "private-session-canary".into(),
+            id: LOCAL_SESSION.into(),
             control: Arc::new(Control {
                 counts: self.counts.clone(),
                 generated,
@@ -126,8 +128,8 @@ impl Provider for Script {
                     for event in events {
                         sequence += 1;
                         yield EventEnvelope {
-                            schema_version: 1, sequence, event_id: format!("event-{sequence}"),
-                            session_id: "private-session-canary".into(), request_id: Some(format!("request-{turn}")),
+                            schema_version: 1, sequence, event_id: format!("{LOCAL_SESSION}:{sequence}"),
+                            session_id: LOCAL_SESSION.into(), request_id: Some(format!("00000000-0000-4000-8000-{turn:012x}")),
                             provider: PROVIDER_ID.into(), provider_sequence: None, event,
                         };
                     }
@@ -160,7 +162,7 @@ impl SessionControl for Control {
         self.counts.generates.fetch_add(1, Ordering::SeqCst);
         self.generated.send(turn).unwrap();
         Ok(RequestReceipt {
-            request_id: format!("request-{turn}"),
+            request_id: format!("00000000-0000-4000-8000-{turn:012x}"),
         })
     }
     fn close(&self) {}
@@ -287,6 +289,7 @@ fn finish(mut process: Process, crash: bool) {
     let (stdout, stderr) = process.finish(if crash { 73 } else { 0 });
     for output in [&stdout, &stderr] {
         assert!(!output.contains(TOKEN));
+        assert!(!output.contains(LOCAL_SESSION));
         assert!(!output.contains("canary"));
     }
     assert_eq!(

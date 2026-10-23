@@ -30,8 +30,10 @@ pub(super) fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> RunEventEn
         run_id: run.as_str().into(),
         turn_id: match &event {
             RunEvent::RunStarted | RunEvent::RunFinished { .. } => None,
-            RunEvent::TurnStarted { number } => Some(format!("turn-{number}")),
-            _ => Some("turn-1".into()),
+            RunEvent::TurnStarted { number } => {
+                Some(format!("11111111-1111-4111-8111-{number:012x}"))
+            }
+            _ => Some("11111111-1111-4111-8111-000000000001".into()),
         },
         session_id: if matches!(event, RunEvent::RunStarted) {
             None
@@ -41,7 +43,7 @@ pub(super) fn runtime(run: &RunId, sequence: u64, event: RunEvent) -> RunEventEn
         request_id: if matches!(event, RunEvent::RunStarted | RunEvent::TurnStarted { .. }) {
             None
         } else {
-            Some("original request".into())
+            Some("00000000-0000-4000-8000-000000000001".into())
         },
         event,
     }
@@ -531,7 +533,7 @@ async fn p1a11_mixed_records_rollback_and_receipt_replay_after_terminal() {
         AppendRunRecord::Runtime(runtime(&run, 2, RunEvent::TurnStarted { number: 1 })),
         AppendRunRecord::Runtime(runtime(&run, 3, tool_start)),
         AppendRunRecord::ToolResult {
-            request_id: Some("original request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             call_id: "call".into(),
             output: output.into(),
             is_error: true,

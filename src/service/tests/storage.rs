@@ -61,6 +61,124 @@ async fn active_session_rejects_new_work_without_queueing_independent_session() 
 }
 
 #[tokio::test]
+async fn exclusive_active_session_rejects_other_operations_but_reconciles_same_operation() {
+    let (_temp, store) = store().await;
+    let a = session(&store).await;
+    let b = session(&store).await;
+    let waiting = Arc::new(Control::default());
+    let other = Arc::new(Control::default());
+    let (gateway, script) = Script::gateway(vec![waiting.clone(), other.clone()]);
+    let host = RunHost::new(store, gateway).unwrap();
+    let client = host.client();
+    let initial = request();
+    let retry = PersistentRunRequest {
+        operation_id: initial.operation_id.clone(),
+        run_id: initial.run_id.clone(),
+        input: initial.input.clone(),
+    };
+    let mut changed = request();
+    changed.operation_id = initial.operation_id.clone();
+    let first = client
+        .submit_exclusive(a.session_id().clone(), initial, ToolRegistry::new())
+        .unwrap();
+    watchdog(waiting.waiting.notified()).await;
+    let original = first.accepted().await.unwrap();
+    assert_eq!(
+        client
+            .submit_exclusive(a.session_id().clone(), request(), ToolRegistry::new())
+            .unwrap_err(),
+        RunHostError::ActiveRun
+    );
+    let duplicate = client
+        .submit_exclusive(a.session_id().clone(), retry, ToolRegistry::new())
+        .unwrap();
+    let acceptance = watchdog(duplicate.accepted()).await.unwrap();
+    assert!(acceptance.duplicate());
+    assert_eq!(acceptance.receipt(), original.receipt());
+    watchdog(duplicate.completion()).await;
+    // Same operation with a changed run reaches canonical validation, not the active guard.
+    let conflict = client
+        .submit_exclusive(a.session_id().clone(), changed, ToolRegistry::new())
+        .unwrap();
+    let completion = watchdog(conflict.completion()).await;
+    assert!(
+        matches!(failure(&completion).cause(), PersistentRunCause::Storage(error) if error.kind() == StorageErrorKind::CommandConflict)
+    );
+    let independent = client
+        .submit_exclusive(b.session_id().clone(), request(), ToolRegistry::new())
+        .unwrap();
+    watchdog(other.waiting.notified()).await;
+    other.release.notify_one();
+    assert_eq!(
+        executed(&watchdog(independent.completion()).await)
+            .2
+            .outcome,
+        RunOutcome::Completed
+    );
+    assert_eq!(count(&waiting.closes), 0);
+    waiting.release.notify_one();
+    assert_eq!(
+        executed(&watchdog(first.completion()).await).2.outcome,
+        RunOutcome::Completed
+    );
+    retired(&host).await;
+    assert_eq!(count(&script.opens), 2);
+    closed(&host).await;
+}
+
+#[tokio::test]
+async fn public_historical_duplicate_survives_newer_live_exclusive_operation() {
+    let (_temp, store) = store().await;
+    let session = session(&store).await;
+    let control = Arc::new(Control::default());
+    let (gateway, script) = Script::gateway(vec![control.clone()]);
+    let host = RunHost::new(store, gateway).unwrap();
+    let client = host.client();
+    let original = request();
+    let retry = PersistentRunRequest {
+        operation_id: original.operation_id.clone(),
+        run_id: original.run_id.clone(),
+        input: original.input.clone(),
+    };
+    let first = client
+        .submit_exclusive(session.session_id().clone(), original, ToolRegistry::new())
+        .unwrap();
+    watchdog(control.waiting.notified()).await;
+    control.release.notify_one();
+    watchdog(first.completion()).await;
+    retired(&host).await;
+    let receipt = first.accepted().await.unwrap();
+    // The completed entry permits a later operation. Registration alone owns precommit work.
+    let (newer, worker) = host
+        .inner
+        .register(
+            session.session_id().clone(),
+            request(),
+            ToolRegistry::new(),
+            true,
+        )
+        .unwrap();
+    assert!(client.has_other_active_operation(session.session_id(), &retry.operation_id));
+    let repeated = client
+        .submit(session.session_id().clone(), retry, ToolRegistry::new())
+        .unwrap();
+    let accepted = watchdog(repeated.accepted()).await.unwrap();
+    assert!(accepted.duplicate());
+    assert_eq!(accepted.receipt(), receipt.receipt());
+    watchdog(repeated.completion()).await;
+    assert_eq!(count(&script.opens), 1);
+    assert_eq!(count(&script.validations), 1);
+    assert_eq!(host.inner.gate().entries.len(), 1);
+    let shutdown = host.begin_shutdown();
+    host.inner.runtime.spawn(worker);
+    watchdog(newer.completion()).await;
+    assert!(matches!(
+        &*watchdog(shutdown.wait()).await,
+        ShutdownOutcome::Closed
+    ));
+}
+
+#[tokio::test]
 async fn both_absent_host_receipts_yield_one_executor_and_one_duplicate() {
     let fixture = Fixture::new().await;
     let task = fixture.task("absent host race", Plan::default());

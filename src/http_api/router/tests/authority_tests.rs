@@ -61,6 +61,7 @@ async fn ipv6_public_default_port_and_actual_listener_authority_over_tcp() {
         http,
         run_hooks: Default::default(),
         event_hooks: Default::default(),
+        display_hooks: Default::default(),
         stop,
         task,
     };

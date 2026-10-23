@@ -200,9 +200,9 @@ async fn consistency_public_session_rejects_before_publication_execution_or_next
             let mut provider =
                 OpenAiCodexProvider::loopback(Arc::new(FakeAuth), transport, address);
             if name == "event bound" {
-                // The 4,097-event stress case can exceed the short loopback deadline
-                // when the complete test suite runs in parallel.
-                provider.timeouts.total = Duration::from_secs(30);
+                // Give the 4,097-event proof time to reach the event bound under
+                // parallel load. The per-event watchdog still catches stalls.
+                provider.timeouts.total = Timeouts::default().total;
             }
             let mut options = SessionOptions::new("synthetic");
             options.transport = transport;

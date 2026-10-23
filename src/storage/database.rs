@@ -115,10 +115,15 @@ pub(super) async fn finish_transaction<T>(
                 transaction.rollback().await.map_err(self::error)?;
                 return Err(error);
             }
+            #[cfg(test)]
+            let _commit_time =
+                super::test_hooks::latency::span(super::test_hooks::latency::Stage::Commit);
             transaction
                 .commit()
                 .await
                 .map_err(|_| StorageError::new(StorageErrorKind::CommitUnknown))?;
+            #[cfg(test)]
+            drop(_commit_time);
             #[cfg(test)]
             super::test_hooks::hit(super::test_hooks::Point::AfterCommit).await?;
             Ok(value)
@@ -154,7 +159,12 @@ pub(super) async fn finish_write<T>(
     result: Result<T>,
     #[cfg(test)] fail_cleanup: bool,
 ) -> Result<(T, Option<super::CleanupWarning>)> {
+    #[cfg(test)]
+    let _retirement_time =
+        super::test_hooks::latency::span(super::test_hooks::latency::Stage::WritableRetirement);
     let cleanup = close(connection, lifecycle).await;
+    #[cfg(test)]
+    drop(_retirement_time);
     // Test a reported cleanup failure after real, known-safe worker retirement.
     #[cfg(test)]
     let cleanup = if fail_cleanup {

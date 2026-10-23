@@ -80,7 +80,10 @@ pub(super) async fn crash(fixture: &Fixture, stage: Stage, input: &mut impl BufR
         assert_eq!(event.schema_version, 1);
         assert_eq!(event.provider, ID);
         assert_eq!(event.session_id, "provider-session");
-        assert_eq!(event.request_id.as_deref(), Some("q1"));
+        assert_eq!(
+            event.request_id.as_deref(),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
         assert_eq!(event.sequence, (i as u64 + 1) * 3);
         assert_eq!(event.provider_sequence, Some(event.sequence + 1000));
         assert_eq!(event.event_id, format!("source-{}", event.sequence));
@@ -117,7 +120,10 @@ pub(super) async fn crash(fixture: &Fixture, stage: Stage, input: &mut impl BufR
             assert_eq!(run, fixture.run_id.as_str());
             assert_eq!(call, "one");
             assert_eq!(name, "add_numbers");
-            assert_eq!(request.as_deref(), Some("q1"));
+            assert_eq!(
+                request.as_deref(),
+                Some("00000000-0000-4000-8000-000000000001")
+            );
             assert_eq!(*started, 8);
             assert!(finished.is_none());
             if effects == 0 {
@@ -146,7 +152,10 @@ pub(super) async fn crash(fixture: &Fixture, stage: Stage, input: &mut impl BufR
                 assert_eq!(saved.output().as_bytes(), expected.as_bytes());
                 assert_eq!(saved.is_error(), is_error);
                 assert_eq!(saved.call_id(), "one");
-                assert_eq!(saved.request_id(), Some("q1"));
+                assert_eq!(
+                    saved.request_id(),
+                    Some("00000000-0000-4000-8000-000000000001")
+                );
             }
         }
     }

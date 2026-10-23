@@ -40,7 +40,7 @@ impl SessionControl for Control {
             }],
             _ => panic!("unexpected extra generation"),
         };
-        let request_id = format!("request-{turn}");
+        let request_id = format!("00000000-0000-4000-8000-{turn:012x}");
         self.sender
             .send(EventEnvelope {
                 schema_version: 1,

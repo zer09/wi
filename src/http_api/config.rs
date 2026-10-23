@@ -50,6 +50,8 @@ pub struct ApiSettings {
     provider_id: String,
     options: SessionOptions,
     enable_add_numbers: bool,
+    #[cfg(test)]
+    test_tool: Option<std::sync::Arc<dyn crate::tools::Tool>>,
 }
 
 impl ApiSettings {
@@ -92,6 +94,8 @@ impl ApiSettings {
             provider_id,
             options,
             enable_add_numbers,
+            #[cfg(test)]
+            test_tool: None,
         })
     }
 
@@ -112,6 +116,17 @@ impl ApiSettings {
     }
     pub fn enable_add_numbers(&self) -> bool {
         self.enable_add_numbers
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_tool(&mut self, tool: std::sync::Arc<dyn crate::tools::Tool>) {
+        assert!(self.test_tool.is_none(), "test tool already set");
+        self.test_tool = Some(tool);
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_tool(&self) -> Option<&std::sync::Arc<dyn crate::tools::Tool>> {
+        self.test_tool.as_ref()
     }
 
     /// Pure membership check. An unapproved caller path is never probed.

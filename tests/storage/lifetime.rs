@@ -55,7 +55,7 @@ async fn p1a26_finite_history_and_tool_results_exceed_old_context_thresholds() {
         sequence += 1;
         records.push(tool_event(&run, sequence, events[0].clone()));
         records.push(AppendRunRecord::ToolResult {
-            request_id: Some("original request".into()),
+            request_id: Some("00000000-0000-4000-8000-000000000001".into()),
             call_id: call,
             output,
             is_error,

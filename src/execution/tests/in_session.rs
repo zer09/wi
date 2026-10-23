@@ -92,7 +92,7 @@ async fn p1b2_01_09_10_12_13_public_tasks_install_exact_history_and_only_execute
     assert_eq!(saved.is_error(), Some(false));
     assert_eq!(
         saved.request_id(),
-        Some(format!("{}-q1", first.run_id).as_str())
+        Some(format!("{}-000000000001", &first.run_id.as_str()[..23]).as_str())
     );
 
     let second = fixture.task(

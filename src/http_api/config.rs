@@ -167,7 +167,7 @@ impl ApiConfig {
     }
 }
 
-/// Strict startup input for a later CLI adapter. Parsing does not load credentials or storage.
+/// Strict startup input used by `wi serve`. Parsing does not load credentials or storage.
 pub struct ConfigFile {
     listen: SocketAddr,
     data_root: PathBuf,

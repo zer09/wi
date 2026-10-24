@@ -1,5 +1,5 @@
 //! Closed display JSON shared by storage sizing and HTTP output.
-// Consumers arrive with indexed reads and HTTP in later increments.
+// Indexed storage reads and the HTTP conversation adapter use these encoders.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use std::io::{self, Write};

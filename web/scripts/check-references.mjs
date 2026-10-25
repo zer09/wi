@@ -10,6 +10,9 @@ const installed = new Set([
   key('web/scripts/assets.mjs', '../node_modules/typescript/bin/tsc'),
   key('web/test-support/browser-pin.mjs', '../node_modules/playwright-core/package.json'),
   key('web/test/browser-case-diagnostics.test.mjs', '../node_modules/playwright/package.json'),
+  key('web/test/browser-case-diagnostics.test.mjs', '../node_modules/playwright/lib/runner/taskRunner.js'),
+  ...['lib/reporters/base.js', 'lib/util.js', 'package.json'].map(name =>
+    key('web/test/browser-suite-launch.test.mjs', `../node_modules/playwright/${name}`)),
   ...['index.mjs', 'cli.js', 'package.json'].map(name =>
     key('web/test/browser-case-diagnostics.test.mjs', `../node_modules/@playwright/test/${name}`)),
 ]);
@@ -60,7 +63,7 @@ export function audit(files, available = new Set(files.keys()), installedFile = 
     counts.modules++;
     for (const ref of references(path, text)) {
       counts.references++;
-      const target = posix.normalize(posix.join(posix.dirname(path), ref.target.split(/[?#]/, 1)[0]));
+      const target = posix.normalize(posix.join(posix.dirname(path), ref.target.split(/[?#]/, 1)[0])).replace(/\/+$/, '') || '.';
       const present = available.has(target) || dirs.has(target);
       if (ref.absent) {
         counts.absent++;
@@ -71,7 +74,7 @@ export function audit(files, available = new Set(files.keys()), installedFile = 
         counts.generated++; // cargo build produces this binary; no source file is omitted.
         continue;
       }
-      if (ref.kind === 'module-url' && installed.has(key(path, ref.target))) {
+      if (installed.has(key(path, ref.target))) {
         counts.installed++;
         if (!installedFile(target)) errors.push(`${path}:${ref.line}: installed input missing: ${ref.target}`);
         continue;

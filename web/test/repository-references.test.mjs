@@ -74,3 +74,27 @@ test('only the named Cargo output is classified as generated', () => {
   assert.equal(audit(files({ 'scripts/cli_retest.mjs': source })).counts.generated, 1);
   assert.equal(audit(files({ 'scripts/cli_retest.mjs': source.replace('/wi"', '/typo"') })).errors.length, 1);
 });
+
+test('directory URLs resolve with trailing slashes, including the repository root', () => {
+  const source = ['new URL("../../", import.meta.url);',
+    'new URL("../src/", import.meta.url);', 'new URL("../e2e/", import.meta.url);'].join('\n');
+  const input = files({ 'web/test/a.mjs': source, 'web/src/a.ts': '', 'web/e2e/a.mjs': '' });
+  assert.equal(audit(input).errors.length, 0);
+  input.set('web/test/a.mjs', 'new URL("../absent/", import.meta.url);');
+  assert.equal(audit(input).errors.length, 1);
+});
+
+test('installed Playwright require inputs are checked on disk as well as URL inputs', () => {
+  const input = files({
+    'web/test/browser-case-diagnostics.test.mjs': 'require("../node_modules/playwright/lib/runner/taskRunner.js");',
+    'web/test/browser-suite-launch.test.mjs': [
+      'require("../node_modules/playwright/lib/reporters/base.js");',
+      'require("../node_modules/playwright/lib/util.js");',
+      'require("../node_modules/playwright/package.json");',
+    ].join('\n'),
+  });
+  const paths = new Set(['lib/runner/taskRunner.js', 'lib/reporters/base.js', 'lib/util.js', 'package.json']
+    .map(path => `web/node_modules/playwright/${path}`));
+  assert.equal(audit(input, new Set(input.keys()), path => paths.has(path)).errors.length, 0);
+  assert.equal(audit(input).errors.length, 4);
+});

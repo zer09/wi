@@ -61,6 +61,14 @@ Keep lower-level, mocked, joined, and process evidence distinct. Named assertion
 
 CI retains Ubuntu/macOS native jobs and an Ubuntu browser job. Inspect each required job and step on the exact submitted revision before merging. Inspect the post-merge run separately. Do not suppress warnings, filter unresolved required tests, or substitute source inventory for execution. Keep historical acceptance distinct from current regression health in [PROJECT_STATE.md](PROJECT_STATE.md).
 
+## CI scheduling
+
+The [workflow](../.github/workflows/ci.yml) runs for pull requests with the default `opened`, `synchronize`, and `reopened` activities, and for pushes to `master` only. It does not check tag pushes or feature-branch pushes without a pull request.
+
+New revisions cancel superseded runs for the same pull request. Different pull requests remain independent. Each `master` push has a unique concurrency group, so newer pushes neither cancel running verification nor displace queued verification.
+
+This scheduling cleanup does not repair the observed test failures or change the current-health qualifications.
+
 ## Documentation maintenance
 
 Update the relevant current guide when code changes. Keep schema/API rules near their source references. Historical plans and acceptance diaries remain in the [archive](ACCEPTANCE.md#historical-evidence), not active assignments.

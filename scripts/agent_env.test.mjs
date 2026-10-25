@@ -434,18 +434,14 @@ const policyURL = new URL('../docs/DELEGATE_EXECUTION.md', import.meta.url);
 const policy = () => readFileSync(policyURL, 'utf8');
 for (const [path, href] of [
   ['AGENTS.md', 'docs/DELEGATE_EXECUTION.md'],
-  ['docs/slices/g1/IMPLEMENTOR_PROMPT.md', '../../DELEGATE_EXECUTION.md'],
-  ['docs/slices/g1/VALIDATION.md', '../../DELEGATE_EXECUTION.md'],
+  ['docs/DEVELOPMENT.md', 'DELEGATE_EXECUTION.md'],
+  ['docs/README.md', 'DELEGATE_EXECUTION.md'],
 ]) {
-  test(`current policy link in ${path} is prospective and preserves historical failures`, () => {
+  test(`current policy link in ${path} resolves to the maintained policy`, () => {
     const url = new URL(`../${path}`, import.meta.url);
     const text = readFileSync(url, 'utf8');
     assert.ok(text.includes(`[Delegate execution policy](${href})`));
     assert.equal(new URL(href, url).href, policyURL.href);
-    assert.match(text, /NEW wi assignments issued from October 11, 2026, after owner approval/);
-    assert.match(text, /supersedes older all-command literal-prefix and permanently fatal harmless-diagnostic rules prospectively only/);
-    assert.match(text, /Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged/);
-    assert.match(text, /Explicit acceptance requirements and explicitly terminal rules remain mandatory/);
   });
 }
 
@@ -469,17 +465,16 @@ test('canonical policy bootstrap protects launcher and target Node argv without 
   assert.match(text, /Existing recorders may load, verify and inherit the same JSON instead of nesting this launcher/);
 });
 
-test('prospective policy retains old roles, validation sections and mandatory acceptance', () => {
+test('prospective policy retains historical evidence without reinstating old acceptance status', () => {
   const text = policy();
   assert.match(text, /NEW wi assignments issued from October 11, 2026/);
   assert.match(text, /prospectively only/);
   assert.match(text, /Old handoffs, failed checks and failed or BLOCKED roles remain historical unchanged/);
   assert.match(text, /Explicit user\/project acceptance requirements and explicitly terminal procedural rules remain mandatory/);
   assert.match(text, /Do not invent irrevocable harmless-procedure rules without owner authority/);
-  const validation = readFileSync(new URL('../docs/slices/g1/VALIDATION.md', import.meta.url), 'utf8');
-  assert.deepEqual([...validation.matchAll(/^## (\d+)\./gm)].map(m => Number(m[1])), [1, 2, 3, 4, 5, 6, 7]);
-  assert.match(validation, /Sections 1 through 6 retain their historical source\/design observations/);
-  assert.match(validation, /does not pass a G11 row, change accepted=false or authorize product verification/);
+  assert.ok(text.includes('[ACCEPTANCE.md](ACCEPTANCE.md)'));
+  assert.ok(text.includes('[PROJECT_STATE.md](PROJECT_STATE.md)'));
+  assert.match(text, /does not change either result or reinstate a completed assignment/);
 });
 
 test('policy distinguishes correctable rejection, required verification failure and actual breach', () => {
@@ -521,7 +516,7 @@ test('policy preserves fixture exceptions, environment authority, platform and s
   assert.match(text, /synthetic invalid environment files under approved TMPDIR/);
   assert.match(text, /never substitute a fixture environment/i);
   assert.match(text, /Standard delegation gates, role boundaries, attempt limits and final report requirements remain unchanged/);
-  assert.match(text, /All 40 rows remain PARTIAL with accepted=false/);
+  assert.match(text, /Historical acceptance is recorded in/);
   assert.match(text, /Ledger 31\/50 used, 19 remaining is unchanged/);
   assert.match(text, /do not restore native Windows support/);
   assert.match(text, /Existing gate recorders retain descendant identity, cleanup, source and evidence ownership/);

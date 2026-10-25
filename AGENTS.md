@@ -1,5 +1,7 @@
 # Working on Wi
 
+[Delegate execution policy](docs/DELEGATE_EXECUTION.md) documents the retained launcher and controlled verification procedure.
+
 Read [README.md](README.md), [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md), and [docs/README.md](docs/README.md). Use the implemented code and current reference guides, not historical implementor prompts, as the starting point. The owner supplies the scope for each new task. [docs/DECISIONS.md](docs/DECISIONS.md) preserves adopted requirements and withdrawn proposals.
 
 ## Boundaries to preserve

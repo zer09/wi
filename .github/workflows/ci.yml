@@ -1,5 +1,12 @@
 name: Rust source validation
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -11,6 +18,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check repository references
+        run: |
+          python3 -m unittest discover -s scripts -p test_check_references.py
+          python3 scripts/check_references.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -119,6 +130,18 @@ jobs:
             process.exitCode = 1;
           }
           NODE
+      - name: Check parsed source references
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: |
+          node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node --test -- web/test/repository-references.test.mjs
+          node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/check-references.mjs
+      - name: Test delegate launcher and policy
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node --test -- scripts/agent_env.test.mjs
       - name: Provision pinned browser
         working-directory: .
         env:

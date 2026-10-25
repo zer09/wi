@@ -1,5 +1,7 @@
 # Wi documentation
 
+[Delegate execution policy](DELEGATE_EXECUTION.md) documents the retained launcher and controlled verification procedure.
+
 Start with [Current project state](PROJECT_STATE.md) for the dated baseline, open regression findings, and current scope. [Durable decisions](DECISIONS.md) records requirements and superseded proposals. Product guides describe implemented behavior, not an agent execution diary.
 
 | Guide | Contents |

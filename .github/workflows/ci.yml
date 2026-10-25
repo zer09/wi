@@ -130,6 +130,13 @@ jobs:
             process.exitCode = 1;
           }
           NODE
+      - name: Check parsed source references
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: |
+          node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node --test -- web/test/repository-references.test.mjs
+          node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node -- web/scripts/check-references.mjs
       - name: Test delegate launcher and policy
         working-directory: .
         env:

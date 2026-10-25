@@ -55,6 +55,8 @@ The browser is framework-free TypeScript, HTML, and CSS. Node 24.x, TypeScript 5
 
 ```sh
 npm --prefix web ci
+node --test web/test/repository-references.test.mjs
+node web/scripts/check-references.mjs
 npm --prefix web run typecheck
 npm --prefix web test
 npm --prefix web run build
@@ -93,9 +95,11 @@ Before removing or moving documentation, search source includes, scripts, fixtur
 
 ### Reference audit scope
 
-`python3 scripts/check_references.py` reads every tracked text file from the current checkout. It checks local Markdown links and heading fragments, explicit reference-link definitions, concrete code-formatted source paths, literal document paths in source, Rust include macros, and static relative JavaScript/TypeScript imports and module URLs. A TypeScript `.js` import may resolve to its tracked `.ts` source. It fails on missing targets and missing tracked input files; tests and fixtures are not blanket-excluded.
+`python3 scripts/check_references.py` reads every tracked text file from the current checkout. It checks local Markdown links and heading fragments, explicit reference-link definitions, concrete code-formatted source paths, literal document paths in source, and Rust include macros. It fails on missing targets and missing tracked input files. Fenced examples are not navigation links.
 
-The check is offline. External URLs, dynamically assembled paths, runtime-created fixture paths, and arbitrary application routes are not proven by this scan. Two exact module URL targets are classified as generated inputs: the Cargo-built CLI and the npm-installed TypeScript compiler. Their build/install and behavioral checks remain required. Do not add broad directory exclusions to hide a missing source file. The check's synthetic tests prove missing-target detection and valid-reference handling.
+After `npm --prefix web ci`, `node web/scripts/check-references.mjs` parses all tracked JavaScript and TypeScript with the existing locked TypeScript parser. It checks relative imports/exports, literal dynamic imports, and static module-relative URLs. A TypeScript `.js` import may resolve to its tracked `.ts` source. Quoted synthetic programs are not imports of the enclosing test. Two existing retirement assertions are checked for absence, not repaired by recreating retired files. Exact npm-installed inputs are checked on disk after installation. Only the named Cargo-built CLI is classified as a generated output. Tests and fixtures are not blanket-excluded; misspelled siblings of classified inputs still fail.
+
+Both checks are offline. External URLs, dynamically assembled paths, embedded programs executed under a different working directory, runtime-created fixture paths, and arbitrary application routes are not proven by these scans; their execution tests remain required. These are concrete static-reference checks, not a proof of every possible runtime access. Synthetic regression cases distinguish missing dependencies, negative fixtures, generated inputs and valid references. CI runs both checks and the full root launcher suite in addition to its existing gates.
 
 The documentation cleanup left an active launcher suite reading deleted policy/assignment files. The retained execution policy is now maintained here; the link checks target AGENTS, this guide, and the docs index. Only obsolete assignment/status assertions changed. Launcher behavior checks remain intact. The archived implementation prompts remain historical rather than being recreated as current instructions.
 

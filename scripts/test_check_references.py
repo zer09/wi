@@ -42,35 +42,26 @@ class ReferenceChecks(unittest.TestCase):
         errors, _ = audit({"src/lib.rs": source})
         self.assertTrue(any("rust-include" in error for error in errors))
 
-    def test_module_urls_and_literal_document_arrays(self):
-        target = '../' + 'docs/' + 'gone.md'
-        source = 'new ' + 'URL(' + repr(target) + ', import.meta.url);'
-        source += "const docs = ['docs/" + "old.md'];"
+    def test_literal_document_arrays(self):
+        source = "const docs = ['docs/" + "old.md'];"
         errors, _ = audit({"scripts/test.mjs": source})
-        self.assertTrue(any("module-url" in error for error in errors))
-        self.assertTrue(any("old.md" in error for error in errors))
-
-    def test_typescript_js_specifier_resolves_to_source(self):
-        source = 'import { x } ' + 'from "./other.js";'
-        files = {"web/src/main.ts": source, "web/src/other.ts": "export const x = 1;"}
-        self.assertEqual(audit(files)[0], [])
-        del files["web/src/other.ts"]
-        self.assertEqual(len(audit(files)[0]), 1)
-
-    def test_import_does_not_resolve_to_unrelated_same_basename(self):
-        source = 'import ' + '"./other.mjs";'
-        errors, _ = audit({"scripts/main.mjs": source, "web/other.mjs": ""})
         self.assertEqual(len(errors), 1)
+        self.assertIn("old.md", errors[0])
+
+    def test_source_position_suffixes(self):
+        files = {"README.md": "`src/module.rs:247:41` `src/module.rs:1-2`",
+                 "src/module.rs": ""}
+        self.assertEqual(audit(files)[0], [])
 
     def test_concrete_backtick_paths_and_template_exclusions(self):
         text = '`src/missing.rs:12-15` `src/**/tests` `sessions/<id>/data`'
-        errors, _ = audit({"docs/guide.md": text})
+        errors, _ = audit({"docs/" + "guide.md": text})
         self.assertEqual(len(errors), 1)
         self.assertIn("missing.rs", errors[0])
 
     def test_no_tests_directory_exclusion(self):
-        source = 'new ' + 'URL("../absent.json", import.meta.url)'
-        errors, _ = audit({"tests/regression.mjs": source})
+        source = 'include_str!' + '("../missing.json")'
+        errors, _ = audit({"tests/regression.rs": source})
         self.assertEqual(len(errors), 1)
 
     def test_old_document_shape_is_rejected_then_real_target_passes(self):

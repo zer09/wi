@@ -2,7 +2,8 @@
 """Offline checks for explicit repository references; not a general code parser.
 
 Scan every tracked text file. Check Markdown links/anchors, literal repository
-Markdown paths in code, Rust includes, and relative JS/TS imports/module URLs.
+Markdown paths in code and Rust includes. JavaScript/TypeScript syntax is
+checked separately with the existing TypeScript parser in web/scripts.
 External URLs, runtime-created paths and dynamically assembled paths are not
 resolved. No source, fixture, test or historical directory is blanket-excluded.
 """
@@ -16,14 +17,6 @@ from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import unquote, urlsplit
-
-
-# These two references have explicit build/install producers, not tracked inputs.
-# Do not turn this into a directory wildcard: a misspelled sibling must still fail.
-GENERATED = {
-    ("scripts/cli_retest.mjs", "../target/debug/wi"): "cargo build",
-    ("web/scripts/assets.mjs", "../node_modules/typescript/bin/tsc"): "npm ci in web",
-}
 
 
 class Reference(NamedTuple):
@@ -85,7 +78,7 @@ def references(path: str, text: str) -> list[Reference]:
             add(match[1], match.start(), "markdown", clean)
         # Code-formatted concrete source paths are also documentation promises.
         for match in re.finditer(r"`((?:\.{1,2}/)?(?:src|scripts|tests|examples|docs|web|\.github)/[^`\s]+)`", clean):
-            target = re.sub(r":\d+(?:[-–]\d+)?$", "", match[1])
+            target = re.sub(r":\d+(?::\d+)?(?:[-–]\d+(?::\d+)?)?$", "", match[1])
             if not re.search(r"[*{}<>$]", target):
                 add(target, match.start(), "source-path", clean)
     else:
@@ -95,11 +88,6 @@ def references(path: str, text: str) -> list[Reference]:
     if path.endswith(".rs"):
         for match in re.finditer(r'include(?:_str|_bytes)?!\s*\(\s*(?:r\#*)?"([^"\n]+)"', text):
             add(match[1], match.start(), "rust-include")
-    if path.endswith((".mjs", ".js", ".ts")):
-        for match in re.finditer(r'''new\s+URL\(\s*["'](\.{1,2}/[^"'\n]+)["']\s*,\s*import\.meta\.url\s*\)''', text):
-            add(match[1], match.start(), "module-url")
-        for match in re.finditer(r'''(?:\bfrom\s*|\bimport\s*\(?\s*)["'](\.{1,2}/[^"'\n]+)["']''', text):
-            add(match[1], match.start(), "module-import")
     return refs
 
 
@@ -115,9 +103,6 @@ def audit(files: dict[str, str], tracked: set[str] | None = None) -> tuple[list[
     for path, text in sorted(files.items()):
         for ref in references(path, text):
             counts[ref.kind] += 1
-            if (path, ref.target) in GENERATED and ref.kind == "module-url":
-                counts["generated-not-checked"] += 1
-                continue
             if ref.kind == "undefined-label":
                 errors.append(f"{path}:{ref.line}: undefined Markdown label {ref.target!r}")
                 continue
@@ -132,8 +117,6 @@ def audit(files: dict[str, str], tracked: set[str] | None = None) -> tuple[list[
             else:
                 candidates = [posixpath.join(posixpath.dirname(path), target) if target else path]
             candidates = [posixpath.normpath(p) for p in candidates]
-            if ref.kind == "module-import" and path.endswith(".ts"):
-                candidates += [p[:-3] + ".ts" for p in candidates if p.endswith(".js")]
             valid = next((p for p in candidates if p in tracked or p in directories), None)
             if valid is None:
                 errors.append(f"{path}:{ref.line}: missing {ref.kind} target {ref.target!r}")

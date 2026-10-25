@@ -18,6 +18,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check repository references
+        run: |
+          python3 -m unittest discover -s scripts -p test_check_references.py
+          python3 scripts/check_references.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -126,6 +130,11 @@ jobs:
             process.exitCode = 1;
           }
           NODE
+      - name: Test delegate launcher and policy
+        working-directory: .
+        env:
+          WI_CI_ENV_FILE: ${{ steps.suite_environment.outputs.env_file }}
+        run: node -- scripts/agent_env.mjs --env-file "$WI_CI_ENV_FILE" -- node --test -- scripts/agent_env.test.mjs
       - name: Provision pinned browser
         working-directory: .
         env:
